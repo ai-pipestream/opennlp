@@ -75,9 +75,10 @@ public class SentenceDetectorME implements SentenceDetector, Probabilistic {
   private final EndOfSentenceScanner scanner;
 
   /**
-   * The list of probabilities associated with each decision.
+   * Stores probabilities from the most recent sentPosDetect() call for use by probs().
+   * Volatile to ensure visibility across threads when using the deprecated probs() method.
    */
-  private final List<Double> sentProbs = new ArrayList<>();
+  private volatile double[] lastSentProbs = new double[0];
 
   /**
    * The {@link Dictionary abbreviation dictionary} if available (may be {@code null}).
@@ -195,7 +196,7 @@ public class SentenceDetectorME implements SentenceDetector, Probabilistic {
    */
   @Override
   public Span[] sentPosDetect(CharSequence s) {
-    sentProbs.clear();
+    List<Double> sentProbs = new ArrayList<>();
     List<Integer> enders = scanner.getPositions(s);
     List<Integer> positions = new ArrayList<>(enders.size());
 
@@ -249,10 +250,13 @@ public class SentenceDetectorME implements SentenceDetector, Probabilistic {
 
       if (end - start > 0) {
         sentProbs.add(1d);
+        lastSentProbs = ArrayMath.toDoubleArray(sentProbs);
         return new Span[] {new Span(start, end)};
       }
-      else
+      else {
+        lastSentProbs = new double[0];
         return new Span[0];
+      }
     }
 
     // Convert the sentence end indexes to spans
@@ -297,6 +301,8 @@ public class SentenceDetectorME implements SentenceDetector, Probabilistic {
 
     }
 
+    lastSentProbs = ArrayMath.toDoubleArray(sentProbs);
+
     return spans;
   }
 
@@ -312,7 +318,7 @@ public class SentenceDetectorME implements SentenceDetector, Probabilistic {
    */
   @Override
   public double[] probs() {
-    return ArrayMath.toDoubleArray(sentProbs);
+    return lastSentProbs.clone();
   }
 
   /**

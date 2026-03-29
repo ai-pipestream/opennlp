@@ -50,9 +50,10 @@ import opennlp.tools.util.TrainingParameters;
  * The {@link TokenizerModel} class encapsulates that model and provides
  * methods to create it from the binary representation.
  * <p>
- * A tokenizer instance is not thread-safe. For each thread, one tokenizer
- * must be instantiated which can share one {@link TokenizerModel} instance
- * to safe memory.
+ * A tokenizer instance is thread-safe. Multiple threads can share one
+ * {@link TokenizerME} instance backed by the same {@link TokenizerModel}.
+ * Note: the deprecated {@link #probs()} method returns probabilities from
+ * the last completed call to {@link #tokenizePos(String)} on any thread.
  * <p>
  * To train a new model, the {@link #train(ObjectStream, TokenizerFactory, TrainingParameters)} method
  * can be used.
@@ -106,12 +107,10 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
   private final boolean useAlphaNumericOptimization;
 
   /*
-   * List of probabilities for each token returned from a call to
-   * <code>tokenize</code> or <code>tokenizePos</code>.
+   * Stores probabilities from the most recent tokenizePos() call for use by probs().
+   * Volatile to ensure visibility across threads when using the deprecated probs() method.
    */
-  private final List<Double> tokProbs;
-
-  private final List<Span> newTokens;
+  private volatile double[] lastProbs = new double[0];
 
   /*
    * The {@link Dictionary abbreviation dictionary} if available (may be {@code null}).
@@ -150,9 +149,6 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
     this.cg = factory.getContextGenerator();
     this.alphanumeric = factory.getAlphaNumericPattern();
     this.useAlphaNumericOptimization = factory.isUseAlphaNumericOptimization();
-
-    newTokens = new ArrayList<>();
-    tokProbs = new ArrayList<>(50);
   }
 
   /**
@@ -166,7 +162,7 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
    */
   @Override
   public double[] probs() {
-    return ArrayMath.toDoubleArray(tokProbs);
+    return lastProbs.clone();
   }
 
   /**
@@ -193,8 +189,8 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
     WhitespaceTokenizer whitespaceTokenizer = WhitespaceTokenizer.INSTANCE;
     whitespaceTokenizer.setKeepNewLines(keepNewLines);
     Span[] tokens = whitespaceTokenizer.tokenizePos(d);
-    newTokens.clear();
-    tokProbs.clear();
+    List<Span> newTokens = new ArrayList<>();
+    List<Double> tokProbs = new ArrayList<>(50);
     for (Span s : tokens) {
       String tok = d.substring(s.getStart(), s.getEnd());
       // Can't tokenize single characters
@@ -235,6 +231,8 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
         }
       }
     }
+
+    lastProbs = ArrayMath.toDoubleArray(tokProbs);
 
     Span[] spans = new Span[newTokens.size()];
     newTokens.toArray(spans);

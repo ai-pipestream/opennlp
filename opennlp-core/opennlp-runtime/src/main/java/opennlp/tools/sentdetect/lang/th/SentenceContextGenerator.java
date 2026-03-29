@@ -33,30 +33,32 @@ public class SentenceContextGenerator extends DefaultSDContextGenerator {
   @Override
   protected void collectFeatures(String prefix, String suffix, String previous, String next,
                                  Character eosChar) {
-    buf.append("p=");
-    buf.append(prefix);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    StringBuffer b = buf.get();
+    java.util.List<String> feats = collectFeats.get();
+    b.append("p=");
+    b.append(prefix);
+    feats.add(b.toString());
+    b.setLength(0);
 
-    buf.append("s=");
-    buf.append(suffix);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    b.append("s=");
+    b.append(suffix);
+    feats.add(b.toString());
+    b.setLength(0);
 
-    collectFeats.add("p1=" + prefix.substring(StrictMath.max(prefix.length() - 1,0)));
-    collectFeats.add("p2=" + prefix.substring(StrictMath.max(prefix.length() - 2,0)));
-    collectFeats.add("p3=" + prefix.substring(StrictMath.max(prefix.length() - 3,0)));
-    collectFeats.add("p4=" + prefix.substring(StrictMath.max(prefix.length() - 4,0)));
-    collectFeats.add("p5=" + prefix.substring(StrictMath.max(prefix.length() - 5,0)));
-    collectFeats.add("p6=" + prefix.substring(StrictMath.max(prefix.length() - 6,0)));
-    collectFeats.add("p7=" + prefix.substring(StrictMath.max(prefix.length() - 7,0)));
+    feats.add("p1=" + prefix.substring(StrictMath.max(prefix.length() - 1,0)));
+    feats.add("p2=" + prefix.substring(StrictMath.max(prefix.length() - 2,0)));
+    feats.add("p3=" + prefix.substring(StrictMath.max(prefix.length() - 3,0)));
+    feats.add("p4=" + prefix.substring(StrictMath.max(prefix.length() - 4,0)));
+    feats.add("p5=" + prefix.substring(StrictMath.max(prefix.length() - 5,0)));
+    feats.add("p6=" + prefix.substring(StrictMath.max(prefix.length() - 6,0)));
+    feats.add("p7=" + prefix.substring(StrictMath.max(prefix.length() - 7,0)));
 
-    collectFeats.add("n1=" + suffix.substring(0,StrictMath.min(1, suffix.length())));
-    collectFeats.add("n2=" + suffix.substring(0,StrictMath.min(2, suffix.length())));
-    collectFeats.add("n3=" + suffix.substring(0,StrictMath.min(3, suffix.length())));
-    collectFeats.add("n4=" + suffix.substring(0,StrictMath.min(4, suffix.length())));
-    collectFeats.add("n5=" + suffix.substring(0,StrictMath.min(5, suffix.length())));
-    collectFeats.add("n6=" + suffix.substring(0,StrictMath.min(6, suffix.length())));
-    collectFeats.add("n7=" + suffix.substring(0,StrictMath.min(7, suffix.length())));
+    feats.add("n1=" + suffix.substring(0,StrictMath.min(1, suffix.length())));
+    feats.add("n2=" + suffix.substring(0,StrictMath.min(2, suffix.length())));
+    feats.add("n3=" + suffix.substring(0,StrictMath.min(3, suffix.length())));
+    feats.add("n4=" + suffix.substring(0,StrictMath.min(4, suffix.length())));
+    feats.add("n5=" + suffix.substring(0,StrictMath.min(5, suffix.length())));
+    feats.add("n6=" + suffix.substring(0,StrictMath.min(6, suffix.length())));
+    feats.add("n7=" + suffix.substring(0,StrictMath.min(7, suffix.length())));
   }
 }

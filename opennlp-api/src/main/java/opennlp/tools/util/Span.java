@@ -367,21 +367,29 @@ public class Span implements Comparable<Span>, Serializable {
     String[] tokens = new String[spans.length];
 
     for (int si = 0, sl = spans.length; si < sl; si++) {
-      tokens[si] = spans[si].getCoveredText(s).toString();
+      if (spans[si] != null) {
+        tokens[si] = spans[si].getCoveredText(s).toString();
+      } else {
+        tokens[si] = "";
+      }
     }
 
     return tokens;
   }
-  
+
   public static String[] spansToStrings(Span[] spans, String[] tokens) {
     String[] chunks = new String[spans.length];
     StringBuilder cb = new StringBuilder();
     for (int si = 0, sl = spans.length; si < sl; si++) {
-      cb.setLength(0);
-      for (int ti = spans[si].getStart(); ti < spans[si].getEnd(); ti++) {
-        cb.append(tokens[ti]).append(" ");
+      if (spans[si] != null) {
+        cb.setLength(0);
+        for (int ti = spans[si].getStart(); ti < spans[si].getEnd(); ti++) {
+          cb.append(tokens[ti]).append(" ");
+        }
+        chunks[si] = cb.substring(0, cb.length() - 1);
+      } else {
+        chunks[si] = "";
       }
-      chunks[si] = cb.substring(0, cb.length() - 1);
     }
     return chunks;
   }

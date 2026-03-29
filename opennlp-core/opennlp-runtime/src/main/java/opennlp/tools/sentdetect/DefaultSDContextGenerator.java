@@ -33,13 +33,17 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
 
   /**
    * String buffer for generating features.
+   * Uses ThreadLocal to ensure thread-safety when a single instance is shared across threads.
    */
-  protected final StringBuffer buf;
+  protected final ThreadLocal<StringBuffer> buf =
+      ThreadLocal.withInitial(StringBuffer::new);
 
   /**
    * List for holding features as they are generated.
+   * Uses ThreadLocal to ensure thread-safety when a single instance is shared across threads.
    */
-  protected final List<String> collectFeats;
+  protected final ThreadLocal<List<String>> collectFeats =
+      ThreadLocal.withInitial(ArrayList::new);
 
   private final Set<String> inducedAbbreviations;
 
@@ -70,8 +74,6 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
     for (char eosChar: eosCharacters) {
       this.eosCharacters.add(eosChar);
     }
-    buf = new StringBuffer();
-    collectFeats = new ArrayList<>();
   }
 
   private static String escapeChar(Character c) {
@@ -88,6 +90,7 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
 
   @Override
   public String[] getContext(CharSequence sb, int position) {
+    List<String> feats = collectFeats.get();
 
     /*
      * String preceding the eos character in the eos token.
@@ -112,10 +115,10 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
     int lastIndex = sb.length() - 1;
     { // compute space previous and space next features.
       if (position > 0 && StringUtil.isWhitespace(sb.charAt(position - 1)))
-        collectFeats.add("sp");
+        feats.add("sp");
       if (position < lastIndex && StringUtil.isWhitespace(sb.charAt(position + 1)))
-        collectFeats.add("sn");
-      collectFeats.add("eos=" + escapeChar(sb.charAt(position)));
+        feats.add("sn");
+      feats.add("eos=" + escapeChar(sb.charAt(position)));
     }
     int prefixStart = previousSpaceIndex(sb, position);
 
@@ -154,9 +157,9 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
 
     collectFeatures(prefix,suffix,previous,next, sb.charAt(position));
 
-    String[] context = new String[collectFeats.size()];
-    context = collectFeats.toArray(context);
-    collectFeats.clear();
+    String[] context = new String[feats.size()];
+    context = feats.toArray(context);
+    feats.clear();
     return context;
   }
   
@@ -171,56 +174,58 @@ public class DefaultSDContextGenerator implements SDContextGenerator {
    */
   protected void collectFeatures(String prefix, String suffix, String previous,
       String next, Character eosChar) {
-    buf.append("x=");
-    buf.append(prefix);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    StringBuffer b = buf.get();
+    List<String> feats = collectFeats.get();
+    b.append("x=");
+    b.append(prefix);
+    feats.add(b.toString());
+    b.setLength(0);
     if (!prefix.isEmpty()) {
-      collectFeats.add(Integer.toString(prefix.length()));
+      feats.add(Integer.toString(prefix.length()));
       if (isFirstUpper(prefix)) {
-        collectFeats.add("xcap");
+        feats.add("xcap");
       }
       if (eosChar != null && inducedAbbreviations.contains(prefix + eosChar)) {
-        collectFeats.add("xabbrev");
+        feats.add("xabbrev");
       }
     }
 
-    buf.append("v=");
-    buf.append(previous);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    b.append("v=");
+    b.append(previous);
+    feats.add(b.toString());
+    b.setLength(0);
     if (!previous.isEmpty()) {
       if (isFirstUpper(previous)) {
-        collectFeats.add("vcap");
+        feats.add("vcap");
       }
       if (inducedAbbreviations.contains(previous)) {
-        collectFeats.add("vabbrev");
+        feats.add("vabbrev");
       }
     }
 
-    buf.append("s=");
-    buf.append(suffix);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    b.append("s=");
+    b.append(suffix);
+    feats.add(b.toString());
+    b.setLength(0);
     if (!suffix.isEmpty()) {
       if (isFirstUpper(suffix)) {
-        collectFeats.add("scap");
+        feats.add("scap");
       }
       if (inducedAbbreviations.contains(suffix)) {
-        collectFeats.add("sabbrev");
+        feats.add("sabbrev");
       }
     }
 
-    buf.append("n=");
-    buf.append(next);
-    collectFeats.add(buf.toString());
-    buf.setLength(0);
+    b.append("n=");
+    b.append(next);
+    feats.add(b.toString());
+    b.setLength(0);
     if (!next.isEmpty()) {
       if (isFirstUpper(next)) {
-        collectFeats.add("ncap");
+        feats.add("ncap");
       }
       if (inducedAbbreviations.contains(next)) {
-        collectFeats.add("nabbrev");
+        feats.add("nabbrev");
       }
     }
   }

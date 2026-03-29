@@ -328,4 +328,80 @@ public class SpanTest {
   void testStartLargerThanEnd() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new Span(100, 50));
   }
+
+  /**
+   * Test that {@link Span#spansToStrings(Span[], CharSequence)} handles null span entries
+   * gracefully instead of throwing a NullPointerException.
+   */
+  @Test
+  void testSpansToStringsWithNullSpanEntries() {
+    String text = "Hello world, this is a test.";
+    Span[] spans = new Span[] {
+        new Span(0, 5),
+        null,
+        new Span(13, 17)
+    };
+
+    String[] result = Span.spansToStrings(spans, text);
+    Assertions.assertNotNull(result);
+    Assertions.assertEquals(3, result.length);
+    Assertions.assertEquals("Hello", result[0]);
+    Assertions.assertEquals("", result[1]);
+    Assertions.assertEquals("this", result[2]);
+  }
+
+  /**
+   * Test that {@link Span#spansToStrings(Span[], String[])} handles null span entries
+   * gracefully instead of throwing a NullPointerException.
+   */
+  @Test
+  void testSpansToStringsTokensWithNullSpanEntries() {
+    String[] tokens = {"The", "quick", "brown", "fox"};
+    Span[] spans = new Span[] {
+        new Span(0, 2),
+        null,
+        new Span(2, 4)
+    };
+
+    String[] result = Span.spansToStrings(spans, tokens);
+    Assertions.assertNotNull(result);
+    Assertions.assertEquals(3, result.length);
+    Assertions.assertEquals("The quick", result[0]);
+    Assertions.assertEquals("", result[1]);
+    Assertions.assertEquals("brown fox", result[2]);
+  }
+
+  /**
+   * Test that {@link Span#spansToStrings(Span[], CharSequence)} works normally
+   * when no null spans are present.
+   */
+  @Test
+  void testSpansToStringsWithNoNulls() {
+    String text = "Hello world";
+    Span[] spans = new Span[] {
+        new Span(0, 5),
+        new Span(6, 11)
+    };
+
+    String[] result = Span.spansToStrings(spans, text);
+    Assertions.assertNotNull(result);
+    Assertions.assertEquals(2, result.length);
+    Assertions.assertEquals("Hello", result[0]);
+    Assertions.assertEquals("world", result[1]);
+  }
+
+  /**
+   * Test with an array containing only null spans.
+   */
+  @Test
+  void testSpansToStringsAllNulls() {
+    String text = "Hello world";
+    Span[] spans = new Span[] { null, null };
+
+    String[] result = Span.spansToStrings(spans, text);
+    Assertions.assertNotNull(result);
+    Assertions.assertEquals(2, result.length);
+    Assertions.assertEquals("", result[0]);
+    Assertions.assertEquals("", result[1]);
+  }
 }
