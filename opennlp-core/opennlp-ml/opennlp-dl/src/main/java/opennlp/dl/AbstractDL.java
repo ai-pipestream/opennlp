@@ -24,6 +24,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,26 +48,92 @@ public abstract class AbstractDL implements AutoCloseable {
   public static final String ATTENTION_MASK = "attention_mask";
   public static final String TOKEN_TYPE_IDS = "token_type_ids";
 
-  protected OrtEnvironment env;
-  protected OrtSession session;
-  protected Tokenizer tokenizer;
-  protected Map<String, Integer> vocab;
+  protected final OrtEnvironment env;
+  protected final OrtSession session;
+  protected final Tokenizer tokenizer;
+  protected final Map<String, Integer> vocab;
+
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   private static final Pattern JSON_ENTRY_PATTERN =
       Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"\\s*:\\s*(\\d+)");
 
   /**
+   * Initializes the shared, immutable inference state: the ONNX environment and session,
+   * the loaded vocabulary and the configured tokenizer. These fields are {@code final}
+   * and assigned exactly once here, so a fully constructed instance is safely published
+   * and can be shared across threads.
+   *
+   * @param model The ONNX model file.
+   * @param vocabulary The vocabulary file matching the model.
+   * @param sessionOptions The session options (e.g. CUDA execution provider); build with
+   *     {@link #sessionOptions(InferenceOptions)} when honoring {@link InferenceOptions}.
+   * @param lowerCase {@code true} for uncased models (lower casing and accent stripping
+   *     during tokenization), {@code false} for cased models.
+   *
+   * @throws OrtException Thrown if the {@code model} cannot be loaded.
+   * @throws IOException Thrown if the {@code model} or {@code vocabulary} cannot be read.
+   */
+  protected AbstractDL(final File model, final File vocabulary,
+                       final OrtSession.SessionOptions sessionOptions, final boolean lowerCase)
+      throws IOException, OrtException {
+    Objects.requireNonNull(model, "model");
+    Objects.requireNonNull(vocabulary, "vocabulary");
+    Objects.requireNonNull(sessionOptions, "sessionOptions");
+    this.env = OrtEnvironment.getEnvironment();
+    // try-with-resources closes the session options once the session has consumed them.
+    try (sessionOptions) {
+      final OrtSession createdSession = env.createSession(model.getPath(), sessionOptions);
+      try {
+        this.vocab = Map.copyOf(loadVocab(vocabulary));
+        this.tokenizer = createTokenizer(vocab, lowerCase);
+      } catch (IOException | RuntimeException e) {
+        // Vocabulary/tokenizer init failed after the native session was created; close it
+        // so a partially constructed instance never leaks the ONNX session.
+        try {
+          createdSession.close();
+        } catch (OrtException suppressed) {
+          e.addSuppressed(suppressed);
+        }
+        throw e;
+      }
+      this.session = createdSession;
+    }
+  }
+
+  /**
+   * Builds ONNX session options from the given {@link InferenceOptions}, enabling the CUDA
+   * execution provider on the configured device when GPU inference is requested.
+   *
+   * @param inferenceOptions The inference options to read the GPU configuration from.
+   * @return The configured session options.
+   *
+   * @throws OrtException Thrown if the CUDA execution provider cannot be added.
+   */
+  protected static OrtSession.SessionOptions sessionOptions(final InferenceOptions inferenceOptions)
+      throws OrtException {
+    Objects.requireNonNull(inferenceOptions, "inferenceOptions");
+    validateSplitOptions(inferenceOptions);
+    final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
+    if (inferenceOptions.isGpu()) {
+      sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
+    }
+    return sessionOptions;
+  }
+
+  /**
    * Loads a vocabulary {@link File} from disk.
    * Supports both plain text files (one token per
-   * line) and JSON files mapping tokens to integer
-   * IDs.
+   * line) and simple JSON vocabulary files mapping tokens to integer
+   * IDs. JSON support is intentionally limited to the HuggingFace vocabulary
+   * shape; it is not a general-purpose JSON parser.
    *
    * @param vocabFile The vocabulary file.
    * @return A map of vocabulary words to IDs.
    * @throws IOException Thrown if the vocabulary
    *     file cannot be opened or read.
    */
-  public Map<String, Integer> loadVocab(
+  public static Map<String, Integer> loadVocab(
       final File vocabFile) throws IOException {
 
     final Path vocabPath =
@@ -104,7 +172,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param vocab The vocabulary map.
    * @return A configured {@link WordpieceTokenizer}.
    */
-  protected WordpieceTokenizer createTokenizer(
+  protected static WordpieceTokenizer createTokenizer(
       final Map<String, Integer> vocab) {
     if (vocab.containsKey(
             WordpieceTokenizer.ROBERTA_CLS_TOKEN)
@@ -132,7 +200,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @throws IllegalArgumentException Thrown if a RoBERTa-style vocabulary
    *     contains no supported unknown token.
    */
-  protected BertTokenizer createTokenizer(
+  protected static BertTokenizer createTokenizer(
       final Map<String, Integer> vocab, final boolean lowerCase) {
     if (vocab.containsKey(
             WordpieceTokenizer.ROBERTA_CLS_TOKEN)
@@ -182,21 +250,38 @@ public abstract class AbstractDL implements AutoCloseable {
    */
   protected static boolean resolveLowerCase(
       final InferenceOptions options, final boolean componentDefault) {
+    Objects.requireNonNull(options, "options");
     return options.getLowerCase() != null ? options.getLowerCase() : componentDefault;
   }
 
-  private Map<String, Integer> loadJsonVocab(final String json) {
+  /**
+   * Validates the document splitting options used by tokenizers that split long inputs.
+   *
+   * @param options The inference options to validate.
+   * @throws IllegalArgumentException Thrown if the split settings cannot make progress.
+   */
+  protected static void validateSplitOptions(final InferenceOptions options) {
+    Objects.requireNonNull(options, "options");
+    if (options.getDocumentSplitSize() <= 0) {
+      throw new IllegalArgumentException("documentSplitSize must be greater than zero.");
+    }
+    if (options.getSplitOverlapSize() < 0) {
+      throw new IllegalArgumentException("splitOverlapSize must not be negative.");
+    }
+    if (options.getSplitOverlapSize() >= options.getDocumentSplitSize()) {
+      throw new IllegalArgumentException(
+          "splitOverlapSize must be smaller than documentSplitSize.");
+    }
+  }
+
+  private static Map<String, Integer> loadJsonVocab(final String json) {
 
     final Map<String, Integer> vocab = new HashMap<>();
     final Matcher matcher = JSON_ENTRY_PATTERN.matcher(json);
 
     while (matcher.find()) {
       final String token = matcher.group(1)
-          .replace("\\\"", "\"")
-          .replace("\\\\", "\\")
-          .replace("\\/", "/")
-          .replace("\\n", "\n")
-          .replace("\\t", "\t");
+          .transform(AbstractDL::unescapeJsonString);
       final int id = Integer.parseInt(matcher.group(2));
       vocab.put(token, id);
     }
@@ -204,19 +289,68 @@ public abstract class AbstractDL implements AutoCloseable {
     return vocab;
   }
 
+  private static String unescapeJsonString(final String value) {
+    final StringBuilder result = new StringBuilder(value.length());
+    for (int i = 0; i < value.length(); i++) {
+      final char ch = value.charAt(i);
+      if (ch != '\\') {
+        result.append(ch);
+        continue;
+      }
+      if (++i == value.length()) {
+        throw new IllegalArgumentException("Invalid JSON string escape.");
+      }
+      final char escaped = value.charAt(i);
+      switch (escaped) {
+        case '"' -> result.append('"');
+        case '\\' -> result.append('\\');
+        case '/' -> result.append('/');
+        case 'b' -> result.append('\b');
+        case 'f' -> result.append('\f');
+        case 'n' -> result.append('\n');
+        case 'r' -> result.append('\r');
+        case 't' -> result.append('\t');
+        case 'u' -> {
+          if (i + 4 >= value.length()) {
+            throw new IllegalArgumentException("Invalid JSON unicode escape.");
+          }
+          final String hex = value.substring(i + 1, i + 5);
+          try {
+            result.append((char) Integer.parseInt(hex, 16));
+          } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid JSON unicode escape.", e);
+          }
+          i += 4;
+        }
+        default -> throw new IllegalArgumentException("Invalid JSON string escape.");
+      }
+    }
+    return result.toString();
+  }
+
   /**
-   * Closes this resource, relinquishing any underlying resources.
+   * Closes the ONNX {@link OrtSession} owned by this instance.
    *
-   * @throws OrtException Thrown if it failed to close Ort resources.
-   * @throws IllegalStateException Thrown if the underlying resources were already closed.
+   * <p>The {@link OrtEnvironment} is deliberately <b>not</b> closed:
+   * {@link OrtEnvironment#getEnvironment()} returns a process-wide singleton shared by
+   * every deep-learning component, so closing it here would tear down the environment
+   * other live components still depend on.</p>
+   *
+   * <p>This method is idempotent: calling {@code close()} more than once, or calling it on
+   * a never-used but successfully constructed instance, is a no-op after the first successful
+   * close. The underlying {@link OrtSession#close()} is only invoked once.</p>
+   *
+   * @throws OrtException Thrown if the close attempt fails in the native layer.
    */
   @Override
-  public void close() throws OrtException, IllegalStateException {
-    if (session != null) {
-      session.close();
-    }
-    if (env != null) {
-      env.close();
+  public void close() throws OrtException {
+    if (closed.compareAndSet(false, true)) {
+      try {
+        session.close();
+      } catch (OrtException | RuntimeException e) {
+        closed.set(false);
+        throw e;
+      }
     }
   }
 

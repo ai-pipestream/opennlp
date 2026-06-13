@@ -57,4 +57,11 @@ public class DocumentCategorizerDLTest {
     assertTrue(e.getMessage().contains("missing"),
         "the error message should name the missing token: " + e.getMessage());
   }
+
+  @Test
+  void testSoftmaxIsNumericallyStable() {
+    final double[] scores = DocumentCategorizerDL.softmax(new float[] {1000.0f, 1001.0f});
+
+    assertArrayEquals(new double[] {0.2689414213699951, 0.7310585786300049}, scores, 1e-15);
+  }
 }

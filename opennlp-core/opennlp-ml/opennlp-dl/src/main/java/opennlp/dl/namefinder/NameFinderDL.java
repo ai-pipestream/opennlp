@@ -25,11 +25,11 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
@@ -37,6 +37,7 @@ import opennlp.dl.AbstractDL;
 import opennlp.dl.InferenceOptions;
 import opennlp.dl.SpanEnd;
 import opennlp.dl.Tokens;
+import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.namefind.TokenNameFinder;
 import opennlp.tools.sentdetect.SentenceDetector;
 import opennlp.tools.util.Span;
@@ -51,9 +52,19 @@ import opennlp.tools.util.Span;
  * boundaries. For uncased models, set
  * {@link InferenceOptions#setLowerCase(boolean)} to {@code true}.</p>
  *
+ * <p>This class is thread-safe and may be shared across threads, provided the supplied
+ * {@link SentenceDetector} is itself thread-safe (e.g. {@link opennlp.tools.sentdetect.SentenceDetectorME},
+ * which is {@code @ThreadSafe}). Inference holds no per-call instance state, the relevant
+ * {@link InferenceOptions} values are snapshotted into final fields at construction (so
+ * mutating the passed options afterwards does not affect a shared instance), and the
+ * underlying {@link OrtSession} supports concurrent execution. This thread-safety
+ * guarantee applies until {@link #close()} is called; callers must not race
+ * {@code close()} with inference methods.</p>
+ *
  * @see TokenNameFinder
  * @see InferenceOptions
  */
+@ThreadSafe
 public class NameFinderDL extends AbstractDL implements TokenNameFinder {
 
   public static final String I_PER = "I-PER";
@@ -67,7 +78,12 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
 
   private final SentenceDetector sentenceDetector;
   private final Map<Integer, String> ids2Labels;
-  private final InferenceOptions inferenceOptions;
+  // Inference options are snapshotted into final fields at construction so a shared
+  // instance never reads the caller's mutable InferenceOptions during inference.
+  private final boolean includeAttentionMask;
+  private final boolean includeTokenTypeIds;
+  private final int documentSplitSize;
+  private final int splitOverlapSize;
 
   /**
    * Instantiates a {@link TokenNameFinder name finder} using ONNX models.
@@ -103,20 +119,26 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
                       InferenceOptions inferenceOptions,
                       SentenceDetector sentenceDetector) throws IOException, OrtException {
 
-    this.env = OrtEnvironment.getEnvironment();
+    super(model, vocabulary,
+        sessionOptions(validateConstructorArguments(
+            inferenceOptions, ids2Labels, sentenceDetector)),
+        resolveLowerCase(inferenceOptions, LOWER_CASE_DEFAULT));
 
-    final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
-    if (inferenceOptions.isGpu()) {
-      sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
-    }
-
-    this.session = env.createSession(model.getPath(), sessionOptions);
-    this.ids2Labels = ids2Labels;
-    this.vocab = loadVocab(vocabulary);
-    this.tokenizer = createTokenizer(vocab, resolveLowerCase(inferenceOptions, LOWER_CASE_DEFAULT));
-    this.inferenceOptions = inferenceOptions;
+    this.ids2Labels = Map.copyOf(ids2Labels);
+    this.includeAttentionMask = inferenceOptions.isIncludeAttentionMask();
+    this.includeTokenTypeIds = inferenceOptions.isIncludeTokenTypeIds();
+    this.documentSplitSize = inferenceOptions.getDocumentSplitSize();
+    this.splitOverlapSize = inferenceOptions.getSplitOverlapSize();
     this.sentenceDetector = sentenceDetector;
 
+  }
+
+  private static InferenceOptions validateConstructorArguments(
+      final InferenceOptions inferenceOptions, final Map<Integer, String> ids2Labels,
+      final SentenceDetector sentenceDetector) {
+    Objects.requireNonNull(ids2Labels, "ids2Labels");
+    Objects.requireNonNull(sentenceDetector, "sentenceDetector");
+    return inferenceOptions;
   }
 
   @Override
@@ -146,12 +168,12 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
             inputs.put(INPUT_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(tokens.ids()),
                 new long[] {1, tokens.ids().length}));
 
-            if (inferenceOptions.isIncludeAttentionMask()) {
+            if (includeAttentionMask) {
               inputs.put(ATTENTION_MASK, OnnxTensor.createTensor(env,
                   LongBuffer.wrap(tokens.mask()), new long[] {1, tokens.mask().length}));
             }
 
-            if (inferenceOptions.isIncludeTokenTypeIds()) {
+            if (includeTokenTypeIds) {
               inputs.put(TOKEN_TYPE_IDS, OnnxTensor.createTensor(env,
                   LongBuffer.wrap(tokens.types()), new long[] {1, tokens.types().length}));
             }
@@ -377,11 +399,11 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
     final String[] whitespaceTokenized = text.split("\\s+");
 
     for (int start = 0; start < whitespaceTokenized.length;
-         start = start + inferenceOptions.getDocumentSplitSize()) {
+         start = start + documentSplitSize) {
 
       // 200 word length chunk
       // Check the end do don't go past and get a StringIndexOutOfBoundsException
-      int end = start + inferenceOptions.getDocumentSplitSize();
+      int end = start + documentSplitSize;
       if (end > whitespaceTokenized.length) {
         end = whitespaceTokenized.length;
       }
@@ -390,7 +412,7 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
       final String group = String.join(" ", Arrays.copyOfRange(whitespaceTokenized, start, end));
 
       // We want to overlap each chunk by 50 words so scoot back 50 words for the next iteration.
-      start = start - inferenceOptions.getSplitOverlapSize();
+      start = start - splitOverlapSize;
 
       // Now we can tokenize the group and continue.
       final String[] tokens = tokenizer.tokenize(group);
