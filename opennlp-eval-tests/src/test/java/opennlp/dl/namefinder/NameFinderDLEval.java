@@ -69,12 +69,23 @@ public class NameFinderDLEval extends AbstractEvalTest {
         logger.debug(span.toString());
       }
 
-      Assertions.assertEquals(1, spans.length);
+      final String text = String.join(" ", tokens);
+
+      // The model emits a PER and a LOC entity; the person-only decoder previously dropped
+      // the location. Span types are the entity labels (PER/LOC), not the matched text.
+      Assertions.assertEquals(2, spans.length);
+
+      Assertions.assertEquals("PER", spans[0].getType());
       Assertions.assertEquals(0, spans[0].getStart());
       Assertions.assertEquals(17, spans[0].getEnd());
       Assertions.assertEquals(8.251646041870117, spans[0].getProb(), 0.00001);
-      Assertions.assertEquals("George Washington",
-          spans[0].getCoveredText(String.join(" ", tokens)));
+      Assertions.assertEquals("George Washington", spans[0].getCoveredText(text));
+
+      Assertions.assertEquals("LOC", spans[1].getType());
+      Assertions.assertEquals(39, spans[1].getStart());
+      Assertions.assertEquals(52, spans[1].getEnd());
+      Assertions.assertEquals("United States", spans[1].getCoveredText(text));
+      Assertions.assertTrue(spans[1].getProb() > 0);
     }
 
   }
@@ -253,8 +264,11 @@ public class NameFinderDLEval extends AbstractEvalTest {
       }
 
       Assertions.assertEquals(1, spans.length);
+      Assertions.assertEquals("PER", spans[0].getType());
       Assertions.assertEquals(13, spans[0].getStart());
       Assertions.assertEquals(30, spans[0].getEnd());
+      Assertions.assertEquals("George Washington",
+          spans[0].getCoveredText(String.join(" ", tokens)));
     }
   }
 
@@ -278,8 +292,10 @@ public class NameFinderDLEval extends AbstractEvalTest {
       }
 
       Assertions.assertEquals(1, spans.length);
+      Assertions.assertEquals("PER", spans[0].getType());
       Assertions.assertEquals(13, spans[0].getStart());
       Assertions.assertEquals(19, spans[0].getEnd());
+      Assertions.assertEquals("George", spans[0].getCoveredText(String.join(" ", tokens)));
     }
   }
 
@@ -342,11 +358,17 @@ public class NameFinderDLEval extends AbstractEvalTest {
         logger.debug(span.toString());
       }
 
+      final String text = String.join(" ", tokens);
+
       Assertions.assertEquals(2, spans.length);
+      Assertions.assertEquals("PER", spans[0].getType());
       Assertions.assertEquals(0, spans[0].getStart());
       Assertions.assertEquals(17, spans[0].getEnd());
+      Assertions.assertEquals("George Washington", spans[0].getCoveredText(text));
+      Assertions.assertEquals("PER", spans[1].getType());
       Assertions.assertEquals(22, spans[1].getStart());
       Assertions.assertEquals(37, spans[1].getEnd());
+      Assertions.assertEquals("Abraham Lincoln", spans[1].getCoveredText(text));
 
     }
 
