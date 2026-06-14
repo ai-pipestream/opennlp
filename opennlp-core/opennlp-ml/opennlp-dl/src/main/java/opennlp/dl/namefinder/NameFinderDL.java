@@ -56,9 +56,15 @@ import opennlp.tools.util.Span;
  */
 public class NameFinderDL extends AbstractDL implements TokenNameFinder {
 
+  /** Example person labels; retained for reference. Decoding now handles any B-/I- type. */
   public static final String I_PER = "I-PER";
   public static final String B_PER = "B-PER";
   public static final String SEPARATOR = "[SEP]";
+
+  /** BIO prefixes: a token labelled {@code B-<TYPE>} begins an entity, {@code I-<TYPE>}
+   * continues one. The text after the prefix is the entity type reported on the span. */
+  private static final String BEGIN_PREFIX = "B-";
+  private static final String INSIDE_PREFIX = "I-";
 
   /** NER models are commonly cased, so lower casing is off by default. */
   private static final boolean LOWER_CASE_DEFAULT = false;
@@ -187,13 +193,16 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
             // Can we do thresholding without it between 0 and 1?
             final double confidence = arr[maxIndex]; // / 10;
 
-            // Is this is the start of a person entity.
-            if (B_PER.equals(label)) {
+            // Is this the start of an entity? Any B-<TYPE> begins a span of that type.
+            if (label != null && label.startsWith(BEGIN_PREFIX)) {
+
+              // The entity type is the label without its B- prefix, e.g. B-ORG -> ORG.
+              final String entityType = label.substring(BEGIN_PREFIX.length());
 
               String spanText;
 
-              // Find the end index of the span in the array (where the label is not I-PER).
-              final SpanEnd spanEnd = findSpanEnd(v, x, ids2Labels, toks);
+              // Find the end index of the span (where the label is no longer I-<TYPE>).
+              final SpanEnd spanEnd = findSpanEnd(v, x, ids2Labels, toks, entityType);
 
               // If the end is -1 it means this is a single-span token.
               // If the end is != -1 it means this is a multi-span token.
@@ -259,7 +268,8 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
 
                   final int characterEnd = characterStart + spanText.length();
 
-                  spans.add(new Span(characterStart, characterEnd, spanText, confidence));
+                  // The span type is the entity label (e.g. PER, ORG), not the matched text.
+                  spans.add(new Span(characterStart, characterEnd, entityType, confidence));
 
                   // OP-1: Only increment characterStart by one.
                   characterStart++;
@@ -290,26 +300,27 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
   }
 
   private SpanEnd findSpanEnd(float[][][] v, int startIndex, Map<Integer, String> id2Labels,
-                              String[] tokens) {
+                              String[] tokens, String entityType) {
+
+    // The continuation label for this entity type, e.g. I-PER for entity type PER.
+    final String insideLabel = INSIDE_PREFIX + entityType;
 
     // -1 means there is no follow-up token, so it is a single-token span.
     int index = -1;
     int characterEnd = 0;
 
-    // Starts at the span start in the vector.
-    // Looks at the next token to see if it is an I-PER.
-    // Go until the next token is something other than I-PER.
-    // When the next token is not I-PER, return the previous index.
+    // Starts at the span start in the vector and walks forward while the next token is
+    // labelled I-<entityType>; the span ends at the previous index when it is not.
 
     for (int x = startIndex + 1; x < v[0].length; x++) {
 
       // Get the next item.
       final float[] arr = v[0][x];
 
-      // See if the next token has an I-PER label.
+      // See if the next token continues this entity (I-<entityType>).
       final String nextTokenClassification = id2Labels.get(maxIndex(arr));
 
-      if (!I_PER.equals(nextTokenClassification)) {
+      if (!insideLabel.equals(nextTokenClassification)) {
         index = x - 1;
         break;
       }
