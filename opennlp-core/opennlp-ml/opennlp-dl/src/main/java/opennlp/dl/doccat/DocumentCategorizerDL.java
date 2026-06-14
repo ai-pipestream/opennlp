@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -163,8 +164,10 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
   }
 
   /**
-   * Returns an empty score array if inference fails, preserving the historical
-   * {@link DocumentCategorizer} behavior of this implementation.
+   * Returns a zero-filled score array with one entry per category if inference fails (the
+   * failure is logged), so the rest of the {@link DocumentCategorizer} API — e.g.
+   * {@link #scoreMap}, {@link #sortedScoreMap}, {@link #getBestCategory} — stays safe to call
+   * after an error instead of throwing on an empty array.
    */
   @Override
   public double[] categorize(String[] strings) {
@@ -226,7 +229,8 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
       logger.error("Unable to perform document classification inference", ex);
     }
 
-    return new double[] {};
+    // Sized to the category count so scoreMap()/sortedScoreMap() never index out of bounds.
+    return new double[categories.size()];
 
   }
 
@@ -323,20 +327,13 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
     // Split the input text into 200 word chunks with 50 overlapping between chunks.
     final String[] whitespaceTokenized = text.split("\\s+");
 
-    int start = 0;
-    while (start < whitespaceTokenized.length) {
+    for (final int[] range : chunkRanges(whitespaceTokenized.length,
+        documentSplitSize, splitOverlapSize)) {
 
-      // 200 word length chunk
-      // Check the end do don't go past and get a StringIndexOutOfBoundsException
-      final int end = Math.min(start + documentSplitSize, whitespaceTokenized.length);
+      // The group is that subsection of the input.
+      final String group =
+          String.join(" ", Arrays.copyOfRange(whitespaceTokenized, range[0], range[1]));
 
-      // The group is that subsection of string.
-      final String group = String.join(" ", Arrays.copyOfRange(whitespaceTokenized, start, end));
-
-      // We want to overlap each chunk by 50 words for the next iteration.
-      start = end == whitespaceTokenized.length ? end : end - splitOverlapSize;
-
-      // Now we can tokenize the group and continue.
       final String[] tokens = tokenizer.tokenize(group);
 
       final long[] ids = tokenIds(tokens, vocab);
@@ -353,6 +350,32 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
 
     return t;
 
+  }
+
+  /**
+   * Computes the {@code [start, end)} word-index ranges the input is split into: chunks of
+   * {@code splitSize} words overlapping by {@code overlapSize}. The loop always advances by
+   * at least one word, so a misconfigured {@code overlapSize >= splitSize} can neither stall
+   * the loop nor produce negative indices.
+   *
+   * @param length The number of whitespace-separated words.
+   * @param splitSize The chunk size in words.
+   * @param overlapSize The overlap between consecutive chunks in words.
+   * @return The ordered list of {@code [start, end)} ranges; empty when {@code length == 0}.
+   */
+  static List<int[]> chunkRanges(final int length, final int splitSize, final int overlapSize) {
+    final List<int[]> ranges = new ArrayList<>();
+    int start = 0;
+    while (start < length) {
+      final int end = Math.min(start + splitSize, length);
+      ranges.add(new int[] {start, end});
+      if (end == length) {
+        break;
+      }
+      // Overlap by overlapSize words, but always move forward by at least one.
+      start = Math.max(end - overlapSize, start + 1);
+    }
+    return ranges;
   }
 
   /**
@@ -390,6 +413,9 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
    */
   static double[] softmax(final float[] input) {
 
+    // Subtract the maximum before exponentiating (numerically stable softmax): exp() of a
+    // large logit otherwise overflows to +Infinity, yielding NaN scores. Mathematically
+    // identical to the naive form. Results are kept in double precision throughout.
     final double[] t = new double[input.length];
     double max = Double.NEGATIVE_INFINITY;
     for (final float value : input) {
@@ -397,7 +423,6 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
     }
 
     double sum = 0.0;
-
     for (int x = 0; x < input.length; x++) {
       final double val = Math.exp(input[x] - max);
       sum += val;
@@ -405,7 +430,6 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
     }
 
     final double[] output = new double[input.length];
-
     for (int x = 0; x < output.length; x++) {
       output[x] = t[x] / sum;
     }
