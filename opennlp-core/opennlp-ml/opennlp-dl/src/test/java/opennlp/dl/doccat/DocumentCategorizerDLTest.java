@@ -83,6 +83,10 @@ public class DocumentCategorizerDLTest {
 
     assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(null));
     assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(new String[0]));
+    assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(new String[] {null}));
+    assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(new String[] {""}));
+    assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(new String[] {"   "}));
+    assertThrows(IllegalArgumentException.class, () -> categorizer.categorize(new String[] {"\t\n"}));
   }
 
   @Test

@@ -181,16 +181,27 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
    * malformed input is rejected with {@link IllegalArgumentException}, and any failure executing
    * the model is surfaced as an {@link IllegalStateException} (cause preserved).
    *
+   * <p><b>Release note (OpenNLP 3.0):</b> prior releases returned a zero-filled array (sized to
+   * the number of categories) on inference failure so that {@link #scoreMap}, {@link #getBestCategory}
+   * and similar methods could still be called. This implementation now throws on such failures.
+   * Callers that need to handle inference errors gracefully should catch {@link IllegalStateException}.</p>
+   *
    * @param strings The document to categorize; {@code strings[0]} is classified.
    * @return The per-category probabilities.
-   * @throws IllegalArgumentException If {@code strings} is {@code null} or empty.
+   * @throws IllegalArgumentException If {@code strings} is {@code null} or empty, or if the first element
+   *     is {@code null}, or if it contains no non-whitespace tokens (e.g. blank or whitespace-only).
    * @throws IllegalStateException    If inference fails or the model returns an unexpected output.
    */
   @Override
   public double[] categorize(String[] strings) {
 
-    if (strings == null || strings.length == 0) {
+    if (strings == null || strings.length == 0 || strings[0] == null) {
       throw new IllegalArgumentException("strings must contain at least one document to categorize");
+    }
+
+    if (strings[0].trim().isEmpty()) {
+      throw new IllegalArgumentException(
+          "document must contain at least one non-whitespace token to categorize");
     }
 
     final List<Tokens> tokens = tokenize(strings[0]);

@@ -30,6 +30,10 @@ public class AverageClassificationScoringStrategy implements ClassificationScori
   @Override
   public double[] score(List<double[]> scores) {
 
+    if (scores == null || scores.isEmpty()) {
+      throw new IllegalArgumentException("scores must contain at least one part score");
+    }
+
     final int values = scores.get(0).length;
 
     final double[] averages = new double[values];

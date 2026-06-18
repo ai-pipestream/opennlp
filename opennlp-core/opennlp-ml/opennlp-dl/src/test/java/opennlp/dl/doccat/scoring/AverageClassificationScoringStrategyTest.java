@@ -61,4 +61,11 @@ public class AverageClassificationScoringStrategyTest {
 
   }
 
+  @Test
+  void rejectsEmptyScoresList() {
+    final ClassificationScoringStrategy strategy = new AverageClassificationScoringStrategy();
+    Assertions.assertThrows(IllegalArgumentException.class, () -> strategy.score(new LinkedList<>()));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> strategy.score(null));
+  }
+
 }
