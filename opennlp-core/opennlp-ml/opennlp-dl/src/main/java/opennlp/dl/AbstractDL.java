@@ -42,6 +42,8 @@ import opennlp.tools.tokenize.BertTokenizer;
 import opennlp.tools.tokenize.Tokenizer;
 import opennlp.tools.tokenize.WordpieceTokenizer;
 import opennlp.tools.util.normalizer.CharClass;
+import opennlp.tools.util.normalizer.NormalizedText;
+import opennlp.tools.util.normalizer.OffsetMap;
 
 /**
  * Base class for OpenNLP deep-learning classes using ONNX Runtime.
@@ -341,9 +343,11 @@ public abstract class AbstractDL implements AutoCloseable {
 
   /**
    * Optionally folds Unicode whitespace and/or dashes in the input to their ASCII forms before
-   * inference. Each member code point maps to exactly one ASCII character, so the transform is
-   * offset preserving for Basic Multilingual Plane characters and any spans a model produces still
-   * align with the input.
+   * inference, returning just the folded text. This is suitable for callers that do not map model
+   * output back to character offsets, such as whole-document classification. When the result must
+   * be mapped back to the original text (for example to report entity spans), use
+   * {@link #normalizeInputMapped(String, boolean, boolean)} instead, which also returns an
+   * {@link OffsetMap} that stays correct even when a fold changes the string length.
    *
    * @param text The input text.
    * @param normalizeWhitespace Whether to fold whitespace to ASCII spaces.
@@ -360,6 +364,45 @@ public abstract class AbstractDL implements AutoCloseable {
       result = DASHES.normalize(result).toString();
     }
     return result;
+  }
+
+  /**
+   * Like {@link #normalizeInput(String, boolean, boolean)} but also produces an {@link OffsetMap}
+   * from the folded text back to {@code text}, so model output positions can be mapped to original
+   * character offsets even when a fold changes the string length: a supplementary dash collapsing
+   * to one hyphen, or, for folds that may be added later, an expansion such as an ellipsis to three
+   * dots.
+   *
+   * @param text The input text.
+   * @param normalizeWhitespace Whether to fold whitespace to ASCII spaces.
+   * @param normalizeDashes Whether to fold dashes to the ASCII hyphen.
+   * @return The optionally normalized text paired with its offset map back to {@code text}.
+   */
+  protected static NormalizedText normalizeInputMapped(final String text,
+      final boolean normalizeWhitespace, final boolean normalizeDashes) {
+    // Whitespace folding is length-preserving (every Unicode White_Space code point is in the BMP),
+    // so it does not move offsets; only dash folding can change length. We therefore take the offset
+    // map from the dash stage, which -- because the whitespace stage left offsets untouched -- maps
+    // the final text straight back to the original. A length-changing fold added before the dash
+    // stage would require composing the stage maps.
+    final String afterWhitespace =
+        normalizeWhitespace ? WHITESPACE.normalize(text).toString() : text;
+    if (normalizeDashes) {
+      final NormalizedText folded = DASHES.normalizeMapped(afterWhitespace);
+      return new NormalizedText(text, folded.normalized(), folded.offsets());
+    }
+    return identityNormalizedText(text, afterWhitespace);
+  }
+
+  // A NormalizedText whose offset map is the identity, for the case where no length-changing fold
+  // was applied so the folded text has the same length and offsets as the original.
+  private static NormalizedText identityNormalizedText(final String original,
+      final String normalized) {
+    final OffsetMap.Builder offsets = new OffsetMap.Builder();
+    for (int i = 0; i < normalized.length(); i++) {
+      offsets.map(i);
+    }
+    return new NormalizedText(original, normalized, offsets.build(normalized.length()));
   }
 
   /**

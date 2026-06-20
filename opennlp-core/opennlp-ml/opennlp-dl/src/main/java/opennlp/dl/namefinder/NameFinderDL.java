@@ -42,6 +42,8 @@ import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.namefind.TokenNameFinder;
 import opennlp.tools.sentdetect.SentenceDetector;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.normalizer.NormalizedText;
+import opennlp.tools.util.normalizer.OffsetMap;
 
 /**
  * An implementation of {@link TokenNameFinder} that uses ONNX models.
@@ -170,10 +172,17 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
   /**
    * {@inheritDoc}
    *
-   * <p>This method joins the provided tokens with spaces, sentence-splits the joined text,
-   * runs each sentence through the ONNX token-classification model, decodes BIO labels into
-   * {@link Span spans}, and resolves those spans back to character offsets in the joined text.</p>
+   * <p>Joins the provided tokens with spaces, sentence-splits the joined text, runs each sentence
+   * through the ONNX token-classification model, decodes BIO labels into {@link Span spans}, and
+   * resolves those spans to character offsets in the joined text <em>after</em> any optional input
+   * normalization.</p>
    *
+   * @deprecated When whitespace or dash normalization is enabled and a fold changes the input
+   *     length (for example a supplementary-plane dash collapsing to one hyphen), the returned
+   *     spans are offsets into the normalized text and no longer align with the original input. Use
+   *     {@link #findInOriginal(String[])}, which maps spans back to original coordinates. This
+   *     method is retained for backward compatibility and is equivalent when no length-changing
+   *     fold occurs.
    * @throws IllegalStateException Thrown if inference fails, if the model output shape is not
    *     the expected {@code float[batch][token][label]} form, if the model output contains
    *     no usable label score for a token, or if the model's predicted index for a token is not
@@ -181,14 +190,45 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
    * @throws IllegalArgumentException Thrown if a token produced for the input is not present in
    *     the vocabulary, which indicates the vocabulary file does not match the model.
    */
+  @Deprecated
   @Override
   public Span[] find(String[] input) {
+    return locate(input).spans().toArray(new Span[0]);
+  }
+
+  /**
+   * Finds names and returns their {@link Span spans} in coordinates of the original joined input
+   * ({@code String.join(" ", input)}), regardless of any whitespace or dash normalization applied
+   * before inference. Spans are mapped back through the normalization {@link OffsetMap}, so a fold
+   * that changes the input length (a supplementary dash shrinking, or an expansion) does not shift
+   * the reported offsets.
+   *
+   * @param input The tokens to search.
+   * @return The detected spans, in original-input character coordinates.
+   * @throws IllegalStateException Thrown under the same conditions as {@link #find(String[])}.
+   * @throws IllegalArgumentException Thrown under the same conditions as {@link #find(String[])}.
+   */
+  public Span[] findInOriginal(String[] input) {
+    final DecodedSpans decoded = locate(input);
+    final OffsetMap offsets = decoded.normalized().offsets();
+    final List<Span> mapped = new ArrayList<>(decoded.spans().size());
+    for (final Span span : decoded.spans()) {
+      mapped.add(new Span(offsets.toOriginalOffset(span.getStart()),
+          offsets.toOriginalOffset(span.getEnd()), span.getType(), span.getProb()));
+    }
+    return mapped.toArray(new Span[0]);
+  }
+
+  // Shared core: normalize the joined input (capturing the offset map back to the original), then
+  // decode spans against the normalized text with a per-sentence, forward-threaded character cursor.
+  private DecodedSpans locate(String[] input) {
 
     final List<Span> spans = new ArrayList<>();
 
     // Join the tokens here because they will be tokenized using Wordpiece during inference.
-    final String text =
-        normalizeInput(String.join(" ", input), normalizeWhitespace, normalizeDashes);
+    final NormalizedText normalized =
+        normalizeInputMapped(String.join(" ", input), normalizeWhitespace, normalizeDashes);
+    final String text = normalized.normalized();
 
     // sentPosDetect (not sentDetect) so each sentence's offset in the full text is known.
     final Span[] sentenceSpans = sentenceDetector.sentPosDetect(text);
@@ -217,8 +257,10 @@ public class NameFinderDL extends AbstractDL implements TokenNameFinder {
 
     }
 
-    return spans.toArray(new Span[0]);
+    return new DecodedSpans(spans, normalized);
+  }
 
+  private record DecodedSpans(List<Span> spans, NormalizedText normalized) {
   }
 
   /**
