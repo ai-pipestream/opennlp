@@ -165,7 +165,8 @@ String bestCategory = categorizer.getBestCategory(outcomes);]]>
 File vocab = new File("/path/to/vocab.txt");
 Map<Integer, String> categories = new HashMap<>();
 String[] inputText = new String[]{"My input text is great."};
-final DocumentCategorizerDL myCategorizer = new DocumentCategorizerDL(model, vocab, categories);
+final DocumentCategorizerDL myCategorizer = new DocumentCategorizerDL(
+    model, vocab, categories, new AverageClassificationScoringStrategy(), new InferenceOptions());
 double[] outcomes = myCategorizer.categorize(inputText);
 String category = myCategorizer.getBestCategory(outcomes);]]>
 				</programlisting>
@@ -187,7 +188,7 @@ String category = myCategorizer.getBestCategory(outcomes);]]>
 options.setNormalizeWhitespace(true);
 options.setNormalizeDashes(true);
 DocumentCategorizerDL categorizer = new DocumentCategorizerDL(
-    model, vocab, categories, scoringStrategy, options);]]>
+    model, vocab, categories, new AverageClassificationScoringStrategy(), options);]]>
 			</programlisting>
 		</section>
 	</section>

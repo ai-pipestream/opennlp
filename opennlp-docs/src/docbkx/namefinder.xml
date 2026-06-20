@@ -155,10 +155,14 @@ Span[] nameSpans = nameFinder.find(sentence);]]>
 					<programlisting language="java">
 <![CDATA[File model = new File("/path/to/model.onnx");
 File vocab = new File("/path/to/vocab.txt");
-Map<Integer, String> categories = new HashMap<>();
-String[] tokens = new String[]{"George", "Washington", "was", "president", "of", "the", "United", "States", "."};
-NameFinderDL nameFinderDL = new NameFinderDL(model, vocab, getIds2Labels(), sentenceDetector);
-Span[] spans = nameFinderDL.find(tokens);]]>
+// Maps the model's output indices to its BIO labels, e.g. "O", "B-PER", "I-PER".
+Map<Integer, String> ids2Labels = new HashMap<>();
+SentenceDetector sentenceDetector =
+    new SentenceDetectorME(new SentenceModel(new File("/path/to/en-sent.bin")));
+String[] tokens = {"George", "Washington", "was", "president", "of", "the", "United", "States", "."};
+NameFinderDL nameFinderDL = new NameFinderDL(model, vocab, ids2Labels, sentenceDetector);
+// findInOriginal returns spans in the original input's coordinates.
+Span[] spans = nameFinderDL.findInOriginal(tokens);]]>
 					</programlisting>
 					For additional examples, refer to the <code>NameFinderDLEval</code> class.
 				</para>
@@ -182,10 +186,19 @@ Span[] spans = nameFinderDL.find(tokens);]]>
 					normalization pipeline are documented in <xref linkend="tools.normalizer"/>.
 				</para>
 				<programlisting language="java">
-<![CDATA[InferenceOptions options = new InferenceOptions();
+<![CDATA[File model = new File("/path/to/model.onnx");
+File vocab = new File("/path/to/vocab.txt");
+Map<Integer, String> ids2Labels = new HashMap<>(); // the model's BIO labels
+SentenceDetector sentenceDetector =
+    new SentenceDetectorME(new SentenceModel(new File("/path/to/en-sent.bin")));
+String[] tokens = {"George", "Washington", "was", "president", "."};
+
+InferenceOptions options = new InferenceOptions();
 options.setNormalizeWhitespace(true);
 options.setNormalizeDashes(true);
-NameFinderDL finder = new NameFinderDL(model, vocab, ids2Labels, options, sentenceDetector);]]>
+NameFinderDL finder = new NameFinderDL(model, vocab, ids2Labels, options, sentenceDetector);
+// findInOriginal maps spans back to the original input even when a fold changes its length.
+Span[] spans = finder.findInOriginal(tokens);]]>
 				</programlisting>
 			</section>
 	</section>
