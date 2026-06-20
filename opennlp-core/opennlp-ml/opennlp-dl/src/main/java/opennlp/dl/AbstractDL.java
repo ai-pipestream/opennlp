@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ import ai.onnxruntime.OrtSession;
 import opennlp.tools.tokenize.BertTokenizer;
 import opennlp.tools.tokenize.Tokenizer;
 import opennlp.tools.tokenize.WordpieceTokenizer;
+import opennlp.tools.util.normalizer.CharClass;
 
 /**
  * Base class for OpenNLP deep-learning classes using ONNX Runtime.
@@ -325,6 +327,63 @@ public abstract class AbstractDL implements AutoCloseable {
       throw new IllegalArgumentException(
           "splitOverlapSize must be smaller than documentSplitSize.");
     }
+  }
+
+  /**
+   * Unicode-aware whitespace. Input is tokenized on the full Unicode {@code White_Space} set
+   * rather than the six ASCII characters Java's {@code \s} recognizes, and the same class is
+   * reused by subclasses that need to match against whitespace in the source text.
+   */
+  protected static final CharClass WHITESPACE = CharClass.whitespace();
+
+  /** Unicode dashes (excluding the mathematical minus signs), used for optional input folding. */
+  protected static final CharClass DASHES = CharClass.dashes();
+
+  /**
+   * Optionally folds Unicode whitespace and/or dashes in the input to their ASCII forms before
+   * inference. Each member code point maps to exactly one ASCII character, so the transform is
+   * offset preserving for Basic Multilingual Plane characters and any spans a model produces still
+   * align with the input.
+   *
+   * @param text The input text.
+   * @param normalizeWhitespace Whether to fold whitespace to ASCII spaces.
+   * @param normalizeDashes Whether to fold dashes to the ASCII hyphen.
+   * @return The optionally normalized text.
+   */
+  protected static String normalizeInput(final String text, final boolean normalizeWhitespace,
+                                         final boolean normalizeDashes) {
+    String result = text;
+    if (normalizeWhitespace) {
+      result = WHITESPACE.normalize(result).toString();
+    }
+    if (normalizeDashes) {
+      result = DASHES.normalize(result).toString();
+    }
+    return result;
+  }
+
+  /**
+   * Splits {@code text} on Unicode whitespace and groups the resulting tokens into overlapping
+   * chunks, each rejoined with single ASCII spaces, ready for WordPiece tokenization. The split
+   * uses the Unicode {@code White_Space} set, so spacing such as a no-break space or the
+   * ideographic space is recognized, and it yields no empty tokens from leading, trailing, or
+   * repeated whitespace.
+   *
+   * @param text The input text.
+   * @param documentSplitSize The maximum number of whitespace tokens per chunk.
+   * @param splitOverlapSize The number of tokens shared between consecutive chunks.
+   * @return The chunk strings, in order.
+   */
+  protected static List<String> whitespaceChunks(final String text, final int documentSplitSize,
+                                                 final int splitOverlapSize) {
+    final String[] whitespaceTokenized = WHITESPACE.split(text);
+    final List<String> groups = new ArrayList<>();
+    for (final ChunkRange chunkRange : chunkRanges(
+        whitespaceTokenized.length, documentSplitSize, splitOverlapSize)) {
+      groups.add(String.join(" ",
+          Arrays.copyOfRange(whitespaceTokenized, chunkRange.start(), chunkRange.end())));
+    }
+    return groups;
   }
 
   /**
