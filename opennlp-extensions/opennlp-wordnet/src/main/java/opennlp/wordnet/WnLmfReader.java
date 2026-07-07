@@ -28,23 +28,24 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import javax.xml.XMLConstants;
 import javax.xml.stream.Location;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
  * Reads a WN-LMF XML document (the Global WordNet Association interchange format, used by Open
- * English WordNet and many other language wordnets) into a {@link WordNetLexicon}.
+ * English WordNet and many other language wordnets) into a {@link LexicalKnowledgeBase}.
  *
  * <p>The reader is clean-room, built from the published format documentation, and uses only the
- * JDK's StAX parser. It reads the subset of the format the {@link WordNetLexicon} contract
+ * JDK's StAX parser. It reads the subset of the format the {@link LexicalKnowledgeBase} contract
  * serves: lexical entries (lemma, part of speech, senses), synsets (definition and typed
  * relations), and sense relations, which are lifted to the synset level as documented on
  * {@link WordNetRelation}. Elements outside that subset ({@code Pronunciation}, {@code Form},
@@ -53,12 +54,14 @@ import opennlp.tools.wordnet.WordNetRelation;
  * metadata, are also skipped: the contract has no untyped relation slot. Every other unknown
  * relation type fails loud.</p>
  *
- * <p><b>Security.</b> The parser is hardened against XXE: DTD processing and external entity
- * resolution are disabled, nothing is ever fetched from the network, and a document containing
- * a DOCTYPE declaration is rejected outright. Note that Open English WordNet releases ship with
- * a DOCTYPE line referencing the schema DTD; to read such a file with this v1 reader, delete
- * that one line first. Rejecting DTDs wholesale rather than trusting parser-specific partial
- * DTD support is a deliberate v1 posture.</p>
+ * <p><b>Security.</b> The parser is hardened against XXE per the OWASP-documented posture for
+ * formats that carry a DOCTYPE: a DOCTYPE declaration is tokenized and skipped, but nothing it
+ * names is ever resolved. External entities and the external DTD subset are both disabled
+ * ({@code IS_SUPPORTING_EXTERNAL_ENTITIES} and {@code ACCESS_EXTERNAL_DTD} are off), and the
+ * {@link javax.xml.stream.XMLResolver} throws on any resolution attempt regardless, so no
+ * network or filesystem access can be triggered by a DOCTYPE, internal or external. Open English
+ * WordNet releases ship with a DOCTYPE line referencing the schema DTD; this reader parses such
+ * a file unmodified.</p>
  *
  * <p><b>Errors.</b> Malformed structure fails loud with an {@link IllegalArgumentException}
  * naming the resource and, where the parser provides one, the line: missing required
@@ -92,7 +95,7 @@ public final class WnLmfReader {
    *     document is malformed; the message names the file and, where available, the line.
    * @throws UncheckedIOException Thrown if reading the file fails.
    */
-  public static WordNetLexicon read(Path file) {
+  public static LexicalKnowledgeBase read(Path file) {
     if (file == null) {
       throw new IllegalArgumentException("File must not be null");
     }
@@ -115,7 +118,7 @@ public final class WnLmfReader {
    * @throws IllegalArgumentException Thrown if an argument is {@code null} or the document is
    *     malformed; the message names the resource and, where available, the line.
    */
-  public static WordNetLexicon read(InputStream in, String resourceName) {
+  public static LexicalKnowledgeBase read(InputStream in, String resourceName) {
     if (in == null) {
       throw new IllegalArgumentException("In must not be null");
     }
@@ -138,9 +141,13 @@ public final class WnLmfReader {
 
   private static XMLInputFactory hardenedFactory() {
     final XMLInputFactory factory = XMLInputFactory.newFactory();
-    // XXE hardening: no DTD processing, no external entities, nothing fetched from anywhere.
+    // XXE hardening, the OWASP-documented posture for DOCTYPE-bearing formats: the internal
+    // subset is not processed (so no custom entity gets declared at all), and both the
+    // external DTD subset and external entities are denied, so a DOCTYPE is tokenized and
+    // skipped but nothing it names is ever fetched.
     factory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
     factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
+    factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
     factory.setProperty(XMLInputFactory.IS_COALESCING, Boolean.TRUE);
     factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> {
       throw new XMLStreamException("External entity resolution is disabled, refusing " + systemId);
@@ -178,10 +185,10 @@ public final class WnLmfReader {
     void parse(XMLStreamReader reader) throws XMLStreamException {
       while (reader.hasNext()) {
         final int event = reader.next();
-        if (event == XMLStreamConstants.DTD) {
-          throw malformed(reader.getLocation(),
-              "Document contains a DOCTYPE declaration; the hardened reader rejects DTDs", null);
-        }
+        // A DTD event (the DOCTYPE declaration) is intentionally not handled here: with
+        // external entities and the external subset denied in the factory, it carries nothing
+        // that can affect parsing, so it is skipped exactly like a comment or an ignored
+        // element.
         if (event == XMLStreamConstants.START_ELEMENT) {
           startElement(reader);
         } else if (event == XMLStreamConstants.END_ELEMENT) {
@@ -277,7 +284,7 @@ public final class WnLmfReader {
       }
     }
 
-    WordNetLexicon build() {
+    LexicalKnowledgeBase build() {
       // Every sense must point to a declared synset, with a consistent part of speech.
       for (final Map.Entry<String, String> sense : synsetBySenseId.entrySet()) {
         final RawSynset target = rawSynsets.get(sense.getValue());

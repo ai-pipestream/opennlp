@@ -27,8 +27,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
@@ -40,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class WnLmfReaderTest {
 
-  static WordNetLexicon fixture() {
+  static LexicalKnowledgeBase fixture() {
     try (InputStream in = WnLmfReaderTest.class.getResourceAsStream("mini-wn-lmf.xml")) {
       assertNotNull(in, "Fixture mini-wn-lmf.xml must be on the test classpath");
       return WnLmfReader.read(in, "mini-wn-lmf.xml");
@@ -49,7 +49,7 @@ public class WnLmfReaderTest {
     }
   }
 
-  private static WordNetLexicon parse(String document) {
+  private static LexicalKnowledgeBase parse(String document) {
     return WnLmfReader.read(
         new ByteArrayInputStream(document.getBytes(StandardCharsets.UTF_8)), "inline.xml");
   }
@@ -74,7 +74,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testLookupFoldsCaseAndUnderscore() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals("mini-n1", lexicon.lookup("Domestic_Dog", WordNetPos.NOUN).get(0).id());
     assertEquals("mini-n1", lexicon.lookup("DOG", WordNetPos.NOUN).get(0).id());
   }
@@ -88,7 +88,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testLookupIsPosScoped() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(1, lexicon.lookup("run", WordNetPos.VERB).size());
     assertTrue(lexicon.lookup("dog", WordNetPos.VERB).isEmpty());
     assertFalse(lexicon.contains("walk", WordNetPos.NOUN));
@@ -97,7 +97,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testRelationNavigation() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(List.of("mini-n1"), lexicon.related("mini-n2", WordNetRelation.HYPONYM));
     assertEquals(List.of("mini-v1", "mini-v2"),
         lexicon.related("mini-v4", WordNetRelation.HYPONYM));
@@ -106,7 +106,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testSenseRelationsAreLiftedToSynsetLevel() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(List.of("mini-a2"), lexicon.related("mini-a1", WordNetRelation.ANTONYM));
     assertEquals(List.of("mini-a1"), lexicon.related("mini-a2", WordNetRelation.ANTONYM));
     assertEquals(List.of("mini-v1"),
@@ -126,7 +126,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testUnknownLemmaOrSynsetIsEmpty() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertTrue(lexicon.lookup("zebra", WordNetPos.NOUN).isEmpty());
     assertTrue(lexicon.synset("mini-n99").isEmpty());
   }
@@ -138,7 +138,7 @@ public class WnLmfReaderTest {
         "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
             + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/></LexicalEntry>"
             + "<Synset id=\"t-1\" partOfSpeech=\"n\"><Definition>a feline</Definition></Synset>"));
-    final WordNetLexicon lexicon = WnLmfReader.read(file);
+    final LexicalKnowledgeBase lexicon = WnLmfReader.read(file);
     assertEquals("a feline", lexicon.lookup("cat", WordNetPos.NOUN).get(0).gloss());
   }
 
@@ -157,14 +157,39 @@ public class WnLmfReaderTest {
   }
 
   @Test
-  void testRejectsDoctype() {
+  void testSkipsDoctypeDeclaration() {
+    // Real Open English WordNet releases ship exactly this shape: a DOCTYPE naming the schema
+    // DTD by an unreachable SYSTEM identifier (example.invalid is the RFC 2606 reserved domain
+    // that must never resolve). The reader must parse past it without attempting to fetch it.
     final String document = "<?xml version=\"1.0\"?>\n"
         + "<!DOCTYPE LexicalResource SYSTEM \"http://example.invalid/WN-LMF-1.3.dtd\">\n"
         + "<LexicalResource><Lexicon id=\"t\" label=\"t\" language=\"en\" version=\"1\">"
+        + "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
+        + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/></LexicalEntry>"
+        + "<Synset id=\"t-1\" partOfSpeech=\"n\"><Definition>a feline</Definition></Synset>"
+        + "</Lexicon></LexicalResource>";
+    final LexicalKnowledgeBase lexicon = parse(document);
+    assertEquals("a feline", lexicon.lookup("cat", WordNetPos.NOUN).get(0).gloss());
+  }
+
+  @Test
+  void testInternalSubsetEntityIsNeverExpanded(@TempDir Path tempDir) throws IOException {
+    // A DOCTYPE-declared internal-subset entity is the classic XXE payload: if the parser ever
+    // honored it, the entity reference below would be replaced by the target file's content.
+    // With SUPPORT_DTD disabled the declaration itself is never registered, so the reference is
+    // undefined and parsing must fail loud rather than silently expand it.
+    final Path secret = tempDir.resolve("secret.txt");
+    Files.writeString(secret, "xxe-marker-should-never-appear");
+    final String document = "<?xml version=\"1.0\"?>\n"
+        + "<!DOCTYPE LexicalResource [<!ENTITY xxe SYSTEM \"" + secret.toUri() + "\">]>\n"
+        + "<LexicalResource><Lexicon id=\"t\" label=\"t\" language=\"en\" version=\"1\">"
+        + "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"&xxe;\" partOfSpeech=\"n\"/>"
+        + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/></LexicalEntry>"
+        + "<Synset id=\"t-1\" partOfSpeech=\"n\"><Definition>a feline</Definition></Synset>"
         + "</Lexicon></LexicalResource>";
     final IllegalArgumentException e =
         assertThrows(IllegalArgumentException.class, () -> parse(document));
-    assertTrue(e.getMessage().contains("inline.xml"));
+    assertFalse(e.getMessage().contains("xxe-marker-should-never-appear"));
   }
 
   @Test
@@ -212,7 +237,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testSkipsOtherRelationType() {
-    final WordNetLexicon lexicon = parse(
+    final LexicalKnowledgeBase lexicon = parse(
         wrap("<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
             + "<Sense id=\"t-cat-n-1\" synset=\"t-1\">"
             + "<SenseRelation relType=\"other\" target=\"t-cat-n-1\"/></Sense></LexicalEntry>"
