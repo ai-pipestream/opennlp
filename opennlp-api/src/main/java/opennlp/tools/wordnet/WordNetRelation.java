@@ -22,7 +22,7 @@ package opennlp.tools.wordnet;
  * <p>The value set covers the pointer types documented for the legacy Princeton WNDB format,
  * which is also the common core the WN-LMF interchange format expresses; both readers map their
  * format's names onto these values, so consumers navigate one relation vocabulary regardless of
- * the data tier behind the {@link WordNetLexicon} seam. {@link #PARTICIPLE} is part of that
+ * the data tier behind the {@link LexicalKnowledgeBase} seam. {@link #PARTICIPLE} is part of that
  * documented set (the adjective &quot;participle of verb&quot; pointer) even though it is easy
  * to overlook; without it, real Princeton data would be unreadable. Two values go beyond the
  * WNDB pointer set: {@link #ENTAILED_BY} and {@link #CAUSED_BY} cover the inverse relations

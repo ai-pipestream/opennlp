@@ -24,8 +24,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
@@ -61,7 +61,7 @@ public class ReaderEquivalenceTest {
 
   @Test
   void testLookupAgreesForEveryLemmaAndPos() {
-    final WordNetLexicon lmf = WnLmfReaderTest.fixture();
+    final LexicalKnowledgeBase lmf = WnLmfReaderTest.fixture();
     final InMemoryWordNetLexicon wndb = (InMemoryWordNetLexicon) WndbReaderTest.fixture();
     final Set<String> checked = new HashSet<>();
     for (final Synset synset : wndb.synsets()) {
@@ -82,8 +82,8 @@ public class ReaderEquivalenceTest {
 
   @Test
   void testSenseOrderAgreesForMultiSenseLemma() {
-    final WordNetLexicon lmf = WnLmfReaderTest.fixture();
-    final WordNetLexicon wndb = WndbReaderTest.fixture();
+    final LexicalKnowledgeBase lmf = WnLmfReaderTest.fixture();
+    final LexicalKnowledgeBase wndb = WndbReaderTest.fixture();
     final List<String> lmfOrder = glosses(lmf.lookup("run", WordNetPos.NOUN));
     final List<String> wndbOrder = glosses(wndb.lookup("run", WordNetPos.NOUN));
     assertEquals(2, lmfOrder.size());
@@ -102,7 +102,7 @@ public class ReaderEquivalenceTest {
 
   // A synset's relations with targets replaced by their glosses, id-scheme independent.
   private static Map<WordNetRelation, Set<String>> relationsByGloss(Synset synset,
-                                                                    WordNetLexicon lexicon) {
+                                                                    LexicalKnowledgeBase lexicon) {
     final Map<WordNetRelation, Set<String>> result = new HashMap<>();
     for (final Map.Entry<WordNetRelation, List<String>> relation :
         synset.relations().entrySet()) {

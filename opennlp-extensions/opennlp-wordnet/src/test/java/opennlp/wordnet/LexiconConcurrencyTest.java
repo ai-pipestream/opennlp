@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
-import opennlp.tools.wordnet.WordNetLexicon;
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
@@ -42,7 +42,7 @@ public class LexiconConcurrencyTest {
 
   @Test
   void testConcurrentLookupsSeeConsistentResults() throws InterruptedException {
-    final WordNetLexicon lexicon = WndbReaderTest.fixture();
+    final LexicalKnowledgeBase lexicon = WndbReaderTest.fixture();
     final CountDownLatch start = new CountDownLatch(1);
     final CountDownLatch done = new CountDownLatch(THREADS);
     final Queue<String> problems = new ConcurrentLinkedQueue<>();
@@ -70,7 +70,7 @@ public class LexiconConcurrencyTest {
     assertEquals(List.of(), List.copyOf(problems));
   }
 
-  private static void verifyOnce(WordNetLexicon lexicon, Queue<String> problems) {
+  private static void verifyOnce(LexicalKnowledgeBase lexicon, Queue<String> problems) {
     if (!"wndb-00001075-n".equals(lexicon.lookup("dog", WordNetPos.NOUN).get(0).id())) {
       problems.add("Wrong dog lookup");
     }

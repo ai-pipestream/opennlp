@@ -22,13 +22,13 @@ import java.util.Locale;
 
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.lemmatizer.Lemmatizer;
-import opennlp.tools.wordnet.WordNetLexicon;
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.WordNetPos;
 
 /**
  * A clean-room implementation of the documented Morphy algorithm as a {@link Lemmatizer}:
  * exception-list lookup first, then the per-part-of-speech iterative detachment rules, with
- * every rule-derived candidate validated against a {@link WordNetLexicon} before it is
+ * every rule-derived candidate validated against a {@link LexicalKnowledgeBase} before it is
  * returned.
  *
  * <p><b>Algorithm.</b> For each token the part-of-speech tag is mapped to a
@@ -90,7 +90,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
 
   private static final String[][] NO_RULES = {};
 
-  private final WordNetLexicon lexicon;
+  private final LexicalKnowledgeBase lexicon;
   private final MorphyExceptions exceptions;
 
   /**
@@ -102,7 +102,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
    * @throws IllegalArgumentException Thrown if {@code lexicon} or {@code exceptions} is
    *     {@code null}.
    */
-  public MorphyLemmatizer(WordNetLexicon lexicon, MorphyExceptions exceptions) {
+  public MorphyLemmatizer(LexicalKnowledgeBase lexicon, MorphyExceptions exceptions) {
     if (lexicon == null) {
       throw new IllegalArgumentException("Lexicon must not be null");
     }

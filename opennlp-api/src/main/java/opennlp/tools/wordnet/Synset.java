@@ -30,7 +30,7 @@ import opennlp.tools.commons.ThreadSafe;
  * <p>The shape is deliberately format-agnostic. The {@link #id() id} is an opaque,
  * source-qualified string minted by whichever reader produced the synset (a WN-LMF document's
  * own synset id, or an id a WNDB reader derives from the file position); consumers must not
- * parse it, only pass it back to {@link WordNetLexicon#synset(String)} and compare it for
+ * parse it, only pass it back to {@link LexicalKnowledgeBase#synset(String)} and compare it for
  * equality. Keeping identity opaque is what lets a bundled lexicon and a user-downloaded
  * lexicon sit behind the same seam, and lets later alignment layers join sources without a
  * contract change.</p>

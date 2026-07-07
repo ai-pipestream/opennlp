@@ -28,8 +28,8 @@ import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
@@ -53,7 +53,7 @@ public class WndbReaderTest {
     }
   }
 
-  static WordNetLexicon fixture() {
+  static LexicalKnowledgeBase fixture() {
     return WndbReader.read(fixtureDirectory());
   }
 
@@ -71,7 +71,7 @@ public class WndbReaderTest {
 
   @Test
   void testLookupFoldsCaseAndUnderscore() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(DOG_ID, lexicon.lookup("Domestic_Dog", WordNetPos.NOUN).get(0).id());
     assertEquals(DOG_ID, lexicon.lookup("DOG", WordNetPos.NOUN).get(0).id());
   }
@@ -84,7 +84,7 @@ public class WndbReaderTest {
 
   @Test
   void testRelationNavigation() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(List.of(DOG_ID), lexicon.related(CANID_ID, WordNetRelation.HYPONYM));
     assertEquals(List.of("wndb-00001075-v", "wndb-00001171-v"),
         lexicon.related("wndb-00001324-v", WordNetRelation.HYPONYM));
@@ -94,7 +94,7 @@ public class WndbReaderTest {
 
   @Test
   void testLexicalPointersSurfaceAtSynsetLevel() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(List.of("wndb-00001141-a"),
         lexicon.related("wndb-00001075-a", WordNetRelation.ANTONYM));
     assertEquals(List.of("wndb-00001075-a"),
@@ -103,7 +103,7 @@ public class WndbReaderTest {
 
   @Test
   void testSatelliteNormalizesToAdjectiveAndMarkerIsStripped() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     final Synset large = lexicon.lookup("large", WordNetPos.ADJECTIVE).get(0);
     assertEquals(WordNetPos.ADJECTIVE, large.pos());
     assertEquals(List.of("wndb-00001211-a"), large.related(WordNetRelation.SIMILAR_TO));
@@ -114,7 +114,7 @@ public class WndbReaderTest {
 
   @Test
   void testUnknownLemmaOrSynsetIsEmpty() {
-    final WordNetLexicon lexicon = fixture();
+    final LexicalKnowledgeBase lexicon = fixture();
     assertTrue(lexicon.lookup("zebra", WordNetPos.NOUN).isEmpty());
     assertTrue(lexicon.synset("wndb-99999999-n").isEmpty());
   }

@@ -20,15 +20,16 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The wordnet lexicon seam: lemma and synset lookup over a loaded wordnet-style resource.
+ * The lexical knowledge base seam: lemma and synset lookup over a loaded lexical-semantic
+ * resource in the WordNet family.
  *
  * <p>This interface is the contract every wordnet-shaped dataset sits behind. A legacy Princeton
  * WNDB directory, a WN-LMF XML document (the Global WordNet Association interchange format used
  * by Open English WordNet and many other language wordnets), a future bundled
  * permissively-licensed lexicon, and a future user-downloaded CC-BY lexicon are all
- * implementations of this one seam, so a consumer written against {@code WordNetLexicon} never
- * changes when the data tier does. Nothing in the contract names a particular resource; synset
- * identity is opaque and source-qualified (see {@link Synset#id()}).</p>
+ * implementations of this one seam, so a consumer written against {@code LexicalKnowledgeBase}
+ * never changes when the data tier does. Nothing in the contract names a particular resource;
+ * synset identity is opaque and source-qualified (see {@link Synset#id()}).</p>
  *
  * <p>The surface is intentionally minimal but sufficient for the layered features above it:
  * lemma lookup and membership for morphological analysis (Morphy-style lemmatization), and
@@ -44,7 +45,7 @@ import java.util.Optional;
  * <p>Implementations must be immutable and thread-safe after loading: one instance is meant to
  * be shared across an application's threads for concurrent lookups.</p>
  */
-public interface WordNetLexicon {
+public interface LexicalKnowledgeBase {
 
   /**
    * Finds the synsets containing a lemma with a part of speech, in the source's sense order

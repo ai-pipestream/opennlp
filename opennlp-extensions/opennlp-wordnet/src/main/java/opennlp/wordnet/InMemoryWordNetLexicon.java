@@ -26,15 +26,15 @@ import java.util.Map;
 import java.util.Optional;
 
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
- * The immutable in-memory {@link WordNetLexicon} both readers produce: a synset table plus a
+ * The immutable in-memory {@link LexicalKnowledgeBase} both readers produce: a synset table plus a
  * folded (lemma, part of speech) index. Package-private because it is a reader product, not a
- * public entry point; consumers hold it as {@link WordNetLexicon}.
+ * public entry point; consumers hold it as {@link LexicalKnowledgeBase}.
  *
  * <p>Lemma matching follows the recommended seam semantics: keys are folded by lowercasing with
  * the root locale and treating the underscore some formats store in multiword lemmas as a
@@ -45,7 +45,7 @@ import opennlp.tools.wordnet.WordNetRelation;
  * After construction all state is immutable, making instances safe for concurrent lookups.</p>
  */
 @ThreadSafe
-final class InMemoryWordNetLexicon implements WordNetLexicon {
+final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
 
   private final Map<String, Synset> synsetsById;
   private final Map<LemmaKey, List<Synset>> senseIndex;

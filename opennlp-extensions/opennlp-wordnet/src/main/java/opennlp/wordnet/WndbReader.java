@@ -28,14 +28,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetLexicon;
 import opennlp.tools.wordnet.WordNetPos;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
  * Reads a legacy Princeton WNDB database directory ({@code index.noun}, {@code data.noun}, and
- * the corresponding pairs for verbs, adjectives, and adverbs) into a {@link WordNetLexicon}.
+ * the corresponding pairs for verbs, adjectives, and adverbs) into a {@link LexicalKnowledgeBase}.
  *
  * <p>The reader is clean-room, built from the published {@code wndb(5WN)} and
  * {@code wninput(5WN)} format documentation, with no third-party WordNet library involved. All
@@ -80,7 +80,7 @@ public final class WndbReader {
    *     file and line.
    * @throws UncheckedIOException Thrown if reading a file fails.
    */
-  public static WordNetLexicon read(Path directory) {
+  public static LexicalKnowledgeBase read(Path directory) {
     if (directory == null) {
       throw new IllegalArgumentException("Directory must not be null");
     }

@@ -28,10 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exercises the {@link WordNetLexicon} default methods against a minimal in-memory
+ * Exercises the {@link LexicalKnowledgeBase} default methods against a minimal in-memory
  * implementation, so the defaults are validated independently of any reader.
  */
-public class WordNetLexiconTest {
+public class LexicalKnowledgeBaseTest {
 
   private static final Synset DOG = new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"),
       "a domesticated canid", Map.of(WordNetRelation.HYPERNYM, List.of("test-2-n")));
@@ -40,7 +40,7 @@ public class WordNetLexiconTest {
       "a carnivorous mammal", Map.of(WordNetRelation.HYPONYM, List.of("test-1-n")));
 
   // A deliberately tiny implementation of only the two abstract methods.
-  private static final WordNetLexicon LEXICON = new WordNetLexicon() {
+  private static final LexicalKnowledgeBase LEXICON = new LexicalKnowledgeBase() {
 
     @Override
     public List<Synset> lookup(String lemma, WordNetPos pos) {
