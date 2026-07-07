@@ -17,6 +17,8 @@
 package opennlp.wordnet;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -126,6 +128,11 @@ final class InMemoryWordNetLexicon implements WordNetLexicon {
   /** {@return the number of synsets in this lexicon} */
   int size() {
     return synsetsById.size();
+  }
+
+  /** {@return all synsets, for equivalence checks and diagnostics within this package} */
+  Collection<Synset> synsets() {
+    return Collections.unmodifiableCollection(synsetsById.values());
   }
 
   /**
