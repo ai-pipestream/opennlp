@@ -23,18 +23,21 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.UnaryOperator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,16 +57,20 @@ public class WndbReaderTest {
   }
 
   static LexicalKnowledgeBase fixture() {
-    return WndbReader.read(fixtureDirectory());
+    try {
+      return WndbReader.read(fixtureDirectory());
+    } catch (IOException e) {
+      throw new IllegalStateException("Unexpected IOException reading the WNDB fixture", e);
+    }
   }
 
   @Test
   void testLookupReturnsSynsetWithAllComponents() {
-    final List<Synset> senses = fixture().lookup("dog", WordNetPos.NOUN);
+    final List<Synset> senses = fixture().lookup("dog", WordNetPOS.NOUN);
     assertEquals(1, senses.size());
     final Synset dog = senses.get(0);
     assertEquals(DOG_ID, dog.id());
-    assertEquals(WordNetPos.NOUN, dog.pos());
+    assertEquals(WordNetPOS.NOUN, dog.pos());
     assertEquals(List.of("dog", "domestic dog"), dog.lemmas());
     assertEquals("a domesticated canid", dog.gloss());
     assertEquals(List.of(CANID_ID), dog.related(WordNetRelation.HYPERNYM));
@@ -72,14 +79,14 @@ public class WndbReaderTest {
   @Test
   void testLookupFoldsCaseAndUnderscore() {
     final LexicalKnowledgeBase lexicon = fixture();
-    assertEquals(DOG_ID, lexicon.lookup("Domestic_Dog", WordNetPos.NOUN).get(0).id());
-    assertEquals(DOG_ID, lexicon.lookup("DOG", WordNetPos.NOUN).get(0).id());
+    assertEquals(DOG_ID, lexicon.lookup("Domestic_Dog", WordNetPOS.NOUN).get(0).id());
+    assertEquals(DOG_ID, lexicon.lookup("DOG", WordNetPOS.NOUN).get(0).id());
   }
 
   @Test
   void testLookupKeepsIndexSenseOrder() {
     assertEquals(List.of("wndb-00001427-n", "wndb-00001669-n"),
-        fixture().lookup("run", WordNetPos.NOUN).stream().map(Synset::id).toList());
+        fixture().lookup("run", WordNetPOS.NOUN).stream().map(Synset::id).toList());
   }
 
   @Test
@@ -90,6 +97,16 @@ public class WndbReaderTest {
         lexicon.related("wndb-00001324-v", WordNetRelation.HYPONYM));
     assertEquals(List.of("wndb-00001075-v"),
         lexicon.related("wndb-00001427-n", WordNetRelation.DERIVATIONALLY_RELATED));
+  }
+
+  @Test
+  void testRelationTargetSharesCanonicalIdInstance() {
+    final LexicalKnowledgeBase lexicon = fixture();
+    final String target = lexicon.synset(DOG_ID).orElseThrow()
+        .related(WordNetRelation.HYPERNYM).get(0);
+    // Not just equal: the identical instance from the synset table, so a loaded lexicon keeps
+    // one copy of each id no matter how many pointers reference it.
+    assertSame(lexicon.synset(CANID_ID).orElseThrow().id(), target);
   }
 
   @Test
@@ -104,18 +121,41 @@ public class WndbReaderTest {
   @Test
   void testSatelliteNormalizesToAdjectiveAndMarkerIsStripped() {
     final LexicalKnowledgeBase lexicon = fixture();
-    final Synset large = lexicon.lookup("large", WordNetPos.ADJECTIVE).get(0);
-    assertEquals(WordNetPos.ADJECTIVE, large.pos());
+    final Synset large = lexicon.lookup("large", WordNetPOS.ADJECTIVE).get(0);
+    assertEquals(WordNetPOS.ADJECTIVE, large.pos());
     assertEquals(List.of("wndb-00001211-a"), large.related(WordNetRelation.SIMILAR_TO));
     // short is stored as short(p); the syntactic marker is not part of the lemma.
     assertEquals(List.of("short"),
-        lexicon.lookup("short", WordNetPos.ADJECTIVE).get(0).lemmas());
+        lexicon.lookup("short", WordNetPOS.ADJECTIVE).get(0).lemmas());
+  }
+
+  @Test
+  void testVerbGroupPointerMapsToVerbGroup(@TempDir Path tempDir) throws IOException {
+    // The fixture has no $ pointer, so the VERB_GROUP mapping is pinned against a minimal
+    // constructed database whose byte offsets are computed, not hard-coded: every offset field
+    // is exactly eight digits, so the second line's position is independent of the digit values.
+    writeEmptyDb(tempDir, "noun", "adj", "adv");
+    final String template =
+        "00000000 29 v 01 sing 0 001 $ XXXXXXXX v 0000 00 | produce musical tones";
+    final String off2 = String.format(Locale.ROOT, "%08d", template.length() + 1);
+    final String line1 = template.replace("XXXXXXXX", off2);
+    final String line2 = off2 + " 29 v 01 chant 0 001 $ 00000000 v 0000 00 | sing monotonously";
+    Files.writeString(tempDir.resolve("data.verb"), line1 + "\n" + line2 + "\n",
+        StandardCharsets.ISO_8859_1);
+    Files.writeString(tempDir.resolve("index.verb"),
+        "chant v 1 1 $ 1 0 " + off2 + "\nsing v 1 1 $ 1 0 00000000\n",
+        StandardCharsets.ISO_8859_1);
+    final LexicalKnowledgeBase lexicon = WndbReader.read(tempDir);
+    assertEquals(List.of("wndb-" + off2 + "-v"),
+        lexicon.related("wndb-00000000-v", WordNetRelation.VERB_GROUP));
+    assertEquals(List.of("wndb-00000000-v"),
+        lexicon.related("wndb-" + off2 + "-v", WordNetRelation.VERB_GROUP));
   }
 
   @Test
   void testUnknownLemmaOrSynsetIsEmpty() {
     final LexicalKnowledgeBase lexicon = fixture();
-    assertTrue(lexicon.lookup("zebra", WordNetPos.NOUN).isEmpty());
+    assertTrue(lexicon.lookup("zebra", WordNetPOS.NOUN).isEmpty());
     assertTrue(lexicon.synset("wndb-99999999-n").isEmpty());
   }
 
@@ -130,8 +170,8 @@ public class WndbReaderTest {
   void testRejectsMissingDatabaseFile(@TempDir Path tempDir) throws IOException {
     copyFixture(tempDir);
     Files.delete(tempDir.resolve("data.verb"));
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("data.verb"));
   }
 
@@ -140,8 +180,8 @@ public class WndbReaderTest {
     copyFixture(tempDir);
     mutate(tempDir, "index.noun", line -> line.startsWith("berry ")
         ? line.replace("00001564", "00001565") : line);
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("berry"));
     assertTrue(e.getMessage().contains("00001565"));
   }
@@ -151,8 +191,8 @@ public class WndbReaderTest {
     copyFixture(tempDir);
     mutate(tempDir, "data.noun",
         line -> line.replace("00001503 03 n 01 box", "00001504 03 n 01 box"));
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("disagrees"));
   }
 
@@ -161,8 +201,8 @@ public class WndbReaderTest {
     copyFixture(tempDir);
     mutate(tempDir, "data.noun", line -> line.startsWith("00001564")
         ? line.substring(0, line.indexOf(" 000 |")) : line);
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("data.noun"));
     assertTrue(e.getMessage().contains("Truncated"));
   }
@@ -172,8 +212,8 @@ public class WndbReaderTest {
     copyFixture(tempDir);
     mutate(tempDir, "data.noun", line -> line.replace("001 @ 00001160 n 0000",
         "001 ? 00001160 n 0000"));
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("Undeclared pointer symbol: ?"));
   }
 
@@ -182,9 +222,32 @@ public class WndbReaderTest {
     copyFixture(tempDir);
     mutate(tempDir, "data.noun", line -> line.replace("001 @ 00001160 n 0000",
         "001 @ 00009999 n 0000"));
-    final IllegalArgumentException e =
-        assertThrows(IllegalArgumentException.class, () -> WndbReader.read(tempDir));
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
     assertTrue(e.getMessage().contains("wndb-00009999-n"));
+  }
+
+  @Test
+  void testDanglingPointerErrorNamesPointerLine(@TempDir Path tempDir) throws IOException {
+    // A constructed database with no preamble, so the dangling pointer sits on a known line
+    // and the error message can be pinned to name it.
+    writeEmptyDb(tempDir, "noun", "adj", "adv");
+    Files.writeString(tempDir.resolve("data.verb"),
+        "00000000 29 v 01 sing 0 001 $ 00009999 v 0000 00 | produce musical tones\n",
+        StandardCharsets.ISO_8859_1);
+    Files.writeString(tempDir.resolve("index.verb"), "sing v 1 1 $ 1 0 00000000\n",
+        StandardCharsets.ISO_8859_1);
+    final InvalidFormatException e =
+        assertThrows(InvalidFormatException.class, () -> WndbReader.read(tempDir));
+    assertTrue(e.getMessage().contains("wndb-00009999-v"));
+    assertTrue(e.getMessage().contains("line 1"));
+  }
+
+  private static void writeEmptyDb(Path directory, String... suffixes) throws IOException {
+    for (final String suffix : suffixes) {
+      Files.writeString(directory.resolve("data." + suffix), "");
+      Files.writeString(directory.resolve("index." + suffix), "");
+    }
   }
 
   private static void copyFixture(Path target) throws IOException {

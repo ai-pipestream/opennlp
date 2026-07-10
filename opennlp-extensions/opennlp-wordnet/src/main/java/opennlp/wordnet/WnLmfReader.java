@@ -19,15 +19,16 @@ package opennlp.wordnet;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.stream.Location;
 import javax.xml.stream.XMLInputFactory;
@@ -35,9 +36,10 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
@@ -63,13 +65,15 @@ import opennlp.tools.wordnet.WordNetRelation;
  * WordNet releases ship with a DOCTYPE line referencing the schema DTD; this reader parses such
  * a file unmodified.</p>
  *
- * <p><b>Errors.</b> Malformed structure fails loud with an {@link IllegalArgumentException}
+ * <p><b>Errors.</b> Malformed structure fails loud with an {@link InvalidFormatException}
  * naming the resource and, where the parser provides one, the line: missing required
- * attributes, a sense pointing to an undeclared synset, a relation to an undeclared target, an
- * unknown part-of-speech code, an unknown relation type, a synset with no member entries.</p>
+ * attributes, a duplicate lexical entry, sense, or synset id, a sense pointing to an undeclared
+ * synset, a relation to an undeclared target, an unknown part-of-speech code, an unknown
+ * relation type, a synset with no member entries. I/O failures propagate as
+ * {@link IOException}.</p>
  *
  * <p>Part-of-speech code {@code s} (adjective satellite) normalizes to
- * {@link WordNetPos#ADJECTIVE}, and a {@code similar} relation whose source is a verb synset
+ * {@link WordNetPOS#ADJECTIVE}, and a {@code similar} relation whose source is a verb synset
  * maps to {@link WordNetRelation#VERB_GROUP} (that is how WN-LMF documents derived from
  * Princeton data express verb groups); on any other part of speech it maps to
  * {@link WordNetRelation#SIMILAR_TO}.</p>
@@ -91,11 +95,12 @@ public final class WnLmfReader {
    *
    * @param file The XML file. Must not be {@code null} and must exist.
    * @return The loaded lexicon.
-   * @throws IllegalArgumentException Thrown if {@code file} is {@code null} or missing, or the
-   *     document is malformed; the message names the file and, where available, the line.
-   * @throws UncheckedIOException Thrown if reading the file fails.
+   * @throws IllegalArgumentException Thrown if {@code file} is {@code null} or missing.
+   * @throws InvalidFormatException Thrown if the document is malformed; the message names the
+   *     file and, where available, the line.
+   * @throws IOException Thrown if reading the file fails.
    */
-  public static LexicalKnowledgeBase read(Path file) {
+  public static LexicalKnowledgeBase read(Path file) throws IOException {
     if (file == null) {
       throw new IllegalArgumentException("File must not be null");
     }
@@ -104,8 +109,6 @@ public final class WnLmfReader {
     }
     try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
       return read(in, file.toString());
-    } catch (IOException e) {
-      throw new UncheckedIOException("Unable to read WN-LMF document " + file, e);
     }
   }
 
@@ -115,10 +118,12 @@ public final class WnLmfReader {
    * @param in           The document stream. Must not be {@code null}.
    * @param resourceName The name used in error messages. Must not be {@code null}.
    * @return The loaded lexicon.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or the document is
-   *     malformed; the message names the resource and, where available, the line.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}.
+   * @throws InvalidFormatException Thrown if the document is malformed; the message names the
+   *     resource and, where available, the line.
+   * @throws IOException Thrown if reading the stream fails.
    */
-  public static LexicalKnowledgeBase read(InputStream in, String resourceName) {
+  public static LexicalKnowledgeBase read(InputStream in, String resourceName) throws IOException {
     if (in == null) {
       throw new IllegalArgumentException("In must not be null");
     }
@@ -134,6 +139,13 @@ public final class WnLmfReader {
         reader.close();
       }
     } catch (XMLStreamException e) {
+      // StAX wraps a failing stream read in an XMLStreamException; surface it as the I/O
+      // failure it is instead of misreporting it as a malformed document.
+      final Throwable nested = e.getNestedException() == null ? e.getCause()
+          : e.getNestedException();
+      if (nested instanceof IOException io) {
+        throw io;
+      }
       throw parser.malformed(e.getLocation(), "XML error: " + e.getMessage(), e);
     }
     return parser.build();
@@ -161,8 +173,9 @@ public final class WnLmfReader {
     private final String resourceName;
 
     // Entry state.
+    private final Set<String> entryIds = new HashSet<>();
     private final Map<String, String> lemmaByEntryId = new HashMap<>();
-    private final Map<String, WordNetPos> posByEntryId = new HashMap<>();
+    private final Map<String, WordNetPOS> posByEntryId = new HashMap<>();
     private final Map<String, String> synsetBySenseId = new HashMap<>();
     private final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
         new LinkedHashMap<>();
@@ -174,7 +187,7 @@ public final class WnLmfReader {
     // Cursor state.
     private String currentEntryId;
     private String currentEntryLemma;
-    private WordNetPos currentEntryPos;
+    private WordNetPOS currentEntryPos;
     private String currentSenseId;
     private RawSynset currentSynset;
 
@@ -182,7 +195,7 @@ public final class WnLmfReader {
       this.resourceName = resourceName;
     }
 
-    void parse(XMLStreamReader reader) throws XMLStreamException {
+    void parse(XMLStreamReader reader) throws XMLStreamException, InvalidFormatException {
       while (reader.hasNext()) {
         final int event = reader.next();
         // A DTD event (the DOCTYPE declaration) is intentionally not handled here: with
@@ -197,11 +210,16 @@ public final class WnLmfReader {
       }
     }
 
-    private void startElement(XMLStreamReader reader) throws XMLStreamException {
+    private void startElement(XMLStreamReader reader)
+        throws XMLStreamException, InvalidFormatException {
       final String name = reader.getLocalName();
       switch (name) {
         case "LexicalEntry" -> {
           currentEntryId = requireAttribute(reader, "id");
+          if (!entryIds.add(currentEntryId)) {
+            throw malformed(reader.getLocation(),
+                "Duplicate lexical entry id " + currentEntryId, null);
+          }
           currentEntryLemma = null;
           currentEntryPos = null;
         }
@@ -222,7 +240,9 @@ public final class WnLmfReader {
           }
           currentSenseId = requireAttribute(reader, "id");
           final String synsetId = requireAttribute(reader, "synset");
-          synsetBySenseId.put(currentSenseId, synsetId);
+          if (synsetBySenseId.putIfAbsent(currentSenseId, synsetId) != null) {
+            throw malformed(reader.getLocation(), "Duplicate sense id " + currentSenseId, null);
+          }
           entryIdsBySynset.computeIfAbsent(synsetId, unused -> new ArrayList<>(2))
               .add(currentEntryId);
           final List<String> order = senseOrder.computeIfAbsent(
@@ -242,7 +262,7 @@ public final class WnLmfReader {
         }
         case "Synset" -> {
           final String id = requireAttribute(reader, "id");
-          final WordNetPos pos = parsePos(requireAttribute(reader, "partOfSpeech"),
+          final WordNetPOS pos = parsePos(requireAttribute(reader, "partOfSpeech"),
               reader.getLocation());
           currentSynset = new RawSynset(id, pos, reader.getAttributeValue(null, "members"),
               line(reader.getLocation()));
@@ -259,8 +279,14 @@ public final class WnLmfReader {
           if (currentSynset == null) {
             throw malformed(reader.getLocation(), "SynsetRelation outside a Synset", null);
           }
-          currentSynset.relations.add(new RawRelation(requireAttribute(reader, "relType"),
-              requireAttribute(reader, "target"), line(reader.getLocation())));
+          final String relType = requireAttribute(reader, "relType");
+          final String target = requireAttribute(reader, "target");
+          // The escape-hatch type is skipped here exactly as it is for sense relations in
+          // build(): documented skip, not rejection.
+          if (!OTHER_RELATION.equals(relType)) {
+            currentSynset.relations.add(
+                new RawRelation(relType, target, line(reader.getLocation())));
+          }
         }
         default -> {
           // Pronunciation, Form, Example, SyntacticBehaviour, ILIDefinition, and other
@@ -284,7 +310,7 @@ public final class WnLmfReader {
       }
     }
 
-    LexicalKnowledgeBase build() {
+    LexicalKnowledgeBase build() throws InvalidFormatException {
       // Every sense must point to a declared synset, with a consistent part of speech.
       for (final Map.Entry<String, String> sense : synsetBySenseId.entrySet()) {
         final RawSynset target = rawSynsets.get(sense.getValue());
@@ -320,15 +346,20 @@ public final class WnLmfReader {
       return new InMemoryWordNetLexicon(synsetsById, senseOrder);
     }
 
-    private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw) {
+    private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw)
+        throws InvalidFormatException {
       final Map<WordNetRelation, LinkedHashSet<String>> typed = new LinkedHashMap<>();
       for (final RawRelation relation : raw.relations) {
         final WordNetRelation type = parseRelation(relation.relType, raw.pos, relation.line);
-        if (!rawSynsets.containsKey(relation.target)) {
+        final RawSynset target = rawSynsets.get(relation.target);
+        if (target == null) {
           throw malformed(null, "Relation " + relation.relType + " at line " + relation.line
               + " on synset " + raw.id + " references undeclared synset " + relation.target, null);
         }
-        typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(relation.target);
+        // The target's canonical id instance, not the pointer's own string: a full lexicon
+        // carries hundreds of thousands of pointers, and sharing the synset table's instances
+        // keeps only one copy of each id in memory.
+        typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(target.id);
       }
       final Map<WordNetRelation, List<String>> relations = new LinkedHashMap<>(typed.size() * 2);
       for (final Map.Entry<WordNetRelation, LinkedHashSet<String>> entry : typed.entrySet()) {
@@ -337,10 +368,10 @@ public final class WnLmfReader {
       return relations;
     }
 
-    private List<String> memberLemmas(RawSynset raw) {
+    private List<String> memberLemmas(RawSynset raw) throws InvalidFormatException {
       final List<String> entryIds;
       if (raw.members != null && !raw.members.isEmpty()) {
-        entryIds = splitOnSpaces(raw.members);
+        entryIds = LemmaFolding.splitOnSpaces(raw.members);
       } else {
         final List<String> fromSenses = entryIdsBySynset.get(raw.id);
         entryIds = fromSenses == null ? List.of() : fromSenses;
@@ -368,21 +399,22 @@ public final class WnLmfReader {
       return lemmas;
     }
 
-    private WordNetPos parsePos(String code, Location location) {
-      // The adjective satellite code normalizes to ADJECTIVE; see WordNetPos.
+    private WordNetPOS parsePos(String code, Location location) throws InvalidFormatException {
+      // The adjective satellite code normalizes to ADJECTIVE; see WordNetPOS.
       return switch (code) {
-        case "n" -> WordNetPos.NOUN;
-        case "v" -> WordNetPos.VERB;
-        case "a", "s" -> WordNetPos.ADJECTIVE;
-        case "r" -> WordNetPos.ADVERB;
+        case "n" -> WordNetPOS.NOUN;
+        case "v" -> WordNetPOS.VERB;
+        case "a", "s" -> WordNetPOS.ADJECTIVE;
+        case "r" -> WordNetPOS.ADVERB;
         default -> throw malformed(location, "Unknown part-of-speech code: " + code, null);
       };
     }
 
-    private WordNetRelation parseRelation(String relType, WordNetPos sourcePos, int line) {
+    private WordNetRelation parseRelation(String relType, WordNetPOS sourcePos, int line)
+        throws InvalidFormatException {
       // Documents derived from Princeton data express verb groups as similar on verb synsets.
       if ("similar".equals(relType)) {
-        return sourcePos == WordNetPos.VERB ? WordNetRelation.VERB_GROUP
+        return sourcePos == WordNetPOS.VERB ? WordNetRelation.VERB_GROUP
             : WordNetRelation.SIMILAR_TO;
       }
       final WordNetRelation relation = RELATION_NAMES.get(relType);
@@ -393,7 +425,7 @@ public final class WnLmfReader {
     }
 
     private String requireAttribute(XMLStreamReader reader, String attribute)
-        throws XMLStreamException {
+        throws InvalidFormatException {
       final String value = reader.getAttributeValue(null, attribute);
       if (value == null || value.isEmpty()) {
         throw malformed(reader.getLocation(), "Element " + reader.getLocalName()
@@ -402,45 +434,28 @@ public final class WnLmfReader {
       return value;
     }
 
-    IllegalArgumentException malformed(Location location, String message, Throwable cause) {
+    InvalidFormatException malformed(Location location, String message, Throwable cause) {
       final int line = line(location);
       final String prefix = line < 0 ? "Malformed WN-LMF document " + resourceName + ": "
           : "Malformed WN-LMF document " + resourceName + " at line " + line + ": ";
-      return cause == null ? new IllegalArgumentException(prefix + message)
-          : new IllegalArgumentException(prefix + message, cause);
+      return cause == null ? new InvalidFormatException(prefix + message)
+          : new InvalidFormatException(prefix + message, cause);
     }
 
     private static int line(Location location) {
       return location == null ? -1 : location.getLineNumber();
     }
-
-    private static List<String> splitOnSpaces(String value) {
-      final List<String> parts = new ArrayList<>(4);
-      int start = 0;
-      while (start < value.length()) {
-        final int space = value.indexOf(' ', start);
-        if (space < 0) {
-          parts.add(value.substring(start));
-          break;
-        }
-        if (space > start) {
-          parts.add(value.substring(start, space));
-        }
-        start = space + 1;
-      }
-      return parts;
-    }
   }
 
   private static final class RawSynset {
     private final String id;
-    private final WordNetPos pos;
+    private final WordNetPOS pos;
     private final String members;
     private final int line;
     private final List<RawRelation> relations = new ArrayList<>(4);
     private String gloss;
 
-    RawSynset(String id, WordNetPos pos, String members, int line) {
+    RawSynset(String id, WordNetPOS pos, String members, int line) {
       this.id = id;
       this.pos = pos;
       this.members = members;

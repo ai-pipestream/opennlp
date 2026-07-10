@@ -57,7 +57,7 @@ import opennlp.tools.commons.ThreadSafe;
 @ThreadSafe
 public record Synset(
     String id,
-    WordNetPos pos,
+    WordNetPOS pos,
     List<String> lemmas,
     String gloss,
     Map<WordNetRelation, List<String>> relations) {

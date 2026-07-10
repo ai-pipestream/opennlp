@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,20 +71,20 @@ public class LexiconConcurrencyTest {
   }
 
   private static void verifyOnce(LexicalKnowledgeBase lexicon, Queue<String> problems) {
-    if (!"wndb-00001075-n".equals(lexicon.lookup("dog", WordNetPos.NOUN).get(0).id())) {
+    if (!"wndb-00001075-n".equals(lexicon.lookup("dog", WordNetPOS.NOUN).get(0).id())) {
       problems.add("Wrong dog lookup");
     }
-    if (lexicon.lookup("run", WordNetPos.NOUN).size() != 2) {
+    if (lexicon.lookup("run", WordNetPOS.NOUN).size() != 2) {
       problems.add("Wrong run sense count");
     }
     if (!List.of("wndb-00001160-n")
         .equals(lexicon.related("wndb-00001075-n", WordNetRelation.HYPERNYM))) {
       problems.add("Wrong dog hypernym");
     }
-    if (lexicon.contains("zebra", WordNetPos.NOUN)) {
+    if (lexicon.contains("zebra", WordNetPOS.NOUN)) {
       problems.add("Phantom zebra");
     }
-    if (!lexicon.contains("walk", WordNetPos.VERB)) {
+    if (!lexicon.contains("walk", WordNetPOS.VERB)) {
       problems.add("Missing walk verb");
     }
   }

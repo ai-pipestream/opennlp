@@ -17,7 +17,6 @@
 package opennlp.wordnet;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,11 +24,11 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import opennlp.tools.commons.ThreadSafe;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.util.InvalidFormatException;
+import opennlp.tools.wordnet.WordNetPOS;
 
 /**
  * The Morphy exception lists: the per-part-of-speech tables of irregular inflected forms
@@ -52,9 +51,9 @@ import opennlp.tools.wordnet.WordNetPos;
 @ThreadSafe
 public final class MorphyExceptions {
 
-  private final Map<WordNetPos, Map<String, List<String>>> byPos;
+  private final Map<WordNetPOS, Map<String, List<String>>> byPos;
 
-  private MorphyExceptions(Map<WordNetPos, Map<String, List<String>>> byPos) {
+  private MorphyExceptions(Map<WordNetPOS, Map<String, List<String>>> byPos) {
     this.byPos = byPos;
   }
 
@@ -66,11 +65,12 @@ public final class MorphyExceptions {
    *                  exist.
    * @return The loaded exception lists.
    * @throws IllegalArgumentException Thrown if {@code directory} is {@code null} or not a
-   *     directory, one of the four files is missing, or a line is malformed; the message names
-   *     the file and line.
-   * @throws UncheckedIOException Thrown if reading a file fails.
+   *     directory.
+   * @throws InvalidFormatException Thrown if one of the four files is missing or a line is
+   *     malformed; the message names the file and line.
+   * @throws IOException Thrown if reading a file fails.
    */
-  public static MorphyExceptions load(Path directory) {
+  public static MorphyExceptions load(Path directory) throws IOException {
     if (directory == null) {
       throw new IllegalArgumentException("Directory must not be null");
     }
@@ -78,11 +78,11 @@ public final class MorphyExceptions {
       throw new IllegalArgumentException(
           "Directory does not exist or is not a directory: " + directory);
     }
-    final Map<WordNetPos, Map<String, List<String>>> byPos = new EnumMap<>(WordNetPos.class);
-    byPos.put(WordNetPos.NOUN, loadFile(directory, "noun.exc"));
-    byPos.put(WordNetPos.VERB, loadFile(directory, "verb.exc"));
-    byPos.put(WordNetPos.ADJECTIVE, loadFile(directory, "adj.exc"));
-    byPos.put(WordNetPos.ADVERB, loadFile(directory, "adv.exc"));
+    final Map<WordNetPOS, Map<String, List<String>>> byPos = new EnumMap<>(WordNetPOS.class);
+    byPos.put(WordNetPOS.NOUN, loadFile(directory, "noun.exc"));
+    byPos.put(WordNetPOS.VERB, loadFile(directory, "verb.exc"));
+    byPos.put(WordNetPOS.ADJECTIVE, loadFile(directory, "adj.exc"));
+    byPos.put(WordNetPOS.ADVERB, loadFile(directory, "adv.exc"));
     return new MorphyExceptions(byPos);
   }
 
@@ -94,67 +94,42 @@ public final class MorphyExceptions {
    * @return The base forms in file order, never {@code null}; empty when the word has no entry.
    * @throws IllegalArgumentException Thrown if {@code word} or {@code pos} is {@code null}.
    */
-  public List<String> lookup(String word, WordNetPos pos) {
+  public List<String> lookup(String word, WordNetPOS pos) {
     if (word == null) {
       throw new IllegalArgumentException("Word must not be null");
     }
     if (pos == null) {
       throw new IllegalArgumentException("Pos must not be null");
     }
-    final List<String> lemmas = byPos.get(pos).get(fold(word));
+    final List<String> lemmas = byPos.get(pos).get(LemmaFolding.fold(word));
     return lemmas == null ? List.of() : lemmas;
   }
 
-  static String fold(String word) {
-    return word.replace('_', ' ').toLowerCase(Locale.ROOT);
-  }
-
-  private static Map<String, List<String>> loadFile(Path directory, String fileName) {
+  private static Map<String, List<String>> loadFile(Path directory, String fileName)
+      throws IOException {
     final Path file = directory.resolve(fileName);
     if (!Files.isRegularFile(file)) {
-      throw new IllegalArgumentException("Missing exception list file: " + file);
+      throw new InvalidFormatException("Missing exception list file: " + file);
     }
-    final List<String> lines;
-    try {
-      lines = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
-    } catch (IOException e) {
-      throw new UncheckedIOException("Unable to read exception list file " + file, e);
-    }
+    final List<String> lines = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
     final Map<String, List<String>> entries = new HashMap<>(lines.size() * 2);
     for (int i = 0; i < lines.size(); i++) {
       final String line = lines.get(i);
       if (line.isEmpty()) {
         continue;
       }
-      final List<String> fields = splitOnSpaces(line);
+      final List<String> fields = LemmaFolding.splitOnSpaces(line);
       if (fields.size() < 2) {
-        throw new IllegalArgumentException("Malformed exception list " + fileName + " at line "
+        throw new InvalidFormatException("Malformed exception list " + fileName + " at line "
             + (i + 1) + ": expected an inflected form and at least one base form, got: " + line);
       }
       final List<String> lemmas = new ArrayList<>(fields.size() - 1);
       for (final String lemma : fields.subList(1, fields.size())) {
-        lemmas.add(fold(lemma));
+        lemmas.add(LemmaFolding.fold(lemma));
       }
       // A form listed twice keeps its first entry, matching first-match lookup semantics.
-      entries.putIfAbsent(fold(fields.get(0)), List.copyOf(lemmas));
+      entries.putIfAbsent(LemmaFolding.fold(fields.get(0)), List.copyOf(lemmas));
     }
     return Map.copyOf(entries);
-  }
-
-  private static List<String> splitOnSpaces(String line) {
-    final List<String> fields = new ArrayList<>(3);
-    int start = 0;
-    while (start < line.length()) {
-      final int space = line.indexOf(' ', start);
-      if (space < 0) {
-        fields.add(line.substring(start));
-        break;
-      }
-      if (space > start) {
-        fields.add(line.substring(start, space));
-      }
-      start = space + 1;
-    }
-    return fields;
   }
 }

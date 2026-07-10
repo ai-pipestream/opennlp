@@ -21,14 +21,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
@@ -106,7 +105,7 @@ final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
   }
 
   @Override
-  public List<Synset> lookup(String lemma, WordNetPos pos) {
+  public List<Synset> lookup(String lemma, WordNetPOS pos) {
     if (lemma == null) {
       throw new IllegalArgumentException("Lemma must not be null");
     }
@@ -136,13 +135,13 @@ final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
   }
 
   /**
-   * A folded sense-index key. Build with {@link #of(String, WordNetPos)} so every key passes
+   * A folded sense-index key. Build with {@link #of(String, WordNetPOS)} so every key passes
    * through the same fold as every query.
    *
    * @param lemma The folded lemma.
    * @param pos   The part of speech.
    */
-  record LemmaKey(String lemma, WordNetPos pos) {
+  record LemmaKey(String lemma, WordNetPOS pos) {
 
     /**
      * Folds a written form into a key: lowercase with the root locale, underscore as space.
@@ -151,8 +150,8 @@ final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
      * @param pos         The part of speech. Must not be {@code null}.
      * @return The folded key.
      */
-    static LemmaKey of(String writtenForm, WordNetPos pos) {
-      return new LemmaKey(writtenForm.replace('_', ' ').toLowerCase(Locale.ROOT), pos);
+    static LemmaKey of(String writtenForm, WordNetPOS pos) {
+      return new LemmaKey(LemmaFolding.fold(writtenForm), pos);
     }
   }
 }

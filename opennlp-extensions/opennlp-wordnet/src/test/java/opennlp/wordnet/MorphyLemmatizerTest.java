@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,6 +88,10 @@ public class MorphyLemmatizerTest {
       "dog, DT",
       "dog, XYZ",
       "dogs, ''",
+      // Multi-letter closed-class tags that merely begin with a WordNet letter code are not
+      // adjective lookups: AUX was must be unknown, and AUX taller must not detach to tall.
+      "was, AUX",
+      "taller, AUX",
   })
   void testUnknownYieldsMarker(String token, String tag) {
     assertEquals("O", one(token, tag));
@@ -130,17 +134,23 @@ public class MorphyLemmatizerTest {
 
   @Test
   void testPosFromTagMapping() {
-    assertEquals(WordNetPos.NOUN, MorphyLemmatizer.posFromTag("NNP"));
-    assertEquals(WordNetPos.VERB, MorphyLemmatizer.posFromTag("VBZ"));
-    assertEquals(WordNetPos.ADJECTIVE, MorphyLemmatizer.posFromTag("JJ"));
-    assertEquals(WordNetPos.ADVERB, MorphyLemmatizer.posFromTag("RBR"));
-    assertEquals(WordNetPos.ADJECTIVE, MorphyLemmatizer.posFromTag("a"));
-    assertEquals(WordNetPos.ADJECTIVE, MorphyLemmatizer.posFromTag("s"));
-    assertEquals(WordNetPos.ADJECTIVE, MorphyLemmatizer.posFromTag("ADJ"));
-    assertEquals(WordNetPos.ADVERB, MorphyLemmatizer.posFromTag("ADV"));
-    assertEquals(WordNetPos.ADVERB, MorphyLemmatizer.posFromTag("r"));
+    assertEquals(WordNetPOS.NOUN, MorphyLemmatizer.posFromTag("NNP"));
+    assertEquals(WordNetPOS.VERB, MorphyLemmatizer.posFromTag("VBZ"));
+    assertEquals(WordNetPOS.ADJECTIVE, MorphyLemmatizer.posFromTag("JJ"));
+    assertEquals(WordNetPOS.ADVERB, MorphyLemmatizer.posFromTag("RBR"));
+    assertEquals(WordNetPOS.ADJECTIVE, MorphyLemmatizer.posFromTag("a"));
+    assertEquals(WordNetPOS.ADJECTIVE, MorphyLemmatizer.posFromTag("s"));
+    assertEquals(WordNetPOS.ADJECTIVE, MorphyLemmatizer.posFromTag("ADJ"));
+    assertEquals(WordNetPOS.ADVERB, MorphyLemmatizer.posFromTag("ADV"));
+    assertEquals(WordNetPOS.ADVERB, MorphyLemmatizer.posFromTag("r"));
     assertNull(MorphyLemmatizer.posFromTag("DT"));
     assertNull(MorphyLemmatizer.posFromTag(""));
+    // The letter codes a and s match only as one-letter tags: multi-letter tags beginning
+    // with those letters are closed-class or symbol tags, never adjectives.
+    assertNull(MorphyLemmatizer.posFromTag("AUX"));
+    assertNull(MorphyLemmatizer.posFromTag("ADP"));
+    assertNull(MorphyLemmatizer.posFromTag("SCONJ"));
+    assertNull(MorphyLemmatizer.posFromTag("SYM"));
   }
 
   @Test

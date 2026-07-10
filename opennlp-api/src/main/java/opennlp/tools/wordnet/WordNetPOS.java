@@ -30,7 +30,7 @@ package opennlp.tools.wordnet;
  *
  * <p>Enum constants are immutable and safe to share across threads.</p>
  */
-public enum WordNetPos {
+public enum WordNetPOS {
 
   /** Nouns. */
   NOUN,

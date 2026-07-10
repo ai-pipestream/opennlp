@@ -57,7 +57,7 @@ public interface LexicalKnowledgeBase {
    *     the lemma with that part of speech.
    * @throws IllegalArgumentException Thrown if {@code lemma} or {@code pos} is {@code null}.
    */
-  List<Synset> lookup(String lemma, WordNetPos pos);
+  List<Synset> lookup(String lemma, WordNetPOS pos);
 
   /**
    * Finds a synset by its opaque identifier.
@@ -88,14 +88,14 @@ public interface LexicalKnowledgeBase {
   /**
    * Tests whether the lexicon contains a lemma with a part of speech. This is the membership
    * check morphological rules validate their candidates against; implementations may override
-   * it with a cheaper check than {@link #lookup(String, WordNetPos)}.
+   * it with a cheaper check than {@link #lookup(String, WordNetPOS)}.
    *
    * @param lemma The lemma to test. Must not be {@code null}.
    * @param pos   The part of speech to test it as. Must not be {@code null}.
    * @return {@code true} if the lexicon contains the lemma with that part of speech.
    * @throws IllegalArgumentException Thrown if {@code lemma} or {@code pos} is {@code null}.
    */
-  default boolean contains(String lemma, WordNetPos pos) {
+  default boolean contains(String lemma, WordNetPOS pos) {
     return !lookup(lemma, pos).isEmpty();
   }
 }

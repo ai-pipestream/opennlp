@@ -33,24 +33,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class LexicalKnowledgeBaseTest {
 
-  private static final Synset DOG = new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"),
+  private static final Synset DOG = new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"),
       "a domesticated canid", Map.of(WordNetRelation.HYPERNYM, List.of("test-2-n")));
 
-  private static final Synset CANID = new Synset("test-2-n", WordNetPos.NOUN, List.of("canid"),
+  private static final Synset CANID = new Synset("test-2-n", WordNetPOS.NOUN, List.of("canid"),
       "a carnivorous mammal", Map.of(WordNetRelation.HYPONYM, List.of("test-1-n")));
 
   // A deliberately tiny implementation of only the two abstract methods.
   private static final LexicalKnowledgeBase LEXICON = new LexicalKnowledgeBase() {
 
     @Override
-    public List<Synset> lookup(String lemma, WordNetPos pos) {
+    public List<Synset> lookup(String lemma, WordNetPOS pos) {
       if (lemma == null) {
         throw new IllegalArgumentException("Lemma must not be null");
       }
       if (pos == null) {
         throw new IllegalArgumentException("Pos must not be null");
       }
-      if (pos == WordNetPos.NOUN && "dog".equals(lemma)) {
+      if (pos == WordNetPOS.NOUN && "dog".equals(lemma)) {
         return List.of(DOG);
       }
       return List.of();
@@ -92,14 +92,14 @@ public class LexicalKnowledgeBaseTest {
 
   @Test
   void testContainsFollowsLookup() {
-    assertTrue(LEXICON.contains("dog", WordNetPos.NOUN));
-    assertFalse(LEXICON.contains("dog", WordNetPos.VERB));
-    assertFalse(LEXICON.contains("cat", WordNetPos.NOUN));
+    assertTrue(LEXICON.contains("dog", WordNetPOS.NOUN));
+    assertFalse(LEXICON.contains("dog", WordNetPOS.VERB));
+    assertFalse(LEXICON.contains("cat", WordNetPOS.NOUN));
   }
 
   @Test
   void testContainsRejectsNulls() {
-    assertThrows(IllegalArgumentException.class, () -> LEXICON.contains(null, WordNetPos.NOUN));
+    assertThrows(IllegalArgumentException.class, () -> LEXICON.contains(null, WordNetPOS.NOUN));
     assertThrows(IllegalArgumentException.class, () -> LEXICON.contains("dog", null));
   }
 }

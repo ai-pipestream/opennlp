@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class SynsetTest {
 
   private static Synset dog() {
-    return new Synset("test-1-n", WordNetPos.NOUN, List.of("dog", "domestic dog"),
+    return new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog", "domestic dog"),
         "a domesticated canid",
         Map.of(WordNetRelation.HYPERNYM, List.of("test-2-n")));
   }
@@ -39,7 +39,7 @@ public class SynsetTest {
   void testComponents() {
     final Synset synset = dog();
     assertEquals("test-1-n", synset.id());
-    assertEquals(WordNetPos.NOUN, synset.pos());
+    assertEquals(WordNetPOS.NOUN, synset.pos());
     assertEquals(List.of("dog", "domestic dog"), synset.lemmas());
     assertEquals("a domesticated canid", synset.gloss());
     assertEquals(Map.of(WordNetRelation.HYPERNYM, List.of("test-2-n")), synset.relations());
@@ -47,7 +47,7 @@ public class SynsetTest {
 
   @Test
   void testRelatedReturnsTargetsInOrder() {
-    final Synset synset = new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "",
+    final Synset synset = new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "",
         Map.of(WordNetRelation.HYPONYM, List.of("test-3-n", "test-2-n")));
     assertEquals(List.of("test-3-n", "test-2-n"), synset.related(WordNetRelation.HYPONYM));
   }
@@ -64,7 +64,7 @@ public class SynsetTest {
 
   @Test
   void testEmptyGlossAndNoRelationsAreValid() {
-    final Synset synset = new Synset("test-9-r", WordNetPos.ADVERB, List.of("well"), "", Map.of());
+    final Synset synset = new Synset("test-9-r", WordNetPOS.ADVERB, List.of("well"), "", Map.of());
     assertEquals("", synset.gloss());
     assertTrue(synset.relations().isEmpty());
   }
@@ -75,7 +75,7 @@ public class SynsetTest {
     final List<String> targets = new ArrayList<>(List.of("test-2-n"));
     final Map<WordNetRelation, List<String>> relations = new HashMap<>();
     relations.put(WordNetRelation.HYPERNYM, targets);
-    final Synset synset = new Synset("test-1-n", WordNetPos.NOUN, lemmas, "gloss", relations);
+    final Synset synset = new Synset("test-1-n", WordNetPOS.NOUN, lemmas, "gloss", relations);
     lemmas.add("mutated");
     targets.add("mutated");
     relations.put(WordNetRelation.ANTONYM, List.of("test-3-n"));
@@ -97,9 +97,9 @@ public class SynsetTest {
   @Test
   void testRejectsNullOrEmptyId() {
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset(null, WordNetPos.NOUN, List.of("dog"), "", Map.of()));
+        () -> new Synset(null, WordNetPOS.NOUN, List.of("dog"), "", Map.of()));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("", WordNetPos.NOUN, List.of("dog"), "", Map.of()));
+        () -> new Synset("", WordNetPOS.NOUN, List.of("dog"), "", Map.of()));
   }
 
   @Test
@@ -111,40 +111,40 @@ public class SynsetTest {
   @Test
   void testRejectsNullOrEmptyLemmas() {
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, null, "", Map.of()));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, null, "", Map.of()));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of(), "", Map.of()));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of(), "", Map.of()));
     final List<String> withNull = new ArrayList<>();
     withNull.add(null);
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, withNull, "", Map.of()));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, withNull, "", Map.of()));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of(""), "", Map.of()));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of(""), "", Map.of()));
   }
 
   @Test
   void testRejectsNullGloss() {
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), null, Map.of()));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), null, Map.of()));
   }
 
   @Test
   void testRejectsInvalidRelations() {
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "", null));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "", null));
     final Map<WordNetRelation, List<String>> nullKey = new HashMap<>();
     nullKey.put(null, List.of("test-2-n"));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "", nullKey));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "", nullKey));
     final Map<WordNetRelation, List<String>> nullTargets = new HashMap<>();
     nullTargets.put(WordNetRelation.HYPERNYM, null);
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "", nullTargets));
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "", nullTargets));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "",
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "",
             Map.of(WordNetRelation.HYPERNYM, List.of())));
     assertThrows(IllegalArgumentException.class,
-        () -> new Synset("test-1-n", WordNetPos.NOUN, List.of("dog"), "",
+        () -> new Synset("test-1-n", WordNetPOS.NOUN, List.of("dog"), "",
             Map.of(WordNetRelation.HYPERNYM, List.of(""))));
   }
 }

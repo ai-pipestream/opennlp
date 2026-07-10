@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -75,7 +75,7 @@ public class ReaderEquivalenceTest {
             "Sense sequence for " + lemma + " as " + synset.pos());
       }
     }
-    for (final WordNetPos pos : WordNetPos.values()) {
+    for (final WordNetPOS pos : WordNetPOS.values()) {
       assertEquals(lmf.contains("dog", pos), wndb.contains("dog", pos));
     }
   }
@@ -84,8 +84,8 @@ public class ReaderEquivalenceTest {
   void testSenseOrderAgreesForMultiSenseLemma() {
     final LexicalKnowledgeBase lmf = WnLmfReaderTest.fixture();
     final LexicalKnowledgeBase wndb = WndbReaderTest.fixture();
-    final List<String> lmfOrder = glosses(lmf.lookup("run", WordNetPos.NOUN));
-    final List<String> wndbOrder = glosses(wndb.lookup("run", WordNetPos.NOUN));
+    final List<String> lmfOrder = glosses(lmf.lookup("run", WordNetPOS.NOUN));
+    final List<String> wndbOrder = glosses(wndb.lookup("run", WordNetPOS.NOUN));
     assertEquals(2, lmfOrder.size());
     assertEquals(lmfOrder, wndbOrder);
   }

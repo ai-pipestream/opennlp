@@ -23,7 +23,7 @@ import java.util.Locale;
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.lemmatizer.Lemmatizer;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.wordnet.WordNetPOS;
 
 /**
  * A clean-room implementation of the documented Morphy algorithm as a {@link Lemmatizer}:
@@ -32,7 +32,7 @@ import opennlp.tools.wordnet.WordNetPos;
  * returned.
  *
  * <p><b>Algorithm.</b> For each token the part-of-speech tag is mapped to a
- * {@link WordNetPos}; the token is folded (lowercase with the root locale, underscore as
+ * {@link WordNetPOS}; the token is folded (lowercase with the root locale, underscore as
  * space); the {@link MorphyExceptions exception lists} are consulted and a hit is returned
  * directly, without lexicon validation, because the lists themselves are authoritative for
  * irregular forms; otherwise the folded token itself, when the lexicon contains it, and every
@@ -46,11 +46,12 @@ import opennlp.tools.wordnet.WordNetPos;
  *
  * <p><b>Tag mapping.</b> Tags map to WordNet parts of speech by their conventional Penn
  * Treebank prefixes: {@code N} to noun, {@code V} to verb, {@code J} to adjective, and
- * {@code R} to adverb, case-insensitively. The names {@code ADJ} and {@code ADV} and the
- * WordNet letters {@code n}, {@code v}, {@code a}, {@code r}, and {@code s} (satellite,
- * treated as adjective) are also accepted. Anything else, including Penn tags for closed
- * classes such as {@code DT} or {@code MD}, maps to no part of speech and yields the
- * unknown-word result.</p>
+ * {@code R} to adverb, case-insensitively. The names {@code ADJ} and {@code ADV} and, only as
+ * one-letter tags, the WordNet letters {@code n}, {@code v}, {@code a}, {@code r}, and
+ * {@code s} (satellite, treated as adjective) are also accepted. Anything else, including Penn
+ * tags for closed classes such as {@code DT} or {@code MD} and multi-letter tags that merely
+ * begin with an accepted letter, such as {@code AUX}, {@code ADP}, {@code SCONJ}, or
+ * {@code SYM}, maps to no part of speech and yields the unknown-word result.</p>
  *
  * <p><b>Unknown words.</b> Following the convention of
  * {@code opennlp.tools.lemmatizer.DictionaryLemmatizer}, a token with no lemma yields the
@@ -152,11 +153,11 @@ public final class MorphyLemmatizer implements Lemmatizer {
     if (token == null || tag == null) {
       throw new IllegalArgumentException("Tokens and tags must not contain null elements");
     }
-    final WordNetPos pos = posFromTag(tag);
+    final WordNetPOS pos = posFromTag(tag);
     if (pos == null) {
       return List.of();
     }
-    final String folded = MorphyExceptions.fold(token);
+    final String folded = LemmaFolding.fold(token);
     final List<String> irregular = exceptions.lookup(folded, pos);
     if (!irregular.isEmpty()) {
       return irregular;
@@ -178,7 +179,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
     return candidates;
   }
 
-  private static String[][] rulesFor(WordNetPos pos) {
+  private static String[][] rulesFor(WordNetPOS pos) {
     return switch (pos) {
       case NOUN -> NOUN_RULES;
       case VERB -> VERB_RULES;
@@ -188,22 +189,26 @@ public final class MorphyLemmatizer implements Lemmatizer {
   }
 
   // The documented tag mapping; package-private so tests can pin it directly.
-  static WordNetPos posFromTag(String tag) {
+  static WordNetPOS posFromTag(String tag) {
     if (tag.isEmpty()) {
       return null;
     }
     final String upper = tag.toUpperCase(Locale.ROOT);
     if (upper.startsWith("ADJ")) {
-      return WordNetPos.ADJECTIVE;
+      return WordNetPOS.ADJECTIVE;
     }
     if (upper.startsWith("ADV")) {
-      return WordNetPos.ADVERB;
+      return WordNetPOS.ADVERB;
     }
     return switch (upper.charAt(0)) {
-      case 'N' -> WordNetPos.NOUN;
-      case 'V' -> WordNetPos.VERB;
-      case 'J', 'A', 'S' -> WordNetPos.ADJECTIVE;
-      case 'R' -> WordNetPos.ADVERB;
+      case 'N' -> WordNetPOS.NOUN;
+      case 'V' -> WordNetPOS.VERB;
+      case 'J' -> WordNetPOS.ADJECTIVE;
+      // The WordNet letter codes a and s stand for adjective only as one-letter tags:
+      // multi-letter tags such as AUX, ADP, SCONJ, or SYM name closed classes or symbols,
+      // not adjectives, so they map to no part of speech.
+      case 'A', 'S' -> tag.length() == 1 ? WordNetPOS.ADJECTIVE : null;
+      case 'R' -> WordNetPOS.ADVERB;
       default -> null;
     };
   }

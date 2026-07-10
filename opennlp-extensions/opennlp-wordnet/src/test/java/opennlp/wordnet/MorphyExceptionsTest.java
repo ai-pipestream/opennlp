@@ -24,7 +24,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import opennlp.tools.wordnet.WordNetPos;
+import opennlp.tools.util.InvalidFormatException;
+import opennlp.tools.wordnet.WordNetPOS;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,32 +34,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MorphyExceptionsTest {
 
   static MorphyExceptions fixture() {
-    return MorphyExceptions.load(WndbReaderTest.fixtureDirectory());
+    try {
+      return MorphyExceptions.load(WndbReaderTest.fixtureDirectory());
+    } catch (IOException e) {
+      throw new IllegalStateException("Unexpected IOException reading the fixture lists", e);
+    }
   }
 
   @Test
   void testLookupPerPartOfSpeech() {
     final MorphyExceptions exceptions = fixture();
-    assertEquals(List.of("mouse"), exceptions.lookup("mice", WordNetPos.NOUN));
-    assertEquals(List.of("go"), exceptions.lookup("went", WordNetPos.VERB));
-    assertEquals(List.of("good"), exceptions.lookup("better", WordNetPos.ADJECTIVE));
-    assertEquals(List.of("well"), exceptions.lookup("best", WordNetPos.ADVERB));
+    assertEquals(List.of("mouse"), exceptions.lookup("mice", WordNetPOS.NOUN));
+    assertEquals(List.of("go"), exceptions.lookup("went", WordNetPOS.VERB));
+    assertEquals(List.of("good"), exceptions.lookup("better", WordNetPOS.ADJECTIVE));
+    assertEquals(List.of("well"), exceptions.lookup("best", WordNetPOS.ADVERB));
     // Entries are part-of-speech scoped: went is only a verb exception.
-    assertTrue(exceptions.lookup("went", WordNetPos.NOUN).isEmpty());
-    assertTrue(exceptions.lookup("dog", WordNetPos.NOUN).isEmpty());
+    assertTrue(exceptions.lookup("went", WordNetPOS.NOUN).isEmpty());
+    assertTrue(exceptions.lookup("dog", WordNetPOS.NOUN).isEmpty());
   }
 
   @Test
   void testLookupFoldsCase() {
-    assertEquals(List.of("mouse"), fixture().lookup("Mice", WordNetPos.NOUN));
-    assertEquals(List.of("mouse"), fixture().lookup("MICE", WordNetPos.NOUN));
+    assertEquals(List.of("mouse"), fixture().lookup("Mice", WordNetPOS.NOUN));
+    assertEquals(List.of("mouse"), fixture().lookup("MICE", WordNetPOS.NOUN));
   }
 
   @Test
   void testLookupRejectsNulls() {
     final MorphyExceptions exceptions = fixture();
     assertThrows(IllegalArgumentException.class,
-        () -> exceptions.lookup(null, WordNetPos.NOUN));
+        () -> exceptions.lookup(null, WordNetPOS.NOUN));
     assertThrows(IllegalArgumentException.class, () -> exceptions.lookup("mice", null));
   }
 
@@ -74,7 +79,7 @@ public class MorphyExceptionsTest {
     Files.writeString(tempDir.resolve("noun.exc"), "mice mouse\n");
     Files.writeString(tempDir.resolve("verb.exc"), "went go\n");
     Files.writeString(tempDir.resolve("adj.exc"), "better good\n");
-    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+    final InvalidFormatException e = assertThrows(InvalidFormatException.class,
         () -> MorphyExceptions.load(tempDir));
     assertTrue(e.getMessage().contains("adv.exc"));
   }
@@ -85,7 +90,7 @@ public class MorphyExceptionsTest {
     Files.writeString(tempDir.resolve("verb.exc"), "went go\n");
     Files.writeString(tempDir.resolve("adj.exc"), "better good\n");
     Files.writeString(tempDir.resolve("adv.exc"), "best well\n");
-    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+    final InvalidFormatException e = assertThrows(InvalidFormatException.class,
         () -> MorphyExceptions.load(tempDir));
     assertTrue(e.getMessage().contains("noun.exc"));
     assertTrue(e.getMessage().contains("line 2"));
@@ -98,6 +103,6 @@ public class MorphyExceptionsTest {
     Files.writeString(tempDir.resolve("adj.exc"), "better good\n");
     Files.writeString(tempDir.resolve("adv.exc"), "best well\n");
     assertEquals(List.of("axis", "ax"),
-        MorphyExceptions.load(tempDir).lookup("axes", WordNetPos.NOUN));
+        MorphyExceptions.load(tempDir).lookup("axes", WordNetPOS.NOUN));
   }
 }
