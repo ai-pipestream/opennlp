@@ -67,6 +67,7 @@ import opennlp.tools.stemmer.StemmerFactory;
  */
 @ThreadSafe
 public final class SpanishLightStemmer implements Stemmer, StemmerFactory {
+  /** {@inheritDoc} */
   @Override
   public CharSequence stem(CharSequence word) {
     if (word == null) {
@@ -81,6 +82,7 @@ public final class SpanishLightStemmer implements Stemmer, StemmerFactory {
     return new String(buffer, 0, stemmedLength);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
     return this;

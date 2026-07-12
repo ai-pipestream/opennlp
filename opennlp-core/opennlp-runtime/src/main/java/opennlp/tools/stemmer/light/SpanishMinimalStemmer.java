@@ -30,6 +30,7 @@ import opennlp.tools.stemmer.StemmerFactory;
 @Deprecated
 @ThreadSafe
 public final class SpanishMinimalStemmer implements Stemmer, StemmerFactory {
+  /** {@inheritDoc} */
   @Override
   public CharSequence stem(CharSequence word) {
     if (word == null) {
@@ -44,6 +45,7 @@ public final class SpanishMinimalStemmer implements Stemmer, StemmerFactory {
     return new String(buffer, 0, stemmedLength);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
     return this;
