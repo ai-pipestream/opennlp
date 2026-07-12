@@ -38,28 +38,20 @@ import opennlp.tools.wordnet.WordNetRelation;
  * sharing its synsets, the lemmas of its hypernym ancestors up to a configured depth, and
  * optionally the lemmas of its direct hyponyms.
  *
- * <p>Lexical expansion trades precision for recall: a consumer matching on {@code dog} can also
- * match {@code domestic dog} (synonym) and {@code canid} (hypernym). Each {@link Expansion}
- * carries a weight so the consumer can discount looser expansions instead of treating them as
- * the original term. Weights are a deterministic heuristic, not probabilities: the first sense
- * of a term starts at {@code 1.0}, each later sense is multiplied by the sense decay, and every
- * hypernym or hyponym step multiplies by the depth decay. Both decays are configurable; the
- * defaults halve the weight per step so distant ancestors fade quickly.</p>
+ * <p>Each {@link Expansion} carries a deterministic heuristic weight, not a probability: the
+ * first sense of a term starts at {@code 1.0}, each later sense is multiplied by the configurable
+ * sense decay, and every hypernym or hyponym step multiplies by the configurable depth decay.
+ * When the term itself is not in the lexicon and a {@link Lemmatizer} is configured, the term is
+ * lemmatized and the lemma expanded instead; the lemmatizer is invoked with the
+ * {@link WordNetPOS} name as the tag.</p>
  *
- * <p>When the term itself is not in the lexicon and a {@link Lemmatizer} is configured, the term
- * is lemmatized and the lemma expanded instead, so inflected input ({@code dogs},
- * {@code running}) still expands and the lemma itself surfaces as a synonym expansion. The
- * lemmatizer is invoked with the {@link WordNetPOS} name as the tag, which the Morphy
- * lemmatizer of this module understands.</p>
- *
- * <p>Hypernym walks follow both the direct and the instance relation (an instance like a city
- * name climbs to its class), track visited synsets so malformed cyclic data cannot loop, and
- * never report the term itself. Results are deduplicated case-insensitively, keeping the highest
- * weight, and ordered by weight descending, then kind, then term, so output is stable across
- * runs.</p>
+ * <p>Hypernym walks follow both the direct and the instance relation, track visited synsets so
+ * malformed cyclic data cannot loop, and never report the term itself. Results are deduplicated
+ * case-insensitively, keeping the highest weight, and ordered by weight descending, then kind,
+ * then term, so output is stable across runs.</p>
  *
  * <p>Instances are immutable and safe for concurrent use when the configured lexicon and
- * lemmatizer are; the reference implementations of both are.</p>
+ * lemmatizer are.</p>
  */
 @ThreadSafe
 public final class LexicalExpander {
@@ -180,8 +172,10 @@ public final class LexicalExpander {
         : List.copyOf(ordered);
   }
 
-  // The form actually expanded: the term when the lexicon knows it, otherwise its lemma when a
-  // lemmatizer is configured and produces a known lemma, otherwise nothing.
+  /**
+   * Resolves the form actually expanded: the term when the lexicon knows it, otherwise its lemma
+   * when a lemmatizer is configured and produces a known lemma, otherwise {@code null}.
+   */
   private String resolveSubject(String term, WordNetPOS pos) {
     if (lexicon.contains(term, pos)) {
       return term;
