@@ -17,26 +17,13 @@
 package opennlp.tools.wordnet;
 
 /**
- * The typed relations a wordnet-style lexicon draws between {@link Synset synsets}.
+ * The typed relations a wordnet-style lexicon draws between {@link Synset synsets}. Both readers
+ * map their format's relation names onto these values, so consumers navigate one vocabulary
+ * regardless of the data tier behind the {@link LexicalKnowledgeBase} seam.
  *
- * <p>The value set covers the pointer types documented for the legacy Princeton WNDB format,
- * which is also the common core the WN-LMF interchange format expresses; both readers map their
- * format's names onto these values, so consumers navigate one relation vocabulary regardless of
- * the data tier behind the {@link LexicalKnowledgeBase} seam. {@link #PARTICIPLE} is part of that
- * documented set (the adjective &quot;participle of verb&quot; pointer) even though it is easy
- * to overlook; without it, real Princeton data would be unreadable. Two values go beyond the
- * WNDB pointer set: {@link #ENTAILED_BY} and {@link #CAUSED_BY} cover the inverse relations
- * WN-LMF documents such as Open English WordNet materialize, so reading such a document loses
- * no typed relation; a WNDB-backed lexicon never produces them because the legacy format stores
- * only the forward direction.</p>
- *
- * <p>Some of these relations are, in the source formats, drawn between individual word senses
- * rather than whole synsets (antonymy and derivation are the common examples). In this v1
- * contract they surface at the synset level: the synset containing the source sense carries the
- * relation to the synset containing the target sense. A sense-level view is a later, additive
- * layer.</p>
- *
- * <p>Enum constants are immutable and safe to share across threads.</p>
+ * <p>Relations that a source format draws between individual word senses (antonymy and
+ * derivation, for example) surface here at the synset level: the synset containing the source
+ * sense carries the relation to the synset containing the target sense.</p>
  */
 public enum WordNetRelation {
 

@@ -20,27 +20,15 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The lexical knowledge base seam: lemma and synset lookup over a loaded lexical-semantic
- * resource in the WordNet family.
- *
- * <p>This interface is the contract every wordnet-shaped dataset sits behind. A legacy Princeton
- * WNDB directory, a WN-LMF XML document (the Global WordNet Association interchange format used
- * by Open English WordNet and many other language wordnets), a future bundled
- * permissively-licensed lexicon, and a future user-downloaded CC-BY lexicon are all
- * implementations of this one seam, so a consumer written against {@code LexicalKnowledgeBase}
- * never changes when the data tier does. Nothing in the contract names a particular resource;
- * synset identity is opaque and source-qualified (see {@link Synset#id()}).</p>
- *
- * <p>The surface is intentionally minimal but sufficient for the layered features above it:
- * lemma lookup and membership for morphological analysis (Morphy-style lemmatization), and
- * synset retrieval with typed relation navigation for query expansion and, later, similarity
- * measures. Feature layers stack on these four operations without a contract change.</p>
+ * Lemma and synset lookup over a loaded lexical-semantic resource in the WordNet family. A
+ * consumer written against this seam is independent of the data tier behind it; synset identity
+ * is opaque and source-qualified (see {@link Synset#id()}).
  *
  * <p>Lemma matching semantics are the implementation's concern. The reference implementations
  * match case-insensitively (case folding with the root locale) and treat the underscore some
- * formats store in multiword lemmas as a space, which is the recommended behavior; an
- * implementation with different semantics must document them. Returned {@link Synset#lemmas()
- * lemmas} preserve the source's written forms, with spaces in multiword lemmas.</p>
+ * formats store in multiword lemmas as a space; an implementation with different semantics must
+ * document them. Returned {@link Synset#lemmas() lemmas} preserve the source's written forms,
+ * with spaces in multiword lemmas.</p>
  *
  * <p>Implementations must be immutable and thread-safe after loading: one instance is meant to
  * be shared across an application's threads for concurrent lookups.</p>

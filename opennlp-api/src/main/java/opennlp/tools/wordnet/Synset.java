@@ -27,17 +27,10 @@ import opennlp.tools.commons.ThreadSafe;
  * One synonym set: a single lexicalized concept with its member lemmas, gloss, and typed
  * relations to other synsets.
  *
- * <p>The shape is deliberately format-agnostic. The {@link #id() id} is an opaque,
- * source-qualified string minted by whichever reader produced the synset (a WN-LMF document's
- * own synset id, or an id a WNDB reader derives from the file position); consumers must not
- * parse it, only pass it back to {@link LexicalKnowledgeBase#synset(String)} and compare it for
- * equality. Keeping identity opaque is what lets a bundled lexicon and a user-downloaded
- * lexicon sit behind the same seam, and lets later alignment layers join sources without a
- * contract change.</p>
- *
- * <p>Relations map each {@link WordNetRelation} present on this synset to the target synset
- * ids in source order. Relations some formats draw between individual senses (antonymy,
- * derivation) surface here at the synset level; see {@link WordNetRelation}.</p>
+ * <p>The {@link #id() id} is an opaque, source-qualified string minted by the reader that
+ * produced the synset; consumers must not parse it, only pass it back to
+ * {@link LexicalKnowledgeBase#synset(String)} and compare it for equality. Relations map each
+ * {@link WordNetRelation} present on this synset to the target synset ids in source order.</p>
  *
  * <p>Instances are immutable and thread-safe: the list and map components are defensively
  * copied to immutable views at construction.</p>

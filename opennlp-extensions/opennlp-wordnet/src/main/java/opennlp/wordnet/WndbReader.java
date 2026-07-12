@@ -37,36 +37,27 @@ import opennlp.tools.wordnet.WordNetRelation;
  * Reads a legacy Princeton WNDB database directory ({@code index.noun}, {@code data.noun}, and
  * the corresponding pairs for verbs, adjectives, and adverbs) into a {@link LexicalKnowledgeBase}.
  *
- * <p>The reader is clean-room, built from the published {@code wndb(5WN)} and
- * {@code wninput(5WN)} format documentation, with no third-party WordNet library involved. All
- * eight files must be present in the directory. License preamble lines (which begin with a
- * space in the released files) are skipped in index and data files. {@code index.sense} is not
- * read: the v1 contract has no sense-key surface, so sense keys belong to the later sense
- * inventory layer. The {@code *.exc} morphological exception lists in the same directory are
- * the {@link MorphyLemmatizer} companion input and are read separately.</p>
+ * <p>All eight index and data files must be present. License preamble lines (which begin with a
+ * space in the released files) are skipped. {@code index.sense} is not read, and the
+ * {@code *.exc} exception lists are the {@link MorphyLemmatizer} companion input, read
+ * separately.</p>
  *
- * <p>Synset ids are minted as {@code wndb-}<i>offset</i>{@code -}<i>pos</i> from the data
- * file's 8-digit byte offset and part-of-speech letter, for example {@code wndb-00001740-n}.
- * The id is opaque to consumers; the format mirrors WN-LMF-style ids only for readability.
- * Adjective satellite lines ({@code ss_type} {@code s}) normalize to
- * {@link WordNetPOS#ADJECTIVE}, and the syntactic markers the adjective files append to some
- * words ({@code (p)}, {@code (a)}, {@code (ip)}) are stripped from lemmas. Underscores in
- * stored lemmas become spaces. Sense order per lemma follows the index file's offset order,
- * which the format documents as most frequent first.</p>
+ * <p>Synset ids are minted as {@code wndb-}<i>offset</i>{@code -}<i>pos</i> from the data file's
+ * 8-digit byte offset and part-of-speech letter, for example {@code wndb-00001740-n}; the id is
+ * opaque to consumers. Adjective satellite lines normalize to {@link WordNetPOS#ADJECTIVE}, the
+ * syntactic markers the adjective files append ({@code (p)}, {@code (a)}, {@code (ip)}) are
+ * stripped, and underscores in lemmas become spaces. Sense order per lemma follows the index
+ * file's offset order.</p>
  *
- * <p><b>Errors.</b> Malformed content fails loud with an {@link InvalidFormatException}
- * naming the file and line: a missing file, a truncated or overlong line, a data line whose
- * offset field disagrees with its actual byte position (the format's documented seek
- * contract), an index entry referencing an offset with no data line, an undeclared pointer
- * symbol, or a pointer to a nonexistent target. I/O failures propagate as
- * {@link IOException}.</p>
- *
- * <p>The returned lexicon is immutable and safe for concurrent lookups.</p>
+ * <p>Malformed content fails loud with an {@link InvalidFormatException} naming the file and
+ * line; I/O failures propagate as {@link IOException}. The returned lexicon is immutable and safe
+ * for concurrent lookups.</p>
  */
 public final class WndbReader {
 
   private static final Map<String, WordNetRelation> POINTER_SYMBOLS = pointerSymbols();
 
+  /** Not instantiable. */
   private WndbReader() {
   }
 
@@ -102,7 +93,7 @@ public final class WndbReader {
     return new InMemoryWordNetLexicon(synsetsById, senseOrder);
   }
 
-  // The four part-of-speech file pairs of a WNDB directory.
+  /** The four part-of-speech file pairs of a WNDB directory. */
   private enum FilePos {
     NOUN("noun", 'n', WordNetPOS.NOUN),
     VERB("verb", 'v', WordNetPOS.VERB),
@@ -113,6 +104,13 @@ public final class WndbReader {
     private final char posChar;
     private final WordNetPOS pos;
 
+    /**
+     * Binds a part of speech to its file suffix and WNDB letter.
+     *
+     * @param suffix  The file suffix, for example {@code noun}.
+     * @param posChar The WNDB part-of-speech letter.
+     * @param pos     The mapped part of speech.
+     */
     FilePos(String suffix, char posChar, WordNetPOS pos) {
       this.suffix = suffix;
       this.posChar = posChar;
@@ -120,6 +118,14 @@ public final class WndbReader {
     }
   }
 
+  /**
+   * Parses one {@code data.*} file, collecting its synsets keyed by minted id.
+   *
+   * @param directory  The database directory.
+   * @param filePos    The part-of-speech file pair.
+   * @param rawSynsets The accumulating synset table.
+   * @throws IOException Thrown if the file is missing, malformed, or unreadable.
+   */
   private static void parseDataFile(Path directory, FilePos filePos,
                                     Map<String, RawSynset> rawSynsets) throws IOException {
     final String fileName = "data." + filePos.suffix;
@@ -142,6 +148,18 @@ public final class WndbReader {
     }
   }
 
+  /**
+   * Parses one data-file synset line into a raw synset.
+   *
+   * @param line       The decoded line, without its trailing newline.
+   * @param byteOffset The line's byte offset, matched against the line's own offset field.
+   * @param fileName   The data file name, for error reporting.
+   * @param lineNumber The 1-based line number.
+   * @param filePos    The part-of-speech file pair.
+   * @param rawSynsets The accumulating synset table.
+   * @throws InvalidFormatException Thrown if the line is malformed or its offset field disagrees
+   *     with its byte position.
+   */
   private static void parseDataLine(String line, int byteOffset, String fileName, int lineNumber,
                                     FilePos filePos, Map<String, RawSynset> rawSynsets)
       throws InvalidFormatException {
@@ -201,6 +219,13 @@ public final class WndbReader {
         fileName, lineNumber));
   }
 
+  /**
+   * Resolves raw synsets into contract synsets, validating every pointer target.
+   *
+   * @param rawSynsets The parsed synsets keyed by id.
+   * @return The contract synsets keyed by id.
+   * @throws InvalidFormatException Thrown if a pointer targets a nonexistent synset.
+   */
   private static Map<String, Synset> resolve(Map<String, RawSynset> rawSynsets)
       throws InvalidFormatException {
     final Map<String, Synset> synsetsById = new LinkedHashMap<>(rawSynsets.size() * 2);
@@ -209,13 +234,10 @@ public final class WndbReader {
       for (final RawPointer pointer : raw.pointers) {
         final RawSynset target = rawSynsets.get(pointer.targetId);
         if (target == null) {
-          // The pointer's own line, so the error names exactly where the dangling pointer sits.
           throw malformed(raw.fileName, pointer.lineNumber, "Synset " + raw.id + " has a "
               + pointer.relation + " pointer to nonexistent synset " + pointer.targetId);
         }
-        // The target's canonical id instance, not the pointer's freshly minted string: a full
-        // database carries hundreds of thousands of pointers, and sharing the synset table's
-        // instances keeps only one copy of each id in memory.
+        // Share the synset table's id instance so only one copy of each id is retained.
         typed.computeIfAbsent(pointer.relation, unused -> new LinkedHashSet<>())
             .add(target.id);
       }
@@ -228,6 +250,15 @@ public final class WndbReader {
     return synsetsById;
   }
 
+  /**
+   * Parses one {@code index.*} file, building the sense order per folded lemma key.
+   *
+   * @param directory  The database directory.
+   * @param filePos    The part-of-speech file pair.
+   * @param rawSynsets The resolved synset table, for offset validation.
+   * @param senses     The accumulating sense-order map.
+   * @throws IOException Thrown if the file is missing, malformed, or unreadable.
+   */
   private static void parseIndexFile(Path directory, FilePos filePos,
                                      Map<String, RawSynset> rawSynsets,
                                      Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senses)
@@ -251,6 +282,18 @@ public final class WndbReader {
     }
   }
 
+  /**
+   * Parses one index-file line into a lemma's sense order.
+   *
+   * @param line       The line to parse.
+   * @param fileName   The index file name, for error reporting.
+   * @param lineNumber The 1-based line number.
+   * @param filePos    The part-of-speech file pair.
+   * @param rawSynsets The resolved synset table, for offset validation.
+   * @param senses     The accumulating sense-order map.
+   * @throws InvalidFormatException Thrown if the line is malformed or references an unknown
+   *     offset.
+   */
   private static void parseIndexLine(String line, String fileName, int lineNumber,
                                      FilePos filePos, Map<String, RawSynset> rawSynsets,
                                      Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senses)
@@ -269,8 +312,7 @@ public final class WndbReader {
     }
     final int pointerTypeCount = tokens.nextInt("p_cnt", 10);
     for (int i = 0; i < pointerTypeCount; i++) {
-      // The index file's pointer-type summary is informational; the typed pointers in the
-      // data file are authoritative, so the summary symbols are not validated here.
+      // The summary symbols are informational; the data file's pointers are authoritative.
       tokens.next("ptr_symbol");
     }
     tokens.next("sense_cnt");
@@ -303,7 +345,16 @@ public final class WndbReader {
     }
   }
 
-  // Strips the documented adjective syntactic markers and turns underscores into spaces.
+  /**
+   * Strips the adjective syntactic markers ({@code (p)}, {@code (a)}, {@code (ip)}) and turns
+   * underscores into spaces.
+   *
+   * @param word       The raw word field.
+   * @param fileName   The data file name, for error reporting.
+   * @param lineNumber The 1-based line number.
+   * @return The cleaned lemma.
+   * @throws InvalidFormatException Thrown if the word carries an unknown marker or is empty.
+   */
   private static String cleanLemma(String word, String fileName, int lineNumber)
       throws InvalidFormatException {
     String cleaned = word;
@@ -321,6 +372,14 @@ public final class WndbReader {
     return cleaned.replace('_', ' ');
   }
 
+  /**
+   * Parses an 8-digit synset offset.
+   *
+   * @param offset The offset field.
+   * @param tokens The tokenizer, for error reporting.
+   * @return The offset as an integer.
+   * @throws InvalidFormatException Thrown if the field is not 8 digits.
+   */
   private static int parseOffset(String offset, Tokenizer tokens) throws InvalidFormatException {
     if (offset.length() != 8) {
       throw tokens.malformedToken("Synset offset must be 8 digits, got: " + offset);
@@ -336,6 +395,14 @@ public final class WndbReader {
     return value;
   }
 
+  /**
+   * Parses a pointer's one-letter part-of-speech code.
+   *
+   * @param pos    The code field.
+   * @param tokens The tokenizer, for error reporting.
+   * @return One of {@code n}, {@code v}, {@code a}, {@code r}.
+   * @throws InvalidFormatException Thrown if the code is not one of those letters.
+   */
   private static char posChar(String pos, Tokenizer tokens) throws InvalidFormatException {
     if (pos.length() == 1) {
       final char c = pos.charAt(0);
@@ -346,6 +413,15 @@ public final class WndbReader {
     throw tokens.malformedToken("Pointer pos must be one of n, v, a, r, got: " + pos);
   }
 
+  /**
+   * Reads a required database file in full.
+   *
+   * @param file     The file path.
+   * @param fileName The file name, for error reporting.
+   * @return The file bytes.
+   * @throws InvalidFormatException Thrown if the file is missing.
+   * @throws IOException Thrown if reading fails.
+   */
   private static byte[] readAll(Path file, String fileName) throws IOException {
     if (!Files.isRegularFile(file)) {
       throw new InvalidFormatException("Missing WNDB database file: " + file);
@@ -353,13 +429,21 @@ public final class WndbReader {
     return Files.readAllBytes(file);
   }
 
+  /**
+   * Builds a malformed-file exception naming the file and line.
+   *
+   * @param fileName   The file name.
+   * @param lineNumber The 1-based line number.
+   * @param message    The failure detail.
+   * @return The exception to throw.
+   */
   private static InvalidFormatException malformed(String fileName, int lineNumber,
                                                   String message) {
     return new InvalidFormatException(
         "Malformed WNDB file " + fileName + " at line " + lineNumber + ": " + message);
   }
 
-  // A cursor over one line's space-separated fields; no regular expressions involved.
+  /** A cursor over one line's space-separated fields. */
   private static final class Tokenizer {
 
     private final String line;
@@ -367,12 +451,26 @@ public final class WndbReader {
     private final int lineNumber;
     private int position;
 
+    /**
+     * Creates a tokenizer over one line.
+     *
+     * @param line       The line to tokenize.
+     * @param fileName   The file name, for error reporting.
+     * @param lineNumber The 1-based line number.
+     */
     Tokenizer(String line, String fileName, int lineNumber) {
       this.line = line;
       this.fileName = fileName;
       this.lineNumber = lineNumber;
     }
 
+    /**
+     * Reads the next space-separated field.
+     *
+     * @param field The field name, for error reporting.
+     * @return The field value.
+     * @throws InvalidFormatException Thrown if the line is truncated before the field.
+     */
     String next(String field) throws InvalidFormatException {
       while (position < line.length() && line.charAt(position) == ' ') {
         position++;
@@ -387,6 +485,14 @@ public final class WndbReader {
       return line.substring(start, position);
     }
 
+    /**
+     * Reads the next field as an integer in the given radix.
+     *
+     * @param field The field name, for error reporting.
+     * @param radix The numeric radix.
+     * @return The parsed value.
+     * @throws InvalidFormatException Thrown if the field is missing or not a valid integer.
+     */
     int nextInt(String field, int radix) throws InvalidFormatException {
       final String token = next(field);
       try {
@@ -397,7 +503,12 @@ public final class WndbReader {
       }
     }
 
-    // The remainder after the pipe separator, trimmed of the surrounding spaces.
+    /**
+     * Reads the gloss: the remainder after the pipe separator, trimmed of surrounding spaces.
+     *
+     * @return The gloss text.
+     * @throws InvalidFormatException Thrown if the pipe separator is missing.
+     */
     String gloss() throws InvalidFormatException {
       final String separator = next("gloss separator");
       if (!"|".equals(separator)) {
@@ -414,6 +525,12 @@ public final class WndbReader {
       return line.substring(start, end);
     }
 
+    /**
+     * Builds a malformed-file exception at this tokenizer's line.
+     *
+     * @param message The failure detail.
+     * @return The exception to throw.
+     */
     InvalidFormatException malformedToken(String message) {
       return malformed(fileName, lineNumber, message);
     }
@@ -431,6 +548,17 @@ public final class WndbReader {
     private final String fileName;
     private final int lineNumber;
 
+    /**
+     * Creates a raw synset gathered while parsing a data file.
+     *
+     * @param id         The minted synset id.
+     * @param pos        The part of speech.
+     * @param lemmas     The member lemmas.
+     * @param gloss      The gloss text.
+     * @param pointers   The raw pointers to resolve.
+     * @param fileName   The source file name.
+     * @param lineNumber The source line number.
+     */
     RawSynset(String id, WordNetPOS pos, List<String> lemmas, String gloss,
               List<RawPointer> pointers, String fileName, int lineNumber) {
       this.id = id;
@@ -443,6 +571,11 @@ public final class WndbReader {
     }
   }
 
+  /**
+   * Builds the WNDB pointer-symbol to {@link WordNetRelation} table.
+   *
+   * @return The immutable symbol table.
+   */
   private static Map<String, WordNetRelation> pointerSymbols() {
     final Map<String, WordNetRelation> symbols = new HashMap<>();
     symbols.put("!", WordNetRelation.ANTONYM);

@@ -35,13 +35,10 @@ import opennlp.tools.wordnet.WordNetRelation;
  * folded (lemma, part of speech) index. Package-private because it is a reader product, not a
  * public entry point; consumers hold it as {@link LexicalKnowledgeBase}.
  *
- * <p>Lemma matching follows the recommended seam semantics: keys are folded by lowercasing with
- * the root locale and treating the underscore some formats store in multiword lemmas as a
- * space. Queries are folded identically at lookup time.</p>
- *
- * <p>Construction verifies referential integrity: every relation target of every synset must
- * resolve to a synset in the table, so a lexicon can never hand out a dangling identifier.
- * After construction all state is immutable, making instances safe for concurrent lookups.</p>
+ * <p>Keys and queries are folded identically (see {@link LemmaFolding}). Construction verifies
+ * referential integrity: every relation target of every synset must resolve to a synset in the
+ * table, so a lexicon can never hand out a dangling identifier. After construction all state is
+ * immutable, making instances safe for concurrent lookups.</p>
  */
 @ThreadSafe
 final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
@@ -104,6 +101,7 @@ final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
     this.senseIndex = index;
   }
 
+  /** {@inheritDoc} */
   @Override
   public List<Synset> lookup(String lemma, WordNetPOS pos) {
     if (lemma == null) {
@@ -116,6 +114,7 @@ final class InMemoryWordNetLexicon implements LexicalKnowledgeBase {
     return senses == null ? List.of() : senses;
   }
 
+  /** {@inheritDoc} */
   @Override
   public Optional<Synset> synset(String synsetId) {
     if (synsetId == null) {

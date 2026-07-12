@@ -26,48 +26,22 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.WordNetPOS;
 
 /**
- * A clean-room implementation of the documented Morphy algorithm as a {@link Lemmatizer}:
- * exception-list lookup first, then the per-part-of-speech iterative detachment rules, with
- * every rule-derived candidate validated against a {@link LexicalKnowledgeBase} before it is
- * returned.
+ * A {@link Lemmatizer} implementing the Morphy algorithm: exception-list lookup first, then the
+ * per-part-of-speech iterative detachment rules, with every rule-derived candidate validated
+ * against a {@link LexicalKnowledgeBase} before it is returned. A token is folded (lowercase with
+ * the root locale, underscore as space) before lookup, and returned lemmas are in that folded
+ * form.
  *
- * <p><b>Algorithm.</b> For each token the part-of-speech tag is mapped to a
- * {@link WordNetPOS}; the token is folded (lowercase with the root locale, underscore as
- * space); the {@link MorphyExceptions exception lists} are consulted and a hit is returned
- * directly, without lexicon validation, because the lists themselves are authoritative for
- * irregular forms; otherwise the folded token itself, when the lexicon contains it, and every
- * detachment-rule result the lexicon confirms become the candidate lemmas, in rule order. The
- * rules are the documented Morphy suffix substitutions: for nouns {@code -s}, {@code -ses},
- * {@code -xes}, {@code -zes}, {@code -ches}, {@code -shes}, {@code -men}, {@code -ies}; for
- * verbs {@code -s}, {@code -ies}, {@code -es}, {@code -ed}, {@code -ing} (with their {@code e}
- * restorations); for adjectives {@code -er} and {@code -est} (plain and {@code e}-restoring);
- * and none for adverbs, which rely on the exception list alone. Returned lemmas are in the
- * lexicon's folded canonical form (lowercase, spaces in multiword lemmas).</p>
+ * <p>Part-of-speech tags map to a {@link WordNetPOS} by their conventional Penn Treebank
+ * prefixes ({@code N}, {@code V}, {@code J}, {@code R}), the names {@code ADJ} and {@code ADV},
+ * and the one-letter WordNet codes {@code n}, {@code v}, {@code a}, {@code r}, and {@code s}
+ * (satellite, treated as adjective), case-insensitively. A tag that maps to no part of speech
+ * yields the unknown-word result.</p>
  *
- * <p><b>Tag mapping.</b> Tags map to WordNet parts of speech by their conventional Penn
- * Treebank prefixes: {@code N} to noun, {@code V} to verb, {@code J} to adjective, and
- * {@code R} to adverb, case-insensitively. The names {@code ADJ} and {@code ADV} and, only as
- * one-letter tags, the WordNet letters {@code n}, {@code v}, {@code a}, {@code r}, and
- * {@code s} (satellite, treated as adjective) are also accepted. Anything else, including Penn
- * tags for closed classes such as {@code DT} or {@code MD} and multi-letter tags that merely
- * begin with an accepted letter, such as {@code AUX}, {@code ADP}, {@code SCONJ}, or
- * {@code SYM}, maps to no part of speech and yields the unknown-word result.</p>
- *
- * <p><b>Unknown words.</b> Following the convention of
- * {@code opennlp.tools.lemmatizer.DictionaryLemmatizer}, a token with no lemma yields the
- * string {@code "O"} from {@link #lemmatize(String[], String[])} and a singleton
- * {@code ["O"]} from {@link #lemmatize(List, List)}.</p>
- *
- * <p>No lexicon or exception data is bundled: point {@link WndbReader} and
- * {@link MorphyExceptions#load(java.nio.file.Path) MorphyExceptions} at a WordNet database
- * directory you
- * downloaded, or combine {@link WnLmfReader} with a downloaded exception-list directory. Both
- * inputs are required because rule-derived candidates are meaningless without a lexicon to
- * validate them against; an exception-only mode would be a misleading half-feature, so it does
- * not exist. Bundling the permissively licensed data is a recorded follow-up.</p>
- *
- * <p>Instances are immutable and safe for concurrent use once constructed with a loaded
- * lexicon and exception lists.</p>
+ * <p>Following {@code opennlp.tools.lemmatizer.DictionaryLemmatizer}, a token with no lemma
+ * yields {@code "O"} from {@link #lemmatize(String[], String[])} and {@code ["O"]} from
+ * {@link #lemmatize(List, List)}. Both a lexicon and exception lists are required. Instances are
+ * immutable and safe for concurrent use.</p>
  */
 @ThreadSafe
 public final class MorphyLemmatizer implements Lemmatizer {
@@ -114,6 +88,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
     this.exceptions = exceptions;
   }
 
+  /** {@inheritDoc} */
   @Override
   public String[] lemmatize(String[] toks, String[] tags) {
     if (toks == null || tags == null) {
@@ -131,6 +106,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
     return lemmas;
   }
 
+  /** {@inheritDoc} */
   @Override
   public List<List<String>> lemmatize(List<String> toks, List<String> tags) {
     if (toks == null || tags == null) {
@@ -148,7 +124,14 @@ public final class MorphyLemmatizer implements Lemmatizer {
     return lemmas;
   }
 
-  // All lemmas of one token, most preferred first; empty when the word is unknown.
+  /**
+   * Finds all lemmas of one token, most preferred first.
+   *
+   * @param token The token to lemmatize.
+   * @param tag   The part-of-speech tag.
+   * @return The candidate lemmas, empty when the word is unknown or the tag maps to no part of
+   *     speech.
+   */
   private List<String> lemmasOf(String token, String tag) {
     if (token == null || tag == null) {
       throw new IllegalArgumentException("Tokens and tags must not contain null elements");
@@ -179,6 +162,12 @@ public final class MorphyLemmatizer implements Lemmatizer {
     return candidates;
   }
 
+  /**
+   * Selects the detachment-rule table for a part of speech.
+   *
+   * @param pos The part of speech.
+   * @return The suffix-substitution rules, empty for adverbs.
+   */
   private static String[][] rulesFor(WordNetPOS pos) {
     return switch (pos) {
       case NOUN -> NOUN_RULES;
@@ -188,7 +177,13 @@ public final class MorphyLemmatizer implements Lemmatizer {
     };
   }
 
-  // The documented tag mapping; package-private so tests can pin it directly.
+  /**
+   * Maps a part-of-speech tag to a {@link WordNetPOS}. Package-private so tests can pin the
+   * mapping directly.
+   *
+   * @param tag The tag to map.
+   * @return The part of speech, or {@code null} when the tag names none.
+   */
   static WordNetPOS posFromTag(String tag) {
     if (tag.isEmpty()) {
       return null;
@@ -204,9 +199,7 @@ public final class MorphyLemmatizer implements Lemmatizer {
       case 'N' -> WordNetPOS.NOUN;
       case 'V' -> WordNetPOS.VERB;
       case 'J' -> WordNetPOS.ADJECTIVE;
-      // The WordNet letter codes a and s stand for adjective only as one-letter tags:
-      // multi-letter tags such as AUX, ADP, SCONJ, or SYM name closed classes or symbols,
-      // not adjectives, so they map to no part of speech.
+      // Codes a and s mean adjective only as one-letter tags; AUX, ADP and the like do not.
       case 'A', 'S' -> tag.length() == 1 ? WordNetPOS.ADJECTIVE : null;
       case 'R' -> WordNetPOS.ADVERB;
       default -> null;

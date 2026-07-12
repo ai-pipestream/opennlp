@@ -22,15 +22,12 @@ import java.util.Locale;
 
 /**
  * The single home of the lemma fold and the space-separated field split this package relies on.
- *
- * <p>The fold agreement is load-bearing: {@link MorphyExceptions} keys, the
- * {@link InMemoryWordNetLexicon.LemmaKey sense-index keys}, and every query fold identically,
- * so a rule-derived candidate validated against the lexicon and an exception-list hit can never
- * disagree on canonical form. Keeping one implementation here prevents the copies from
- * drifting apart.</p>
+ * {@link MorphyExceptions} keys, the {@link InMemoryWordNetLexicon.LemmaKey sense-index keys},
+ * and every query must fold through {@link #fold(String)} so their canonical forms agree.
  */
 final class LemmaFolding {
 
+  /** Not instantiable. */
   private LemmaFolding() {
   }
 
@@ -46,8 +43,7 @@ final class LemmaFolding {
   }
 
   /**
-   * Splits a space-separated field list, collapsing runs of spaces; no regular expressions
-   * involved.
+   * Splits a space-separated field list, collapsing runs of spaces.
    *
    * @param value The field list. Must not be {@code null}.
    * @return The non-empty fields in order, never {@code null}.

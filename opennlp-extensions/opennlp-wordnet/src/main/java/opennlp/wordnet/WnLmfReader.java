@@ -44,41 +44,25 @@ import opennlp.tools.wordnet.WordNetRelation;
 
 /**
  * Reads a WN-LMF XML document (the Global WordNet Association interchange format, used by Open
- * English WordNet and many other language wordnets) into a {@link LexicalKnowledgeBase}.
+ * English WordNet and many other language wordnets) into a {@link LexicalKnowledgeBase} using the
+ * JDK StAX parser.
  *
- * <p>The reader is clean-room, built from the published format documentation, and uses only the
- * JDK's StAX parser. It reads the subset of the format the {@link LexicalKnowledgeBase} contract
- * serves: lexical entries (lemma, part of speech, senses), synsets (definition and typed
- * relations), and sense relations, which are lifted to the synset level as documented on
- * {@link WordNetRelation}. Elements outside that subset ({@code Pronunciation}, {@code Form},
- * {@code Example}, {@code SyntacticBehaviour}, {@code ILIDefinition}, and similar) are skipped.
- * Relations of type {@code other}, the format's escape hatch for relations typed only by
- * metadata, are also skipped: the contract has no untyped relation slot. Every other unknown
+ * <p>It reads the subset of the format the contract serves: lexical entries, synsets with their
+ * definitions and typed relations, and sense relations, which are lifted to the synset level as
+ * documented on {@link WordNetRelation}. Elements outside that subset are skipped, as are
+ * relations of type {@code other} (the format's untyped escape hatch); any other unknown
  * relation type fails loud.</p>
  *
- * <p><b>Security.</b> The parser is hardened against XXE per the OWASP-documented posture for
- * formats that carry a DOCTYPE: a DOCTYPE declaration is tokenized and skipped, but nothing it
- * names is ever resolved. External entities and the external DTD subset are both disabled
- * ({@code IS_SUPPORTING_EXTERNAL_ENTITIES} and {@code ACCESS_EXTERNAL_DTD} are off), and the
- * {@link javax.xml.stream.XMLResolver} throws on any resolution attempt regardless, so no
- * network or filesystem access can be triggered by a DOCTYPE, internal or external. Open English
- * WordNet releases ship with a DOCTYPE line referencing the schema DTD; this reader parses such
- * a file unmodified.</p>
+ * <p>The parser is hardened against XXE: the DTD internal subset is not processed, and external
+ * entities and the external DTD subset are disabled, so a DOCTYPE is tokenized and skipped but
+ * nothing it names is ever resolved. A release carrying a DOCTYPE line parses unmodified.</p>
  *
- * <p><b>Errors.</b> Malformed structure fails loud with an {@link InvalidFormatException}
- * naming the resource and, where the parser provides one, the line: missing required
- * attributes, a duplicate lexical entry, sense, or synset id, a sense pointing to an undeclared
- * synset, a relation to an undeclared target, an unknown part-of-speech code, an unknown
- * relation type, a synset with no member entries. I/O failures propagate as
- * {@link IOException}.</p>
- *
- * <p>Part-of-speech code {@code s} (adjective satellite) normalizes to
- * {@link WordNetPOS#ADJECTIVE}, and a {@code similar} relation whose source is a verb synset
- * maps to {@link WordNetRelation#VERB_GROUP} (that is how WN-LMF documents derived from
- * Princeton data express verb groups); on any other part of speech it maps to
- * {@link WordNetRelation#SIMILAR_TO}.</p>
- *
- * <p>The returned lexicon is immutable and safe for concurrent lookups.</p>
+ * <p>Malformed structure fails loud with an {@link InvalidFormatException} naming the resource
+ * and, where the parser provides one, the line; I/O failures propagate as {@link IOException}.
+ * Part-of-speech code {@code s} normalizes to {@link WordNetPOS#ADJECTIVE}, and a {@code similar}
+ * relation on a verb synset maps to {@link WordNetRelation#VERB_GROUP} rather than
+ * {@link WordNetRelation#SIMILAR_TO}. The returned lexicon is immutable and safe for concurrent
+ * lookups.</p>
  */
 public final class WnLmfReader {
 
@@ -87,6 +71,7 @@ public final class WnLmfReader {
   /** The format's escape-hatch relation type; carries no type the contract can express. */
   private static final String OTHER_RELATION = "other";
 
+  /** Not instantiable. */
   private WnLmfReader() {
   }
 
@@ -151,12 +136,14 @@ public final class WnLmfReader {
     return parser.build();
   }
 
+  /**
+   * Builds an XXE-hardened StAX factory: the DTD internal subset is not processed and external
+   * entities and the external DTD subset are denied, so a DOCTYPE is skipped but never resolved.
+   *
+   * @return The hardened factory.
+   */
   private static XMLInputFactory hardenedFactory() {
     final XMLInputFactory factory = XMLInputFactory.newFactory();
-    // XXE hardening, the OWASP-documented posture for DOCTYPE-bearing formats: the internal
-    // subset is not processed (so no custom entity gets declared at all), and both the
-    // external DTD subset and external entities are denied, so a DOCTYPE is tokenized and
-    // skipped but nothing it names is ever fetched.
     factory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
     factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
     factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
@@ -167,7 +154,7 @@ public final class WnLmfReader {
     return factory;
   }
 
-  // The streaming parse state and post-parse resolution.
+  /** Holds the streaming parse state and performs post-parse resolution. */
   private static final class Parser {
 
     private final String resourceName;
@@ -191,17 +178,26 @@ public final class WnLmfReader {
     private String currentSenseId;
     private RawSynset currentSynset;
 
+    /**
+     * Creates a parser.
+     *
+     * @param resourceName The name used in error messages.
+     */
     Parser(String resourceName) {
       this.resourceName = resourceName;
     }
 
+    /**
+     * Streams the document, dispatching start and end elements.
+     *
+     * @param reader The StAX reader.
+     * @throws XMLStreamException Thrown if the stream read fails.
+     * @throws InvalidFormatException Thrown if the document is malformed.
+     */
     void parse(XMLStreamReader reader) throws XMLStreamException, InvalidFormatException {
       while (reader.hasNext()) {
         final int event = reader.next();
-        // A DTD event (the DOCTYPE declaration) is intentionally not handled here: with
-        // external entities and the external subset denied in the factory, it carries nothing
-        // that can affect parsing, so it is skipped exactly like a comment or an ignored
-        // element.
+        // A DTD event carries nothing that can affect parsing once the factory is hardened.
         if (event == XMLStreamConstants.START_ELEMENT) {
           startElement(reader);
         } else if (event == XMLStreamConstants.END_ELEMENT) {
@@ -210,6 +206,14 @@ public final class WnLmfReader {
       }
     }
 
+    /**
+     * Handles one start element, updating cursor state and collecting raw entries, senses, and
+     * synsets.
+     *
+     * @param reader The StAX reader positioned on the start element.
+     * @throws XMLStreamException Thrown if reading element text fails.
+     * @throws InvalidFormatException Thrown if the element violates the format.
+     */
     private void startElement(XMLStreamReader reader)
         throws XMLStreamException, InvalidFormatException {
       final String name = reader.getLocalName();
@@ -281,8 +285,7 @@ public final class WnLmfReader {
           }
           final String relType = requireAttribute(reader, "relType");
           final String target = requireAttribute(reader, "target");
-          // The escape-hatch type is skipped here exactly as it is for sense relations in
-          // build(): documented skip, not rejection.
+          // The escape-hatch type is a documented skip, not a rejection.
           if (!OTHER_RELATION.equals(relType)) {
             currentSynset.relations.add(
                 new RawRelation(relType, target, line(reader.getLocation())));
@@ -295,6 +298,11 @@ public final class WnLmfReader {
       }
     }
 
+    /**
+     * Clears cursor state when a tracked element closes.
+     *
+     * @param name The local name of the closing element.
+     */
     private void endElement(String name) {
       switch (name) {
         case "LexicalEntry" -> {
@@ -310,6 +318,14 @@ public final class WnLmfReader {
       }
     }
 
+    /**
+     * Resolves the collected raw state into an immutable lexicon: validates sense targets, lifts
+     * sense relations to the synset level, and materializes the contract synsets.
+     *
+     * @return The loaded lexicon.
+     * @throws InvalidFormatException Thrown if a sense or relation references an undeclared
+     *     target, or a synset has no members.
+     */
     LexicalKnowledgeBase build() throws InvalidFormatException {
       // Every sense must point to a declared synset, with a consistent part of speech.
       for (final Map.Entry<String, String> sense : synsetBySenseId.entrySet()) {
@@ -346,6 +362,14 @@ public final class WnLmfReader {
       return new InMemoryWordNetLexicon(synsetsById, senseOrder);
     }
 
+    /**
+     * Resolves a raw synset's relations into typed target-id lists, deduplicated in source order.
+     *
+     * @param raw The raw synset.
+     * @return The typed relations for the contract synset.
+     * @throws InvalidFormatException Thrown if a relation type is unknown or its target is
+     *     undeclared.
+     */
     private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw)
         throws InvalidFormatException {
       final Map<WordNetRelation, LinkedHashSet<String>> typed = new LinkedHashMap<>();
@@ -356,9 +380,7 @@ public final class WnLmfReader {
           throw malformed(null, "Relation " + relation.relType + " at line " + relation.line
               + " on synset " + raw.id + " references undeclared synset " + relation.target, null);
         }
-        // The target's canonical id instance, not the pointer's own string: a full lexicon
-        // carries hundreds of thousands of pointers, and sharing the synset table's instances
-        // keeps only one copy of each id in memory.
+        // Share the synset table's id instance so only one copy of each id is retained.
         typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(target.id);
       }
       final Map<WordNetRelation, List<String>> relations = new LinkedHashMap<>(typed.size() * 2);
@@ -368,6 +390,15 @@ public final class WnLmfReader {
       return relations;
     }
 
+    /**
+     * Resolves a synset's member entry ids to their lemmas, from the {@code members} attribute
+     * when present and otherwise from the senses that pointed at the synset.
+     *
+     * @param raw The raw synset.
+     * @return The member lemmas in source order, deduplicated.
+     * @throws InvalidFormatException Thrown if the synset has no members, names an undeclared
+     *     entry, or a member's part of speech disagrees with the synset's.
+     */
     private List<String> memberLemmas(RawSynset raw) throws InvalidFormatException {
       final List<String> entryIds;
       if (raw.members != null && !raw.members.isEmpty()) {
@@ -399,8 +430,16 @@ public final class WnLmfReader {
       return lemmas;
     }
 
+    /**
+     * Maps a WN-LMF part-of-speech code to a {@link WordNetPOS}; code {@code s} normalizes to
+     * {@link WordNetPOS#ADJECTIVE}.
+     *
+     * @param code     The part-of-speech code.
+     * @param location The parser location, for error reporting.
+     * @return The part of speech.
+     * @throws InvalidFormatException Thrown if the code is unknown.
+     */
     private WordNetPOS parsePos(String code, Location location) throws InvalidFormatException {
-      // The adjective satellite code normalizes to ADJECTIVE; see WordNetPOS.
       return switch (code) {
         case "n" -> WordNetPOS.NOUN;
         case "v" -> WordNetPOS.VERB;
@@ -410,9 +449,19 @@ public final class WnLmfReader {
       };
     }
 
+    /**
+     * Maps a WN-LMF relation name to a {@link WordNetRelation}. A {@code similar} relation on a
+     * verb synset maps to {@link WordNetRelation#VERB_GROUP}, otherwise to
+     * {@link WordNetRelation#SIMILAR_TO}.
+     *
+     * @param relType   The relation name.
+     * @param sourcePos The part of speech of the source synset.
+     * @param line      The document line, for error reporting.
+     * @return The mapped relation.
+     * @throws InvalidFormatException Thrown if the relation name is unknown.
+     */
     private WordNetRelation parseRelation(String relType, WordNetPOS sourcePos, int line)
         throws InvalidFormatException {
-      // Documents derived from Princeton data express verb groups as similar on verb synsets.
       if ("similar".equals(relType)) {
         return sourcePos == WordNetPOS.VERB ? WordNetRelation.VERB_GROUP
             : WordNetRelation.SIMILAR_TO;
@@ -424,6 +473,14 @@ public final class WnLmfReader {
       return relation;
     }
 
+    /**
+     * Reads a required attribute from the current element.
+     *
+     * @param reader    The StAX reader.
+     * @param attribute The attribute name.
+     * @return The non-empty attribute value.
+     * @throws InvalidFormatException Thrown if the attribute is absent or empty.
+     */
     private String requireAttribute(XMLStreamReader reader, String attribute)
         throws InvalidFormatException {
       final String value = reader.getAttributeValue(null, attribute);
@@ -434,6 +491,14 @@ public final class WnLmfReader {
       return value;
     }
 
+    /**
+     * Builds a malformed-document exception naming the resource and, when known, the line.
+     *
+     * @param location The parser location, or {@code null} when unavailable.
+     * @param message  The failure detail.
+     * @param cause    The underlying cause, or {@code null}.
+     * @return The exception to throw.
+     */
     InvalidFormatException malformed(Location location, String message, Throwable cause) {
       final int line = line(location);
       final String prefix = line < 0 ? "Malformed WN-LMF document " + resourceName + ": "
@@ -442,6 +507,12 @@ public final class WnLmfReader {
           : new InvalidFormatException(prefix + message, cause);
     }
 
+    /**
+     * Extracts a line number from a parser location.
+     *
+     * @param location The location, or {@code null}.
+     * @return The line number, or {@code -1} when unknown.
+     */
     private static int line(Location location) {
       return location == null ? -1 : location.getLineNumber();
     }
@@ -455,6 +526,14 @@ public final class WnLmfReader {
     private final List<RawRelation> relations = new ArrayList<>(4);
     private String gloss;
 
+    /**
+     * Creates a raw synset gathered during parsing.
+     *
+     * @param id      The synset id.
+     * @param pos     The part of speech.
+     * @param members The {@code members} attribute value, or {@code null} when absent.
+     * @param line    The document line.
+     */
     RawSynset(String id, WordNetPOS pos, String members, int line) {
       this.id = id;
       this.pos = pos;
@@ -470,6 +549,11 @@ public final class WnLmfReader {
                                   int line) {
   }
 
+  /**
+   * Builds the WN-LMF relation-name to {@link WordNetRelation} table.
+   *
+   * @return The immutable name table.
+   */
   private static Map<String, WordNetRelation> relationNames() {
     final Map<String, WordNetRelation> names = new HashMap<>();
     names.put("antonym", WordNetRelation.ANTONYM);

@@ -19,16 +19,10 @@ package opennlp.tools.wordnet;
 /**
  * The four parts of speech a wordnet-style lexicon distinguishes.
  *
- * <p>This enum is deliberately format-free: it carries none of the single-letter codes the
- * on-disk formats use, so the contract does not leak a storage detail. Readers own the mapping
- * from their format's codes to these values.</p>
- *
- * <p>Adjective satellites (the {@code s} code some formats use for adjectives clustered around
- * a head adjective) normalize to {@link #ADJECTIVE}: the head/satellite split is a storage
- * layout, not a part of speech, and the cluster structure is preserved through the
- * {@link WordNetRelation#SIMILAR_TO} relation instead.</p>
- *
- * <p>Enum constants are immutable and safe to share across threads.</p>
+ * <p>The enum carries none of the single-letter codes the on-disk formats use; readers own the
+ * mapping from their format's codes to these values. Adjective satellites normalize to
+ * {@link #ADJECTIVE}, with the cluster structure preserved through
+ * {@link WordNetRelation#SIMILAR_TO}.</p>
  */
 public enum WordNetPOS {
 

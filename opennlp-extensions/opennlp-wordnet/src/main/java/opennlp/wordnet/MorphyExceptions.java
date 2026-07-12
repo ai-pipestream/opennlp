@@ -36,23 +36,24 @@ import opennlp.tools.wordnet.WordNetPOS;
  * consults before its detachment rules.
  *
  * <p>{@link #load(Path)} reads the four {@code *.exc} files ({@code noun.exc},
- * {@code verb.exc}, {@code adj.exc}, {@code adv.exc}) in the documented WNDB format: one entry
- * per line, the inflected form followed by one or more base forms, space separated, with
- * underscores standing for spaces in multiword entries. All four files must be present; note
- * that Princeton's database-only download ({@code WNdb}) does not include them, while the full
- * WordNet package does. No exception data is bundled with this module; see
- * {@link MorphyLemmatizer} for the tiering rationale.</p>
+ * {@code verb.exc}, {@code adj.exc}, {@code adv.exc}), which must all be present, in the WNDB
+ * format: one entry per line, the inflected form followed by one or more base forms, space
+ * separated, with underscores standing for spaces in multiword entries. No exception data is
+ * bundled; the caller supplies a directory.</p>
  *
- * <p>Lookups fold the queried word the same way the lexicon seam folds lemmas: lowercase with
- * the root locale, underscore as space.</p>
- *
- * <p>Instances are immutable after loading and safe for concurrent lookups.</p>
+ * <p>Lookups fold the queried word the same way the lexicon seam folds lemmas. Instances are
+ * immutable after loading and safe for concurrent lookups.</p>
  */
 @ThreadSafe
 public final class MorphyExceptions {
 
   private final Map<WordNetPOS, Map<String, List<String>>> byPos;
 
+  /**
+   * Wraps the per-part-of-speech exception tables.
+   *
+   * @param byPos The loaded tables, one per part of speech.
+   */
   private MorphyExceptions(Map<WordNetPOS, Map<String, List<String>>> byPos) {
     this.byPos = byPos;
   }
@@ -105,6 +106,15 @@ public final class MorphyExceptions {
     return lemmas == null ? List.of() : lemmas;
   }
 
+  /**
+   * Loads one {@code *.exc} file into a folded inflected-form to base-forms map.
+   *
+   * @param directory The directory holding the file.
+   * @param fileName  The exception file name, for example {@code noun.exc}.
+   * @return The folded exception entries.
+   * @throws InvalidFormatException Thrown if the file is missing or a line is malformed.
+   * @throws IOException Thrown if reading the file fails.
+   */
   private static Map<String, List<String>> loadFile(Path directory, String fileName)
       throws IOException {
     final Path file = directory.resolve(fileName);
