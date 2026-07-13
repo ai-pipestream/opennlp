@@ -143,6 +143,7 @@ public final class LexicalExpander {
     return collect(term, List.of(WordNetPOS.values()));
   }
 
+  /** Expands the term across the given parts of speech and returns the ranked, capped result. */
   private List<Expansion> collect(String term, List<WordNetPOS> poses) {
     if (term == null || term.isBlank()) {
       throw new IllegalArgumentException("The term must not be null or blank.");
@@ -196,6 +197,7 @@ public final class LexicalExpander {
     return lemma;
   }
 
+  /** Offers the synonyms, hypernym ancestors, and optional hyponyms of one sense into {@code best}. */
   private void expandSense(Synset sense, int rank, double senseWeight,
                            Map<String, Expansion> best, Set<String> excluded) {
     for (final String lemma : sense.lemmas()) {
@@ -244,6 +246,7 @@ public final class LexicalExpander {
     }
   }
 
+  /** Returns the synset ids of both the direct and the instance hypernyms of the synset. */
   private static List<String> hypernymsOf(Synset synset) {
     final List<String> direct = synset.related(WordNetRelation.HYPERNYM);
     final List<String> instance = synset.related(WordNetRelation.INSTANCE_HYPERNYM);
@@ -256,6 +259,7 @@ public final class LexicalExpander {
     return all;
   }
 
+  /** Records the candidate under its folded term when not excluded and it beats any current best. */
   private static void offer(Map<String, Expansion> best, Set<String> excluded,
                             Expansion candidate) {
     final String key = fold(candidate.term());
@@ -339,8 +343,8 @@ public final class LexicalExpander {
     }
 
     /**
-     * Configures whether direct hyponyms are included. Hyponyms narrow rather than generalize,
-     * which suits some matching tasks and hurts others, so they are off by default.
+     * Configures whether direct hyponyms are included. They are off by default because they
+     * broaden queries.
      *
      * @param includeHyponyms Whether to include direct hyponyms.
      * @return This builder.
