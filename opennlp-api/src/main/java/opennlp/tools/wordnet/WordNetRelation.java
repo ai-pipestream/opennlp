@@ -17,9 +17,8 @@
 package opennlp.tools.wordnet;
 
 /**
- * The typed relations a wordnet-style lexicon draws between {@link Synset synsets}. Both readers
- * map their format's relation names onto these values, so consumers navigate one vocabulary
- * regardless of the data tier behind the {@link LexicalKnowledgeBase} seam.
+ * The typed relations a wordnet-style lexicon draws between {@link Synset synsets}. Readers map
+ * their source format's relation names onto these values.
  *
  * <p>Relations that a source format draws between individual word senses (antonymy and
  * derivation, for example) surface here at the synset level: the synset containing the source

@@ -181,10 +181,14 @@ public final class MorphyLemmatizer implements Lemmatizer {
    * Maps a part-of-speech tag to a {@link WordNetPOS}. Package-private so tests can pin the
    * mapping directly.
    *
-   * @param tag The tag to map.
+   * @param tag The tag to map. Must not be {@code null}.
    * @return The part of speech, or {@code null} when the tag names none.
+   * @throws IllegalArgumentException Thrown if {@code tag} is {@code null}.
    */
   static WordNetPOS posFromTag(String tag) {
+    if (tag == null) {
+      throw new IllegalArgumentException("Tag must not be null");
+    }
     if (tag.isEmpty()) {
       return null;
     }

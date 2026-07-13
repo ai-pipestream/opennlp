@@ -20,9 +20,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Lemma and synset lookup over a loaded lexical-semantic resource in the WordNet family. A
- * consumer written against this seam is independent of the data tier behind it; synset identity
- * is opaque and source-qualified (see {@link Synset#id()}).
+ * Lemma and synset lookup over a loaded lexical-semantic resource in the WordNet family. Synset
+ * identity is opaque and source-qualified (see {@link Synset#id()}). Lookups return their matches
+ * in the source's sense order and never return {@code null}.
  *
  * <p>Lemma matching semantics are the implementation's concern. The reference implementations
  * match case-insensitively (case folding with the root locale) and treat the underscore some

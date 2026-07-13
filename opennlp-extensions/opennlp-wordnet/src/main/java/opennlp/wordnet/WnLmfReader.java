@@ -53,9 +53,8 @@ import opennlp.tools.wordnet.WordNetRelation;
  * relations of type {@code other} (the format's untyped escape hatch); any other unknown
  * relation type fails loud.</p>
  *
- * <p>The parser is hardened against XXE: the DTD internal subset is not processed, and external
- * entities and the external DTD subset are disabled, so a DOCTYPE is tokenized and skipped but
- * nothing it names is ever resolved. A release carrying a DOCTYPE line parses unmodified.</p>
+ * <p>The parser is hardened against XXE: DTD processing and external entities are disabled, so a
+ * DOCTYPE is skipped but nothing it names is fetched or resolved.</p>
  *
  * <p>Malformed structure fails loud with an {@link InvalidFormatException} naming the resource
  * and, where the parser provides one, the line; I/O failures propagate as {@link IOException}.
@@ -124,8 +123,7 @@ public final class WnLmfReader {
         reader.close();
       }
     } catch (XMLStreamException e) {
-      // StAX wraps a failing stream read in an XMLStreamException; surface it as the I/O
-      // failure it is instead of misreporting it as a malformed document.
+      // StAX wraps a failing stream read in an XMLStreamException; surface it as the I/O failure.
       final Throwable nested = e.getNestedException() == null ? e.getCause()
           : e.getNestedException();
       if (nested instanceof IOException io) {

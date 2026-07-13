@@ -19,6 +19,7 @@ package opennlp.wordnet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * The single home of the lemma fold and the space-separated field split this package relies on.
@@ -37,8 +38,10 @@ final class LemmaFolding {
    *
    * @param writtenForm The form as written in a source file or query. Must not be {@code null}.
    * @return The folded form.
+   * @throws NullPointerException Thrown if {@code writtenForm} is {@code null}.
    */
   static String fold(String writtenForm) {
+    Objects.requireNonNull(writtenForm, "writtenForm must not be null");
     return writtenForm.replace('_', ' ').toLowerCase(Locale.ROOT);
   }
 
