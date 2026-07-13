@@ -540,9 +540,11 @@ public final class WnLmfReader {
     }
   }
 
+  /** A parsed synset relation, kept until the target synset is known. */
   private record RawRelation(String relType, String target, int line) {
   }
 
+  /** A parsed sense relation, kept until both sense ids are known. */
   private record RawSenseRelation(String sourceSenseId, String relType, String targetSenseId,
                                   int line) {
   }

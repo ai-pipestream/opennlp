@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.wordnet.WordNetPOS;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Pins the shared fold and split behavior every user of {@link LemmaFolding} depends on:
@@ -56,5 +57,10 @@ public class LemmaFoldingTest {
     // query folded at lookup time land on the same canonical shape.
     assertEquals(InMemoryWordNetLexicon.LemmaKey.of("Domestic_Dog", WordNetPOS.NOUN),
         InMemoryWordNetLexicon.LemmaKey.of(LemmaFolding.fold("DOMESTIC_DOG"), WordNetPOS.NOUN));
+  }
+
+  @Test
+  void testFoldRejectsNull() {
+    assertThrows(IllegalArgumentException.class, () -> LemmaFolding.fold(null));
   }
 }

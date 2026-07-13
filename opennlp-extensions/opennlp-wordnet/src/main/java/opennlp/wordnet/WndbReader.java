@@ -536,6 +536,7 @@ public final class WndbReader {
     }
   }
 
+  /** A parsed pointer line, kept until the target synset is known. */
   private record RawPointer(WordNetRelation relation, String targetId, int lineNumber) {
   }
 

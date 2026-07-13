@@ -151,6 +151,7 @@ public class MorphyLemmatizerTest {
     assertNull(MorphyLemmatizer.posFromTag("ADP"));
     assertNull(MorphyLemmatizer.posFromTag("SCONJ"));
     assertNull(MorphyLemmatizer.posFromTag("SYM"));
+    assertThrows(IllegalArgumentException.class, () -> MorphyLemmatizer.posFromTag(null));
   }
 
   @Test
