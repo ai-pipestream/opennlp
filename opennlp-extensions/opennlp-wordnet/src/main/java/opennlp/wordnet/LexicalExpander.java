@@ -92,6 +92,7 @@ public final class LexicalExpander {
   private final double senseDecay;
   private final double depthDecay;
 
+  /** Creates an expander from a validated {@link Builder}. */
   private LexicalExpander(Builder builder) {
     this.lexicon = builder.lexicon;
     this.lemmatizer = builder.lemmatizer;
@@ -289,6 +290,12 @@ public final class LexicalExpander {
     private double senseDecay = 0.5;
     private double depthDecay = 0.5;
 
+    /**
+     * Creates a builder over the given lexicon; use {@link LexicalExpander#builder}.
+     *
+     * @param lexicon The knowledge base to expand against. Must not be {@code null}.
+     * @throws IllegalArgumentException Thrown if {@code lexicon} is null.
+     */
     private Builder(LexicalKnowledgeBase lexicon) {
       if (lexicon == null) {
         throw new IllegalArgumentException("The lexicon must not be null.");
