@@ -272,6 +272,7 @@ public final class LexicalExpander {
     }
   }
 
+  /** Folds a term to its case-insensitive comparison key. */
   private static String fold(String term) {
     return term.toLowerCase(Locale.ROOT);
   }
@@ -343,8 +344,7 @@ public final class LexicalExpander {
     }
 
     /**
-     * Configures whether direct hyponyms are included. They are off by default because they
-     * broaden queries.
+     * Configures whether direct hyponyms are included; off by default.
      *
      * @param includeHyponyms Whether to include direct hyponyms.
      * @return This builder.
