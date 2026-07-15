@@ -65,13 +65,19 @@
 		</para>
 		<para>
 			A document exposes the layers it holds, the annotations on any one layer, and a method
-			that returns a new document with an added layer:
-			<programlisting language="java"><![CDATA[Set<LayerKey<?>> present = document.layers();
-List<Annotation<String>> tokens = document.get(Layers.TOKENS);
-Document withTokens = document.with(Layers.TOKENS, tokens);]]></programlisting>
-			The original document is unchanged by <code>with</code>; the returned document carries
-			the new layer in addition to the ones already present. Reading a layer that is not
-			present returns an empty list rather than <code>null</code>.
+			that returns a new document with an added layer.
+			<programlisting language="java"><![CDATA[List<Annotation<String>> tokens = List.of(
+    new Annotation<>(new Span(0, 8), "Rockwell"));
+
+Document tokenized = document.with(Layers.TOKENS, tokens);
+
+Set<LayerKey<?>> present = tokenized.layers();       // contains Layers.TOKENS
+List<Annotation<String>> readBack = tokenized.get(Layers.TOKENS);]]></programlisting>
+			The original <code>document</code> is unchanged by <code>with</code>: it still has no
+			token layer, while <code>tokenized</code> carries it. A document holds at most one layer
+			per key, so <code>with</code> rejects an attempt to add a layer the document already has;
+			an annotator produces a layer once. Reading a layer that is not present returns an empty
+			list rather than <code>null</code>.
 		</para>
 	</section>
 
