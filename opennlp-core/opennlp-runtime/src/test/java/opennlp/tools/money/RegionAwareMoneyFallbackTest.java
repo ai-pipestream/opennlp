@@ -26,6 +26,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
 import opennlp.tools.geo.DocumentRegionAnnotator;
+import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
 
@@ -66,8 +67,9 @@ public class RegionAwareMoneyFallbackTest {
       throw new IllegalStateException("the geocoder must not be consulted");
     };
     final Document document = new RegionAwareMoneyAnnotator().annotate(
-        new DocumentRegionAnnotator(unreachable).annotate(
-            Document.of("the fee is $7").with(Layers.ENTITIES, List.of())));
+        new DocumentRegionAnnotator().annotate(
+            new GeocodeAnnotator(unreachable).annotate(
+                Document.of("the fee is $7").with(Layers.ENTITIES, List.of()))));
 
     final List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
     assertEquals(1, money.size());

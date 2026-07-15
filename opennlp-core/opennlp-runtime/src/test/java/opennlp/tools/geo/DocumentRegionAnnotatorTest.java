@@ -42,8 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the region ballot: geocoded mentions vote with their confidence, country-name
- * mentions vote directly through JDK locale data, and shares rank the result.
+ * Tests the locations layer and the region ballot built on it: resolved mentions keep
+ * their full resolution in the layer and vote with their confidence, country-name
+ * mentions the geocoder left unresolved vote through JDK locale data, and shares rank
+ * the result.
  */
 public class DocumentRegionAnnotatorTest {
 
@@ -56,22 +58,50 @@ public class DocumentRegionAnnotatorTest {
   /** Mirrors the annotator's fixed vote weight of a direct country-name mention. */
   private static final double COUNTRY_NAME_WEIGHT = 0.95;
 
-  /** The entity type label the annotator treats as a location by default. */
-  private static final String LOCATION = "location";
-
   /**
    * A no-break space: blank under the toolkit's whitespace definition, but not under
    * {@link String#isBlank()}.
    */
   private static final String NO_BREAK_SPACE = "\u00A0";
 
+  /**
+   * Runs the location pipeline: the geocode annotator provides the locations layer and
+   * the region annotator derives the ballot from it.
+   *
+   * @param geocoder The geocoder backing the locations layer. Must not be {@code null}.
+   * @param document The document carrying an entity layer. Must not be {@code null}.
+   * @return The document with the locations and regions layers added. Never
+   *         {@code null}.
+   */
+  private static Document annotate(Geocoder geocoder, Document document) {
+    return new DocumentRegionAnnotator()
+        .annotate(new GeocodeAnnotator(geocoder).annotate(document));
+  }
+
+  @Test
+  void testLocationsLayerKeepsTheFullResolution() {
+    final Geocoder geocoder =
+        GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
+    final String text = "a Sydney landmark";
+    final Document document = new GeocodeAnnotator(geocoder)
+        .annotate(GeoTestUtil.withLocations(text, "Sydney"));
+
+    final List<Annotation<GeoResolution>> locations =
+        document.get(GeocodeAnnotator.LOCATIONS);
+    assertEquals(1, locations.size());
+    assertEquals("AU", locations.get(0).value().entry().countryCode());
+    assertEquals(TABLE_CONFIDENCE, locations.get(0).value().confidence(), SHARE_DELTA);
+    assertEquals("Sydney",
+        locations.get(0).span().getCoveredText(text).toString());
+  }
+
   @Test
   void testGeocodedMentionsVoteWithConfidence() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(
         Map.of("Sydney", "AU", "Melbourne", "AU", "Auckland", "NZ"), TABLE_CONFIDENCE);
     final String text = "flights from Sydney and Melbourne to Auckland";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "Sydney", "Melbourne", "Auckland"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations(text, "Sydney", "Melbourne", "Auckland"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -83,12 +113,10 @@ public class DocumentRegionAnnotatorTest {
   }
 
   @Test
-  void testCountryNamesVoteWithoutTheGazetteer() {
-    // the geocoder resolves nothing; the country name still votes
+  void testCountryNamesVoteWhenTheGeocoderCannotResolve() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of());
     final String text = "mining exports from Australia rose";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "Australia"));
+    final Document document = annotate(geocoder, GeoTestUtil.withLocations(text, "Australia"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -98,18 +126,18 @@ public class DocumentRegionAnnotatorTest {
   }
 
   /**
-   * Verifies that the geocoder can override a country-name mention: {@code Georgia} is
-   * the display name of the country {@code GE}, but the geocoder resolves the mention
-   * to the US state, so the name vote is dropped and the document elects {@code US},
+   * Verifies that a resolved mention never consults the name table: {@code Georgia} is
+   * the display name of the country {@code GE}, but the locations layer resolves the
+   * mention to the US state, so the document elects {@code US} with no {@code GE} row,
    * pricing its dollars as USD rather than GEL.
    */
   @Test
-  void testGeocoderOverridesADisagreeingCountryNameMention() {
+  void testResolvedMentionOverridesTheCountryNameTable() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(
         Map.of("Georgia", "US", "Atlanta", "US"), TABLE_CONFIDENCE);
     final String text = "Georgia's secretary of state confirmed the recount in Atlanta";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "Georgia", "Atlanta"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations(text, "Georgia", "Atlanta"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -119,28 +147,26 @@ public class DocumentRegionAnnotatorTest {
   }
 
   /**
-   * Verifies that a geocoder agreeing with a country-name mention does not double the
-   * vote: {@code Australia} resolves to {@code AU} both by name and through the
-   * geocoder, so it votes once with the country-name weight and the shares stay the
-   * exact name-weight and confidence quotients.
+   * Verifies that a resolved country-name mention casts exactly one vote, at its
+   * resolution confidence: {@code Australia} resolves to {@code AU} in the locations
+   * layer, so it never adds a second name-table vote, and the two countries tie at
+   * equal confidence with the tie broken by ascending country code.
    */
   @Test
-  void testAgreeingGeocoderKeepsTheSingleCountryNameVote() {
+  void testResolvedCountryNameMentionVotesOnceWithItsConfidence() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(
         Map.of("Australia", "AU", "Auckland", "NZ"), TABLE_CONFIDENCE);
     final String text = "exports from Australia to Auckland rose";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "Australia", "Auckland"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations(text, "Australia", "Auckland"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
     assertEquals(2, ballot.size());
     assertEquals("AU", ballot.get(0).value().countryCode());
-    assertEquals(COUNTRY_NAME_WEIGHT / (COUNTRY_NAME_WEIGHT + TABLE_CONFIDENCE),
-        ballot.get(0).value().share(), SHARE_DELTA);
+    assertEquals(0.5, ballot.get(0).value().share(), SHARE_DELTA);
     assertEquals("NZ", ballot.get(1).value().countryCode());
-    assertEquals(TABLE_CONFIDENCE / (COUNTRY_NAME_WEIGHT + TABLE_CONFIDENCE),
-        ballot.get(1).value().share(), SHARE_DELTA);
+    assertEquals(0.5, ballot.get(1).value().share(), SHARE_DELTA);
   }
 
   /**
@@ -154,8 +180,8 @@ public class DocumentRegionAnnotatorTest {
     final Geocoder geocoder =
         GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
     final String text = "the Sydney office reports to New Zealand headquarters";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "Sydney", "New Zealand"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations(text, "Sydney", "New Zealand"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -172,7 +198,8 @@ public class DocumentRegionAnnotatorTest {
    * Verifies that country-name matching tolerates the spellings real text uses: the
    * CLDR display name's apostrophe (U+2019) and the ASCII apostrophe, the accented and
    * the plain spelling of a name with diacritics, and any letter case. The geocoder
-   * resolves nothing, so each match is proven by the resulting one-row ballot.
+   * resolves nothing, so no mention has a locations row and each match is proven by
+   * the name-table fallback's one-row ballot.
    *
    * @param mention The country mention as it appears in the text.
    * @param expectedCountry The ISO 3166-1 alpha-2 code the mention must elect.
@@ -187,8 +214,8 @@ public class DocumentRegionAnnotatorTest {
       "australia, AU"
   })
   void testCountryNameSpellingVariantsMatch(String mention, String expectedCountry) {
-    final Document document = new DocumentRegionAnnotator(GeoTestUtil.tableGeocoder(Map.of()))
-        .annotate(GeoTestUtil.withLocations("new offices in " + mention + " opened", mention));
+    final Document document = annotate(GeoTestUtil.tableGeocoder(Map.of()),
+        GeoTestUtil.withLocations("new offices in " + mention + " opened", mention));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -200,30 +227,33 @@ public class DocumentRegionAnnotatorTest {
   @Test
   void testNoEvidenceMeansAnEmptyBallot() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of());
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("nothing resolvable in Atlantis", "Atlantis"));
+    final Document document = annotate(geocoder,
+        GeoTestUtil.withLocations("nothing resolvable in Atlantis", "Atlantis"));
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.get(GeocodeAnnotator.LOCATIONS).isEmpty());
   }
 
   @Test
   void testNonLocationEntitiesDoNotVote() {
-    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
+    final Geocoder geocoder =
+        GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
     final String text = "Sydney Smith spoke";
     final Document document = Document.of(text)
         .with(Layers.ENTITIES,
             List.of(new Annotation<>(new Span(0, 12), "person")));
-    assertTrue(new DocumentRegionAnnotator(geocoder).annotate(document)
+    assertTrue(annotate(geocoder, document)
         .get(DocumentRegionAnnotator.REGIONS).isEmpty());
   }
 
   @Test
   void testCustomLocationTypesMatchCaseInsensitively() {
-    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
+    final Geocoder geocoder =
+        GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), TABLE_CONFIDENCE);
     final String text = "Sydney hosts the summit";
     final Document document = Document.of(text).with(Layers.ENTITIES,
         List.of(new Annotation<>(new Span(0, 6), "GPE")));
-    final Document annotated =
-        new DocumentRegionAnnotator(geocoder, Set.of("gpe")).annotate(document);
+    final Document annotated = new DocumentRegionAnnotator(Set.of("gpe"))
+        .annotate(new GeocodeAnnotator(geocoder, Set.of("gpe")).annotate(document));
 
     final List<Annotation<RegionVote>> ballot =
         annotated.get(DocumentRegionAnnotator.REGIONS);
@@ -231,34 +261,49 @@ public class DocumentRegionAnnotatorTest {
     assertEquals("AU", ballot.get(0).value().countryCode());
   }
 
+  /**
+   * Verifies that an absent locations layer is rejected as an assembly error rather
+   * than tolerated as an empty ballot, so a pipeline missing its
+   * {@link GeocodeAnnotator} stage fails loudly.
+   */
+  @Test
+  void testMissingLocationsLayerIsRejected() {
+    final Document document =
+        GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao");
+    assertThrows(IllegalArgumentException.class,
+        () -> new DocumentRegionAnnotator().annotate(document));
+  }
+
+  @Test
+  void testValidation() {
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of());
+    assertThrows(IllegalArgumentException.class, () -> new GeocodeAnnotator(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(geocoder, Set.of()));
+    assertThrows(IllegalArgumentException.class,
+        () -> new DocumentRegionAnnotator(Set.of()));
+    assertThrows(IllegalArgumentException.class,
+        () -> new DocumentRegionAnnotator().annotate(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(geocoder).annotate(null));
+  }
+
   @Test
   void testGeocoderIoFailureSurfacesUnchecked() {
     final Geocoder failing = (text, mentions) -> {
       throw new IOException("gazetteer unavailable");
     };
-    final Document document = GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao");
+    final Document document =
+        GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao");
     assertThrows(UncheckedIOException.class,
-        () -> new DocumentRegionAnnotator(failing).annotate(document));
-  }
-
-  @Test
-  void testNullGeocoderIsRejected() {
-    assertThrows(IllegalArgumentException.class, () -> new DocumentRegionAnnotator(null));
-  }
-
-  @Test
-  void testNullDocumentIsRejected() {
-    final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(GeoTestUtil.tableGeocoder(Map.of()));
-    assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
+        () -> new GeocodeAnnotator(failing).annotate(document));
   }
 
   @ParameterizedTest
   @MethodSource("invalidLocationTypes")
   void testLocationTypesAreValidated(Set<String> locationTypes) {
-    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of());
     assertThrows(IllegalArgumentException.class,
-        () -> new DocumentRegionAnnotator(geocoder, locationTypes));
+        () -> new DocumentRegionAnnotator(locationTypes));
   }
 
   private static Stream<Arguments> invalidLocationTypes() {
@@ -268,7 +313,7 @@ public class DocumentRegionAnnotatorTest {
         Arguments.of(Collections.<String>singleton(null)),
         Arguments.of(Set.of(" ")),
         Arguments.of(Set.of(NO_BREAK_SPACE)),
-        Arguments.of(Set.of(LOCATION, "")));
+        Arguments.of(Set.of(GeoTestUtil.LOCATION, "")));
   }
 
   @ParameterizedTest

@@ -55,6 +55,20 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
+   * Runs the location pipeline: the geocode annotator provides the locations layer and
+   * the region annotator derives the ballot from it.
+   *
+   * @param geocoder The geocoder backing the locations layer. Must not be {@code null}.
+   * @param document The document carrying an entity layer. Must not be {@code null}.
+   * @return The document with the locations and regions layers added. Never
+   *         {@code null}.
+   */
+  private static Document annotate(Geocoder geocoder, Document document) {
+    return new DocumentRegionAnnotator()
+        .annotate(new GeocodeAnnotator(geocoder).annotate(document));
+  }
+
+  /**
    * Verifies the ranking rule for a tie: two countries with equal weight split the
    * ballot evenly, and the tie breaks by ascending country code, so {@code FR} ranks
    * ahead of {@code GB} regardless of mention order in the text.
@@ -70,8 +84,8 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
         "London", new GeoTestUtil.ScoredCountry("GB", 0.8),
         "Paris", new GeoTestUtil.ScoredCountry("FR", 0.8)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations(text, "London", "Paris"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations(text, "London", "Paris"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -89,8 +103,8 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testCountryNamesAloneFillTheBallotWithoutGeocoderEvidence() {
-    final Document document = new DocumentRegionAnnotator(GeoTestUtil.tableGeocoder(Map.of()))
-        .annotate(GeoTestUtil.withLocations("trade between Mexico and New Zealand grew",
+    final Document document = annotate(GeoTestUtil.tableGeocoder(Map.of()),
+        GeoTestUtil.withLocations("trade between Mexico and New Zealand grew",
             "Mexico", "New Zealand"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -110,8 +124,7 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testMissingEntityLayerIsRejectedNamingTheLayer() {
-    final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder());
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(Document.of("nothing to locate here")));
     assertEquals("document lacks the required layer opennlp:entities<String>",
@@ -129,8 +142,8 @@ public class DocumentRegionBallotEdgeCaseTest {
         "Nice", new GeoTestUtil.ScoredCountry("FR", 0.3),
         "Nancy", new GeoTestUtil.ScoredCountry("FR", 0.3),
         "Chicago", new GeoTestUtil.ScoredCountry("US", 0.7)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("flights from Nice and Nancy to Chicago",
+    final Document document = annotate(geocoder,
+        GeoTestUtil.withLocations("flights from Nice and Nancy to Chicago",
             "Nice", "Nancy", "Chicago"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -152,8 +165,8 @@ public class DocumentRegionBallotEdgeCaseTest {
   void testZeroConfidenceResolutionCastsNoVote() {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
         "Bilbao", new GeoTestUtil.ScoredCountry("ES", 0.0)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao"));
+    final Document document =
+        annotate(geocoder, GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao"));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
     assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
@@ -170,8 +183,8 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
         "Bilbao", new GeoTestUtil.ScoredCountry("ES", 0.0),
         "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
+    final Document document = annotate(geocoder,
+        GeoTestUtil.withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -191,8 +204,8 @@ public class DocumentRegionBallotEdgeCaseTest {
         "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8),
         "Auckland", new GeoTestUtil.ScoredCountry("NZ", 0.7),
         "London", new GeoTestUtil.ScoredCountry("GB", 0.5)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("flights from Sydney and Auckland to London",
+    final Document document = annotate(geocoder,
+        GeoTestUtil.withLocations("flights from Sydney and Auckland to London",
             "Sydney", "Auckland", "London"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -214,9 +227,8 @@ public class DocumentRegionBallotEdgeCaseTest {
   @ParameterizedTest
   @ValueSource(strings = {"", "   "})
   void testEmptyAndWhitespaceOnlyTextsYieldAnEmptyBallot(String text) {
-    final Document document =
-        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder())
-            .annotate(Document.of(text).with(Layers.ENTITIES, List.of()));
+    final Document document = annotate(GeoTestUtil.unreachableGeocoder(),
+        Document.of(text).with(Layers.ENTITIES, List.of()));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
     assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
@@ -229,10 +241,9 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testPresentButEmptyEntityLayerYieldsAnEmptyPresentBallot() {
-    final Document document =
-        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder())
-            .annotate(Document.of("nothing to locate here")
-                .with(Layers.ENTITIES, List.of()));
+    final Document document = annotate(GeoTestUtil.unreachableGeocoder(),
+        Document.of("nothing to locate here")
+            .with(Layers.ENTITIES, List.of()));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
     assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
@@ -249,8 +260,8 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
         "Pacific", new GeoTestUtil.ScoredCountry(null, 0.9),
         "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(GeoTestUtil.withLocations("across the Pacific to Sydney",
+    final Document document = annotate(geocoder,
+        GeoTestUtil.withLocations("across the Pacific to Sydney",
             "Pacific", "Sydney"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -266,8 +277,7 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testNullDocumentIsRejected() {
-    final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder());
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
     assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 }

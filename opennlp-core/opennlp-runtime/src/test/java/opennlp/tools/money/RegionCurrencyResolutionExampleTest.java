@@ -31,6 +31,7 @@ import opennlp.tools.geo.DocumentRegionAnnotator;
 import opennlp.tools.geo.GazetteerEntry;
 import opennlp.tools.geo.GeoPoint;
 import opennlp.tools.geo.GeoResolution;
+import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
 import opennlp.tools.util.Span;
@@ -121,7 +122,8 @@ public class RegionCurrencyResolutionExampleTest {
         List.of(locationEntity("Guadalajara"), locationEntity("Boston")));
 
     final Document document = new RegionAwareMoneyAnnotator().annotate(
-        new DocumentRegionAnnotator(exampleGeocoder()).annotate(withEntities));
+        new DocumentRegionAnnotator().annotate(
+            new GeocodeAnnotator(exampleGeocoder()).annotate(withEntities)));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -149,9 +151,10 @@ public class RegionCurrencyResolutionExampleTest {
    */
   @Test
   void testReadingTheRankedBallotRows() {
-    final Document document = new DocumentRegionAnnotator(exampleGeocoder())
-        .annotate(Document.of(TEXT).with(Layers.ENTITIES,
-            List.of(locationEntity("Guadalajara"), locationEntity("Boston"))));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(exampleGeocoder()).annotate(
+            Document.of(TEXT).with(Layers.ENTITIES,
+                List.of(locationEntity("Guadalajara"), locationEntity("Boston")))));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);

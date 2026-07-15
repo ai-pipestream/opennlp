@@ -17,8 +17,6 @@
 
 package opennlp.tools.geo;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,19 +41,20 @@ import opennlp.tools.util.StringUtil;
  * {@link #REGIONS}, a document-scoped layer of span-less {@link RegionVote} rows ranked
  * by share.
  *
- * <p>Every location mention goes through the {@link Geocoder} and votes for its
- * entry's country weighted by the resolution confidence. A mention whose text is an
- * English country name, for example {@code Australia}, additionally matches a name
- * table built from JDK locale data, because place gazetteers often carry no country
- * entries. When the geocoder resolves such a mention to a different country, the
- * geocoder's resolution wins and the name vote is dropped, so {@code Georgia} next to
- * {@code Atlanta} counts for the United States rather than the Caucasus republic; when
- * the geocoder returns nothing for the mention or agrees with the name, the mention
- * casts the single name-table vote. A mention that resolves to nothing and names no
- * country does not vote, and a document without usable evidence gets an empty
- * layer.</p>
+ * <p>Two kinds of evidence vote. A location entity resolved by the
+ * {@link GeocodeAnnotator} votes for its entry's country weighted by the resolution
+ * confidence, so a coherence-aware geocoder makes the ballot sharper. A location
+ * entity the geocoder left unresolved still votes when its text is an English country
+ * name, recognized through JDK locale data, which covers gazetteers that carry no
+ * country entries. Name matching folds the spellings real text uses: NFKC
+ * normalization, the CLDR apostrophe (U+2019) folded to the ASCII apostrophe, and a
+ * diacritic-stripped fallback; aliases such as {@code USA} are out of scope. A
+ * resolved mention never consults the name table, which is what makes {@code Georgia}
+ * next to {@code Atlanta} count for the United States rather than the Caucasus
+ * republic. Mentions with neither kind of evidence do not vote; a document without
+ * usable evidence gets an empty layer.</p>
  *
- * <p>The annotator holds no per-call state and is as thread-safe as its geocoder.</p>
+ * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
@@ -87,36 +86,27 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
 
   private static final Map<String, String> COUNTRY_NAMES = countryNames();
 
-  private final Geocoder geocoder;
   private final Set<String> locationTypes;
 
   /**
    * Initializes the annotator for entities typed {@value #DEFAULT_LOCATION_TYPE}.
-   *
-   * @param geocoder The geocoder resolving location mentions. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code geocoder} is {@code null}.
    */
-  public DocumentRegionAnnotator(Geocoder geocoder) {
-    this(geocoder, Set.of(DEFAULT_LOCATION_TYPE));
+  public DocumentRegionAnnotator() {
+    this(Set.of(DEFAULT_LOCATION_TYPE));
   }
 
   /**
    * Initializes the annotator.
    *
-   * @param geocoder The geocoder resolving location mentions. Must not be {@code null}.
    * @param locationTypes The entity type labels treated as locations, matched
    *                      case-insensitively. Must not be {@code null} or empty.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or
-   *         {@code locationTypes} is empty.
+   * @throws IllegalArgumentException Thrown if {@code locationTypes} is {@code null},
+   *         empty, or contains a blank entry.
    */
-  public DocumentRegionAnnotator(Geocoder geocoder, Set<String> locationTypes) {
-    if (geocoder == null) {
-      throw new IllegalArgumentException("geocoder must not be null");
-    }
+  public DocumentRegionAnnotator(Set<String> locationTypes) {
     if (locationTypes == null || locationTypes.isEmpty()) {
       throw new IllegalArgumentException("locationTypes must not be null or empty");
     }
-    this.geocoder = geocoder;
     final Set<String> lowered = new HashSet<>(locationTypes.size());
     for (final String type : locationTypes) {
       if (type == null || StringUtil.isBlank(type)) {
@@ -131,58 +121,42 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * {@inheritDoc}
    *
    * @param document The document to annotate. Must not be {@code null} and must carry
-   *                 the {@link Layers#ENTITIES} layer.
+   *                 the {@link Layers#ENTITIES} and {@link GeocodeAnnotator#LOCATIONS}
+   *                 layers.
    * @return The document with the {@link #REGIONS} layer added. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
-   *         entity layer is absent.
-   * @throws UncheckedIOException Thrown if the {@link Geocoder} fails with an
-   *         {@link IOException}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or a
+   *         required layer is absent.
    */
   @Override
   public Document annotate(Document document) {
-    DocumentAnnotators.requireLayers(document, Layers.ENTITIES);
+    if (document == null) {
+      throw new IllegalArgumentException("document must not be null");
+    }
+    DocumentAnnotators.requireLayers(document, Layers.ENTITIES, GeocodeAnnotator.LOCATIONS);
     final CharSequence text = document.text();
+    final Map<Long, GeoResolution> resolutionsBySpan = new HashMap<>();
+    for (final Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATIONS)) {
+      resolutionsBySpan.put(spanKey(location.span()), location.value());
+    }
     final Map<String, Double> weights = new HashMap<>();
-    final Map<Span, String> nameVotes = new HashMap<>();
-    final List<Span> toGeocode = new ArrayList<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
       if (!locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
         continue;
       }
       final Span span = entity.span();
+      final GeoResolution resolution = resolutionsBySpan.get(spanKey(span));
+      if (resolution != null) {
+        final String countryCode = resolution.entry().countryCode();
+        if (countryCode != null) {
+          weights.merge(countryCode, resolution.confidence(), Double::sum);
+        }
+        continue;
+      }
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
       final String countryCode = countryCodeOf(mention);
       if (countryCode != null) {
-        nameVotes.put(span, countryCode);
+        weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
       }
-      toGeocode.add(span);
-    }
-    if (!toGeocode.isEmpty()) {
-      final List<GeoResolution> resolutions;
-      try {
-        resolutions = geocoder.resolve(text, toGeocode);
-      } catch (IOException e) {
-        throw new UncheckedIOException("Unable to geocode the document's location mentions", e);
-      }
-      for (final GeoResolution resolution : resolutions) {
-        final String countryCode = resolution.entry().countryCode();
-        if (countryCode == null) {
-          continue;
-        }
-        final String namedCountry = nameVotes.get(resolution.mention());
-        if (namedCountry == null) {
-          weights.merge(countryCode, resolution.confidence(), Double::sum);
-        } else if (!countryCode.equals(namedCountry)) {
-          // The geocoder places the mention in another country, for example the US
-          // state of Georgia; its resolution wins and the name vote is dropped.
-          nameVotes.remove(resolution.mention());
-          weights.merge(countryCode, resolution.confidence(), Double::sum);
-        }
-        // An agreeing resolution changes nothing: the mention casts its name vote once.
-      }
-    }
-    for (final String countryCode : nameVotes.values()) {
-      weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
     }
     return document.with(REGIONS, ballot(weights));
   }
@@ -250,9 +224,14 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     return top.share() - runnerUp >= minMargin ? Optional.of(top) : Optional.empty();
   }
 
+  /** Collapses a span to its offsets, so entity and resolution spans match by position. */
+  private static long spanKey(Span span) {
+    return ((long) span.getStart() << 32) | span.getEnd();
+  }
+
   @Override
   public Set<LayerKey<?>> requires() {
-    return Set.of(Layers.ENTITIES);
+    return Set.of(Layers.ENTITIES, GeocodeAnnotator.LOCATIONS);
   }
 
   @Override
