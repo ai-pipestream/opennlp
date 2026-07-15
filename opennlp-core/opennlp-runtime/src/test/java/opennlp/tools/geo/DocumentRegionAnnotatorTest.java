@@ -132,6 +132,35 @@ public class DocumentRegionAnnotatorTest {
   }
 
   @Test
+  void testFlagEmojiVotesWithoutAnyEntitySupport() {
+    final Geocoder geocoder = tableGeocoder(Map.of());
+    final Document document =
+        annotate(geocoder, withEntities("shipping update 🇦🇺 soon"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 1e-9);
+  }
+
+  @Test
+  void testConsecutiveFlagsSegmentLeftToRight() {
+    final Geocoder geocoder = tableGeocoder(Map.of());
+    final Document document = annotate(geocoder,
+        withEntities("match report 🇫🇷🇩🇪 today"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(2, ballot.size());
+    for (final Annotation<RegionVote> vote : ballot) {
+      assertTrue(vote.value().countryCode().equals("FR")
+          || vote.value().countryCode().equals("DE"));
+      assertEquals(0.5, vote.value().share(), 1e-9);
+    }
+  }
+
+  @Test
   void testNonLocationEntitiesDoNotVote() {
     final Geocoder geocoder = tableGeocoder(Map.of("Sydney", "AU"));
     final String text = "Sydney Smith spoke";
