@@ -101,6 +101,47 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     this.symbols = Map.copyOf(symbolCurrencies);
   }
 
+  /**
+   * Creates an extractor whose symbol table resolves ambiguous symbols for a region:
+   * in an Australian document, {@code $} denotes {@code AUD}.
+   *
+   * <p>The override is derived from JDK locale data: when the region's own currency is
+   * written with a single currency-sign code point in that region, that symbol maps to
+   * the region's currency, and all other defaults stay. Regions whose conventional
+   * symbol is not a single currency sign, for example a letter, keep the default table
+   * unchanged. This is the hook for document-level location evidence: once a pipeline
+   * knows where a document speaks from, money in it is identified in the right
+   * currency and can be converted through {@link FxRates}.</p>
+   *
+   * @param region A locale with a country component. Must not be {@code null} and must
+   *               name a region with a currency.
+   * @return A {@link CursorMoneyExtractor} for the region. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code region} is {@code null} or has no
+   *         currency.
+   */
+  public static CursorMoneyExtractor forRegion(java.util.Locale region) {
+    if (region == null) {
+      throw new IllegalArgumentException("region must not be null");
+    }
+    final Currency currency;
+    try {
+      currency = Currency.getInstance(region);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("region has no currency: " + region, e);
+    }
+    final String symbol = currency.getSymbol(region);
+    if (symbol.codePointCount(0, symbol.length()) != 1) {
+      return new CursorMoneyExtractor();
+    }
+    final int cp = symbol.codePointAt(0);
+    if (Character.getType(cp) != Character.CURRENCY_SYMBOL) {
+      return new CursorMoneyExtractor();
+    }
+    final Map<Integer, String> symbols = new java.util.HashMap<>(DEFAULT_SYMBOLS);
+    symbols.put(cp, currency.getCurrencyCode());
+    return new CursorMoneyExtractor(symbols);
+  }
+
   @Override
   public List<MoneyAmount> extract(CharSequence text) {
     if (text == null) {
