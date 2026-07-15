@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.document" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>The Document Model</title>
+
+	<section xml:id="tools.document.introduction">
+		<title>Introduction</title>
+		<para>
+			The package <code>opennlp.tools.document</code> provides a container that carries a
+			piece of text together with every annotation produced from it. Where the individual
+			tools in this manual each read one kind of input and return one kind of output, the
+			document model gives those outputs a common home: a single immutable object that holds
+			the original text and any number of typed annotation layers over it. Sentence
+			boundaries, tokens, part-of-speech tags, names, and any layer an application defines all
+			live side by side, each addressable by a typed key.
+		</para>
+		<para>
+			Two properties make the container useful as the backbone of a processing pipeline.
+			First, every annotation is anchored to the original text by character offsets, and those
+			offsets never change: a token span read back after ten further stages still indexes the
+			exact substring it covered when it was produced. Second, the container is immutable.
+			Adding a layer returns a new document rather than mutating the old one, so a document can
+			be shared across threads without copying and a pipeline is a plain sequence of
+			pure functions.
+		</para>
+		<para>
+			The chapters that follow describe the components that produce these layers: sentence
+			detection, tokenization, part-of-speech tagging, name finding, and the rest. This
+			chapter describes the container they share and the small interface an annotator
+			implements to take part in a pipeline.
+		</para>
+	</section>
+
+	<section xml:id="tools.document.model">
+		<title>Documents and annotations</title>
+		<para>
+			A <code>Document</code> is created from a piece of text and starts with no layers:
+			<programlisting language="java"><![CDATA[Document document = Document.of("Rockwell International Corp. said it signed an agreement.");]]></programlisting>
+			The original text is always available and is never rewritten to a derived form:
+			<programlisting language="java"><![CDATA[CharSequence text = document.text();]]></programlisting>
+		</para>
+		<para>
+			An annotation is a span of the text paired with a value. The span uses the same
+			<code>opennlp.tools.util.Span</code> type used elsewhere in the library, and its start
+			and end are offsets into <code>document.text()</code>. The value type is whatever the
+			layer carries: a string for a token or a tag, a richer record for a structured layer.
+			<programlisting language="java"><![CDATA[public record Annotation<T>(Span span, T value) { }]]></programlisting>
+			Because the span always refers to the original text, an annotation produced by a later
+			stage can be lined up with one from an earlier stage without any offset bookkeeping. A
+			part-of-speech tag and the token it describes share the same span.
+		</para>
+		<para>
+			A document exposes the layers it holds, the annotations on any one layer, and a method
+			that returns a new document with an added layer:
+			<programlisting language="java"><![CDATA[Set<LayerKey<?>> present = document.layers();
+List<Annotation<String>> tokens = document.get(Layers.TOKENS);
+Document withTokens = document.with(Layers.TOKENS, tokens);]]></programlisting>
+			The original document is unchanged by <code>with</code>; the returned document carries
+			the new layer in addition to the ones already present. Reading a layer that is not
+			present returns an empty list rather than <code>null</code>.
+		</para>
+	</section>
+
+	<section xml:id="tools.document.layers">
+		<title>Layers and typed keys</title>
+		<para>
+			A layer is identified by a <code>LayerKey</code>, which pairs a string identifier with
+			the value type carried on that layer. The type parameter is what makes
+			<code>document.get(Layers.TOKENS)</code> return a
+			<code>List&lt;Annotation&lt;String&gt;&gt;</code> without a cast: the key carries the
+			type, and the compiler checks that reads and writes agree.
+			<programlisting language="java"><![CDATA[LayerKey<String> tokens = LayerKey.of("tokens", String.class);]]></programlisting>
+			Two keys are equal when both their identifier and their type are equal, so a key can be
+			reconstructed anywhere from the same identifier and class and will address the same
+			layer.
+		</para>
+		<para>
+			The <code>Layers</code> class holds the keys the built-in annotators use, so
+			applications and annotators refer to the same layers by the same constants:
+			<informaltable frame="all">
+				<tgroup cols="2">
+					<thead>
+						<row>
+							<entry>Key</entry>
+							<entry>Value</entry>
+						</row>
+					</thead>
+					<tbody>
+						<row>
+							<entry><code>Layers.SENTENCES</code></entry>
+							<entry>one annotation per sentence</entry>
+						</row>
+						<row>
+							<entry><code>Layers.TOKENS</code></entry>
+							<entry>one annotation per token, value is the token text</entry>
+						</row>
+						<row>
+							<entry><code>Layers.POS_TAGS</code></entry>
+							<entry>one annotation per token, value is the tag</entry>
+						</row>
+						<row>
+							<entry><code>Layers.ENTITIES</code></entry>
+							<entry>one annotation per detected name, value is the type</entry>
+						</row>
+					</tbody>
+				</tgroup>
+			</informaltable>
+			An application defines its own layer by declaring a key of its own type. Nothing about
+			the container is specific to the built-in layers; a custom layer is a first-class
+			citizen addressed exactly like the built-in ones.
+		</para>
+	</section>
+
+	<section xml:id="tools.document.annotators">
+		<title>Annotators</title>
+		<para>
+			A <code>DocumentAnnotator</code> reads the layers it needs from a document and returns a
+			document with the layer it produces added. The interface is small:
+			<programlisting language="java"><![CDATA[public interface DocumentAnnotator {
+
+  Document annotate(Document document);
+
+  default Set<LayerKey<?>> requires() {
+    return Set.of();
+  }
+
+  Set<LayerKey<?>> provides();
+}]]></programlisting>
+			The <code>requires</code> and <code>provides</code> sets declare the annotator's
+			place in a pipeline: what layers must already be present for it to run, and what layers
+			it adds. An annotator that needs nothing keeps the default empty <code>requires</code>.
+		</para>
+		<para>
+			The library ships annotators that adapt the existing tools to this interface. Each wraps
+			a trained model or component and declares its layers:
+			<informaltable frame="all">
+				<tgroup cols="3">
+					<thead>
+						<row>
+							<entry>Annotator</entry>
+							<entry>Requires</entry>
+							<entry>Provides</entry>
+						</row>
+					</thead>
+					<tbody>
+						<row>
+							<entry><code>SentenceDetectorAnnotator</code></entry>
+							<entry>nothing</entry>
+							<entry><code>SENTENCES</code></entry>
+						</row>
+						<row>
+							<entry><code>TokenizerAnnotator</code></entry>
+							<entry>nothing; uses <code>SENTENCES</code> when present</entry>
+							<entry><code>TOKENS</code></entry>
+						</row>
+						<row>
+							<entry><code>POSTaggerAnnotator</code></entry>
+							<entry><code>TOKENS</code></entry>
+							<entry><code>POS_TAGS</code></entry>
+						</row>
+						<row>
+							<entry><code>NameFinderAnnotator</code></entry>
+							<entry><code>TOKENS</code></entry>
+							<entry><code>ENTITIES</code></entry>
+						</row>
+					</tbody>
+				</tgroup>
+			</informaltable>
+			The tokenizer adapter shows the offset discipline the container relies on. When the
+			sentence layer is present it tokenizes each sentence separately, then shifts each token
+			span back into original-text coordinates, so a token span read from the finished
+			document indexes the original text directly and not the sentence it was found in.
+		</para>
+	</section>
+
+	<section xml:id="tools.document.analyzer">
+		<title>Running a pipeline</title>
+		<para>
+			A <code>DocumentAnalyzer</code> holds an ordered list of annotators and runs them over a
+			piece of text. It is assembled with a builder:
+			<programlisting language="java"><![CDATA[DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+    .add(new SentenceDetectorAnnotator(sentenceDetector))
+    .add(new TokenizerAnnotator(tokenizer))
+    .add(new POSTaggerAnnotator(posTagger))
+    .build();
+
+Document document = analyzer.analyze("Rockwell International Corp. said it signed an agreement.");]]></programlisting>
+			The analyzer creates a document from the text and hands it to each annotator in turn,
+			passing the document returned by one annotator to the next. Because each
+			<code>annotate</code> call returns a new document, the analyzer simply threads the
+			document through the sequence.
+		</para>
+		<para>
+			The builder checks the pipeline when it is built. Each annotator's
+			<code>requires</code> set must be satisfied by the layers that earlier annotators
+			<code>provides</code>, or the build fails rather than leaving a pipeline that would break
+			at run time. Adding <code>POSTaggerAnnotator</code> before anything provides
+			<code>TOKENS</code>, for example, is rejected at build time.
+		</para>
+		<para>
+			Once the document is analyzed, its layers are read back with the same keys the
+			annotators used to write them:
+			<programlisting language="java"><![CDATA[List<Annotation<String>> tokens = document.get(Layers.TOKENS);
+List<Annotation<String>> tags = document.get(Layers.POS_TAGS);
+
+for (int i = 0; i < tokens.size(); i++) {
+  Span span = tokens.get(i).span();
+  System.out.println(tokens.get(i).value() + "/" + tags.get(i).value()
+      + " at [" + span.getStart() + ".." + span.getEnd() + "]");
+}]]></programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.document.custom">
+		<title>Writing a custom annotator</title>
+		<para>
+			An application adds its own analysis by implementing <code>DocumentAnnotator</code>. The
+			annotator below reads the token layer and produces a layer of acronyms, tokens of two or
+			more characters that are written entirely in uppercase letters. It declares its own key,
+			requires <code>TOKENS</code>, and provides the new layer.
+			<programlisting language="java"><![CDATA[public class AcronymAnnotator implements DocumentAnnotator {
+
+  public static final LayerKey<String> ACRONYMS =
+      LayerKey.of("acronyms", String.class);
+
+  @Override
+  public Set<LayerKey<?>> requires() {
+    return Set.of(Layers.TOKENS);
+  }
+
+  @Override
+  public Set<LayerKey<?>> provides() {
+    return Set.of(ACRONYMS);
+  }
+
+  @Override
+  public Document annotate(Document document) {
+    List<Annotation<String>> acronyms = new ArrayList<>();
+    for (Annotation<String> token : document.get(Layers.TOKENS)) {
+      if (isAcronym(token.value())) {
+        acronyms.add(new Annotation<>(token.span(), token.value()));
+      }
+    }
+    return document.with(ACRONYMS, acronyms);
+  }
+
+  private static boolean isAcronym(String form) {
+    if (form.length() < 2) {
+      return false;
+    }
+    for (int i = 0; i < form.length(); i++) {
+      if (!Character.isUpperCase(form.charAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+}]]></programlisting>
+			Reusing the token span for each acronym keeps the new layer anchored to the same
+			original-text offsets as the tokens it was derived from. The annotator drops into a
+			pipeline like any other, and because it declares that it requires <code>TOKENS</code>,
+			the builder guarantees a tokenizer runs before it.
+		</para>
+	</section>
+
+</chapter>

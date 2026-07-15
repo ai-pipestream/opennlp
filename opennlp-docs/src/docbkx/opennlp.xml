@@ -98,6 +98,7 @@ under the License.
 	<toc/>
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./introduction.xml"/>
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./project-structure.xml"/>
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./document.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./langdetect.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./sentdetect.xml"/>
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./tokenizer.xml" />
