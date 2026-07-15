@@ -20,11 +20,12 @@ package opennlp.tools.tokenize.lattice;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.zip.GZIPInputStream;
+
+import opennlp.tools.util.archive.TarStream;
 
 /**
  * Fetches and unpacks a mecab-format dictionary archive into a local directory, so the
@@ -38,15 +39,11 @@ import java.util.zip.GZIPInputStream;
  * {@code *.csv}, {@code *.def}, and {@code dicrc}. Entries are flattened to their base
  * names, which also means no archive path can escape the target directory.</p>
  *
+ * @see opennlp.tools.util.ResourceInstaller ResourceInstaller, the general tool for
+ *      user-supplied resources
  * @since 3.0.0
  */
 public final class MecabDictionaryInstaller {
-
-  private static final int TAR_BLOCK = 512;
-  private static final int TAR_NAME_LENGTH = 100;
-  private static final int TAR_SIZE_OFFSET = 124;
-  private static final int TAR_SIZE_LENGTH = 12;
-  private static final int TAR_TYPE_OFFSET = 156;
 
   private MecabDictionaryInstaller() {
     // static installer only
@@ -91,29 +88,18 @@ public final class MecabDictionaryInstaller {
       throw new IllegalArgumentException("stream and targetDirectory must not be null");
     }
     Files.createDirectories(targetDirectory);
-    final InputStream tar = new GZIPInputStream(archiveStream);
-    final byte[] header = new byte[TAR_BLOCK];
+    final TarStream entries = new TarStream(new GZIPInputStream(archiveStream));
     int extracted = 0;
-    while (readBlock(tar, header)) {
-      if (isEndBlock(header)) {
-        break;
+    while (entries.next()) {
+      if (!entries.isFile()) {
+        continue;
       }
-      final String name = headerName(header);
-      final long size = headerSize(header);
-      final char type = (char) header[TAR_TYPE_OFFSET];
-      final String baseName = baseName(name);
-      final boolean wanted = (type == '0' || type == 0)
-          && (baseName.endsWith(".csv") || baseName.endsWith(".def")
-              || "dicrc".equals(baseName));
-      if (wanted) {
-        final Path file = targetDirectory.resolve(baseName);
-        try (InputStream entry = boundedStream(tar, size)) {
-          Files.copy(entry, file, StandardCopyOption.REPLACE_EXISTING);
-        }
+      final String baseName = baseName(entries.name());
+      if (baseName.endsWith(".csv") || baseName.endsWith(".def")
+          || "dicrc".equals(baseName)) {
+        Files.copy(entries.entryStream(), targetDirectory.resolve(baseName),
+            StandardCopyOption.REPLACE_EXISTING);
         extracted++;
-        skip(tar, padding(size));
-      } else {
-        skip(tar, size + padding(size));
       }
     }
     if (extracted == 0) {
@@ -122,105 +108,8 @@ public final class MecabDictionaryInstaller {
     return extracted;
   }
 
-  private static boolean readBlock(InputStream in, byte[] block) throws IOException {
-    int filled = 0;
-    while (filled < block.length) {
-      final int read = in.read(block, filled, block.length - filled);
-      if (read < 0) {
-        if (filled == 0) {
-          return false;
-        }
-        throw new IOException("truncated tar header");
-      }
-      filled += read;
-    }
-    return true;
-  }
-
-  private static boolean isEndBlock(byte[] block) {
-    for (final byte b : block) {
-      if (b != 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private static String headerName(byte[] header) {
-    int end = 0;
-    while (end < TAR_NAME_LENGTH && header[end] != 0) {
-      end++;
-    }
-    return new String(header, 0, end, StandardCharsets.UTF_8);
-  }
-
-  private static long headerSize(byte[] header) throws IOException {
-    long size = 0;
-    for (int i = TAR_SIZE_OFFSET; i < TAR_SIZE_OFFSET + TAR_SIZE_LENGTH; i++) {
-      final byte b = header[i];
-      if (b == 0 || b == ' ') {
-        continue;
-      }
-      if (b < '0' || b > '7') {
-        throw new IOException("malformed tar size field");
-      }
-      size = size * 8 + (b - '0');
-    }
-    return size;
-  }
-
   private static String baseName(String name) {
     final int slash = name.lastIndexOf('/');
     return slash < 0 ? name : name.substring(slash + 1);
-  }
-
-  private static long padding(long size) {
-    final long remainder = size % TAR_BLOCK;
-    return remainder == 0 ? 0 : TAR_BLOCK - remainder;
-  }
-
-  private static void skip(InputStream in, long bytes) throws IOException {
-    long remaining = bytes;
-    final byte[] buffer = new byte[8192];
-    while (remaining > 0) {
-      final int read = in.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-      if (read < 0) {
-        throw new IOException("truncated tar entry");
-      }
-      remaining -= read;
-    }
-  }
-
-  /** Wraps the tar stream so exactly one entry's bytes are readable. */
-  private static InputStream boundedStream(InputStream in, long size) {
-    return new InputStream() {
-      private long remaining = size;
-
-      @Override
-      public int read() throws IOException {
-        if (remaining <= 0) {
-          return -1;
-        }
-        final int b = in.read();
-        if (b < 0) {
-          throw new IOException("truncated tar entry");
-        }
-        remaining--;
-        return b;
-      }
-
-      @Override
-      public int read(byte[] buffer, int offset, int length) throws IOException {
-        if (remaining <= 0) {
-          return -1;
-        }
-        final int read = in.read(buffer, offset, (int) Math.min(length, remaining));
-        if (read < 0) {
-          throw new IOException("truncated tar entry");
-        }
-        remaining -= read;
-        return read;
-      }
-    };
   }
 }
