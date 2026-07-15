@@ -19,9 +19,9 @@ package opennlp.tools.pii;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * A deterministic {@link PiiExtractor}: forward scans over the text, no regular
@@ -118,7 +118,7 @@ public class CursorPiiExtractor implements PiiExtractor {
         continue;
       }
       final String normalized =
-          text.subSequence(start, end).toString().toLowerCase(Locale.ROOT);
+          StringUtil.toLowerCase(text.subSequence(start, end));
       hits.add(new Hit(start, end, PRIORITY_EMAIL,
           new PiiMention(new Span(start, end), PiiMention.TYPE_EMAIL, normalized)));
     }

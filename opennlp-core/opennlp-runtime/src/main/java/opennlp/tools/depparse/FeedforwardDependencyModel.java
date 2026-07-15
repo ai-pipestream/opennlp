@@ -27,8 +27,9 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
+
+import opennlp.tools.util.StringUtil;
 
 /**
  * The weights of the feedforward transition parser: embeddings for words, tags, and arc
@@ -147,7 +148,7 @@ public class FeedforwardDependencyModel {
     if (word == null) {
       return null;
     }
-    return word.startsWith("*") ? word : word.toLowerCase(Locale.ROOT);
+    return word.startsWith("*") ? word : StringUtil.toLowerCase(word);
   }
 
   private static int lookup(Map<String, Integer> ids, String symbol) {

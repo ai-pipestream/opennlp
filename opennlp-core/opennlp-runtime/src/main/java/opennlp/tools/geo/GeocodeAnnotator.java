@@ -22,7 +22,6 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import opennlp.tools.document.Annotation;
@@ -31,6 +30,7 @@ import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Geocodes the location entities of a document: reads {@link Layers#ENTITIES} and
@@ -85,7 +85,7 @@ public class GeocodeAnnotator implements DocumentAnnotator {
       if (type == null || type.isBlank()) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
-      lowered.add(type.toLowerCase(Locale.ROOT));
+      lowered.add(StringUtil.toLowerCase(type));
     }
     this.geocoder = geocoder;
     this.locationTypes = Set.copyOf(lowered);
@@ -98,7 +98,7 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     }
     final List<Span> mentions = new ArrayList<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
-      if (locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
+      if (locationTypes.contains(StringUtil.toLowerCase(entity.value()))) {
         mentions.add(entity.span());
       }
     }

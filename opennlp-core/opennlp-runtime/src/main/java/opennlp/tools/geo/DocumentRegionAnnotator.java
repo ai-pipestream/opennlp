@@ -31,6 +31,7 @@ import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 import opennlp.tools.util.normalizer.EmojiFlags;
 
 /**
@@ -95,7 +96,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       if (type == null || type.isBlank()) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
-      lowered.add(type.toLowerCase(Locale.ROOT));
+      lowered.add(StringUtil.toLowerCase(type));
     }
     this.locationTypes = Set.copyOf(lowered);
   }
@@ -112,7 +113,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
-      if (!locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
+      if (!locationTypes.contains(StringUtil.toLowerCase(entity.value()))) {
         continue;
       }
       final Span span = entity.span();
@@ -125,7 +126,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
         continue;
       }
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
-      final String countryCode = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
+      final String countryCode = COUNTRY_NAMES.get(StringUtil.toLowerCase(mention));
       if (countryCode != null) {
         weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
       }
@@ -202,7 +203,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     for (final String code : Locale.getISOCountries()) {
       final String name = Locale.of("", code).getDisplayCountry(Locale.ENGLISH);
       if (!name.isEmpty() && !name.equals(code)) {
-        names.put(name.toLowerCase(Locale.ROOT), code);
+        names.put(StringUtil.toLowerCase(name), code);
       }
     }
     return Map.copyOf(names);
