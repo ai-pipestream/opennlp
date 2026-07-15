@@ -169,4 +169,79 @@ for (Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATION
 		</para>
 	</section>
 
+	<section xml:id="tools.geo.hierarchy">
+		<title>Administrative hierarchy</title>
+		<para>
+			A resolved place sits inside larger places: a neighborhood inside a city, the city
+			inside a state, the state inside a country. A <code>PlaceHierarchy</code> answers, for a
+			given place identifier, the chain of places that contain it, nearest first.
+			<programlisting language="java"><![CDATA[public interface PlaceHierarchy {
+
+  List<PlaceAncestor> ancestors(String id);
+}]]></programlisting>
+			Each <code>PlaceAncestor</code> carries the identifier, name, and type of one enclosing
+			place, and a <code>ContainmentChain</code> is the ordered list of them from the nearest
+			enclosing place out to the largest.
+		</para>
+		<para>
+			<code>ContainmentSpine</code> is a hierarchy built from a table the application supplies.
+			Its builder takes places one at a time, or reads them in bulk from one of two formats. A
+			neutral tab-separated table lists <code>id</code>, <code>parent_id</code>,
+			<code>name</code>, and <code>type</code> per line, with an empty parent for a root; a
+			result exported from a knowledge base that records administrative containment drops
+			straight into this format. A Who's On First meta CSV is read by its own header columns
+			<code>id</code>, <code>parent_id</code>, <code>name</code>, and <code>placetype</code>.
+			<programlisting language="java"><![CDATA[// a neutral containment table the application assembles
+PlaceHierarchy fromTable = ContainmentSpine.builder()
+    .addTable(Path.of("containment.tsv"))
+    .build();
+
+// a Who's On First meta CSV the application downloads
+PlaceHierarchy fromWof = ContainmentSpine.builder()
+    .addWofMeta(Path.of("whosonfirst-admin-meta.csv"))
+    .build();
+
+// or place by place
+PlaceHierarchy built = ContainmentSpine.builder()
+    .add("85869245", "85843091", "Park Slope", "neighbourhood")
+    .add("85843091", "85977539", "Brooklyn", "borough")
+    .build();]]></programlisting>
+			As with the large gazetteers, the Who's On First data is downloaded by the application
+			and is not distributed with OpenNLP.
+		</para>
+		<para>
+			<code>HierarchyAnnotator</code> adds the containment chain of each resolved place to a
+			document. It requires the locations layer produced by the geocoder and provides its own
+			<code>CONTAINMENT</code> key, one <code>ContainmentChain</code> per resolved place whose
+			identifier the hierarchy knows. It reads the identifier from a gazetteer attribute on the
+			resolved entry, by default <code>ATTRIBUTE_KEY_WHOSONFIRST</code>; a second constructor
+			takes the attribute key to use, so a spine keyed on another identifier joins on that
+			attribute instead.
+			<programlisting language="java"><![CDATA[DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+    .add(new SentenceDetectorAnnotator(sentenceDetector))
+    .add(new TokenizerAnnotator(tokenizer))
+    .add(new NameFinderAnnotator(locationFinder))
+    .add(new GeocodeAnnotator(geocoder))
+    .add(new HierarchyAnnotator(hierarchy))
+    .build();
+
+Document document = analyzer.analyze(text);
+
+for (Annotation<ContainmentChain> annotation : document.get(HierarchyAnnotator.CONTAINMENT)) {
+  StringBuilder path = new StringBuilder();
+  for (PlaceAncestor ancestor : annotation.value().ancestors()) {
+    if (path.length() > 0) {
+      path.append(" -> ");
+    }
+    path.append(ancestor.name());
+  }
+  System.out.println(path);
+}]]></programlisting>
+			For a mention resolved to Park Slope, the chain prints as
+			<literal>Park Slope -&gt; Brooklyn -&gt; New York City -&gt; New York -&gt; United States</literal>.
+			A place the hierarchy does not know contributes no annotation; nothing is invented for a
+			missing join.
+		</para>
+	</section>
+
 </chapter>
