@@ -29,6 +29,9 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
+import opennlp.tools.temporal.CursorTemporalExtractor;
+import opennlp.tools.temporal.DocumentDateAnnotator;
+import opennlp.tools.temporal.TemporalAnnotator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -86,6 +89,39 @@ public class MoneyConversionAnnotatorTest {
     // no CHF column in the fixture, so only the USD mention converts
     assertEquals(1, converted.size());
     assertEquals(0, BigDecimal.TEN.compareTo(converted.get(0).value().amount()));
+  }
+
+  @Test
+  void testDocumentDateAnchorsTheConversion() throws IOException {
+    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
+    final Document document = DocumentAnalyzer.builder()
+        .add(new TemporalAnnotator(new CursorTemporalExtractor()))
+        .add(new DocumentDateAnnotator())
+        .add(new MoneyAnnotator(CursorMoneyExtractor.forRegion(Locale.of("en", "AU"))))
+        .add(new MoneyConversionAnnotator(rates, "USD"))
+        .build()
+        .analyze("Sydney, 2026-07-10. The house sold for $900,000 at auction.");
+
+    final List<Annotation<MoneyAmount>> converted =
+        document.get(MoneyConversionAnnotator.CONVERTED_MONEY);
+    assertEquals(1, converted.size());
+    assertEquals("USD", converted.get(0).value().currency());
+    assertEquals(0, new BigDecimal("600000").compareTo(converted.get(0).value().amount()));
+  }
+
+  @Test
+  void testNoDocumentDateConvertsNothing() throws IOException {
+    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
+    final Document document = DocumentAnalyzer.builder()
+        .add(new TemporalAnnotator(new CursorTemporalExtractor()))
+        .add(new DocumentDateAnnotator())
+        .add(new MoneyAnnotator(new CursorMoneyExtractor()))
+        .add(new MoneyConversionAnnotator(rates, "USD"))
+        .build()
+        .analyze("the undated draft mentions $10");
+
+    assertEquals(1, document.get(MoneyAnnotator.MONEY).size());
+    assertEquals(0, document.get(MoneyConversionAnnotator.CONVERTED_MONEY).size());
   }
 
   @Test
