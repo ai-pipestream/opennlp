@@ -35,13 +35,14 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
+import opennlp.tools.util.normalizer.EmojiFlags;
 
 /**
  * Derives the countries a document is about from its location entities and provides
  * {@link #REGIONS}, a document-scoped layer of span-less {@link RegionVote} rows ranked
  * by share.
  *
- * <p>Two kinds of evidence vote. A location entity resolved by the
+ * <p>Three kinds of evidence vote. A location entity resolved by the
  * {@link GeocodeAnnotator} votes for its entry's country weighted by the resolution
  * confidence, so a coherence-aware geocoder makes the ballot sharper. A location
  * entity the geocoder left unresolved still votes when its text is an English country
@@ -51,8 +52,9 @@ import opennlp.tools.util.StringUtil;
  * diacritic-stripped fallback; aliases such as {@code USA} are out of scope. A
  * resolved mention never consults the name table, which is what makes {@code Georgia}
  * next to {@code Atlanta} count for the United States rather than the Caucasus
- * republic. Mentions with neither kind of evidence do not vote; a document without
- * usable evidence gets an empty layer.</p>
+ * republic. A flag emoji anywhere in the text votes for its region, needing no
+ * entity layer support at all. Mentions with no kind of evidence do not vote; a
+ * document without usable evidence gets an empty layer.</p>
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
@@ -75,6 +77,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    */
   private static final double COUNTRY_NAME_WEIGHT = 0.95;
 
+  /** The weight of a flag emoji, as explicit a signal as a country name. */
+  private static final double FLAG_WEIGHT = 0.95;
+
   /** The entity type label treated as a location unless the caller names others. */
   private static final String DEFAULT_LOCATION_TYPE = "location";
 
@@ -85,6 +90,8 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   private static final char RIGHT_SINGLE_QUOTATION_MARK = '’';
 
   private static final Map<String, String> COUNTRY_NAMES = countryNames();
+
+  private static final Set<String> ISO_COUNTRIES = Set.of(Locale.getISOCountries());
 
   private final Set<String> locationTypes;
 
@@ -158,7 +165,37 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
         weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
       }
     }
+    flagVotes(text, weights);
     return document.with(REGIONS, ballot(weights));
+  }
+
+  /**
+   * Adds one vote per flag emoji in the text. Consecutive flags are segmented left to
+   * right, so two adjacent flags never form a spurious middle pair, and only assigned
+   * ISO country codes vote.
+   *
+   * @param text The document text.
+   * @param weights The running weight sums by country code.
+   */
+  private static void flagVotes(CharSequence text, Map<String, Double> weights) {
+    int i = 0;
+    while (i < text.length()) {
+      final int first = Character.codePointAt(text, i);
+      final int width = Character.charCount(first);
+      if (EmojiFlags.isRegionalIndicator(first) && i + width < text.length()) {
+        final int second = Character.codePointAt(text, i + width);
+        if (EmojiFlags.isRegionalIndicator(second)) {
+          final int end = i + width + Character.charCount(second);
+          final String code = EmojiFlags.isoRegion(text.subSequence(i, end)).orElse(null);
+          if (code != null && ISO_COUNTRIES.contains(code)) {
+            weights.merge(code, FLAG_WEIGHT, Double::sum);
+          }
+          i = end;
+          continue;
+        }
+      }
+      i += width;
+    }
   }
 
   /**
