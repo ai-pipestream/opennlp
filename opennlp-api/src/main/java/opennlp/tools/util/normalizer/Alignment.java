@@ -147,22 +147,21 @@ public final class Alignment {
       final int start = middleStart < normalizedLength() ? originalStart[middleStart] : originalLength;
       final int end = middleEnd > 0 ? originalEnd[middleEnd - 1] : 0;
       starts[f] = start;
-      // Math.max keeps the original span non-inverted. When next inserted this final character
-      // (a zero-width middle range, middleStart == middleEnd) the max collapses it to a zero-width
-      // original span -- correct for every insertion except one landing strictly inside an
-      // expansion this stage produced, where the characters on either side share one atomic
-      // original block (originalEnd[middleEnd - 1] > originalStart[middleStart]) that has no
-      // interior offset to point at. There the insertion is attributed to that whole block, the
-      // only choice that keeps originalStart/originalEnd sorted so toOriginalSpan/toNormalizedSpan
-      // keep their O(log n) search; forcing it to zero-width would push originalEnd below its
-      // predecessor and corrupt the reverse mapping.
+      // Math.max keeps the original span non-inverted and keeps originalStart/originalEnd sorted so
+      // the span mappings retain their binary search.
       ends[f] = Math.max(start, end);
     }
     return new Alignment(starts, ends, originalLength);
   }
 
-  // First normalized index whose original coverage ends strictly after offset (so it covers or
-  // follows offset); normalizedLength() when offset is at or past the last covered original char.
+  /**
+   * Finds the first normalized index whose original coverage ends strictly after {@code offset}, so
+   * it covers or follows {@code offset}.
+   *
+   * @param offset An original offset.
+   * @return The first matching normalized index, or {@link #normalizedLength()} when {@code offset}
+   *     is at or past the last covered original character.
+   */
   private int firstIndexEndingAfter(int offset) {
     int low = 0;
     int high = originalEnd.length;
@@ -177,7 +176,12 @@ public final class Alignment {
     return low;
   }
 
-  // First normalized index whose original coverage starts at or after offset.
+  /**
+   * Finds the first normalized index whose original coverage starts at or after {@code offset}.
+   *
+   * @param offset An original offset.
+   * @return The first matching normalized index.
+   */
   private int firstIndexStartingAtOrAfter(int offset) {
     int low = 0;
     int high = originalStart.length;
@@ -192,6 +196,14 @@ public final class Alignment {
     return low;
   }
 
+  /**
+   * Validates that {@code [start, end)} is a half-open range within {@code [0, length]}.
+   *
+   * @param start The inclusive start offset.
+   * @param end The exclusive end offset.
+   * @param length The length bounding the range.
+   * @throws IndexOutOfBoundsException Thrown if the offsets are out of range or inverted.
+   */
   private static void checkRange(int start, int end, int length) {
     if (start < 0 || end > length || start > end) {
       throw new IndexOutOfBoundsException("span [" + start + ", " + end + ") is outside [0, "
@@ -207,11 +219,37 @@ public final class Alignment {
   public static final class Builder {
 
     private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+    private static final int DEFAULT_CAPACITY = 16;
 
-    private int[] starts = new int[16];
-    private int[] ends = new int[16];
+    private int[] starts;
+    private int[] ends;
     private int count;
     private int originalCursor;
+
+    /** Creates a builder with a small default capacity. */
+    public Builder() {
+      this(DEFAULT_CAPACITY);
+    }
+
+    /**
+     * Creates a builder pre-sized for a normalized text of about {@code expectedLength}
+     * characters, so recording the edits of a typical pass (one entry per normalized character)
+     * does not regrow the backing arrays. The value is a sizing hint only; it does not limit how
+     * many edits can be recorded.
+     *
+     * @param expectedLength The expected normalized length, typically the length of the text
+     *     being normalized; must not be negative.
+     * @throws IllegalArgumentException Thrown if {@code expectedLength} is negative.
+     */
+    public Builder(int expectedLength) {
+      if (expectedLength < 0) {
+        throw new IllegalArgumentException(
+            "The expectedLength must not be negative: " + expectedLength);
+      }
+      final int capacity = Math.max(DEFAULT_CAPACITY, expectedLength);
+      starts = new int[capacity];
+      ends = new int[capacity];
+    }
 
     /**
      * Records {@code charCount} characters copied through unchanged (a one to one run).
@@ -272,6 +310,12 @@ public final class Alignment {
       return new Alignment(Arrays.copyOf(starts, count), Arrays.copyOf(ends, count), originalLength);
     }
 
+    /**
+     * Appends one normalized character's original range, growing the backing arrays as needed.
+     *
+     * @param start The inclusive original start offset.
+     * @param end The exclusive original end offset.
+     */
     private void append(int start, int end) {
       if (count == starts.length) {
         grow();
@@ -281,8 +325,11 @@ public final class Alignment {
       count++;
     }
 
-    // Overflow-aware 1.5x growth: never wraps to a negative capacity, degrades to a clean
-    // OutOfMemoryError at the array-size ceiling instead of NegativeArraySizeException.
+    /**
+     * Grows the backing arrays by 1.5x, capped at the maximum array size.
+     *
+     * @throws OutOfMemoryError Thrown when the required capacity exceeds the maximum array size.
+     */
     private void grow() {
       int newCapacity = starts.length + (starts.length >> 1);
       if (newCapacity < 0 || newCapacity > MAX_ARRAY_SIZE) {

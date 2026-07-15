@@ -32,22 +32,35 @@ public class DigitCharSequenceNormalizer implements OffsetAwareNormalizer {
 
   private static final DigitCharSequenceNormalizer INSTANCE = new DigitCharSequenceNormalizer();
 
+  // The ten ASCII digit strings, precomputed so the mapper does not allocate a new single-char
+  // String for every digit it folds.
+  private static final String[] ASCII_DIGITS =
+      {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
+
   /** {@return the shared, stateless instance} */
   public static DigitCharSequenceNormalizer getInstance() {
     return INSTANCE;
   }
 
+  /** {@inheritDoc} */
   @Override
   public CharSequence normalize(CharSequence text) {
     return CharClass.substitute(text, DigitCharSequenceNormalizer::toAscii);
   }
 
-  // The ASCII digit for a Unicode decimal digit code point, or null to copy the code point through.
+  /**
+   * Maps a code point to its ASCII digit fold.
+   *
+   * @param codePoint The code point to fold.
+   * @return The ASCII digit string for a non-ASCII Unicode decimal digit, or {@code null} to copy
+   *     the code point through (ASCII digits are already their own fold).
+   */
   private static String toAscii(int codePoint) {
     final int value = Character.digit(codePoint, 10);
-    return value >= 0 ? String.valueOf((char) ('0' + value)) : null;
+    return value >= 0 && codePoint != '0' + value ? ASCII_DIGITS[value] : null;
   }
 
+  /** {@inheritDoc} */
   @Override
   public AlignedText normalizeAligned(CharSequence text) {
     return CharClass.substituteAligned(text, DigitCharSequenceNormalizer::toAscii);
