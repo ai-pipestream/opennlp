@@ -1,0 +1,133 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package opennlp.tools.postag;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import opennlp.tools.util.ObjectStreamUtils;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/**
+ * Tests the pure-Java neural tagging tier end to end: training on a tiny corpus must
+ * let the greedy feedforward tagger reproduce the training sentences, and a model must
+ * survive the serialization round trip with identical behavior.
+ */
+public class FeedforwardPOSTaggerTest {
+
+  private static FeedforwardPOSModel model;
+  private static FeedforwardPOSTagger tagger;
+
+  private static List<POSSample> corpus() {
+    final List<POSSample> distinct = List.of(
+        new POSSample(new String[] {"the", "dog", "barks"},
+            new String[] {"DT", "NN", "VBZ"}),
+        new POSSample(new String[] {"dogs", "bark"}, new String[] {"NNS", "VBP"}),
+        new POSSample(new String[] {"she", "eats", "fish"},
+            new String[] {"PRP", "VBZ", "NN"}));
+    final List<POSSample> corpus = new ArrayList<>();
+    for (int i = 0; i < 40; i++) {
+      corpus.addAll(distinct);
+    }
+    return corpus;
+  }
+
+  @BeforeAll
+  static void trainTagger() throws IOException {
+    // dropout off so the tiny network memorizes deterministically
+    final FeedforwardPOSTrainer.Settings settings = new FeedforwardPOSTrainer.Settings(
+        16, 32, 80, 32, 0.05, 0.0, 0.0, 1, 1, 17L);
+    model = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings);
+    tagger = new FeedforwardPOSTagger(model);
+  }
+
+  @Test
+  void testMemorizesTrainingSentences() {
+    assertArrayEquals(new String[] {"DT", "NN", "VBZ"},
+        tagger.tag(new String[] {"the", "dog", "barks"}));
+    assertArrayEquals(new String[] {"PRP", "VBZ", "NN"},
+        tagger.tag(new String[] {"she", "eats", "fish"}));
+  }
+
+  @Test
+  void testUnknownWordsStillGetTagsFromTheInventory() {
+    final String[] assigned = tagger.tag(new String[] {"the", "cat", "sleeps"});
+    assertEquals(3, assigned.length);
+    final List<String> inventory = List.of(model.tags());
+    for (final String tag : assigned) {
+      assertEquals(true, inventory.contains(tag));
+    }
+  }
+
+  @Test
+  void testModelRoundTripThroughSerialization() throws IOException {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    model.serialize(out);
+    final FeedforwardPOSModel reloaded =
+        FeedforwardPOSModel.load(new ByteArrayInputStream(out.toByteArray()));
+    assertArrayEquals(tagger.tag(new String[] {"the", "dog", "barks"}),
+        new FeedforwardPOSTagger(reloaded).tag(new String[] {"the", "dog", "barks"}));
+  }
+
+  @Test
+  void testCorruptModelFailsLoud() {
+    assertThrows(IOException.class, () -> FeedforwardPOSModel.load(
+        new ByteArrayInputStream("not a model".getBytes())));
+  }
+
+  @Test
+  void testShapesAndSuffixes() {
+    assertEquals("*cap*", FeedforwardPOSContext.shape("Paris"));
+    assertEquals("*allcaps*", FeedforwardPOSContext.shape("USA"));
+    assertEquals("*digit*", FeedforwardPOSContext.shape("2020"));
+    assertEquals("*alnum*", FeedforwardPOSContext.shape("B2B"));
+    assertEquals("*other*", FeedforwardPOSContext.shape("--"));
+    assertEquals("*lower*", FeedforwardPOSContext.shape("dog"));
+    assertEquals("og", FeedforwardPOSContext.suffix("dog", 2));
+    assertEquals("dog", FeedforwardPOSContext.suffix("dog", 3));
+    assertEquals("ing", FeedforwardPOSContext.suffix("running", 3));
+  }
+
+  @Test
+  void testTopKSequencesIsUnsupported() {
+    assertThrows(UnsupportedOperationException.class,
+        () -> tagger.topKSequences(new String[] {"the"}));
+  }
+
+  @Test
+  void testArgumentValidation() {
+    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTagger(null));
+    assertThrows(IllegalArgumentException.class, () -> tagger.tag(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> FeedforwardPOSTrainer.train(null, FeedforwardPOSTrainer.Settings.defaults()));
+    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
+        0, 32, 10, 32, 0.05, 0.0, 0.0, 1, 1, 17L));
+    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
+        16, 32, 10, 32, 0.05, 0.0, 1.0, 1, 1, 17L));
+  }
+}
