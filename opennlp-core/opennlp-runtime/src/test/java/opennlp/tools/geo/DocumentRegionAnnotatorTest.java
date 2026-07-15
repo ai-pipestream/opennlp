@@ -34,8 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the region ballot: geocoded mentions vote with their confidence, country-name
- * mentions vote directly through JDK locale data, and shares rank the result.
+ * Tests the locations layer and the region ballot built on it: resolved mentions keep
+ * their full resolution in the layer and vote with their confidence, country-name
+ * mentions vote through JDK locale data, and shares rank the result.
  */
 public class DocumentRegionAnnotatorTest {
 
@@ -69,13 +70,34 @@ public class DocumentRegionAnnotatorTest {
     return Document.of(text).with(Layers.ENTITIES, entities);
   }
 
+  private static Document annotate(Geocoder geocoder, Document document) {
+    return new DocumentRegionAnnotator()
+        .annotate(new GeocodeAnnotator(geocoder).annotate(document));
+  }
+
+  @Test
+  void testLocationsLayerKeepsTheFullResolution() {
+    final Geocoder geocoder = tableGeocoder(Map.of("Sydney", "AU"));
+    final String text = "a Sydney landmark";
+    final Document document =
+        new GeocodeAnnotator(geocoder).annotate(withEntities(text, "Sydney"));
+
+    final List<Annotation<GeoResolution>> locations =
+        document.get(GeocodeAnnotator.LOCATIONS);
+    assertEquals(1, locations.size());
+    assertEquals("AU", locations.get(0).value().entry().countryCode());
+    assertEquals(0.8, locations.get(0).value().confidence(), 1e-9);
+    assertEquals("Sydney",
+        locations.get(0).span().getCoveredText(text).toString());
+  }
+
   @Test
   void testGeocodedMentionsVoteWithConfidence() {
     final Geocoder geocoder = tableGeocoder(
         Map.of("Sydney", "AU", "Melbourne", "AU", "Auckland", "NZ"));
     final String text = "flights from Sydney and Melbourne to Auckland";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withEntities(text, "Sydney", "Melbourne", "Auckland"));
+    final Document document =
+        annotate(geocoder, withEntities(text, "Sydney", "Melbourne", "Auckland"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -87,12 +109,10 @@ public class DocumentRegionAnnotatorTest {
   }
 
   @Test
-  void testCountryNamesVoteWithoutTheGazetteer() {
-    // the geocoder resolves nothing; the country name still votes
+  void testCountryNamesVoteWhenTheGeocoderCannotResolve() {
     final Geocoder geocoder = tableGeocoder(Map.of());
     final String text = "mining exports from Australia rose";
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withEntities(text, "Australia"));
+    final Document document = annotate(geocoder, withEntities(text, "Australia"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -104,9 +124,10 @@ public class DocumentRegionAnnotatorTest {
   @Test
   void testNoEvidenceMeansAnEmptyBallot() {
     final Geocoder geocoder = tableGeocoder(Map.of());
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withEntities("nothing resolvable in Atlantis", "Atlantis"));
+    final Document document =
+        annotate(geocoder, withEntities("nothing resolvable in Atlantis", "Atlantis"));
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.get(GeocodeAnnotator.LOCATIONS).isEmpty());
   }
 
   @Test
@@ -116,18 +137,22 @@ public class DocumentRegionAnnotatorTest {
     final Document document = Document.of(text)
         .with(Layers.ENTITIES,
             List.of(new Annotation<>(new Span(0, 12), "person")));
-    assertTrue(new DocumentRegionAnnotator(geocoder).annotate(document)
+    assertTrue(annotate(geocoder, document)
         .get(DocumentRegionAnnotator.REGIONS).isEmpty());
   }
 
   @Test
   void testValidation() {
     final Geocoder geocoder = tableGeocoder(Map.of());
-    assertThrows(IllegalArgumentException.class, () -> new DocumentRegionAnnotator(null));
+    assertThrows(IllegalArgumentException.class, () -> new GeocodeAnnotator(null));
     assertThrows(IllegalArgumentException.class,
-        () -> new DocumentRegionAnnotator(geocoder, Set.of()));
+        () -> new GeocodeAnnotator(geocoder, Set.of()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DocumentRegionAnnotator(geocoder).annotate(null));
+        () -> new DocumentRegionAnnotator(Set.of()));
+    assertThrows(IllegalArgumentException.class,
+        () -> new DocumentRegionAnnotator().annotate(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(geocoder).annotate(null));
   }
 
   @Test
