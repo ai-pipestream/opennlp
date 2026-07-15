@@ -160,10 +160,11 @@ for (Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATION
 }]]></programlisting>
 		</para>
 		<para>
-			By default the annotator treats every entity as a candidate location. A second
-			constructor takes the set of entity types to geocode, so a pipeline whose name finder
-			emits several entity types can restrict geocoding to the location type it uses.
-			<programlisting language="java"><![CDATA[new GeocodeAnnotator(geocoder, Set.of("location"));]]></programlisting>
+			By default the annotator geocodes the entities whose type is
+			<literal>location</literal>, matched without regard to case. A second constructor takes
+			the set of entity type labels to treat as locations, so a pipeline whose name finder
+			labels places differently, or under more than one label, names those labels instead.
+			<programlisting language="java"><![CDATA[new GeocodeAnnotator(geocoder, Set.of("location", "gpe"));]]></programlisting>
 			The locations layer keeps the original mention spans, so a resolved place lines up with
 			the entity it came from and with every other layer in the document.
 		</para>
@@ -181,7 +182,8 @@ for (Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATION
 }]]></programlisting>
 			Each <code>PlaceAncestor</code> carries the identifier, name, and type of one enclosing
 			place, and a <code>ContainmentChain</code> is the ordered list of them from the nearest
-			enclosing place out to the largest.
+			enclosing place out to the largest. The place whose ancestors are requested is not itself
+			part of the chain.
 		</para>
 		<para>
 			<code>ContainmentSpine</code> is a hierarchy built from a table the application supplies.
@@ -202,10 +204,24 @@ PlaceHierarchy fromWof = ContainmentSpine.builder()
     .build();
 
 // or place by place
-PlaceHierarchy built = ContainmentSpine.builder()
-    .add("85869245", "85843091", "Park Slope", "neighbourhood")
-    .add("85843091", "85977539", "Brooklyn", "borough")
+PlaceHierarchy hierarchy = ContainmentSpine.builder()
+    .add("parkslope", "brooklyn", "Park Slope", "neighbourhood")
+    .add("brooklyn", "nyc", "Brooklyn", "borough")
+    .add("nyc", "nystate", "New York City", "locality")
+    .add("nystate", "usa", "New York", "region")
+    .add("usa", null, "United States", "country")
     .build();]]></programlisting>
+			The identifiers here are the application's own; a real spine uses the identifiers of the
+			source it was built from. Asking for the ancestors of a place returns the enclosing
+			places, nearest first, and not the place itself:
+			<programlisting language="java"><![CDATA[for (PlaceAncestor ancestor : hierarchy.ancestors("parkslope")) {
+  System.out.println(ancestor.name());
+}]]></programlisting>
+			prints
+			<screen><![CDATA[Brooklyn
+New York City
+New York
+United States]]></screen>
 			As with the large gazetteers, the Who's On First data is downloaded by the application
 			and is not distributed with OpenNLP.
 		</para>
@@ -237,10 +253,12 @@ for (Annotation<ContainmentChain> annotation : document.get(HierarchyAnnotator.C
   }
   System.out.println(path);
 }]]></programlisting>
-			For a mention resolved to Park Slope, the chain prints as
-			<literal>Park Slope -&gt; Brooklyn -&gt; New York City -&gt; New York -&gt; United States</literal>.
-			A place the hierarchy does not know contributes no annotation; nothing is invented for a
-			missing join.
+			For a mention resolved to the Park Slope place above, the annotation on the containment
+			layer holds that place's enclosing chain, the same
+			<literal>Brooklyn, New York City, New York, United States</literal> that
+			<code>ancestors</code> returns; the resolved place itself is not part of the chain. A
+			place the hierarchy does not know contributes no annotation, and nothing is invented for
+			a missing join.
 		</para>
 	</section>
 
