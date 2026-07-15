@@ -67,6 +67,18 @@ public class TermAnalyzerTest {
   }
 
   @Test
+  void testFullCaseFoldOrdersBeforeAccentFoldRegardlessOfBuilderOrder() {
+    // accentFold added before fullCaseFold, but FULL_CASE_FOLD is declared before ACCENT_FOLD in
+    // Dimension, so the canonical order still runs the case fold first.
+    final TermAnalyzer analyzer = TermAnalyzer.builder().accentFold().fullCaseFold().build();
+    assertEquals(List.of(Dimension.FULL_CASE_FOLD, Dimension.ACCENT_FOLD), analyzer.dimensions());
+    final String input = "CAF" + cp(0x00C9); // CAFE with capital acute E
+    final Term term = analyzer.analyze(input).get(0);
+    assertEquals("cafe", term.normalized());
+    assertEquals("caf" + cp(0x00E9), term.peel()); // before accent folding: lower-case, acute kept
+  }
+
+  @Test
   void testStemIsTheTopLayer() {
     final TermAnalyzer analyzer =
         TermAnalyzer.builder().caseFold().stem(new PorterStemmer()).build();
@@ -152,10 +164,7 @@ public class TermAnalyzerTest {
 
   @Test
   void testLemmatizerReturningNullFailsLoudlyInsteadOfOverflowing() {
-    // A contract-violating Lemmatizer that returns a null lemma must surface as a clear
-    // IllegalStateException. Before this guard the null was cached under LEMMA, read as "absent"
-    // by Term.at's lazy cache, and recomputed through normalized() forever, surfacing as a
-    // StackOverflowError far from the cause.
+    // Pins that a Lemmatizer returning a null lemma fails with a clear IllegalStateException.
     final Lemmatizer broken = new Lemmatizer() {
       @Override
       public String[] lemmatize(String[] tokens, String[] tags) {
@@ -393,5 +402,47 @@ public class TermAnalyzerTest {
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  @Test
+  void testCaseFoldThenFullCaseFoldFailsLoudly() {
+    assertThrows(IllegalStateException.class,
+        () -> TermAnalyzer.builder().caseFold().fullCaseFold());
+  }
+
+  @Test
+  void testFullCaseFoldThenCaseFoldFailsLoudly() {
+    assertThrows(IllegalStateException.class,
+        () -> TermAnalyzer.builder().fullCaseFold().caseFold());
+  }
+
+  @Test
+  void testFullCaseFoldThenLocaleCaseFoldFailsLoudly() {
+    assertThrows(IllegalStateException.class,
+        () -> TermAnalyzer.builder().fullCaseFold().caseFold(Locale.forLanguageTag("tr")));
+  }
+
+  @Test
+  void testCaseFoldThenFullCaseFoldViaTransformFailsLoudly() {
+    // The guard must also hold when the fold arrives through the generic transform(...) entry.
+    assertThrows(IllegalStateException.class,
+        () -> TermAnalyzer.builder().caseFold().transform(Dimension.FULL_CASE_FOLD,
+            FullCaseFoldCharSequenceNormalizer.getInstance()));
+  }
+
+  @Test
+  void testFullCaseFoldThenCaseFoldViaTransformFailsLoudly() {
+    assertThrows(IllegalStateException.class,
+        () -> TermAnalyzer.builder().fullCaseFold().transform(Dimension.CASE_FOLD,
+            CaseFoldCharSequenceNormalizer.getInstance()));
+  }
+
+  @Test
+  void testFullCaseFoldExpandsThroughTheTermModel() {
+    // Full case folding is an expanding fold, so it also exercises the Term stack on a length change.
+    final TermAnalyzer analyzer = TermAnalyzer.builder().fullCaseFold().build();
+    final Term term = analyzer.analyze("Ma" + cp(0x00DF) + "e").get(0); // Ma<sharp-s>e
+    assertEquals("masse", term.normalized());
+    assertEquals("masse", term.at(Dimension.FULL_CASE_FOLD));
   }
 }
