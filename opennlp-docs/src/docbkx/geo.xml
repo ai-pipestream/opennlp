@@ -244,4 +244,41 @@ for (Annotation<ContainmentChain> annotation : document.get(HierarchyAnnotator.C
 		</para>
 	</section>
 
+	<section xml:id="tools.geo.profiles">
+		<title>Place similarity</title>
+		<para>
+			Two places can be alike without sharing a name or appearing together in text. Place
+			similarity compares places by what is measured about them: population density, median
+			income, transit access, whatever an application chooses to record. Each place carries a
+			numeric profile, and two places are similar when their profiles are.
+		</para>
+		<para>
+			<code>PlaceProfiles</code> loads a table the application supplies. The table is
+			tab-separated, with a header of <code>id</code> followed by one column per metric, then
+			one place per line with its identifier and one value per metric.
+			<programlisting language="java"><![CDATA[id	density	income	transit
+park-slope	38000	95000	9
+brooklyn-heights	36000	110000	9
+suburbia	2000	85000	2
+rural-town	150	45000	1]]></programlisting>
+			At load the columns are standardized to mean zero and unit variance, so metrics measured
+			in different units contribute comparably rather than the largest-numbered column
+			dominating. A column that never varies contributes nothing.
+			<programlisting language="java"><![CDATA[PlaceProfiles profiles = PlaceProfiles.load(Path.of("place-profiles.tsv"));]]></programlisting>
+		</para>
+		<para>
+			Places compare by the cosine of their standardized profiles, in the range minus one to
+			one, and <code>mostSimilar</code> ranks the other places by that measure.
+			<programlisting language="java"><![CDATA[double alike = profiles.similarity("park-slope", "brooklyn-heights");
+
+for (PlaceProfiles.Neighbor neighbor : profiles.mostSimilar("park-slope", 5)) {
+  System.out.println(neighbor.id() + "\t" + neighbor.similarity());
+}]]></programlisting>
+			The measure is grounded entirely in the supplied metrics, so the quality of the result
+			follows the quality of the table. Assembling metric tables from public sources such as
+			census and tax data is a data task an application takes on itself; the engine and its
+			table format are what the extension provides.
+		</para>
+	</section>
+
 </chapter>
