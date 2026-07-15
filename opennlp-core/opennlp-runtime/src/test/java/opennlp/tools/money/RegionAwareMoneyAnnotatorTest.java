@@ -110,7 +110,8 @@ public class RegionAwareMoneyAnnotatorTest {
 
     final Document document = DocumentAnalyzer.builder()
         .add(entities)
-        .add(new DocumentRegionAnnotator(geocoder))
+        .add(new opennlp.tools.geo.GeocodeAnnotator(geocoder))
+        .add(new DocumentRegionAnnotator())
         .add(new RegionAwareMoneyAnnotator())
         .add(new MoneyConversionAnnotator(rates, "USD", LocalDate.parse("2026-07-10")))
         .build()
