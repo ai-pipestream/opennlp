@@ -1,0 +1,124 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package opennlp.geo;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+import opennlp.tools.document.Annotation;
+import opennlp.tools.document.Document;
+import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.LayerKey;
+import opennlp.tools.geo.AttributeValue;
+import opennlp.tools.geo.ContainmentChain;
+import opennlp.tools.geo.GazetteerEntry;
+import opennlp.tools.geo.GeoResolution;
+import opennlp.tools.geo.GeocodeAnnotator;
+import opennlp.tools.geo.PlaceAncestor;
+import opennlp.tools.geo.PlaceHierarchy;
+
+/**
+ * Expands each resolved location into the places that contain it: reads the geocoded
+ * locations layer, joins each entry to a {@link PlaceHierarchy} through a configured
+ * attribute key, and provides {@link #CONTAINMENT}, one annotation per expandable
+ * mention carrying its {@link ContainmentChain} on the mention's span.
+ *
+ * <p>A mention whose entry lacks the join attribute, or whose identifier the hierarchy
+ * does not know, simply gets no chain; nothing is invented. The default join key is the
+ * conventional Who's On First attribute, matching the identifiers the bundled
+ * gazetteer derivations carry.</p>
+ *
+ * <p>The annotator holds no per-call state; it is as thread-safe as its hierarchy.</p>
+ *
+ * @since 3.0.0
+ */
+public class HierarchyAnnotator implements DocumentAnnotator {
+
+  /**
+   * Containment chains; each annotation covers one resolved mention and carries its
+   * {@link ContainmentChain}.
+   */
+  public static final LayerKey<ContainmentChain> CONTAINMENT =
+      LayerKey.of("containment", ContainmentChain.class);
+
+  private final PlaceHierarchy hierarchy;
+  private final String attributeKey;
+
+  /**
+   * Initializes the annotator joining on the Who's On First attribute.
+   *
+   * @param hierarchy The hierarchy to walk. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code hierarchy} is {@code null}.
+   */
+  public HierarchyAnnotator(PlaceHierarchy hierarchy) {
+    this(hierarchy, GazetteerEntry.ATTRIBUTE_KEY_WHOSONFIRST);
+  }
+
+  /**
+   * Initializes the annotator.
+   *
+   * @param hierarchy The hierarchy to walk. Must not be {@code null}.
+   * @param attributeKey The gazetteer attribute holding the identifier in the
+   *                     hierarchy's identifier space. Must not be {@code null} or
+   *                     blank.
+   * @throws IllegalArgumentException Thrown if {@code hierarchy} is {@code null} or
+   *         {@code attributeKey} is {@code null} or blank.
+   */
+  public HierarchyAnnotator(PlaceHierarchy hierarchy, String attributeKey) {
+    if (hierarchy == null) {
+      throw new IllegalArgumentException("hierarchy must not be null");
+    }
+    if (attributeKey == null || attributeKey.isBlank()) {
+      throw new IllegalArgumentException("attributeKey must not be null or blank");
+    }
+    this.hierarchy = hierarchy;
+    this.attributeKey = attributeKey;
+  }
+
+  @Override
+  public Document annotate(Document document) {
+    if (document == null) {
+      throw new IllegalArgumentException("document must not be null");
+    }
+    final List<Annotation<ContainmentChain>> chains = new ArrayList<>();
+    for (final Annotation<GeoResolution> location
+        : document.get(GeocodeAnnotator.LOCATIONS)) {
+      final AttributeValue joinId =
+          location.value().entry().attributes().get(attributeKey);
+      if (joinId == null) {
+        continue;
+      }
+      final List<PlaceAncestor> ancestors = hierarchy.ancestors(joinId.value());
+      if (!ancestors.isEmpty()) {
+        chains.add(new Annotation<>(location.span(), new ContainmentChain(ancestors)));
+      }
+    }
+    return document.with(CONTAINMENT, chains);
+  }
+
+  @Override
+  public Set<LayerKey<?>> requires() {
+    return Set.of(GeocodeAnnotator.LOCATIONS);
+  }
+
+  @Override
+  public Set<LayerKey<?>> provides() {
+    return Set.of(CONTAINMENT);
+  }
+}
