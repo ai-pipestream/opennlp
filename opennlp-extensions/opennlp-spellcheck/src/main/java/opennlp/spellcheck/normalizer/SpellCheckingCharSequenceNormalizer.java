@@ -19,13 +19,13 @@ package opennlp.spellcheck.normalizer;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.regex.Pattern;
 
 import opennlp.spellcheck.SpellChecker;
 import opennlp.spellcheck.SuggestItem;
 import opennlp.spellcheck.Verbosity;
 import opennlp.spellcheck.dictionary.SymSpellModel;
+import opennlp.tools.util.StringUtil;
 import opennlp.tools.util.normalizer.AggregateCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.CharSequenceNormalizer;
 
@@ -36,7 +36,9 @@ import opennlp.tools.util.normalizer.CharSequenceNormalizer;
  * <p>The normalizer works in one of two {@linkplain Mode modes}:</p>
  * <ul>
  *   <li>{@link Mode#PER_TOKEN PER_TOKEN} (default) &ndash; the input is split into
- *       whitespace-delimited tokens and each token is corrected independently with
+ *       whitespace-delimited tokens (whitespace being the Unicode {@code White_Space}
+ *       set, {@link StringUtil#isUnicodeWhitespace(int)}) and each token is corrected
+ *       independently with
  *       {@link SpellChecker#lookup}. The original whitespace runs between tokens are
  *       preserved verbatim, so the shape of the line is kept. Tokens the dictionary
  *       already contains (best suggestion at edit distance {@code 0}) are left
@@ -133,11 +135,14 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
    * @param model the loaded model whose engine is used; must not be {@code null}
    */
   public SpellCheckingCharSequenceNormalizer(SymSpellModel model) {
-    this(Objects.requireNonNull(model, "model must not be null").getSymSpell());
+    this(builder(model));
   }
 
   private SpellCheckingCharSequenceNormalizer(Builder b) {
-    this.spellChecker = Objects.requireNonNull(b.spellChecker, "spellChecker must not be null");
+    if (b.spellChecker == null) {
+      throw new IllegalArgumentException("spellChecker must not be null");
+    }
+    this.spellChecker = b.spellChecker;
     this.mode = b.mode;
     this.minTokenLength = b.minTokenLength;
     // The engine throws if a query exceeds its configured maximum, so clamp to it; an
@@ -152,7 +157,10 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
    * @return a new {@link Builder} seeded with sensible defaults
    */
   public static Builder builder(SpellChecker spellChecker) {
-    return new Builder(Objects.requireNonNull(spellChecker, "spellChecker must not be null"));
+    if (spellChecker == null) {
+      throw new IllegalArgumentException("spellChecker must not be null");
+    }
+    return new Builder(spellChecker);
   }
 
   /**
@@ -160,7 +168,10 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
    * @return a new {@link Builder} seeded with sensible defaults
    */
   public static Builder builder(SymSpellModel model) {
-    return new Builder(Objects.requireNonNull(model, "model must not be null").getSymSpell());
+    if (model == null) {
+      throw new IllegalArgumentException("model must not be null");
+    }
+    return new Builder(model.getSymSpell());
   }
 
   /**
@@ -214,10 +225,10 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
     int i = 0;
     final int n = input.length();
     while (i < n) {
-      // Copy a run of whitespace verbatim.
-      if (Character.isWhitespace(input.charAt(i))) {
+      // Copy a run of whitespace (the Unicode White_Space set) verbatim.
+      if (StringUtil.isUnicodeWhitespace(input.charAt(i))) {
         final int start = i;
-        while (i < n && Character.isWhitespace(input.charAt(i))) {
+        while (i < n && StringUtil.isUnicodeWhitespace(input.charAt(i))) {
           i++;
         }
         out.append(input, start, i);
@@ -225,7 +236,7 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
       }
       // Take a non-whitespace token and correct it.
       final int start = i;
-      while (i < n && !Character.isWhitespace(input.charAt(i))) {
+      while (i < n && !StringUtil.isUnicodeWhitespace(input.charAt(i))) {
         i++;
       }
       out.append(correctToken(input.substring(start, i)));
@@ -344,7 +355,10 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
      * @return this builder
      */
     public Builder mode(Mode value) {
-      this.mode = Objects.requireNonNull(value, "mode must not be null");
+      if (value == null) {
+        throw new IllegalArgumentException("mode must not be null");
+      }
+      this.mode = value;
       return this;
     }
 
