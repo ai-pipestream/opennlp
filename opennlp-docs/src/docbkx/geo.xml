@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.geo" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Geographic Resolution</title>
+
+	<section xml:id="tools.geo.introduction">
+		<title>Introduction</title>
+		<para>
+			The <code>opennlp-geo</code> extension turns place names into places on the map. Where
+			the name finder tells an application that a span of text is a location, geographic
+			resolution tells it <emphasis>which</emphasis> location: it takes the mention, looks it
+			up in a gazetteer of known places, chooses among the candidates that share the name, and
+			returns the chosen record with its coordinates. A mention of "Springfield" resolves to
+			one of the many Springfields; a document that also mentions "Illinois" pushes the choice
+			toward the one in Illinois.
+		</para>
+		<para>
+			The extension is built around two small interfaces. A <code>Gazetteer</code> is a
+			lookup over a body of place records. A <code>Geocoder</code> chooses among the
+			candidates a gazetteer returns for the mentions in a piece of text. A document annotator
+			ties the two into a pipeline, reading the entity layer produced by the name finder and
+			adding a layer of resolved locations. Later sections of this chapter add an
+			administrative hierarchy over the resolved places and a similarity measure between
+			places.
+		</para>
+		<para>
+			The extension bundles a small worldwide gazetteer so it works out of the box, and it
+			reads the large open gazetteer formats that an application supplies itself. Consistent
+			with the rest of the library, the large data sets are never packaged: the application
+			downloads the source it wants and points the loader at it, accepting that source's
+			license in doing so.
+		</para>
+	</section>
+
+	<section xml:id="tools.geo.gazetteer">
+		<title>Gazetteers</title>
+		<para>
+			A <code>Gazetteer</code> answers three questions about places: which records carry a
+			given name, which record a source identifies by its own record id, and which record
+			represents a country. Every method may touch backing storage and so may throw
+			<code>IOException</code>.
+			<programlisting language="java"><![CDATA[public interface Gazetteer {
+
+  List<GazetteerEntry> lookup(CharSequence name) throws IOException;
+
+  Optional<GazetteerEntry> byId(String source, String recordId) throws IOException;
+
+  Optional<GazetteerEntry> byRegion(String isoCountryCode) throws IOException;
+
+  Set<String> sources() throws IOException;
+}]]></programlisting>
+		</para>
+		<para>
+			A <code>GazetteerEntry</code> is the record of one place. It carries the source it came
+			from and that source's record id, the primary name and any alternate names, the location
+			as a <code>GeoPoint</code>, the ISO country code, a coarse feature class, a list of the
+			identifiers of the places that contain it, and a map of source-specific attributes. The
+			<code>GeoPoint</code> holds a latitude and longitude in WGS84 decimal degrees, both
+			range-checked when the point is created.
+			<programlisting language="java"><![CDATA[GeoPoint point = entry.location();
+double lat = point.latitude();
+double lon = point.longitude();]]></programlisting>
+		</para>
+		<para>
+			The attribute map is how a record carries identifiers that do not belong to the core
+			fields, for example a Wikidata id or a census geoid. The keys follow the
+			<code>ATTRIBUTE_KEY_*</code> constants published on <code>GazetteerEntry</code>, so an
+			application reads an attribute by the same constant a loader wrote it with. The
+			administrative hierarchy later in this chapter joins on the
+			<code>ATTRIBUTE_KEY_WHOSONFIRST</code> attribute in exactly this way.
+		</para>
+		<para>
+			Three gazetteer implementations ship with the extension. <code>BundledGazetteer</code>
+			is a small worldwide gazetteer packaged with the extension and used through
+			<code>getInstance</code>; it needs no external data and is the quickest way to try the
+			pipeline. <code>GeoNamesGazetteer</code> reads the GeoNames tab-separated format, and
+			<code>OvertureGazetteer</code> reads the Overture division format; both are loaded from a
+			file or stream the application supplies.
+			<programlisting language="java"><![CDATA[// bundled, no external data
+Gazetteer bundled = BundledGazetteer.getInstance();
+
+// a downloaded GeoNames table the application supplies
+Gazetteer geonames = GeoNamesGazetteer.load(Path.of("allCountries.txt"));
+
+// a downloaded Overture division table
+Gazetteer overture = OvertureGazetteer.load(Path.of("divisions.tsv"));]]></programlisting>
+			The GeoNames and Overture data sets are downloaded by the application from their
+			publishers and are not distributed with OpenNLP.
+		</para>
+	</section>
+
+	<section xml:id="tools.geo.geocoding">
+		<title>Geocoding</title>
+		<para>
+			A <code>Geocoder</code> resolves the location mentions in a piece of text against a
+			gazetteer. It is given the text and the spans of the mentions, and returns one
+			<code>GeoResolution</code> per mention it could resolve.
+			<programlisting language="java"><![CDATA[public interface Geocoder {
+
+  List<GeoResolution> resolve(CharSequence text, List<Span> locationMentions)
+      throws IOException;
+}]]></programlisting>
+			A <code>GeoResolution</code> pairs the mention span with the chosen
+			<code>GazetteerEntry</code> and a confidence in the choice.
+			<programlisting language="java"><![CDATA[public record GeoResolution(Span mention, GazetteerEntry entry, double confidence) { }]]></programlisting>
+		</para>
+		<para>
+			Two geocoders ship with the extension, and both take a gazetteer to resolve against.
+			<code>PopulationPriorGeocoder</code> chooses each mention independently, preferring the
+			most prominent candidate for the name. <code>SpatialCoherenceGeocoder</code> resolves
+			the mentions of a document together, preferring a set of choices that sit near one
+			another, so the other places named in a document inform each individual choice.
+			<programlisting language="java"><![CDATA[Gazetteer gazetteer = BundledGazetteer.getInstance();
+Geocoder geocoder = new SpatialCoherenceGeocoder(gazetteer);
+
+List<GeoResolution> resolved = geocoder.resolve(text, mentions);]]></programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.geo.annotator">
+		<title>Geocoding in a document pipeline</title>
+		<para>
+			<code>GeocodeAnnotator</code> runs a geocoder as part of a document pipeline. It reads
+			the entity layer produced by the name finder, resolves the location mentions among those
+			entities, and provides a locations layer whose annotations carry the full
+			<code>GeoResolution</code> for each resolved mention. It requires
+			<code>Layers.ENTITIES</code> and provides its own <code>LOCATIONS</code> key.
+			<programlisting language="java"><![CDATA[Gazetteer gazetteer = BundledGazetteer.getInstance();
+Geocoder geocoder = new SpatialCoherenceGeocoder(gazetteer);
+
+DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+    .add(new SentenceDetectorAnnotator(sentenceDetector))
+    .add(new TokenizerAnnotator(tokenizer))
+    .add(new NameFinderAnnotator(locationFinder))
+    .add(new GeocodeAnnotator(geocoder))
+    .build();
+
+Document document = analyzer.analyze(text);
+
+for (Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATIONS)) {
+  GeoResolution resolution = location.value();
+  GeoPoint point = resolution.entry().location();
+  System.out.println(resolution.mention().getCoveredText(text)
+      + " -> " + resolution.entry().name()
+      + " (" + point.latitude() + ", " + point.longitude() + ")");
+}]]></programlisting>
+		</para>
+		<para>
+			By default the annotator treats every entity as a candidate location. A second
+			constructor takes the set of entity types to geocode, so a pipeline whose name finder
+			emits several entity types can restrict geocoding to the location type it uses.
+			<programlisting language="java"><![CDATA[new GeocodeAnnotator(geocoder, Set.of("location"));]]></programlisting>
+			The locations layer keeps the original mention spans, so a resolved place lines up with
+			the entity it came from and with every other layer in the document.
+		</para>
+	</section>
+
+</chapter>
