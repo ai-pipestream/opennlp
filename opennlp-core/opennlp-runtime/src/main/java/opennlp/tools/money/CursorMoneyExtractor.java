@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.util.Span;
 
 /**
@@ -69,8 +70,6 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       Map.entry(0x20AB, "VND"));  // dong sign
 
   private static final Set<String> ISO_CODES = isoCodes();
-
-  private static final int NO_MATCH = -1;
 
   private final Map<Integer, String> symbols;
 
@@ -128,21 +127,22 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   private MoneyAmount matchAt(CharSequence text, int start) {
     int i = start;
     boolean negative = false;
-    if (charAt(text, i) == '-') {
+    if (NumberScan.charAt(text, i) == '-') {
       negative = true;
       i++;
     }
-    final int cp = codePointAt(text, i);
-    if (cp != NO_MATCH && symbols.containsKey(cp)) {
+    final int cp = NumberScan.codePointAt(text, i);
+    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)) {
       return symbolFirst(text, start, i, negative);
     }
-    if (!negative && isUpperAscii(cp) && boundaryBefore(text, i)) {
+    if (!negative && isUpperAscii(cp) && NumberScan.boundaryBefore(text, i)) {
       final MoneyAmount isoFirst = isoFirst(text, start, i);
       if (isoFirst != null) {
         return isoFirst;
       }
     }
-    if (isAsciiDigit(cp) && (negative ? boundaryBefore(text, start) : boundaryBefore(text, i))) {
+    if (NumberScan.isAsciiDigit(cp)
+        && NumberScan.boundaryBefore(text, negative ? start : i)) {
       return numberFirst(text, start, i, negative);
     }
     return null;
@@ -151,152 +151,58 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   /** Matches {@code $1,234.56}, {@code -$5}, {@code $1.2M}, {@code $ 100}. */
   private MoneyAmount symbolFirst(CharSequence text, int start, int symbolIndex,
       boolean negative) {
-    final String currency = symbols.get(codePointAt(text, symbolIndex));
-    int i = symbolIndex + Character.charCount(codePointAt(text, symbolIndex));
-    if (charAt(text, i) == ' ') {
+    final String currency = symbols.get(NumberScan.codePointAt(text, symbolIndex));
+    int i = symbolIndex + Character.charCount(NumberScan.codePointAt(text, symbolIndex));
+    if (NumberScan.charAt(text, i) == ' ') {
       i++;
     }
-    final Number number = parseNumber(text, i);
-    if (number == null) {
-      return null;
-    }
-    return mention(text, start, number, currency, negative);
+    return mention(text, start, NumberScan.parse(text, i, true), currency, negative);
   }
 
   /** Matches {@code USD 100} and {@code USD 1.2 million}. */
   private MoneyAmount isoFirst(CharSequence text, int start, int codeIndex) {
     final String code = isoCodeAt(text, codeIndex);
-    if (code == null || charAt(text, codeIndex + 3) != ' ') {
+    if (code == null || NumberScan.charAt(text, codeIndex + 3) != ' ') {
       return null;
     }
-    final Number number = parseNumber(text, codeIndex + 4);
-    if (number == null) {
-      return null;
-    }
-    return mention(text, start, number, code, false);
+    return mention(text, start, NumberScan.parse(text, codeIndex + 4, true), code, false);
   }
 
   /** Matches {@code 100 USD}, {@code 50}{@code €}, and {@code 3.5m USD}. */
   private MoneyAmount numberFirst(CharSequence text, int start, int digitIndex,
       boolean negative) {
-    final Number number = parseNumber(text, digitIndex);
+    final NumberScan.Result number = NumberScan.parse(text, digitIndex, true);
     if (number == null) {
       return null;
     }
-    final int cp = codePointAt(text, number.end);
-    if (cp != NO_MATCH && symbols.containsKey(cp)) {
-      final Number extended = new Number(number.value,
-          number.end + Character.charCount(cp));
+    final int cp = NumberScan.codePointAt(text, number.end());
+    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)) {
+      final NumberScan.Result extended = new NumberScan.Result(number.value(),
+          number.end() + Character.charCount(cp));
       return mention(text, start, extended, symbols.get(cp), negative);
     }
     if (cp == ' ') {
-      final String code = isoCodeAt(text, number.end + 1);
+      final String code = isoCodeAt(text, number.end() + 1);
       if (code != null) {
-        return mention(text, start, new Number(number.value, number.end + 4),
-            code, negative);
+        return mention(text, start,
+            new NumberScan.Result(number.value(), number.end() + 4), code, negative);
       }
     }
     return null;
   }
 
-  private MoneyAmount mention(CharSequence text, int start, Number number,
+  private MoneyAmount mention(CharSequence text, int start, NumberScan.Result number,
       String currency, boolean negative) {
-    if (number == null || !boundaryAfter(text, number.end)) {
+    if (number == null || !NumberScan.boundaryAfter(text, number.end())) {
       return null;
     }
-    final BigDecimal amount = negative ? number.value.negate() : number.value;
-    return new MoneyAmount(new Span(start, number.end), amount, currency);
-  }
-
-  /**
-   * Parses a number with optional strict digit grouping, an optional decimal part, and
-   * an optional scale marker. Returns {@code null} when no valid number starts here or
-   * an immediate letter suffix is not a known scale marker.
-   */
-  private static Number parseNumber(CharSequence text, int start) {
-    int i = start;
-    int digits = 0;
-    final StringBuilder normalized = new StringBuilder();
-    while (isAsciiDigit(charAt(text, i))) {
-      normalized.append(text.charAt(i));
-      i++;
-      digits++;
-    }
-    if (digits == 0) {
-      return null;
-    }
-    if (charAt(text, i) == ',' && digits <= 3) {
-      while (charAt(text, i) == ',' && groupOfThree(text, i + 1)) {
-        normalized.append(text, i + 1, i + 4);
-        i += 4;
-      }
-    }
-    if (charAt(text, i) == '.' && isAsciiDigit(charAt(text, i + 1))) {
-      normalized.append('.');
-      i++;
-      while (isAsciiDigit(charAt(text, i))) {
-        normalized.append(text.charAt(i));
-        i++;
-      }
-    }
-    final BigDecimal value = new BigDecimal(normalized.toString());
-    return parseScale(text, i, value);
-  }
-
-  /**
-   * Applies an immediate suffix scale ({@code k}, {@code m}, {@code b}, {@code bn}) or a
-   * following scale word ({@code thousand} to {@code trillion}). An immediate letter
-   * that is not a scale marker invalidates the whole match, so {@code $5x} is not money.
-   */
-  private static Number parseScale(CharSequence text, int end, BigDecimal value) {
-    final char suffix = Character.toLowerCase(charAt(text, end));
-    if (Character.isLetter(suffix)) {
-      final boolean bn = suffix == 'b' && Character.toLowerCase(charAt(text, end + 1)) == 'n';
-      final int suffixEnd = end + (bn ? 2 : 1);
-      final long scale = switch (suffix) {
-        case 'k' -> 1_000L;
-        case 'm' -> 1_000_000L;
-        case 'b' -> 1_000_000_000L;
-        default -> 0L;
-      };
-      if (scale == 0L || Character.isLetterOrDigit(charAt(text, suffixEnd))) {
-        return null;
-      }
-      return new Number(value.multiply(BigDecimal.valueOf(scale)), suffixEnd);
-    }
-    if (charAt(text, end) == ' ') {
-      final Number worded = parseScaleWord(text, end + 1, value);
-      if (worded != null) {
-        return worded;
-      }
-    }
-    return new Number(value, end);
-  }
-
-  /** Parses a scale word after the number; absence is not an error. */
-  private static Number parseScaleWord(CharSequence text, int start, BigDecimal value) {
-    int i = start;
-    final StringBuilder word = new StringBuilder();
-    while (Character.isLetter(charAt(text, i)) && word.length() <= 8) {
-      word.append(Character.toLowerCase(text.charAt(i)));
-      i++;
-    }
-    final long scale = switch (word.toString()) {
-      case "thousand" -> 1_000L;
-      case "million" -> 1_000_000L;
-      case "billion" -> 1_000_000_000L;
-      case "trillion" -> 1_000_000_000_000L;
-      default -> 0L;
-    };
-    if (scale == 0L || Character.isLetterOrDigit(charAt(text, i))) {
-      return null;
-    }
-    return new Number(value.multiply(BigDecimal.valueOf(scale)), i);
+    final BigDecimal amount = negative ? number.value().negate() : number.value();
+    return new MoneyAmount(new Span(start, number.end()), amount, currency);
   }
 
   /** Reads a known ISO 4217 code at the position, or {@code null}. */
   private static String isoCodeAt(CharSequence text, int start) {
-    if (start + 3 > text.length() || !boundaryBefore(text, start)) {
+    if (start + 3 > text.length() || !NumberScan.boundaryBefore(text, start)) {
       return null;
     }
     for (int i = start; i < start + 3; i++) {
@@ -304,41 +210,15 @@ public class CursorMoneyExtractor implements MoneyExtractor {
         return null;
       }
     }
-    if (Character.isLetterOrDigit(charAt(text, start + 3))) {
+    if (Character.isLetterOrDigit(NumberScan.charAt(text, start + 3))) {
       return null;
     }
     final String code = text.subSequence(start, start + 3).toString();
     return ISO_CODES.contains(code) ? code : null;
   }
 
-  private static boolean groupOfThree(CharSequence text, int start) {
-    return isAsciiDigit(charAt(text, start)) && isAsciiDigit(charAt(text, start + 1))
-        && isAsciiDigit(charAt(text, start + 2)) && !isAsciiDigit(charAt(text, start + 3));
-  }
-
-  private static boolean boundaryBefore(CharSequence text, int index) {
-    return index == 0 || !Character.isLetterOrDigit(Character.codePointBefore(text, index));
-  }
-
-  private static boolean boundaryAfter(CharSequence text, int index) {
-    final int cp = codePointAt(text, index);
-    return cp == NO_MATCH || !Character.isLetterOrDigit(cp);
-  }
-
-  private static boolean isAsciiDigit(int cp) {
-    return cp >= '0' && cp <= '9';
-  }
-
   private static boolean isUpperAscii(int cp) {
     return cp >= 'A' && cp <= 'Z';
-  }
-
-  private static char charAt(CharSequence text, int index) {
-    return index >= 0 && index < text.length() ? text.charAt(index) : ' ';
-  }
-
-  private static int codePointAt(CharSequence text, int index) {
-    return index >= 0 && index < text.length() ? Character.codePointAt(text, index) : NO_MATCH;
   }
 
   private static Set<String> isoCodes() {
@@ -347,9 +227,5 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       codes.add(currency.getCurrencyCode());
     }
     return Collections.unmodifiableSet(codes);
-  }
-
-  /** An intermediate parse result: the normalized value and the exclusive end offset. */
-  private record Number(BigDecimal value, int end) {
   }
 }
