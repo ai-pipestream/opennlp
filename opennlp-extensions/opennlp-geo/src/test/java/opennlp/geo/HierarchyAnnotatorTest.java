@@ -31,8 +31,14 @@ import opennlp.tools.geo.GazetteerEntry;
 import opennlp.tools.geo.GeoPoint;
 import opennlp.tools.geo.GeoResolution;
 import opennlp.tools.geo.GeocodeAnnotator;
+import opennlp.tools.geo.PlaceAncestor;
 import opennlp.tools.util.Span;
 
+/**
+ * Tests the containment annotator over pre-built locations layers: expandable mentions
+ * get their chains on the mention spans, and mentions without a join identifier, an
+ * unknown identifier, or an empty chain get no annotation.
+ */
 public class HierarchyAnnotatorTest {
 
   private static GazetteerEntry entry(String name, String wofId) {
@@ -82,6 +88,56 @@ public class HierarchyAnnotatorTest {
     final Document annotated = new HierarchyAnnotator(spine()).annotate(document);
 
     Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
+  }
+
+  /**
+   * Asserts that a mention resolving to the top of the hierarchy produces no
+   * containment annotation: the root has zero ancestors, and a chain of zero ancestors
+   * is never emitted, so the containment layer is provided but stays empty.
+   */
+  @Test
+  void testRootPlaceMentionGetsNoChain() {
+    final String text = "New York in one line";
+    final Span mention = new Span(0, 8);
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(new Annotation<>(mention,
+            new GeoResolution(mention, entry("New York", "85977539"), 0.9))));
+
+    final Document annotated = new HierarchyAnnotator(spine()).annotate(document);
+
+    Assertions.assertTrue(annotated.layers().contains(HierarchyAnnotator.CONTAINMENT));
+    Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
+  }
+
+  /**
+   * Asserts that two mentions of the same place each get their own containment
+   * annotation on their own span, and that the two chains are equal, ancestor for
+   * ancestor.
+   */
+  @Test
+  void testTwoMentionsOfSamePlaceGetTwoIdenticalChains() {
+    final String text = "From Park Slope to Park Slope.";
+    final Span first = new Span(5, 15);
+    final Span second = new Span(19, 29);
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(
+            new Annotation<>(first,
+                new GeoResolution(first, entry("Park Slope", "85865587"), 0.9)),
+            new Annotation<>(second,
+                new GeoResolution(second, entry("Park Slope", "85865587"), 0.9))));
+
+    final Document annotated = new HierarchyAnnotator(spine()).annotate(document);
+
+    final List<Annotation<ContainmentChain>> chains =
+        annotated.get(HierarchyAnnotator.CONTAINMENT);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(first, chains.get(0).span());
+    Assertions.assertEquals(second, chains.get(1).span());
+    Assertions.assertEquals(chains.get(0).value(), chains.get(1).value());
+    Assertions.assertEquals(new ContainmentChain(List.of(
+        new PlaceAncestor("421205765", "Brooklyn", "borough"),
+        new PlaceAncestor("85977539", "New York", "locality"))),
+        chains.get(0).value());
   }
 
   @Test
