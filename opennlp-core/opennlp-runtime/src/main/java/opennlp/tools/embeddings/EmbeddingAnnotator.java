@@ -31,12 +31,21 @@ import opennlp.tools.document.LayerKey;
  * embedded through a {@link TextEmbedder} and provided as a parallel layer of
  * {@code float[]} values on the same spans.
  *
- * <p>The provided layer's identifier is derived from the source layer, so one pipeline
- * can carry token and sentence embeddings side by side by adding two instances over
- * different source layers; read the layer through {@link #layer()}. The embedder sees
- * the covered text of each annotation, so spans stay in original text coordinates.</p>
+ * <p>The provided layer's identifier is the source layer's identifier prefixed with
+ * {@code "embeddings:"}, for example {@code embeddings:tokens} for a source layer with
+ * the identifier {@code tokens}. Because the identifier is derived from the source, one
+ * pipeline can carry token and sentence embeddings side by side by adding two instances
+ * over different source layers; read each instance's provided layer through
+ * {@link #layer()}.</p>
  *
- * <p>The annotator holds no per-call state; it is as thread-safe as its embedder.</p>
+ * <p>The embedder receives the covered text of each source annotation, taken from
+ * {@link Document#text()} by the annotation's span; the annotation's stored value is
+ * never consulted. Every resulting vector is anchored to the span it was computed from,
+ * so the provided layer stays in original text coordinates.</p>
+ *
+ * <p>All fields of this class are immutable and {@link #annotate(Document)} keeps its
+ * working state in local variables, so a single instance may serve concurrent pipelines
+ * whenever the supplied {@link TextEmbedder} is safe for concurrent use.</p>
  *
  * @since 3.0.0
  */
@@ -47,7 +56,8 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
   private final LayerKey<float[]> layer;
 
   /**
-   * Initializes the annotator.
+   * Initializes the annotator and derives the provided layer from the source layer by
+   * prefixing the source layer's identifier with {@code "embeddings:"}.
    *
    * @param embedder The embedder to delegate to. Must not be {@code null}.
    * @param source The layer whose annotations are embedded, for example the token or
@@ -65,12 +75,29 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
 
   /**
    * @return The layer this instance provides: one vector per source annotation, on the
-   *         source annotation's span. Never {@code null}.
+   *         source annotation's span. The layer's identifier is the source layer's
+   *         identifier prefixed with {@code "embeddings:"}. Never {@code null}.
    */
   public LayerKey<float[]> layer() {
     return layer;
   }
 
+  /**
+   * Embeds the covered text of every annotation of the source layer and returns a new
+   * document that additionally carries the resulting vectors under {@link #layer()}.
+   *
+   * <p>A document without the source layer reads as an empty source layer, so the
+   * returned document then carries the provided layer with no annotations. Every vector
+   * is stored exactly as the embedder returned it; no dimension check is applied.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must not
+   *                 already carry the provided layer.
+   * @return A new {@link Document} with the vector layer added to the input layers.
+   *         Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, if it
+   *         already carries the provided layer, or if the embedder returns {@code null}
+   *         for an annotation's covered text.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
@@ -80,17 +107,28 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
     final List<Annotation<String>> annotations = document.get(source);
     final List<Annotation<float[]>> vectors = new ArrayList<>(annotations.size());
     for (final Annotation<String> annotation : annotations) {
+      // Embed the covered text taken from the original document text by the span; the
+      // annotation's stored value is deliberately not used, so the vector always
+      // reflects the exact characters the span points at.
       vectors.add(new Annotation<>(annotation.span(), embedder.embed(
           text.subSequence(annotation.span().getStart(), annotation.span().getEnd()))));
     }
     return document.with(layer, vectors);
   }
 
+  /**
+   * @return The single-element set holding the source layer this annotator reads.
+   *         Never {@code null}.
+   */
   @Override
   public Set<LayerKey<?>> requires() {
     return Set.of(source);
   }
 
+  /**
+   * @return The single-element set holding the vector layer this annotator adds, equal
+   *         to {@link #layer()}. Never {@code null}.
+   */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(layer);
