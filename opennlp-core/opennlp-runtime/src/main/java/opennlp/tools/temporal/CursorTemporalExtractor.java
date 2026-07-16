@@ -219,7 +219,10 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     return new NumberInText(value, i);
   }
 
-  /** Skips an ordinal suffix ({@code st}, {@code nd}, {@code rd}, {@code th}). */
+  /**
+   * Skips an ordinal suffix ({@code st}, {@code nd}, {@code rd}, {@code th}) and returns
+   * the offset behind it, or the unchanged index when no ordinal suffix follows.
+   */
   private static int skipOrdinal(CharSequence text, int index) {
     final char first = Character.toLowerCase(NumberScan.charAt(text, index));
     final char second = Character.toLowerCase(NumberScan.charAt(text, index + 1));
@@ -229,7 +232,10 @@ public class CursorTemporalExtractor implements TemporalExtractor {
         ? index + 2 : index;
   }
 
-  /** Reads a fixed-width digit run as an int, or a negative value when absent. */
+  /**
+   * Reads exactly {@code width} digits as an int, or a negative value when the run is
+   * shorter than requested or continues past the requested width.
+   */
   private static int digits(CharSequence text, int start, int width) {
     int value = 0;
     for (int i = start; i < start + width; i++) {
@@ -242,7 +248,10 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     return NumberScan.isAsciiDigit(NumberScan.charAt(text, start + width)) ? -1 : value;
   }
 
-  /** Reads a letter run of up to nine characters, or {@code null}. */
+  /**
+   * Reads a letter run of at most ten characters, or {@code null} when no letter starts
+   * at the position or the run continues past that length.
+   */
   private static Word word(CharSequence text, int start) {
     int i = start;
     final StringBuilder run = new StringBuilder();

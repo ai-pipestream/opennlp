@@ -84,6 +84,19 @@ public class CursorQuantityExtractorTest {
     assertEquals("%", mentions.get(1).unit());
   }
 
+  /**
+   * Verifies what the scanner accepts for a European-style written number: the decimal
+   * comma is not a decimal marker, so the scan restarts after the comma and only the
+   * trailing digit with its unit is reported.
+   */
+  @Test
+  void testDecimalCommaRestartsTheScanAfterTheComma() {
+    final Quantity mention = single("1.234,5 kg");
+    assertEquals(new Span(6, 10), mention.span());
+    assertEquals(0, new BigDecimal("5").compareTo(mention.value()));
+    assertEquals("kg", mention.unit());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {
       "the 100 things",      // bare number

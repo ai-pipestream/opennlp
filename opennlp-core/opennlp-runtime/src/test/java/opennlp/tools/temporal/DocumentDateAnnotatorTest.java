@@ -25,8 +25,14 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.util.Span;
 
+/**
+ * Tests the document date election rule: the first day-granularity temporal mention in
+ * the text wins, coarser mentions never elect a date, and the electing mention's span
+ * stays on the annotation for auditability.
+ */
 public class DocumentDateAnnotatorTest {
 
   @Test
@@ -60,6 +66,36 @@ public class DocumentDateAnnotatorTest {
 
     Assertions.assertTrue(new DocumentDateAnnotator().annotate(document)
         .get(DocumentDateAnnotator.DOCUMENT_DATE).isEmpty());
+  }
+
+  /**
+   * Verifies the election rule on conflicting dates through the real extractor: when a
+   * document mentions two different days, the first one in text order wins.
+   */
+  @Test
+  void testFirstOfConflictingDatesWinsThroughThePipeline() {
+    final Document document = DocumentAnalyzer.builder()
+        .add(new TemporalAnnotator(new CursorTemporalExtractor()))
+        .add(new DocumentDateAnnotator())
+        .build()
+        .analyze("Filed 2026-07-10. Hearing on 2026-09-02.");
+
+    final List<Annotation<LocalDate>> dates =
+        document.get(DocumentDateAnnotator.DOCUMENT_DATE);
+    Assertions.assertEquals(1, dates.size());
+    Assertions.assertEquals(LocalDate.parse("2026-07-10"), dates.get(0).value());
+    Assertions.assertEquals(new Span(6, 16), dates.get(0).span());
+  }
+
+  /**
+   * Verifies that a document without a temporal layer gets an empty date layer, because
+   * an absent layer reads as an empty list.
+   */
+  @Test
+  void testMissingTemporalLayerElectsNothing() {
+    final Document dated =
+        new DocumentDateAnnotator().annotate(Document.of("no dates here"));
+    Assertions.assertTrue(dated.get(DocumentDateAnnotator.DOCUMENT_DATE).isEmpty());
   }
 
   @Test

@@ -82,6 +82,17 @@ public class EcbFxRatesTest {
     assertTrue(rates().rate("EUR", "USD", LocalDate.parse("2026-05-01")).isEmpty());
   }
 
+  /**
+   * Verifies that the staleness limit is inclusive: a lookup exactly
+   * {@link EcbFxRates#MAX_STALENESS_DAYS} days after the latest row still resolves, and
+   * one day later the rate is absent.
+   */
+  @Test
+  void testStalenessLimitIsInclusive() throws IOException {
+    assertRate("1.2000", rates().rate("EUR", "USD", LocalDate.parse("2026-07-17")));
+    assertTrue(rates().rate("EUR", "USD", LocalDate.parse("2026-07-18")).isEmpty());
+  }
+
   @Test
   void testNotAvailableCellsAndUnknownCurrenciesAreAbsent() throws IOException {
     assertTrue(rates().rate("EUR", "GBP", LocalDate.parse("2026-07-09")).isEmpty());
