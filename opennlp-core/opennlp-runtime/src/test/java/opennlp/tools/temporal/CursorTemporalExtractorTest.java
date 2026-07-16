@@ -91,6 +91,8 @@ public class CursorTemporalExtractorTest {
   @ValueSource(strings = {
       "2026-13-01",           // no thirteenth month
       "2026-02-30",           // calendar-validated
+      "2026-02-29",           // 2026 is not a leap year
+      "Jul. 14, 2026",        // abbreviation with a period is out of scope
       "February 30, 2026",    // calendar-validated
       "July 32 2026",         // no thirty-second day
       "it may be 100",        // month word without a calendar context
@@ -103,6 +105,20 @@ public class CursorTemporalExtractorTest {
   })
   void testRejectedShapes(String text) {
     assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  /**
+   * Verifies that an impossible written day is not silently repaired: calendar
+   * validation rejects the day-first reading, and the scan then reports the
+   * month-and-year part on its own as a month mention.
+   */
+  @Test
+  void testImpossibleDayLeavesOnlyTheMonthMention() {
+    final List<TemporalExpression> mentions = extractor.extract("31 April 2026");
+    assertEquals(1, mentions.size());
+    assertEquals(new Span(3, 13), mentions.get(0).span());
+    assertEquals("2026-04", mentions.get(0).value());
+    assertEquals(Granularity.MONTH, mentions.get(0).granularity());
   }
 
   @Test

@@ -49,11 +49,12 @@ public class CursorMoneyExtractorTest {
   @ParameterizedTest
   @CsvSource(delimiter = ';', value = {
       "$1,234.56; 1234.56; USD",
+      "$1,234,567.89; 1234567.89; USD",
       "$ 100; 100; USD",
-      "€50; 50; EUR",
-      "50€; 50; EUR",
-      "£2.5k; 2500.0; GBP",
-      "¥1000; 1000; JPY",
+      "\u20AC50; 50; EUR",      // U+20AC, the euro sign
+      "50\u20AC; 50; EUR",
+      "\u00A32.5k; 2500.0; GBP",   // U+00A3, the pound sign
+      "\u00A51000; 1000; JPY",     // U+00A5, the yen sign
       "USD 100; 100; USD",
       "100 USD; 100; USD",
       "$1.2M; 1200000.0; USD",
@@ -89,7 +90,7 @@ public class CursorMoneyExtractorTest {
 
   @Test
   void testMultipleMentions() {
-    final List<MoneyAmount> mentions = extractor.extract("paid $5 and €3 today");
+    final List<MoneyAmount> mentions = extractor.extract("paid $5 and \u20AC3 today");
     assertEquals(2, mentions.size());
     assertEquals("USD", mentions.get(0).currency());
     assertEquals("EUR", mentions.get(1).currency());
@@ -100,6 +101,31 @@ public class CursorMoneyExtractorTest {
     final MoneyAmount mention = single("$1,23");
     assertEquals(new Span(0, 2), mention.span());
     assertEquals(0, BigDecimal.ONE.compareTo(mention.amount()));
+  }
+
+  /**
+   * Verifies what the scanner accepts for a European-style written amount: the decimal
+   * comma is not interpreted, so the match ends before the comma and the dot-separated
+   * part is read as a decimal point, since locale-dependent decimal commas are out of
+   * scope by design.
+   */
+  @Test
+  void testDecimalCommaEndsTheMatchBeforeTheComma() {
+    // \u20AC1.234,56 reads as one euro mention over \u20AC1.234
+    final MoneyAmount mention = single("\u20AC1.234,56");
+    assertEquals(new Span(0, 6), mention.span());
+    assertEquals(0, new BigDecimal("1.234").compareTo(mention.amount()));
+    assertEquals("EUR", mention.currency());
+  }
+
+  /**
+   * Verifies the exact spans of a mention at the very start and at the very end of the
+   * text, where the boundary checks run against the text bounds.
+   */
+  @Test
+  void testMentionAtTextStartAndEnd() {
+    assertEquals(new Span(0, 2), single("$5 up front").span());
+    assertEquals(new Span(11, 13), single("the fee is $7").span());
   }
 
   @Test
@@ -117,6 +143,7 @@ public class CursorMoneyExtractorTest {
       "$5x",                 // invalid letter suffix invalidates the match
       "100 USDX",            // not an ISO code
       "chapter USD",         // no number after the code
+      "USD -5",              // the code-first shape takes no leading minus
       "call 555,1234 now"    // invalid grouping, no currency
   })
   void testRejectedShapes(String text) {
