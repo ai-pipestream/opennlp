@@ -39,8 +39,9 @@ import opennlp.tools.geo.PlaceHierarchy;
  * attribute key, and provides {@link #CONTAINMENT}, one annotation per expandable
  * mention carrying its {@link ContainmentChain} on the mention's span.
  *
- * <p>A mention whose entry lacks the join attribute, or whose identifier the hierarchy
- * does not know, simply gets no chain; nothing is invented. The default join key is the
+ * <p>A mention whose entry lacks the join attribute, whose identifier the hierarchy
+ * does not know, or whose place sits at the top of the hierarchy (an empty chain)
+ * simply gets no annotation; nothing is invented. The default join key is the
  * conventional Who's On First attribute, matching the identifiers the bundled
  * gazetteer derivations carry.</p>
  *

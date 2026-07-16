@@ -52,7 +52,11 @@ import opennlp.tools.geo.PlaceHierarchy;
  */
 public final class ContainmentSpine implements PlaceHierarchy {
 
-  /** The longest chain {@link #ancestors(String)} follows before assuming a cycle. */
+  /**
+   * The hard cap on the number of ancestors {@link #ancestors(String)} collects. Cycles
+   * are already stopped by the visited set, so this cap only bounds the walk over a
+   * pathologically deep acyclic table; real administrative hierarchies stay far below it.
+   */
   private static final int MAX_DEPTH = 64;
 
   private record Node(String parentId, String name, String type) {
@@ -72,6 +76,22 @@ public final class ContainmentSpine implements PlaceHierarchy {
     return new Builder();
   }
 
+  /**
+   * Walks the containment chain of a place from the nearest enclosing place outward.
+   * The queried place itself is never part of its own chain.
+   *
+   * <p>The walk stops, without failing, at the first of: a root (a place with no
+   * recorded parent), a parent identifier the spine does not know (the dangling
+   * reference contributes no ancestor), an identifier the walk has already seen (a
+   * cycle in the user-supplied table), or an internal depth cap guarding against
+   * pathologically deep tables.</p>
+   *
+   * @param id The place identifier. Must not be {@code null}.
+   * @return The enclosing places, nearest first, excluding the place itself. Never
+   *         {@code null}; empty when the identifier is unknown, when the place is a
+   *         root, or when its parent reference is not in the spine.
+   * @throws IllegalArgumentException Thrown if {@code id} is {@code null}.
+   */
   @Override
   public List<PlaceAncestor> ancestors(String id) {
     if (id == null) {
@@ -94,7 +114,9 @@ public final class ContainmentSpine implements PlaceHierarchy {
   }
 
   /**
-   * Collects places for a {@link ContainmentSpine}.
+   * Collects places for a {@link ContainmentSpine} from direct additions and table
+   * loads, in any combination and order. A builder is a plain mutable collector and is
+   * not safe for concurrent use; the spine it builds is.
    */
   public static final class Builder {
 
@@ -104,7 +126,8 @@ public final class ContainmentSpine implements PlaceHierarchy {
     }
 
     /**
-     * Adds one place.
+     * Adds one place. Adding an identifier that is already present replaces the
+     * earlier place, so the last addition wins.
      *
      * @param id The place identifier. Must not be {@code null} or blank.
      * @param parentId The parent identifier, or {@code null} for a root.
