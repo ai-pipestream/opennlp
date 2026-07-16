@@ -44,6 +44,9 @@ import opennlp.tools.geo.RegionVote;
  * with an empty ballot, or a winning country without a suitable locale or single
  * currency-sign symbol, falls back to the default table.</p>
  *
+ * <p>The annotator is safe to share between threads: the per-country cache is a
+ * concurrent map and the extractors themselves hold no per-call state.</p>
+ *
  * @since 3.0.0
  */
 public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
@@ -52,7 +55,8 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
   private final Map<String, CursorMoneyExtractor> byCountry = new ConcurrentHashMap<>();
 
   /**
-   * Initializes the annotator.
+   * Initializes the annotator. There is nothing to configure: the symbol table for
+   * each document is derived from that document's region ballot at annotation time.
    */
   public RegionAwareMoneyAnnotator() {
     // extractors are derived per document from the region ballot
@@ -75,7 +79,12 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
     return document.with(MoneyAnnotator.MONEY, mentions);
   }
 
-  /** Resolves and caches the extractor for a winning country. */
+  /**
+   * Resolves and caches the extractor for a winning country. Fallback outcomes are
+   * cached too: a country without an installed locale, or one whose locale has no
+   * currency, maps to the default extractor, so the locale scan runs at most once per
+   * country.
+   */
   private CursorMoneyExtractor extractorFor(String countryCode) {
     return byCountry.computeIfAbsent(countryCode, code -> {
       final Optional<Locale> locale = localeOf(code);
@@ -90,7 +99,11 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
     });
   }
 
-  /** Picks a deterministic installed locale for a country, if any. */
+  /**
+   * Picks an installed locale for a country, if any: the candidate with the
+   * lexicographically smallest language tag, so the choice does not depend on the order
+   * in which the runtime lists its locales.
+   */
   private static Optional<Locale> localeOf(String countryCode) {
     Locale best = null;
     for (final Locale locale : Locale.getAvailableLocales()) {

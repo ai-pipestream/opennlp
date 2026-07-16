@@ -54,11 +54,16 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
 
   /**
    * The document's region ballot: one annotation per candidate country over the whole
-   * document span, ordered by descending share.
+   * document span, ordered by descending share, with equal shares ranked by ascending
+   * country code so the order is deterministic.
    */
   public static final LayerKey<RegionVote> REGIONS = LayerKey.of("regions", RegionVote.class);
 
-  /** The weight of a direct country-name mention, matching a confident resolution. */
+  /**
+   * The vote weight of a direct country-name mention, sitting near the top of the
+   * geocoder confidence range: naming a country outright counts like one confidently
+   * resolved city, without outvoting two independent mentions on its own.
+   */
   private static final double COUNTRY_NAME_WEIGHT = 0.95;
 
   private static final Map<String, String> COUNTRY_NAMES = countryNames();
@@ -141,7 +146,11 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     return document.with(REGIONS, ballot(weights, text.length()));
   }
 
-  /** Turns the weight sums into a ranked ballot of shares over the whole-document span. */
+  /**
+   * Turns the weight sums into a ranked ballot: each country's share is its weight over
+   * the weight total, so shares sum to one, and rows are ordered by descending share
+   * with ties broken by ascending country code. Every row spans the whole document.
+   */
   private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights, int length) {
     double total = 0.0;
     for (final double weight : weights.values()) {
@@ -169,7 +178,11 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     return Set.of(REGIONS);
   }
 
-  /** English country display names from JDK locale data, lowercased, to alpha-2 codes. */
+  /**
+   * Maps lowercased English country display names from JDK locale data to their ISO
+   * 3166-1 alpha-2 codes. Codes for which the JDK has no distinct display name are
+   * skipped rather than mapped to themselves.
+   */
   private static Map<String, String> countryNames() {
     final Map<String, String> names = new HashMap<>();
     for (final String code : Locale.getISOCountries()) {
