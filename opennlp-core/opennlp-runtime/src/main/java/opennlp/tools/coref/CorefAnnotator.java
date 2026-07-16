@@ -38,9 +38,10 @@ import opennlp.tools.util.StringUtil;
  * {@link #CHAINS}, one annotation per mention carrying its {@link CorefMention}.
  *
  * <p>Three sieves run in order of decreasing precision. Exact match links entity
- * mentions of the same type with identical normalized text. Name containment links
- * entity mentions of the same type where one is a word-boundary prefix or suffix of the
- * other, so a surname finds its full name. Pronoun resolution links each third-person
+ * mentions of the same type with identical normalized text, regardless of how far apart
+ * they are. Name containment links entity mentions of the same type where one is a
+ * whitespace-delimited prefix or suffix of the other, so a surname finds its full name.
+ * Pronoun resolution links each third-person
  * pronoun to the nearest preceding compatible entity mention in the same or the
  * directly preceding sentence: gendered pronouns to person entities, neutral pronouns
  * to the configured non-person types, and plural pronouns to either. First and second
@@ -68,17 +69,24 @@ public class CorefAnnotator implements DocumentAnnotator {
   /** How many sentences back a pronoun may find its antecedent. */
   private static final int MAX_SENTENCE_DISTANCE = 1;
 
+  /** POS tags that mark pronoun tokens: Penn Treebank PRP and PRP$, Universal PRON. */
   private static final Set<String> PRONOUN_TAGS = Set.of("PRP", "PRP$", "PRON");
 
+  /** Third-person singular pronoun forms that resolve only to person entities. */
   private static final Set<String> GENDERED_PRONOUNS = Set.of(
       "he", "him", "his", "himself", "she", "her", "hers", "herself");
 
+  /** Third-person plural pronoun forms that resolve to person or non-person entities. */
   private static final Set<String> PLURAL_PRONOUNS = Set.of(
       "they", "them", "their", "theirs", "themselves");
 
+  /** Third-person neutral pronoun forms that resolve only to non-person entities. */
   private static final Set<String> NEUTRAL_PRONOUNS = Set.of("it", "its", "itself");
 
+  /** Lowercased entity type labels gendered pronouns may resolve to. */
   private final Set<String> personTypes;
+
+  /** Lowercased entity type labels neutral pronouns may resolve to. */
   private final Set<String> neutralTypes;
 
   /**
@@ -126,11 +134,29 @@ public class CorefAnnotator implements DocumentAnnotator {
     return Set.copyOf(lowered);
   }
 
-  /** One collected mention before chain assignment. */
+  /**
+   * One collected mention before chain assignment: its character span, its kind, the
+   * index of its source entity or {@link CorefMention#NO_ENTITY} for pronouns, the
+   * lowercased entity type or {@code null} for pronouns, the lowercased covered text,
+   * and the index of the sentence the mention starts in.
+   */
   private record Mention(Span span, String kind, int entity, String type,
       String normalized, int sentence) {
   }
 
+  /**
+   * Resolves coreference over the document and adds the {@link #CHAINS} layer.
+   *
+   * <p>A document whose token layer is empty gets an empty chains layer without further
+   * checks. Otherwise the token and POS tag layers must be aligned one to one and the
+   * sentence layer must not be empty.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} carrying the {@link #CHAINS} layer. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the
+   *         token and POS tag layers differ in size, or tokens are present but the
+   *         sentence layer is empty.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
@@ -185,7 +211,10 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Collects entity mentions and third-person pronoun mentions in text order.
+   * Collects entity mentions and third-person pronoun mentions in text order. Every
+   * entity annotation becomes a mention. A token becomes a pronoun mention only if its
+   * POS tag is a pronoun tag, its lowercased form is a known third-person form, and no
+   * entity span covers it; first and second person forms are left out entirely.
    *
    * @param text The document text.
    * @param sentences The sentence layer.
@@ -221,11 +250,18 @@ public class CorefAnnotator implements DocumentAnnotator {
       mentions.add(new Mention(span, CorefMention.KIND_PRONOUN, CorefMention.NO_ENTITY,
           null, form, sentenceOf(span, sentences)));
     }
+    // restore text order after appending the pronouns behind the entity mentions
     mentions.sort((a, b) -> Integer.compare(a.span().getStart(), b.span().getStart()));
     return mentions;
   }
 
-  /** Links entity mentions of the same type with identical normalized text. */
+  /**
+   * Links entity mentions of the same type with identical normalized text. Every later
+   * occurrence is linked to the first one, with no limit on their distance.
+   *
+   * @param mentions The mentions in text order.
+   * @param parent The union-find forest over mention indices.
+   */
   private static void exactMatchSieve(List<Mention> mentions, int[] parent) {
     final Map<String, Integer> firstByKey = new HashMap<>();
     for (int i = 0; i < mentions.size(); i++) {
@@ -242,8 +278,11 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Links entity mentions of the same type where one text is a word-boundary prefix or
-   * suffix of the other.
+   * Links entity mentions of the same type where one text is a whitespace-delimited
+   * prefix or suffix of the other, with no limit on their distance.
+   *
+   * @param mentions The mentions in text order.
+   * @param parent The union-find forest over mention indices.
    */
   private static void containmentSieve(List<Mention> mentions, int[] parent) {
     for (int i = 0; i < mentions.size(); i++) {
@@ -265,12 +304,13 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Checks whether the shorter text is a word-boundary prefix or suffix of the longer.
+   * Checks whether the shorter text is a whitespace-delimited prefix or suffix of the
+   * longer one, so that only whole leading or trailing words count as contained.
    *
    * @param longer The candidate containing text.
    * @param shorter The candidate contained text.
-   * @return {@code true} if {@code shorter} starts or ends {@code longer} on a word
-   *         boundary.
+   * @return {@code true} if {@code shorter} starts or ends {@code longer} and the
+   *         character adjoining the shared part is a whitespace.
    */
   private static boolean containsAsWords(String longer, String shorter) {
     if (longer.length() <= shorter.length()) {
@@ -282,7 +322,15 @@ public class CorefAnnotator implements DocumentAnnotator {
             && StringUtil.isWhitespace(longer.charAt(longer.length() - shorter.length() - 1)));
   }
 
-  /** Links each pronoun to the nearest preceding compatible entity mention in range. */
+  /**
+   * Links each pronoun to the nearest preceding compatible entity mention. The backward
+   * scan skips other pronouns, stops once a candidate lies more than
+   * {@link #MAX_SENTENCE_DISTANCE} sentences back, and leaves the pronoun a singleton
+   * when no candidate in range is compatible.
+   *
+   * @param mentions The mentions in text order.
+   * @param parent The union-find forest over mention indices.
+   */
   private void pronounSieve(List<Mention> mentions, int[] parent) {
     for (int i = 0; i < mentions.size(); i++) {
       final Mention pronoun = mentions.get(i);
@@ -323,12 +371,13 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Finds the sentence a span starts in.
+   * Finds the sentence a span belongs to.
    *
    * @param span The mention span.
-   * @param sentences The sentence layer.
-   * @return The index of the sentence containing the span start, or the last sentence
-   *         when the span starts after every sentence.
+   * @param sentences The sentence layer. Must not be empty.
+   * @return The index of the first sentence whose end lies beyond the span start, so a
+   *         span starting in the gap between two sentences counts to the following one;
+   *         the last sentence when the span starts after every sentence end.
    */
   private static int sentenceOf(Span span, List<Annotation<String>> sentences) {
     for (int s = 0; s < sentences.size(); s++) {
@@ -357,7 +406,8 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Finds the representative of a mention's set.
+   * Finds the representative of a mention's set, compressing the visited path so later
+   * lookups reach the root directly.
    *
    * @param parent The union-find forest.
    * @param i The mention index.
