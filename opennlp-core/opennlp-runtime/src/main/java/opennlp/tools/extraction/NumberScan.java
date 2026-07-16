@@ -40,7 +40,7 @@ public final class NumberScan {
   public static final int NO_CODE_POINT = -1;
 
   private NumberScan() {
-    // static scanning methods only
+    // This class offers static scanning methods only and is never instantiated.
   }
 
   /**
