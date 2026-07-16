@@ -26,8 +26,9 @@ import opennlp.tools.util.Span;
 /**
  * A deterministic {@link PiiExtractor}: forward scans over the text, no regular
  * expressions, recognizing email addresses, phone numbers, IBANs, and payment card
- * numbers. Every numeric type is checksum validated, so a random digit run is rejected
- * rather than reported.
+ * numbers. IBANs and card numbers are checksum validated and phone numbers must show a
+ * {@code +} prefix or visible formatting, so a random digit run is rejected rather than
+ * reported.
  *
  * <p>Recognized forms:</p>
  * <ul>
@@ -38,12 +39,13 @@ import opennlp.tools.util.Span;
  *   form with 10 or 11 digits that shows formatting evidence, at least one space,
  *   hyphen, or parenthesis between the digits. A bare digit run is never a phone
  *   number. Dots are not accepted as separators, which keeps decimal numbers out.</li>
- *   <li>IBAN: two uppercase letters, two check digits, and up to 30 more uppercase
- *   letters or digits, optionally in space-separated groups, validated with the mod-97
- *   check. Country-specific length tables are not applied.</li>
+ *   <li>IBAN: two uppercase letters, two check digits, and 11 to 30 more uppercase
+ *   letters or digits, 15 to 34 characters in total, optionally in space-separated
+ *   groups, validated with the mod-97 check. Country-specific length tables are not
+ *   applied.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
- *   validated with the Luhn check and a leading digit between 2 and 6 or equal to
- *   3.</li>
+ *   validated with the Luhn check and required to start with a digit between 2 and 6,
+ *   the range that covers the major card networks.</li>
  * </ul>
  *
  * <p>When candidates overlap, the leftmost wins, then the longest, then the more
@@ -69,7 +71,16 @@ public class CursorPiiExtractor implements PiiExtractor {
   private static final int PHONE_MIN_INTERNATIONAL_DIGITS = 8;
   private static final int PHONE_MAX_DIGITS = 15;
 
-  /** One candidate before overlap resolution. */
+  /**
+   * One candidate found by a scanner, held until overlap resolution decides which
+   * candidates survive.
+   *
+   * @param start The candidate start offset in the scanned text, inclusive.
+   * @param end The candidate end offset in the scanned text, exclusive.
+   * @param priority The type priority that breaks exact-span ties; a lower value is the
+   *                 more specific type.
+   * @param mention The mention to report if this candidate survives.
+   */
   private record Hit(int start, int end, int priority, PiiMention mention) {
   }
 
@@ -349,8 +360,8 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a numeric candidate does not continue a word, number, or decimal
-   * fraction to its left.
+   * Checks that a numeric candidate does not continue a word, a number, a decimal
+   * fraction, or a comma-grouped number to its left.
    *
    * @param text The text being scanned.
    * @param start The candidate start.

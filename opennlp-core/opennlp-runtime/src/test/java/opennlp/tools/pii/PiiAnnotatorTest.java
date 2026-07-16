@@ -47,4 +47,20 @@ public class PiiAnnotatorTest {
     final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
+
+  /**
+   * Verifies that a text without any PII still receives the PII layer, present but
+   * empty, so downstream consumers can rely on the layer existing after this annotator
+   * has run.
+   */
+  @Test
+  void testTextWithoutPiiGetsEmptyLayer() {
+    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
+
+    final Document document = annotator.annotate(
+        Document.of("The quick brown fox jumps over the lazy dog."));
+
+    Assertions.assertTrue(document.layers().contains(PiiAnnotator.PII));
+    Assertions.assertTrue(document.get(PiiAnnotator.PII).isEmpty());
+  }
 }

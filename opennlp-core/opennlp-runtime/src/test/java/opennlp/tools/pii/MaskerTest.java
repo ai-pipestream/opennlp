@@ -22,10 +22,10 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
-import opennlp.tools.glossary.AhoCorasickGlossaryMatcher;
-import opennlp.tools.glossary.GlossaryAnnotator;
-import opennlp.tools.glossary.GlossaryEntry;
+import opennlp.tools.document.LayerKey;
+import opennlp.tools.util.Span;
 
 public class MaskerTest {
 
@@ -41,19 +41,37 @@ public class MaskerTest {
     Assertions.assertEquals("Contact **************** or call ****************.", masked);
   }
 
+  /**
+   * Verifies that several layers are masked in one pass: the PII layer produced by the
+   * annotator and a directly built custom span layer, since the masker works with any
+   * span layer, not only PII.
+   */
   @Test
   void testMasksSeveralLayersAtOnce() {
     final String text = "Send the Widget Press manual to jane@example.com now.";
+    final LayerKey<String> terms = LayerKey.of("term", String.class);
     Document document = new PiiAnnotator(new CursorPiiExtractor())
         .annotate(Document.of(text));
-    document = new GlossaryAnnotator(new AhoCorasickGlossaryMatcher(
-        List.of(new GlossaryEntry("ACME-1", "widget press")), true)).annotate(document);
+    document = document.with(terms,
+        List.of(new Annotation<>(new Span(9, 21), "widget press")));
 
-    final String masked = Masker.mask(document,
-        List.of(PiiAnnotator.PII, GlossaryAnnotator.GLOSSARY), '#');
+    final String masked = Masker.mask(document, List.of(PiiAnnotator.PII, terms), '#');
 
     Assertions.assertEquals(text.length(), masked.length());
     Assertions.assertEquals("Send the ############ manual to ################ now.", masked);
+  }
+
+  /**
+   * Verifies that masking a document whose PII layer is present but holds no
+   * detections returns the text completely unchanged.
+   */
+  @Test
+  void testMaskWithoutDetectionsLeavesTextIdentical() {
+    final String text = "Nothing sensitive here.";
+    final Document document =
+        new PiiAnnotator(new CursorPiiExtractor()).annotate(Document.of(text));
+
+    Assertions.assertEquals(text, Masker.mask(document, PiiAnnotator.PII, '*'));
   }
 
   @Test
