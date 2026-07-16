@@ -171,4 +171,153 @@ public class CursorPiiExtractorTest {
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));
   }
+
+  /**
+   * Verifies the behavior on an IBAN-shaped candidate whose check digits fail the
+   * mod-97 test: no IBAN and no card is reported, and in the spaced form the scan falls
+   * through to the formatted ten-digit tail, which qualifies as a domestic phone
+   * number. The compact form offers no formatting evidence, so it yields nothing.
+   */
+  @Test
+  void testIbanShapedTextWithBadCheckDigits() {
+    final String text = "Wire to DE21 3704 0044 0532 0130 00 today.";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    final PiiMention mention = mentions.get(0);
+    Assertions.assertEquals(PiiMention.TYPE_PHONE, mention.type());
+    Assertions.assertEquals(23, mention.span().getStart());
+    Assertions.assertEquals(35, mention.span().getEnd());
+    Assertions.assertEquals("0532 0130 00", text.substring(23, 35));
+    Assertions.assertEquals("0532013000", mention.normalized());
+
+    Assertions.assertTrue(extractor.extract("Wire to DE21370400440532013000 today.").isEmpty());
+  }
+
+  /**
+   * Verifies that the Luhn check alone decides bare sixteen-digit runs: a passing run
+   * is reported as a card with its exact span, and flipping the final digit so the
+   * checksum fails suppresses the mention entirely.
+   */
+  @Test
+  void testCardBareDigitRunLuhnDecides() {
+    final String text = "card 4111111111111111 on file";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(0).type());
+    Assertions.assertEquals(5, mentions.get(0).span().getStart());
+    Assertions.assertEquals(21, mentions.get(0).span().getEnd());
+    Assertions.assertEquals("4111111111111111", mentions.get(0).normalized());
+
+    Assertions.assertTrue(extractor.extract("card 4111111111111112 on file").isEmpty());
+  }
+
+  /**
+   * Verifies that an email address is found with its exact span when it is the very
+   * first token of the text and when it is the very last, with no character following
+   * it.
+   */
+  @Test
+  void testEmailAtTextStartAndEnd() {
+    final List<PiiMention> atStart = extractor.extract("jane@example.com wrote back.");
+    Assertions.assertEquals(1, atStart.size());
+    Assertions.assertEquals(0, atStart.get(0).span().getStart());
+    Assertions.assertEquals(16, atStart.get(0).span().getEnd());
+    Assertions.assertEquals("jane@example.com", atStart.get(0).normalized());
+
+    final List<PiiMention> atEnd = extractor.extract("Please write to jane@example.com");
+    Assertions.assertEquals(1, atEnd.size());
+    Assertions.assertEquals(16, atEnd.get(0).span().getStart());
+    Assertions.assertEquals(32, atEnd.get(0).span().getEnd());
+    Assertions.assertEquals("jane@example.com", atEnd.get(0).normalized());
+  }
+
+  /**
+   * Verifies that a sentence period directly after an email address stays outside the
+   * reported span, checked against the exact offsets and the exact covered text.
+   */
+  @Test
+  void testEmailTrailingSentencePeriodOutsideSpan() {
+    final String text = "Ask jane@example.com.";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(4, mentions.get(0).span().getStart());
+    Assertions.assertEquals(20, mentions.get(0).span().getEnd());
+    Assertions.assertEquals("jane@example.com", text.substring(4, 20));
+  }
+
+  /**
+   * Verifies accepted phone formats with exact spans: a compact international number
+   * with a plus prefix, a hyphen-separated domestic number, and a parenthesized area
+   * code at the very start of the text.
+   */
+  @Test
+  void testPhoneAcceptedFormsWithExactSpans() {
+    final List<PiiMention> international = extractor.extract("Call +14155550123 now.");
+    Assertions.assertEquals(1, international.size());
+    Assertions.assertEquals(5, international.get(0).span().getStart());
+    Assertions.assertEquals(17, international.get(0).span().getEnd());
+    Assertions.assertEquals("+14155550123", international.get(0).normalized());
+
+    final List<PiiMention> domestic = extractor.extract("Call 415-555-0123 today.");
+    Assertions.assertEquals(1, domestic.size());
+    Assertions.assertEquals(5, domestic.get(0).span().getStart());
+    Assertions.assertEquals(17, domestic.get(0).span().getEnd());
+    Assertions.assertEquals("4155550123", domestic.get(0).normalized());
+
+    final List<PiiMention> parenthesized = extractor.extract("(415) 555-0123");
+    Assertions.assertEquals(1, parenthesized.size());
+    Assertions.assertEquals(0, parenthesized.get(0).span().getStart());
+    Assertions.assertEquals(14, parenthesized.get(0).span().getEnd());
+    Assertions.assertEquals("4155550123", parenthesized.get(0).normalized());
+  }
+
+  /**
+   * Verifies rejected phone-like forms: a bare ten-digit run without any formatting, a
+   * separated run with only nine digits, and an international candidate with only
+   * seven digits, which is below the minimum of eight.
+   */
+  @Test
+  void testPhoneRejectedForms() {
+    Assertions.assertTrue(extractor.extract("Order 4155550123 shipped.").isEmpty());
+    Assertions.assertTrue(extractor.extract("Ref 415-555-012 code.").isEmpty());
+    Assertions.assertTrue(extractor.extract("+1234567 is short").isEmpty());
+  }
+
+  /**
+   * Verifies overlap resolution between an IBAN and a phone candidate over the same
+   * digits: alone, the formatted tail of the digit groups is reported as a phone
+   * number, but once a valid IBAN prefix precedes it, the leftmost candidate, the
+   * IBAN, wins and the phone candidate inside it is dropped.
+   */
+  @Test
+  void testOverlappingIbanAndPhoneCandidates() {
+    final List<PiiMention> alone = extractor.extract("num 3704 0044 0532 0130 00 end");
+    Assertions.assertEquals(1, alone.size());
+    Assertions.assertEquals(PiiMention.TYPE_PHONE, alone.get(0).type());
+    Assertions.assertEquals(14, alone.get(0).span().getStart());
+    Assertions.assertEquals(26, alone.get(0).span().getEnd());
+    Assertions.assertEquals("0532013000", alone.get(0).normalized());
+
+    final List<PiiMention> withIban =
+        extractor.extract("Wire to DE89 3704 0044 0532 0130 00 today.");
+    Assertions.assertEquals(1, withIban.size());
+    Assertions.assertEquals(PiiMention.TYPE_IBAN, withIban.get(0).type());
+    Assertions.assertEquals(8, withIban.get(0).span().getStart());
+    Assertions.assertEquals(35, withIban.get(0).span().getEnd());
+    Assertions.assertEquals("DE89370400440532013000", withIban.get(0).normalized());
+  }
+
+  /**
+   * Verifies that empty text and text without any PII both yield an empty result
+   * rather than {@code null} or an exception.
+   */
+  @Test
+  void testEmptyAndPiiFreeText() {
+    Assertions.assertTrue(extractor.extract("").isEmpty());
+    Assertions.assertTrue(
+        extractor.extract("The quick brown fox jumps over the lazy dog.").isEmpty());
+  }
 }
