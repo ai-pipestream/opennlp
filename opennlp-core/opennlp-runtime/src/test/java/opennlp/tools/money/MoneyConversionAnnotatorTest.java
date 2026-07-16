@@ -132,6 +132,17 @@ public class MoneyConversionAnnotatorTest {
     assertEquals("USD", extractor.extract("$5").get(0).currency());
   }
 
+  /**
+   * Verifies the region resolution for another ambiguous dollar region: in a Canadian
+   * document, the dollar sign denotes the Canadian dollar.
+   */
+  @Test
+  void testRegionResolvesTheDollarForCanada() {
+    final CursorMoneyExtractor extractor =
+        CursorMoneyExtractor.forRegion(Locale.of("en", "CA"));
+    assertEquals("CAD", extractor.extract("$5").get(0).currency());
+  }
+
   @Test
   void testForRegionValidation() {
     assertThrows(IllegalArgumentException.class,

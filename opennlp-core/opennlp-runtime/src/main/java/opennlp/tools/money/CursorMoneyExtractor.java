@@ -34,9 +34,9 @@ import opennlp.tools.util.Span;
  * regular expressions, recognizing the common written money shapes.
  *
  * <p>Recognized forms: a currency symbol before or after the number ({@code $1,234.56},
- * {@code 50€}), an ISO 4217 code before or after the number ({@code USD 100},
+ * {@code 50\u20AC}), an ISO 4217 code before or after the number ({@code USD 100},
  * {@code 100 USD}), an optional leading minus ({@code -$5}), and scale markers, either
- * an immediate suffix ({@code $1.2M}, {@code £2.5k}, {@code $3bn}) or a following word
+ * an immediate suffix ({@code $1.2M}, {@code \u00A32.5k}, {@code $3bn}) or a following word
  * ({@code $3 billion}). Digit grouping is validated: once a comma appears, every further
  * group must have exactly three digits, and the match ends at the last valid position.
  * A bare number without a currency marker is never money.</p>
@@ -59,8 +59,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   private static final Map<Integer, String> DEFAULT_SYMBOLS = Map.ofEntries(
       Map.entry((int) '$', "USD"),
       Map.entry(0x20AC, "EUR"),   // euro sign
-      Map.entry((int) '£', "GBP"),
-      Map.entry((int) '¥', "JPY"),
+      Map.entry(0x00A3, "GBP"),   // pound sign
+      Map.entry(0x00A5, "JPY"),   // yen sign
       Map.entry(0x20B9, "INR"),   // rupee sign
       Map.entry(0x20A9, "KRW"),   // won sign
       Map.entry(0x20BD, "RUB"),   // ruble sign
@@ -209,7 +209,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return mention(text, start, NumberScan.parse(text, codeIndex + 4, true), code, false);
   }
 
-  /** Matches {@code 100 USD}, {@code 50}{@code €}, and {@code 3.5m USD}. */
+  /** Matches {@code 100 USD}, {@code 50\u20AC}, and {@code 3.5m USD}. */
   private MoneyAmount numberFirst(CharSequence text, int start, int digitIndex,
       boolean negative) {
     final NumberScan.Result number = NumberScan.parse(text, digitIndex, true);
