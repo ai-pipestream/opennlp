@@ -97,9 +97,10 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
-   * Verifies that country-name mentions carry a ballot on their own: with two English
-   * country names and a geocoder that resolves none of them, both names vote with
-   * the fixed country-name weight, tie evenly, and rank by ascending country code.
+   * Verifies that country-name mentions carry a ballot on their own: with a geocoder
+   * that resolves nothing, both names stay unresolved in the locations layer and still
+   * vote with the fixed country-name weight, tie evenly, and rank by ascending country
+   * code.
    */
   @Test
   void testCountryNamesAloneFillTheBallotWithoutGeocoderEvidence() {
