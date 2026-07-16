@@ -52,9 +52,11 @@ import opennlp.tools.util.normalizer.EmojiFlags;
  * diacritic-stripped fallback; aliases such as {@code USA} are out of scope. A
  * resolved mention never consults the name table, which is what makes {@code Georgia}
  * next to {@code Atlanta} count for the United States rather than the Caucasus
- * republic. A flag emoji anywhere in the text votes for its region, needing no
- * entity layer support at all. Mentions with no kind of evidence do not vote; a
- * document without usable evidence gets an empty layer.</p>
+ * republic. A country flag emoji anywhere in the text, a regional indicator
+ * pair naming an assigned ISO 3166-1 code, votes for its country and needs no entity
+ * layer support at all; subdivision tag-sequence flags name no country and cast no
+ * vote. Mentions with no kind of evidence do not vote; a document without usable
+ * evidence gets an empty layer.</p>
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
@@ -77,7 +79,11 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    */
   private static final double COUNTRY_NAME_WEIGHT = 0.95;
 
-  /** The weight of a flag emoji, as explicit a signal as a country name. */
+  /**
+   * The weight of a country flag emoji, deliberately equal to
+   * {@link #COUNTRY_NAME_WEIGHT} because writing a flag is as explicit a signal as
+   * writing the country's name.
+   */
   private static final double FLAG_WEIGHT = 0.95;
 
   /** The entity type label treated as a location unless the caller names others. */
@@ -125,14 +131,22 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * {@inheritDoc}
+   * Annotates the document with the {@link #REGIONS} ballot.
+   *
+   * <p>Location entities are matched to their resolutions by exact span. A resolved
+   * mention votes with its confidence, an unresolved mention votes as a country name
+   * when its text is one, and country flag emoji vote directly from the text. When
+   * several resolutions share one span, the last one in the locations layer casts
+   * that mention's vote.</p>
    *
    * @param document The document to annotate. Must not be {@code null} and must carry
    *                 the {@link Layers#ENTITIES} and {@link GeocodeAnnotator#LOCATIONS}
    *                 layers.
-   * @return The document with the {@link #REGIONS} layer added. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or a
-   *         required layer is absent.
+   * @return A new {@link Document} with the {@link #REGIONS} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, a
+   *         required layer is absent, or the document already carries the
+   *         {@link #REGIONS} layer.
    */
   @Override
   public Document annotate(Document document) {
@@ -170,9 +184,10 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Adds one vote per flag emoji in the text. Consecutive flags are segmented left to
-   * right, so two adjacent flags never form a spurious middle pair, and only assigned
-   * ISO country codes vote.
+   * Adds one vote per country flag emoji in the text. Consecutive flags are segmented
+   * left to right, so two adjacent flags never form a spurious middle pair. A lone
+   * regional indicator with no partner to its right casts no vote, and a pair decoding
+   * to a code outside the assigned ISO countries is skipped the same way.
    *
    * @param text The document text.
    * @param weights The running weight sums by country code.
@@ -199,16 +214,20 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Turns the weight sums into a ranked ballot: each country's share is its weight over
-   * the weight total, so shares sum to one, and rows are ordered by descending share
-   * with ties broken by ascending country code. The rows carry no spans, since the
-   * ballot describes the document as a whole. A country whose weight sums to zero
-   * carries no evidence and gets no row, so a ballot without positive weights is empty
-   * rather than a set of undefined shares.
+   * Turns the weight sums into the ranked ballot: each country's share is its weight
+   * over the total, and rows are ordered by descending share with ties broken by
+   * ascending country code so the ranking is deterministic. The rows carry no spans,
+   * since the ballot describes the document as a whole.
+   *
+   * <p>A country whose weight sums to zero carries no evidence, which a resolution at
+   * confidence {@code 0.0} is entitled to report, so it casts no vote and gets no row.
+   * An empty weight map, or one without a positive weight, produces an empty ballot
+   * rather than a set of undefined shares.</p>
    *
    * @param weights Maps a country code to the summed weight of its evidence. Must not be
    *                {@code null}.
-   * @return The ranked ballot rows. Never {@code null}.
+   * @return The ballot annotations in rank order. Never {@code null}; empty when no
+   *         country has evidence.
    */
   private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights) {
     double total = 0.0;
