@@ -185,4 +185,263 @@ public class CorefAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(misaligned));
   }
+
+  /**
+   * A pronoun opening the document has no preceding mention to link to, so it stays a
+   * singleton and, being first in text order, opens chain zero.
+   */
+  @Test
+  void testPronounAtDocumentStartStaysSingleton() {
+    final String text = "He waved. John smiled.";
+    final List<Annotation<String>> toks = tokens(text,
+        "He", "waved", ".", "John", "smiled", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 9), "s"),
+            new Annotation<>(new Span(10, 22), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "PRP", "VBD", ".", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(10, 14), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(new Span(0, 2), chains.get(0).span());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(0).value().kind());
+    Assertions.assertEquals(CorefMention.NO_ENTITY, chains.get(0).value().entity());
+    Assertions.assertEquals(1, chains.get(1).value().chain());
+    Assertions.assertEquals(CorefMention.KIND_ENTITY, chains.get(1).value().kind());
+  }
+
+  /**
+   * Two identical names of the same type merge into one chain through the exact match
+   * sieve, even with several sentences between them; the pronoun window does not apply
+   * to name matching.
+   */
+  @Test
+  void testExactNameMatchLinksAcrossDistantSentences() {
+    final String text = "Alice arrived. Rain fell. Wind blew. Alice left.";
+    final List<Annotation<String>> toks = tokens(text,
+        "Alice", "arrived", ".", "Rain", "fell", ".",
+        "Wind", "blew", ".", "Alice", "left", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 14), "s"),
+            new Annotation<>(new Span(15, 25), "s"),
+            new Annotation<>(new Span(26, 36), "s"),
+            new Annotation<>(new Span(37, 48), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "VBD", ".", "NNP", "VBD", ".",
+            "NNP", "VBD", ".", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 5), "person"),
+            new Annotation<>(new Span(37, 42), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(0, chains.get(1).value().chain());
+    Assertions.assertEquals(0, chains.get(0).value().entity());
+    Assertions.assertEquals(1, chains.get(1).value().entity());
+  }
+
+  /**
+   * Nested entity mentions are legal layer content: the containment sieve links the
+   * inner mention to the outer one it prefixes, and the exact match sieve links the
+   * later repetition, so all three mentions form one chain. Mentions sharing a start
+   * offset keep their entity layer order.
+   */
+  @Test
+  void testNestedEntityMentionsFormOneChain() {
+    final String text = "New York City honored New York.";
+    final List<Annotation<String>> toks = tokens(text,
+        "New", "York", "City", "honored", "New", "York", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 31), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "NNP", "NNP", "VBD", "NNP", "NNP", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 13), "location"),
+            new Annotation<>(new Span(0, 8), "location"),
+            new Annotation<>(new Span(22, 30), "location"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(3, chains.size());
+    Assertions.assertEquals(new Span(0, 13), chains.get(0).span());
+    Assertions.assertEquals(new Span(0, 8), chains.get(1).span());
+    Assertions.assertEquals(new Span(22, 30), chains.get(2).span());
+    for (final Annotation<CorefMention> mention : chains) {
+      Assertions.assertEquals(0, mention.value().chain());
+    }
+  }
+
+  /**
+   * A neutral pronoun never resolves to a person entity, so {@code It} after a lone
+   * person mention stays a singleton chain instead of linking to the wrong antecedent.
+   */
+  @Test
+  void testNeutralPronounSkipsPersonEntities() {
+    final String text = "John slept. It rained.";
+    final List<Annotation<String>> toks = tokens(text,
+        "John", "slept", ".", "It", "rained", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 22), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(1, chains.get(1).value().chain());
+    Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(1).value().kind());
+  }
+
+  /**
+   * A plural pronoun accepts both entity type classes: {@code They} links to an
+   * organization in one document and to a person in another.
+   */
+  @Test
+  void testPluralPronounResolvesToEitherTypeClass() {
+    final String orgText = "Acme grew. They hired.";
+    final List<Annotation<String>> orgToks = tokens(orgText,
+        "Acme", "grew", ".", "They", "hired", ".");
+    final Document orgDocument = new CorefAnnotator().annotate(Document.of(orgText)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 10), "s"),
+            new Annotation<>(new Span(11, 22), "s")))
+        .with(Layers.TOKENS, orgToks)
+        .with(Layers.POS_TAGS, values(orgToks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "organization"))));
+    final List<Annotation<CorefMention>> orgChains = orgDocument.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, orgChains.size());
+    Assertions.assertEquals(0, orgChains.get(0).value().chain());
+    Assertions.assertEquals(0, orgChains.get(1).value().chain());
+
+    final String personText = "Smith won. They cheered.";
+    final List<Annotation<String>> personToks = tokens(personText,
+        "Smith", "won", ".", "They", "cheered", ".");
+    final Document personDocument = new CorefAnnotator().annotate(Document.of(personText)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 10), "s"),
+            new Annotation<>(new Span(11, 24), "s")))
+        .with(Layers.TOKENS, personToks)
+        .with(Layers.POS_TAGS, values(personToks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 5), "person"))));
+    final List<Annotation<CorefMention>> personChains =
+        personDocument.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, personChains.size());
+    Assertions.assertEquals(0, personChains.get(0).value().chain());
+    Assertions.assertEquals(0, personChains.get(1).value().chain());
+  }
+
+  /**
+   * First and second person pronoun tokens never become mentions, even with a pronoun
+   * POS tag, so only the entity mention appears in the chains layer.
+   */
+  @Test
+  void testFirstAndSecondPersonPronounsAreNotMentions() {
+    final String text = "John spoke. I listened. You nodded.";
+    final List<Annotation<String>> toks = tokens(text,
+        "John", "spoke", ".", "I", "listened", ".", "You", "nodded", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 23), "s"),
+            new Annotation<>(new Span(24, 35), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "VBD", ".", "PRP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(1, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(CorefMention.KIND_ENTITY, chains.get(0).value().kind());
+  }
+
+  /**
+   * A pronoun-tagged token lying inside an entity span is not collected as a separate
+   * mention, so an entity name starting with {@code It} yields one entity mention, and a
+   * later free-standing {@code It} still resolves to it.
+   */
+  @Test
+  void testPronounTokenInsideEntityIsNotAMention() {
+    final String text = "It Corp grew. It hired.";
+    final List<Annotation<String>> toks = tokens(text,
+        "It", "Corp", "grew", ".", "It", "hired", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 13), "s"),
+            new Annotation<>(new Span(14, 23), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "PRP", "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 7), "organization"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(new Span(0, 7), chains.get(0).span());
+    Assertions.assertEquals(new Span(14, 16), chains.get(1).span());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(0, chains.get(1).value().chain());
+  }
+
+  /**
+   * Entity type labels match case-insensitively on both sides: the default annotator
+   * accepts an uppercase {@code PERSON} label, and an annotator configured with
+   * uppercase labels accepts a mixed-case entity value.
+   */
+  @Test
+  void testTypeLabelsMatchCaseInsensitively() {
+    final String text = "Mary spoke. She left.";
+    final List<Annotation<String>> toks = tokens(text,
+        "Mary", "spoke", ".", "She", "left", ".");
+    final Document upper = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 21), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "PERSON"))));
+    final List<Annotation<CorefMention>> upperChains = upper.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, upperChains.size());
+    Assertions.assertEquals(0, upperChains.get(0).value().chain());
+    Assertions.assertEquals(0, upperChains.get(1).value().chain());
+
+    final Document custom = new CorefAnnotator(Set.of("PER"), Set.of("ORG"))
+        .annotate(Document.of(text)
+            .with(Layers.SENTENCES, List.of(
+                new Annotation<>(new Span(0, 11), "s"),
+                new Annotation<>(new Span(12, 21), "s")))
+            .with(Layers.TOKENS, toks)
+            .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+            .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "Per"))));
+    final List<Annotation<CorefMention>> customChains = custom.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, customChains.size());
+    Assertions.assertEquals(0, customChains.get(0).value().chain());
+    Assertions.assertEquals(0, customChains.get(1).value().chain());
+  }
+
+  /**
+   * A document without entities or third-person pronouns gets an empty chains layer
+   * rather than an exception, and so does a document with no tokens at all.
+   */
+  @Test
+  void testNoMentionsYieldsEmptyChainsLayer() {
+    final String text = "Dogs bark.";
+    final List<Annotation<String>> toks = tokens(text, "Dogs", "bark", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 10), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNS", "VBP", "."))
+        .with(Layers.ENTITIES, List.of()));
+    Assertions.assertTrue(document.get(CorefAnnotator.CHAINS).isEmpty());
+
+    final Document empty = new CorefAnnotator().annotate(Document.of(""));
+    Assertions.assertTrue(empty.get(CorefAnnotator.CHAINS).isEmpty());
+  }
 }
