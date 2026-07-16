@@ -42,7 +42,7 @@ final class FeedforwardPOSContext {
   static final int SLOTS = WORD_SLOTS + SUFFIX_SLOTS + SHAPE_SLOTS + TAG_SLOTS;
 
   private FeedforwardPOSContext() {
-    // feature template only
+    // This class only describes the feature template and is never instantiated.
   }
 
   /**

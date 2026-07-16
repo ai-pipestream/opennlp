@@ -55,7 +55,7 @@ public final class FeedforwardPOSTrainer {
       "*lower*", "*cap*", "*allcaps*", "*digit*", "*alnum*", "*other*");
 
   private FeedforwardPOSTrainer() {
-    // static trainer only
+    // This class only exposes static training methods and is never instantiated.
   }
 
   /**
@@ -154,7 +154,15 @@ public final class FeedforwardPOSTrainer {
     return model;
   }
 
-  /** Builds the vocabularies and randomly initialized weights. */
+  /**
+   * Builds the word, suffix, shape, and tag vocabularies from the corpus, assigns each
+   * surviving symbol an embedding row, and creates a model with randomly initialized
+   * weights that {@link #optimize} then trains in place.
+   *
+   * @param corpus The non-empty training samples.
+   * @param settings The hyperparameters controlling the cutoffs and layer sizes.
+   * @return An untrained model with all vocabularies in place. Never {@code null}.
+   */
   private static FeedforwardPOSModel initialize(List<POSSample> corpus,
       Settings settings) {
     final Map<String, Integer> wordCounts = new LinkedHashMap<>();
@@ -227,7 +235,18 @@ public final class FeedforwardPOSTrainer {
         new float[settings.hiddenSize()], outputWeights, new float[tags.length]);
   }
 
-  /** Minibatch AdaGrad over softmax cross-entropy with cube activation and dropout. */
+  /**
+   * Trains the model weights in place with minibatch AdaGrad over a softmax
+   * cross-entropy loss, using the cube activation on the hidden layer and inverted
+   * dropout during training. Each epoch shuffles the example order with the seeded
+   * random generator, so the whole optimization is reproducible for a fixed seed.
+   *
+   * @param model The freshly initialized model whose weight arrays are updated.
+   * @param featureList The embedding row indices of every training example.
+   * @param goldList The gold output index of every training example, aligned with
+   *                 {@code featureList}.
+   * @param settings The hyperparameters controlling the optimization.
+   */
   private static void optimize(FeedforwardPOSModel model, List<int[]> featureList,
       List<Integer> goldList, Settings settings) {
     final int exampleCount = featureList.size();
@@ -389,6 +408,16 @@ public final class FeedforwardPOSTrainer {
     }
   }
 
+  /**
+   * Applies one AdaGrad step to a weight matrix, averaging the accumulated batch
+   * gradient, adding the L2 penalty, and scaling by the per-weight adaptive rate.
+   *
+   * @param weights The weight matrix to update in place.
+   * @param gradients The summed gradients of the current minibatch.
+   * @param accumulators The running sums of squared gradients per weight.
+   * @param batch The number of examples in the current minibatch.
+   * @param settings The hyperparameters providing the learning rate and L2 penalty.
+   */
   private static void update(float[][] weights, double[][] gradients,
       double[][] accumulators, int batch, Settings settings) {
     for (int r = 0; r < weights.length; r++) {
@@ -404,6 +433,16 @@ public final class FeedforwardPOSTrainer {
     }
   }
 
+  /**
+   * Applies one AdaGrad step to a bias vector, averaging the accumulated batch
+   * gradient and scaling by the per-weight adaptive rate. Biases carry no L2 penalty.
+   *
+   * @param weights The bias vector to update in place.
+   * @param gradients The summed gradients of the current minibatch.
+   * @param accumulators The running sums of squared gradients per weight.
+   * @param batch The number of examples in the current minibatch.
+   * @param settings The hyperparameters providing the learning rate.
+   */
   private static void updateVector(float[] weights, double[] gradients,
       double[] accumulators, int batch, Settings settings) {
     for (int i = 0; i < weights.length; i++) {
@@ -414,6 +453,15 @@ public final class FeedforwardPOSTrainer {
     }
   }
 
+  /**
+   * Draws a matrix with entries sampled uniformly from {@code [-scale, scale)}.
+   *
+   * @param random The seeded random generator, so initialization is reproducible.
+   * @param rows The number of rows.
+   * @param columns The number of columns.
+   * @param scale The half-width of the sampling interval.
+   * @return The freshly sampled matrix. Never {@code null}.
+   */
   private static float[][] uniform(Random random, int rows, int columns, double scale) {
     final float[][] matrix = new float[rows][columns];
     for (int r = 0; r < rows; r++) {
@@ -424,12 +472,25 @@ public final class FeedforwardPOSTrainer {
     return matrix;
   }
 
+  /**
+   * Resets every entry of a gradient matrix to zero so it can accumulate the next
+   * minibatch.
+   *
+   * @param matrix The matrix to clear in place.
+   */
   private static void zero(double[][] matrix) {
     for (final double[] row : matrix) {
       Arrays.fill(row, 0.0);
     }
   }
 
+  /**
+   * Shuffles the example visiting order in place with the Fisher-Yates algorithm,
+   * driven by the seeded random generator so epochs remain reproducible.
+   *
+   * @param order The example indices to permute in place.
+   * @param random The seeded random generator.
+   */
   private static void shuffle(int[] order, Random random) {
     for (int i = order.length - 1; i > 0; i--) {
       final int j = random.nextInt(i + 1);
