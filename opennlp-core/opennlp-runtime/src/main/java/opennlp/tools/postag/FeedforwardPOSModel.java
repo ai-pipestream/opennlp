@@ -66,6 +66,23 @@ public class FeedforwardPOSModel {
   private final float[][] outputWeights;
   private final float[] outputBias;
 
+  /**
+   * Initializes a model from its vocabularies and weight arrays. The trainer is the
+   * only caller; the arrays are taken over without copying and must not be mutated
+   * afterwards except by the trainer that created them.
+   *
+   * @param wordIds The word symbol to embedding row mapping.
+   * @param suffixIds The suffix symbol to embedding row mapping.
+   * @param shapeIds The shape symbol to embedding row mapping.
+   * @param tagIds The tag symbol to embedding row mapping.
+   * @param tags The tag inventory by output index.
+   * @param embeddingSize The embedding dimensionality.
+   * @param embeddings The embedding matrix, one row per symbol.
+   * @param hiddenWeights The hidden layer weight matrix.
+   * @param hiddenBias The hidden layer bias vector.
+   * @param outputWeights The output layer weight matrix.
+   * @param outputBias The output layer bias vector.
+   */
   FeedforwardPOSModel(Map<String, Integer> wordIds, Map<String, Integer> suffixIds,
       Map<String, Integer> shapeIds, Map<String, Integer> tagIds, String[] tags,
       int embeddingSize, float[][] embeddings, float[][] hiddenWeights,
@@ -149,7 +166,13 @@ public class FeedforwardPOSModel {
     return tags.clone();
   }
 
-  /** Lowercases a word symbol; special symbols and absences pass through. */
+  /**
+   * Lowercases a word symbol for the case-insensitive vocabulary lookup. Special
+   * symbols starting with {@code *} and absent positions pass through unchanged.
+   *
+   * @param word The word symbol, or {@code null} for an absent position.
+   * @return The normalized symbol, or {@code null} if {@code word} was {@code null}.
+   */
   static String normalize(String word) {
     if (word == null) {
       return null;
@@ -157,6 +180,15 @@ public class FeedforwardPOSModel {
     return word.startsWith("*") ? word : StringUtil.toLowerCase(word);
   }
 
+  /**
+   * Resolves a symbol to its embedding row. An absent position maps to the padding
+   * symbol and a symbol outside the vocabulary maps to the unknown symbol, so the
+   * lookup always succeeds.
+   *
+   * @param ids The vocabulary to look the symbol up in.
+   * @param symbol The symbol, or {@code null} for an absent position.
+   * @return The embedding row index.
+   */
   private static int lookup(Map<String, Integer> ids, String symbol) {
     Integer id = ids.get(symbol == null ? ABSENT : symbol);
     if (id == null) {
@@ -240,30 +272,43 @@ public class FeedforwardPOSModel {
     }
   }
 
+  /** @return The embedding matrix, exposed to the trainer for in-place updates. */
   float[][] embeddings() {
     return embeddings;
   }
 
+  /** @return The hidden layer weights, exposed to the trainer for in-place updates. */
   float[][] hiddenWeights() {
     return hiddenWeights;
   }
 
+  /** @return The hidden layer bias, exposed to the trainer for in-place updates. */
   float[] hiddenBias() {
     return hiddenBias;
   }
 
+  /** @return The output layer weights, exposed to the trainer for in-place updates. */
   float[][] outputWeights() {
     return outputWeights;
   }
 
+  /** @return The output layer bias, exposed to the trainer for in-place updates. */
   float[] outputBias() {
     return outputBias;
   }
 
+  /** @return The word symbol to embedding row mapping. */
   Map<String, Integer> wordIds() {
     return wordIds;
   }
 
+  /**
+   * Writes a vocabulary as its size followed by every symbol and row index pair.
+   *
+   * @param data The stream to write to.
+   * @param ids The vocabulary to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeVocabulary(DataOutputStream data, Map<String, Integer> ids)
       throws IOException {
     data.writeInt(ids.size());
@@ -273,6 +318,13 @@ public class FeedforwardPOSModel {
     }
   }
 
+  /**
+   * Reads a vocabulary written by {@link #writeVocabulary}, preserving entry order.
+   *
+   * @param data The stream to read from.
+   * @return The restored vocabulary. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static Map<String, Integer> readVocabulary(DataInputStream data)
       throws IOException {
     final int size = data.readInt();
@@ -284,6 +336,13 @@ public class FeedforwardPOSModel {
     return ids;
   }
 
+  /**
+   * Writes a matrix as its row and column counts followed by the values in row order.
+   *
+   * @param data The stream to write to.
+   * @param matrix The matrix to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeMatrix(DataOutputStream data, float[][] matrix)
       throws IOException {
     data.writeInt(matrix.length);
@@ -295,6 +354,13 @@ public class FeedforwardPOSModel {
     }
   }
 
+  /**
+   * Reads a matrix written by {@link #writeMatrix}.
+   *
+   * @param data The stream to read from.
+   * @return The restored matrix. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static float[][] readMatrix(DataInputStream data) throws IOException {
     final int rows = data.readInt();
     final int columns = data.readInt();
@@ -307,6 +373,13 @@ public class FeedforwardPOSModel {
     return matrix;
   }
 
+  /**
+   * Writes a vector as its length followed by the values.
+   *
+   * @param data The stream to write to.
+   * @param vector The vector to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeVector(DataOutputStream data, float[] vector)
       throws IOException {
     data.writeInt(vector.length);
@@ -315,6 +388,13 @@ public class FeedforwardPOSModel {
     }
   }
 
+  /**
+   * Reads a vector written by {@link #writeVector}.
+   *
+   * @param data The stream to read from.
+   * @return The restored vector. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static float[] readVector(DataInputStream data) throws IOException {
     final float[] vector = new float[data.readInt()];
     for (int i = 0; i < vector.length; i++) {
