@@ -111,9 +111,10 @@ public class RegionCurrencyResolutionExampleTest {
   }
 
   /**
-   * Runs the example: the entity layer feeds the region ballot, and the ballot winner
-   * picks the symbol table for the money layer. Asserts the exact ranked shares, that
-   * every ballot row is span-less under the document-scoped key, and that the {@code $} amount is
+   * Runs the example: the entity layer is geocoded into a locations layer that feeds
+   * the region ballot, and the ballot winner picks the symbol table for the money
+   * layer. Asserts the exact ranked shares, that every ballot row is span-less under
+   * the document-scoped key, and that the {@code $} amount is
    * identified as {@code MXN} because Mexico wins the ballot.
    */
   @Test
