@@ -73,6 +73,83 @@ public class ContainmentSpineTest {
     Assertions.assertEquals(1, cyclic.ancestors("a").size());
   }
 
+  /**
+   * Asserts the traversal stop at a dangling parent reference: a parent identifier the
+   * spine does not know contributes no ancestor and ends the chain, so a place whose
+   * only parent is missing has an empty chain, and a longer chain keeps exactly the
+   * places up to the dangling reference.
+   */
+  @Test
+  void testMissingParentReferenceEndsTheChain() {
+    final ContainmentSpine spine = ContainmentSpine.builder()
+        .add("x", "y", "X", "t")
+        .add("y", "zz", "Y", "t")
+        .build();
+
+    Assertions.assertEquals(List.of(new PlaceAncestor("y", "Y", "t")),
+        spine.ancestors("x"));
+    Assertions.assertTrue(spine.ancestors("y").isEmpty());
+  }
+
+  /**
+   * Asserts the duplicate identifier behavior of the builder: adding an identifier
+   * again replaces the earlier place, so a chain through that identifier reports the
+   * name and type of the last addition.
+   */
+  @Test
+  void testDuplicateIdsKeepTheLastAddition() {
+    final ContainmentSpine spine = ContainmentSpine.builder()
+        .add("child", "dup", "Child", "t")
+        .add("dup", null, "First", "t1")
+        .add("dup", null, "Second", "t2")
+        .build();
+
+    Assertions.assertEquals(List.of(new PlaceAncestor("dup", "Second", "t2")),
+        spine.ancestors("child"));
+  }
+
+  /**
+   * Asserts the exact traversal stop inside cycles of the user-supplied table: the walk
+   * halts at the first identifier it has already seen, so a self-parented place has no
+   * ancestors at all, and a three-place cycle yields exactly the two other places
+   * before the walk would revisit the starting place.
+   */
+  @Test
+  void testCyclesStopAtTheFirstRepeatedIdentifier() {
+    final ContainmentSpine selfLoop = ContainmentSpine.builder()
+        .add("a", "a", "A", "t")
+        .build();
+    Assertions.assertTrue(selfLoop.ancestors("a").isEmpty());
+
+    final ContainmentSpine triangle = ContainmentSpine.builder()
+        .add("a", "b", "A", "t")
+        .add("b", "c", "B", "t")
+        .add("c", "a", "C", "t")
+        .build();
+    Assertions.assertEquals(List.of(
+        new PlaceAncestor("b", "B", "t"),
+        new PlaceAncestor("c", "C", "t")),
+        triangle.ancestors("a"));
+  }
+
+  /**
+   * Asserts the internal depth cap on acyclic chains: a chain of seventy places stops
+   * after sixty-four ancestors, nearest first, so a pathologically deep table cannot
+   * produce an unbounded walk.
+   */
+  @Test
+  void testDepthCapBoundsVeryDeepChains() {
+    final ContainmentSpine.Builder builder = ContainmentSpine.builder();
+    for (int i = 0; i < 70; i++) {
+      builder.add("p" + i, i == 69 ? null : "p" + (i + 1), "P" + i, "t");
+    }
+    final List<PlaceAncestor> chain = builder.build().ancestors("p0");
+
+    Assertions.assertEquals(64, chain.size());
+    Assertions.assertEquals("p1", chain.get(0).id());
+    Assertions.assertEquals("p64", chain.get(63).id());
+  }
+
   @Test
   void testNeutralTableLoads(@TempDir Path dir) throws IOException {
     final Path table = dir.resolve("containment.tsv");

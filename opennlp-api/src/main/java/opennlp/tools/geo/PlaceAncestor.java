@@ -31,7 +31,7 @@ package opennlp.tools.geo;
 public record PlaceAncestor(String id, String name, String type) {
 
   /**
-   * Validates the ancestor.
+   * Validates that every component of the ancestor is present and non-blank.
    *
    * @throws IllegalArgumentException Thrown if a component is {@code null} or blank.
    */
