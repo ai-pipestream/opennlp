@@ -36,7 +36,7 @@ package opennlp.tools.geo;
 public record RegionVote(String countryCode, double share) {
 
   /**
-   * Validates the vote.
+   * Validates the vote against the documented constraints.
    *
    * @throws IllegalArgumentException Thrown if {@code countryCode} is {@code null} or
    *         blank, or {@code share} is not in {@code (0, 1]}.
