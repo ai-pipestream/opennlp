@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.geo.DocumentRegionAnnotator;
-import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -60,11 +59,8 @@ public class RegionAwareMoneyFallbackTest {
    */
   @Test
   void testPipelineProducedEmptyBallotUsesTheDefaultTable() {
-    final Geocoder unreachable = (text, mentions) -> {
-      throw new IllegalStateException("the geocoder must not be consulted");
-    };
     final Document document = new RegionAwareMoneyAnnotator().annotate(
-        new DocumentRegionAnnotator(unreachable).annotate(Document.of("the fee is $7")));
+        new DocumentRegionAnnotator().annotate(Document.of("the fee is $7")));
 
     final List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
     assertEquals(1, money.size());

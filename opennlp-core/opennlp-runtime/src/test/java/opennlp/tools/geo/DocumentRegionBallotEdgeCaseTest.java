@@ -75,18 +75,6 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
-   * Builds a geocoder that must never be consulted: any call fails the test loudly.
-   * Passing it proves a code path resolves all of its evidence without the gazetteer.
-   *
-   * @return A {@link Geocoder} that rejects every call. Never {@code null}.
-   */
-  private static Geocoder unreachableGeocoder() {
-    return (text, mentions) -> {
-      throw new IllegalStateException("the geocoder must not be consulted");
-    };
-  }
-
-  /**
    * Builds a minimal city entry for a country; only the country code matters for the
    * region ballot.
    *
@@ -129,8 +117,9 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = tableGeocoder(Map.of(
         "London", new ScoredCountry("GB", 0.8),
         "Paris", new ScoredCountry("FR", 0.8)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("trains between London and Paris", "London", "Paris"));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("trains between London and Paris", "London", "Paris")));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -142,15 +131,17 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
-   * Verifies that country-name mentions carry a ballot on their own: with two English
-   * country names and a geocoder that fails loudly when consulted, both names vote with
-   * the fixed country-name weight, tie evenly, and rank by ascending country code.
+   * Verifies that country-name mentions carry a ballot on their own: with a geocoder
+   * that resolves nothing, both names stay unresolved in the locations layer and still
+   * vote with the fixed country-name weight, tie evenly, and rank by ascending country
+   * code.
    */
   @Test
-  void testCountryNamesAloneFillTheBallotWithoutTheGeocoder() {
-    final Document document = new DocumentRegionAnnotator(unreachableGeocoder())
-        .annotate(withLocations("trade between Mexico and New Zealand grew",
-            "Mexico", "New Zealand"));
+  void testCountryNamesAloneFillTheBallotWhenNothingResolves() {
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(tableGeocoder(Map.of()))
+            .annotate(withLocations("trade between Mexico and New Zealand grew",
+                "Mexico", "New Zealand")));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -163,11 +154,11 @@ public class DocumentRegionBallotEdgeCaseTest {
 
   /**
    * Verifies the empty case: a document without an entity layer produces a present but
-   * empty region layer, and the geocoder is never consulted for it.
+   * empty region layer.
    */
   @Test
   void testNoLocationEntitiesYieldAnEmptyPresentLayer() {
-    final Document document = new DocumentRegionAnnotator(unreachableGeocoder())
+    final Document document = new DocumentRegionAnnotator()
         .annotate(Document.of("nothing to locate here"));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
@@ -185,9 +176,10 @@ public class DocumentRegionBallotEdgeCaseTest {
         "Nice", new ScoredCountry("FR", 0.3),
         "Nancy", new ScoredCountry("FR", 0.3),
         "Chicago", new ScoredCountry("US", 0.7)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("flights from Nice and Nancy to Chicago",
-            "Nice", "Nancy", "Chicago"));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("flights from Nice and Nancy to Chicago",
+                "Nice", "Nancy", "Chicago")));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -242,8 +234,7 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testNullDocumentIsRejected() {
-    final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(unreachableGeocoder());
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
     assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 }
