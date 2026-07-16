@@ -36,9 +36,16 @@ import opennlp.tools.util.Span;
  * Geocodes the location entities of a document: reads {@link Layers#ENTITIES} and
  * provides {@link #LOCATIONS}, one annotation per resolved mention carrying its full
  * {@link GeoResolution}, so the gazetteer entry, coordinates, and confidence stay
- * available to every downstream consumer instead of being recomputed or discarded.
+ * available to every downstream consumer.
  *
- * <p>Mentions the geocoder cannot resolve simply have no annotation in the layer.</p>
+ * <p>All qualifying mentions are handed to the {@link Geocoder} in a single call, which
+ * lets an implementation use co-occurring mentions to disambiguate. A mention the
+ * geocoder cannot resolve simply has no annotation in the layer, and a mention the
+ * geocoder ranks against several candidates gets one annotation per candidate, in the
+ * geocoder's order.</p>
+ *
+ * <p>The annotator holds no per-call state; it is safe to share between threads
+ * whenever its geocoder honors the {@link Geocoder} thread-safety contract.</p>
  *
  * @since 3.0.0
  */
@@ -70,8 +77,8 @@ public class GeocodeAnnotator implements DocumentAnnotator {
    * @param geocoder The geocoder resolving location mentions. Must not be {@code null}.
    * @param locationTypes The entity type labels treated as locations, matched
    *                      case-insensitively. Must not be {@code null} or empty.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or
-   *         {@code locationTypes} is empty.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}, or if
+   *         {@code locationTypes} is empty or contains a {@code null} or blank entry.
    */
   public GeocodeAnnotator(Geocoder geocoder, Set<String> locationTypes) {
     if (geocoder == null) {
@@ -91,6 +98,22 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     this.locationTypes = Set.copyOf(lowered);
   }
 
+  /**
+   * Annotates the document with the {@link #LOCATIONS} layer.
+   *
+   * <p>Entities whose type is in the configured set, compared case-insensitively,
+   * become the mention spans of one geocoder call, and every returned resolution
+   * becomes one annotation at its mention's span. A document without qualifying
+   * mentions gets an empty layer without any geocoder call.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}; a document
+   *                 without an entity layer is treated as having no entities.
+   * @return A new {@link Document} with the {@link #LOCATIONS} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
+   *         already carries the {@link #LOCATIONS} layer.
+   * @throws UncheckedIOException Thrown if the geocoder fails with an I/O error.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

@@ -134,8 +134,9 @@ public class DocumentRegionAnnotatorTest {
   @Test
   void testFlagEmojiVotesWithoutAnyEntitySupport() {
     final Geocoder geocoder = tableGeocoder(Map.of());
+    // Australia flag, U+1F1E6 U+1F1FA
     final Document document =
-        annotate(geocoder, withEntities("shipping update 🇦🇺 soon"));
+        annotate(geocoder, withEntities("shipping update \uD83C\uDDE6\uD83C\uDDFA soon"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -147,8 +148,9 @@ public class DocumentRegionAnnotatorTest {
   @Test
   void testConsecutiveFlagsSegmentLeftToRight() {
     final Geocoder geocoder = tableGeocoder(Map.of());
+    // France flag, U+1F1EB U+1F1F7, directly followed by the Germany flag, U+1F1E9 U+1F1EA
     final Document document = annotate(geocoder,
-        withEntities("match report 🇫🇷🇩🇪 today"));
+        withEntities("match report \uD83C\uDDEB\uD83C\uDDF7\uD83C\uDDE9\uD83C\uDDEA today"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -158,6 +160,60 @@ public class DocumentRegionAnnotatorTest {
           || vote.value().countryCode().equals("DE"));
       assertEquals(0.5, vote.value().share(), 1e-9);
     }
+  }
+
+  @Test
+  void testFlagAtTheStartOfTheTextVotes() {
+    final Geocoder geocoder = tableGeocoder(Map.of());
+    // Australia flag, U+1F1E6 U+1F1FA, as the very first character of the text
+    final String text = "\uD83C\uDDE6\uD83C\uDDFA export volumes rising";
+    final Document document = annotate(geocoder, withEntities(text));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 1e-9);
+    assertEquals(new Span(0, text.length()), ballot.get(0).span());
+  }
+
+  @Test
+  void testDisagreeingFlagsBlendWithGeocodedEvidence() {
+    final Geocoder geocoder = tableGeocoder(Map.of("Sydney", "AU"));
+    // France flag, U+1F1EB U+1F1F7, and Germany flag, U+1F1E9 U+1F1EA
+    final String text = "Sydney update \uD83C\uDDEB\uD83C\uDDF7 \uD83C\uDDE9\uD83C\uDDEA";
+    final Document document = annotate(geocoder, withEntities(text, "Sydney"));
+
+    // AU votes 0.8 (the resolution confidence), each flag votes 0.95, total 2.7; the
+    // flags tie on weight, so their alphabetical country codes break the tie
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(3, ballot.size());
+    assertEquals("DE", ballot.get(0).value().countryCode());
+    assertEquals(0.95 / 2.7, ballot.get(0).value().share(), 1e-9);
+    assertEquals("FR", ballot.get(1).value().countryCode());
+    assertEquals(0.95 / 2.7, ballot.get(1).value().share(), 1e-9);
+    assertEquals("AU", ballot.get(2).value().countryCode());
+    assertEquals(0.8 / 2.7, ballot.get(2).value().share(), 1e-9);
+  }
+
+  @Test
+  void testLoneRegionalIndicatorDoesNotVote() {
+    final Geocoder geocoder = tableGeocoder(Map.of());
+    // lone REGIONAL INDICATOR SYMBOL LETTER A, U+1F1E6, mid-text and a lone
+    // REGIONAL INDICATOR SYMBOL LETTER U, U+1F1FA, ending the text: neither is a pair
+    final Document document = annotate(geocoder,
+        withEntities("grade \uD83C\uDDE6 list \uD83C\uDDFA"));
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+  }
+
+  @Test
+  void testUnassignedRegionalIndicatorPairDoesNotVote() {
+    final Geocoder geocoder = tableGeocoder(Map.of());
+    // the pair U+1F1FD U+1F1FD decodes to XX, which is not an assigned ISO country
+    final Document document = annotate(geocoder,
+        withEntities("status \uD83C\uDDFD\uD83C\uDDFD checked"));
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
   }
 
   @Test
