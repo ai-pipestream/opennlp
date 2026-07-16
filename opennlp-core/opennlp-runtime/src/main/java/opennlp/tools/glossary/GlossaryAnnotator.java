@@ -43,6 +43,7 @@ public class GlossaryAnnotator implements DocumentAnnotator {
   public static final LayerKey<GlossaryMatch> GLOSSARY =
       LayerKey.of("glossary", GlossaryMatch.class);
 
+  /** The matcher that produces the hits this annotator records as a layer. */
   private final GlossaryMatcher matcher;
 
   /**

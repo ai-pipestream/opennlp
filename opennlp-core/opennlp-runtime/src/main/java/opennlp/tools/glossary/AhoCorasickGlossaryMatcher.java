@@ -50,14 +50,25 @@ import opennlp.tools.util.Span;
  */
 public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
 
+  /** The index of the automaton's root state, from which every scan starts. */
   private static final int ROOT = 0;
 
+  /** The registered entries in registration order; raw hits index into this list. */
   private final List<GlossaryEntry> entries;
+
+  /** The term length of each entry, aligned with {@link #entries} by index. */
   private final int[] termLengths;
+
+  /** Whether terms and text are compared through per-character lowercasing. */
   private final boolean ignoreCase;
 
+  /** The goto function: per state, the outgoing edges keyed by normalized character. */
   private final List<Map<Character, Integer>> transitions;
+
+  /** The failure function: per state, the state to fall back to on a character miss. */
   private final int[] fail;
+
+  /** Per state, the indexes into {@link #entries} of the terms that end at that state. */
   private final int[][] outputs;
 
   /**

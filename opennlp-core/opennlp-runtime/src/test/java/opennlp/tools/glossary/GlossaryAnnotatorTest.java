@@ -44,6 +44,43 @@ public class GlossaryAnnotatorTest {
     Assertions.assertTrue(document.layers().contains(GlossaryAnnotator.GLOSSARY));
   }
 
+  /**
+   * Verifies that a text without any glossary hit, including the empty text, still gets
+   * a glossary layer: the layer key is present on the document and its annotation list
+   * is empty, so consumers can distinguish "annotator ran, found nothing" from
+   * "annotator never ran".
+   */
+  @Test
+  void testNoHitsStillProvidesEmptyGlossaryLayer() {
+    final GlossaryAnnotator annotator = new GlossaryAnnotator(
+        new AhoCorasickGlossaryMatcher(
+            List.of(new GlossaryEntry("Q60", "New York City")), false));
+
+    final Document noHits = annotator.annotate(Document.of("Nothing to see here."));
+    Assertions.assertTrue(noHits.layers().contains(GlossaryAnnotator.GLOSSARY));
+    Assertions.assertTrue(noHits.get(GlossaryAnnotator.GLOSSARY).isEmpty());
+
+    final Document emptyText = annotator.annotate(Document.of(""));
+    Assertions.assertTrue(emptyText.layers().contains(GlossaryAnnotator.GLOSSARY));
+    Assertions.assertTrue(emptyText.get(GlossaryAnnotator.GLOSSARY).isEmpty());
+  }
+
+  /**
+   * Verifies that annotating the same document twice fails loud: the second run tries
+   * to add the glossary layer again and the document rejects the duplicate layer with
+   * an {@link IllegalArgumentException}.
+   */
+  @Test
+  void testAnnotateTwiceRejectsDuplicateGlossaryLayer() {
+    final GlossaryAnnotator annotator = new GlossaryAnnotator(
+        new AhoCorasickGlossaryMatcher(
+            List.of(new GlossaryEntry("Q60", "New York City")), false));
+
+    final Document once = annotator.annotate(Document.of("New York City"));
+    Assertions.assertEquals(1, once.get(GlossaryAnnotator.GLOSSARY).size());
+    Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(once));
+  }
+
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new GlossaryAnnotator(null));
