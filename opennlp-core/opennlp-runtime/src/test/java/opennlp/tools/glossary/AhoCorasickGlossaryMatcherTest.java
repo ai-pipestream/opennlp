@@ -22,6 +22,8 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.util.Span;
+
 public class AhoCorasickGlossaryMatcherTest {
 
   @Test
@@ -248,7 +250,6 @@ public class AhoCorasickGlossaryMatcherTest {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
         List.of(new GlossaryEntry("PAD", "launch pad")), false);
 
-    // Two U+1F680 rocket characters, each encoded as a surrogate pair of two chars.
     // Two rocket emoji (U+1F680), each one surrogate pair, precede the term.
     final String text = "\uD83D\uDE80\uD83D\uDE80 launch pad ready";
     final List<GlossaryMatch> matches = matcher.match(text);
@@ -278,6 +279,91 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals(22, matches.get(0).span().getEnd());
     Assertions.assertEquals("caf\u00E9 au lait",
         text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * Verifies the digit half of the boundary contract: a hit whose neighbor is a digit
+   * continues a word exactly like one whose neighbor is a letter, so a code embedded
+   * in a longer alphanumeric run never matches, while the same code between
+   * non-alphanumeric neighbors does.
+   */
+  @Test
+  void testDigitNeighborsBlockTheBoundary() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ID", "b12")), false);
+    Assertions.assertTrue(matcher.match("ab123x").isEmpty());
+    Assertions.assertTrue(matcher.match("4b12").isEmpty());
+    final List<GlossaryMatch> matches = matcher.match("(b12)");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(1, 4), matches.get(0).span());
+  }
+
+  /**
+   * Verifies that a supplementary letter next to a hit blocks the boundary like a
+   * basic-plane one: Deseret letters lie above U+FFFF, and a term glued to one is
+   * inside a word, not on a boundary.
+   */
+  @Test
+  void testSupplementaryLetterNeighborBlocksTheBoundary() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("CAT", "cat")), false);
+    // U+10428, DESERET SMALL LETTER LONG I, a supplementary-plane letter
+    Assertions.assertTrue(matcher.match("\uD801\uDC28cat").isEmpty());
+    Assertions.assertTrue(matcher.match("cat\uD801\uDC28").isEmpty());
+    Assertions.assertEquals(1, matcher.match("a \uD801\uDC28 cat").size());
+  }
+
+  /**
+   * Verifies that boundary filtering happens per hit, before overlap resolution: a
+   * longer candidate rejected at its boundary does not shadow a shorter overlapping
+   * term that sits on clean boundaries of its own.
+   */
+  @Test
+  void testBoundaryRejectedLongerCandidateLetsTheShorterTermThrough() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("LONG", "launch pad"),
+            new GlossaryEntry("SHORT", "launch")), false);
+    // "pads" continues the longer term's last word, so only the shorter term stands
+    final List<GlossaryMatch> matches = matcher.match("launch pads ready");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("SHORT", matches.get(0).id());
+    Assertions.assertEquals(new Span(0, 6), matches.get(0).span());
+  }
+
+  /**
+   * Verifies case-insensitive matching on a non-ASCII basic-plane pair and pins the
+   * documented limitation at the same time: the per-code-point mapping folds a
+   * dotted-capital letter to its simple lowercase, so the sharp s never folds to
+   * {@code ss} and a term spelled with {@code ss} does not match the sharp s.
+   */
+  @Test
+  void testNonAsciiCasePairFoldsAndMultiCharacterFoldingDoesNot() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("RES", "r\u00E9sum\u00E9")), true);
+    // U+00C9/U+00E9, the accented E pair, folds per code point
+    final List<GlossaryMatch> matches = matcher.match("R\u00C9SUM\u00C9 attached");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(0, 6), matches.get(0).span());
+
+    final AhoCorasickGlossaryMatcher sharp = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), true);
+    // U+00DF, the sharp s: its full folding is the two-letter ss, which the
+    // per-code-point mapping deliberately does not apply
+    Assertions.assertTrue(sharp.match("stra\u00DFe").isEmpty());
+  }
+
+  /**
+   * Verifies that ignoring case folds a supplementary-plane pair: the Deseret capital
+   * U+10400 lowercases to U+10428 under the per-code-point mapping, so a term
+   * registered lowercase matches the capital spelling with its exact span.
+   */
+  @Test
+  void testSupplementaryCasePairFoldsWhenIgnoringCase() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("DES", "\uD801\uDC28")), true);
+    final List<GlossaryMatch> matches = matcher.match("- \uD801\uDC00 -");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
   }
 
   @Test
