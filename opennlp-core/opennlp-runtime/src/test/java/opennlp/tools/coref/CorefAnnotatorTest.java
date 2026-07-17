@@ -487,6 +487,135 @@ public class CorefAnnotatorTest {
   }
 
   /**
+   * The mirror image of the case above: the untyped mention comes first and the typed
+   * one second, exercising the other operand of the type guard and the candidate-side
+   * scan of the exact match sieve.
+   */
+  @Test
+  void testTypedEntityMatchesEarlierUntypedEntityWithSameText() {
+    final String text = "Paris met Paris.";
+    final List<Annotation<String>> toks = tokens(text, "Paris", "met", "Paris", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 16), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "PROPN", "VERB", "PROPN", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 5), NameFinderAnnotator.UNTYPED),
+            new Annotation<>(new Span(10, 15), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(0, chains.get(1).value().chain());
+  }
+
+  /**
+   * An unknown-typed mention joins a chain but never bridges two known types: three
+   * identical names typed person, untyped, and location resolve into a person chain
+   * that absorbs the untyped mention, and a separate location chain. Without the
+   * chain-level type, the untyped middle mention would link to the person and the
+   * location would link to the untyped one, collapsing a person and a place into one
+   * chain.
+   */
+  @Test
+  void testUntypedMentionNeverBridgesDifferentlyTypedChains() {
+    final String text = "Georgia met Georgia in Georgia.";
+    final List<Annotation<String>> toks =
+        tokens(text, "Georgia", "met", "Georgia", "in", "Georgia", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 31), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS,
+            values(toks, "PROPN", "VERB", "PROPN", "ADP", "PROPN", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 7), "person"),
+            new Annotation<>(new Span(12, 19), NameFinderAnnotator.UNTYPED),
+            new Annotation<>(new Span(23, 30), "location"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(3, chains.size());
+    Assertions.assertArrayEquals(new int[] {0, 0, 1},
+        chains.stream().mapToInt(a -> a.value().chain()).toArray());
+  }
+
+  /**
+   * The same three-way constellation with the known types swapped: whichever known
+   * type absorbs the untyped mention, the chain invariant holds, and the person and
+   * location mentions never share a chain.
+   */
+  @Test
+  void testBridgeInvariantHoldsWithTypesInReverseOrder() {
+    final String text = "Georgia met Georgia in Georgia.";
+    final List<Annotation<String>> toks =
+        tokens(text, "Georgia", "met", "Georgia", "in", "Georgia", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 31), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS,
+            values(toks, "PROPN", "VERB", "PROPN", "ADP", "PROPN", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 7), "location"),
+            new Annotation<>(new Span(12, 19), NameFinderAnnotator.UNTYPED),
+            new Annotation<>(new Span(23, 30), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(3, chains.size());
+    Assertions.assertArrayEquals(new int[] {0, 0, 1},
+        chains.stream().mapToInt(a -> a.value().chain()).toArray());
+  }
+
+  /**
+   * The containment sieve's cross-type path: a typed full name and an untyped
+   * whitespace-delimited suffix of it link, in both orders of appearance, since an
+   * unknown type never blocks a containment link.
+   */
+  @Test
+  void testContainmentLinksTypedNameWithUntypedSuffix() {
+    final String text = "Barack Obama spoke. Obama left.";
+    final List<Annotation<String>> toks =
+        tokens(text, "Barack", "Obama", "spoke", ".", "Obama", "left", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 19), "s"),
+            new Annotation<>(new Span(20, 31), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS,
+            values(toks, "PROPN", "PROPN", "VERB", "PUNCT", "PROPN", "VERB", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 12), "person"),
+            new Annotation<>(new Span(20, 25), NameFinderAnnotator.UNTYPED))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(chains.get(0).value().chain(), chains.get(1).value().chain());
+  }
+
+  /**
+   * The mirrored containment order: the untyped short form appears first and the
+   * typed full name second, exercising the other containment operand.
+   */
+  @Test
+  void testContainmentLinksUntypedPrefixWithLaterTypedName() {
+    final String text = "Obama arrived. Barack Obama spoke.";
+    final List<Annotation<String>> toks =
+        tokens(text, "Obama", "arrived", ".", "Barack", "Obama", "spoke", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 14), "s"),
+            new Annotation<>(new Span(15, 34), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS,
+            values(toks, "PROPN", "VERB", "PUNCT", "PROPN", "PROPN", "VERB", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 5), NameFinderAnnotator.UNTYPED),
+            new Annotation<>(new Span(15, 27), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(chains.get(0).value().chain(), chains.get(1).value().chain());
+  }
+
+  /**
    * A document without entities or third-person pronouns gets an empty chains layer
    * rather than an exception, and so does a document with no tokens at all.
    */
