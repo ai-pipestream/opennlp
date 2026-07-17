@@ -277,12 +277,8 @@ public class StringUtil {
    *
    * @param theString The {@link CharSequence} to examine. Must not be {@code null}.
    * @return {@code true} if {@code theString} is empty or all whitespace.
-   * @throws IllegalArgumentException If {@code theString} is {@code null}.
    */
   public static boolean isBlank(CharSequence theString) {
-    if (theString == null) {
-      throw new IllegalArgumentException("theString must not be null");
-    }
     for (int i = 0; i < theString.length(); ) {
       final int codePoint = Character.codePointAt(theString, i);
       if (!isWhitespace(codePoint)) {

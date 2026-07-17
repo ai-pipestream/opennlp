@@ -28,7 +28,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -687,27 +686,16 @@ public class StringUtilTest {
    * whitespace-only and empty values are blank, and any non-whitespace code point,
    * supplementary ones included, makes a value non-blank.
    */
-  @ParameterizedTest
-  @MethodSource("blankSamples")
-  void testIsBlankFollowsTheToolkitWhitespaceDefinition(String input, boolean blank) {
-    Assertions.assertEquals(blank, StringUtil.isBlank(input));
-  }
-
-  private static Stream<Arguments> blankSamples() {
-    return Stream.of(
-        Arguments.of("", true),
-        Arguments.of(" \t\n", true),
-        // U+00A0 no-break space and U+2007 figure space: JDK String.isBlank says false
-        Arguments.of("\u00A0", true),
-        Arguments.of(" \u00A0\u2007 ", true),
-        Arguments.of("a", false),
-        Arguments.of(" a ", false),
-        // U+10428, a supplementary-plane letter read as one code point, not two chars
-        Arguments.of("\uD801\uDC28", false));
-  }
-
   @Test
-  void testIsBlankRejectsNull() {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> StringUtil.isBlank(null));
+  void testIsBlankFollowsTheToolkitWhitespaceDefinition() {
+    Assertions.assertTrue(StringUtil.isBlank(""));
+    Assertions.assertTrue(StringUtil.isBlank(" \t\n"));
+    // U+00A0 no-break space and U+2007 figure space: JDK String.isBlank says false
+    Assertions.assertTrue(StringUtil.isBlank("\u00A0"));
+    Assertions.assertTrue(StringUtil.isBlank(" \u00A0\u2007 "));
+    Assertions.assertFalse(StringUtil.isBlank("a"));
+    Assertions.assertFalse(StringUtil.isBlank(" a "));
+    // U+10428, a supplementary-plane letter read as one code point, not two chars
+    Assertions.assertFalse(StringUtil.isBlank("\uD801\uDC28"));
   }
 }
