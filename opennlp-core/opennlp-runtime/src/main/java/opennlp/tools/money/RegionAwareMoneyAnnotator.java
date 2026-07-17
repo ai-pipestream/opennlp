@@ -18,6 +18,7 @@
 package opennlp.tools.money;
 
 import java.util.ArrayList;
+import java.util.Currency;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -81,8 +82,8 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
 
   /**
    * Resolves and caches the extractor for a winning country. Fallback outcomes are
-   * cached too: a country without an installed locale, or one whose locale has no
-   * currency, maps to the default extractor, so the locale scan runs at most once per
+   * cached too: a country with no locale whose currency symbol is a single currency
+   * sign maps to the default extractor, so the locale scan runs at most once per
    * country.
    */
   private CursorMoneyExtractor extractorFor(String countryCode) {
@@ -100,20 +101,59 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Picks an installed locale for a country, if any: the candidate with the
-   * lexicographically smallest language tag, so the choice does not depend on the order
-   * in which the runtime lists its locales.
+   * Picks a locale through which a country's currency symbol can be resolved, that is
+   * one whose currency is written with a single currency-sign code point in that locale.
+   * English is tried first, as {@code en} plus the country, because a country's
+   * minority-language locales often write the currency with a disambiguating prefix, for
+   * example the Canadian dollar as {@code CA$} rather than {@code $}. If English does not
+   * yield a usable symbol, the installed locales for the country are scanned and the
+   * usable candidate with the lexicographically smallest language tag wins, so the choice
+   * never depends on the order in which the runtime lists its locales. If no candidate is
+   * usable, as for a country whose currency is conventionally spelled with letters, the
+   * result is empty and the caller keeps the default symbol table.
+   *
+   * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
+   * @return A locale for the country whose currency symbol is a single currency sign, or
+   *         an empty {@link Optional} if the country has none. Never {@code null}.
    */
   private static Optional<Locale> localeOf(String countryCode) {
+    final Locale english = Locale.of("en", countryCode);
+    if (hasResolvableSymbol(english)) {
+      return Optional.of(english);
+    }
     Locale best = null;
     for (final Locale locale : Locale.getAvailableLocales()) {
       if (countryCode.equals(locale.getCountry())
+          && hasResolvableSymbol(locale)
           && (best == null
               || locale.toLanguageTag().compareTo(best.toLanguageTag()) < 0)) {
         best = locale;
       }
     }
     return Optional.ofNullable(best);
+  }
+
+  /**
+   * Reports whether a locale's currency is written with a single currency-sign code
+   * point there, which is what makes a symbol table override possible; a locale with no
+   * currency at all, such as one naming an unassigned country code, is not resolvable.
+   *
+   * @param locale The locale to test. Must not be {@code null}.
+   * @return {@code true} if the locale has a currency written as one currency sign.
+   */
+  private static boolean hasResolvableSymbol(Locale locale) {
+    final Currency currency;
+    try {
+      currency = Currency.getInstance(locale);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+    if (currency == null) {
+      return false;
+    }
+    final String symbol = currency.getSymbol(locale);
+    return symbol.codePointCount(0, symbol.length()) == 1
+        && Character.getType(symbol.codePointAt(0)) == Character.CURRENCY_SYMBOL;
   }
 
   @Override

@@ -128,6 +128,35 @@ public class RegionAwareMoneyAnnotatorTest {
     assertEquals(identified.span(), converted.span());
   }
 
+  /**
+   * Verifies that a country with several installed locales resolves through one whose
+   * currency symbol is usable: Canada's minority-language locales write the Canadian
+   * dollar as {@code CA$}, which is not a single currency sign, while {@code en-CA}
+   * writes it {@code $}, so a document speaking from Canada identifies {@code $5} as
+   * {@code CAD} rather than falling back to the default table's {@code USD}.
+   */
+  @Test
+  void testCountryWithMinorityLanguageLocalesResolvesTheSymbol() {
+    final Document document = new RegionAwareMoneyAnnotator()
+        .annotate(withBallot("the grant is $5", "CA"));
+    assertEquals("CAD",
+        document.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
+  /**
+   * Verifies that the per-country cache serves repeated documents without changing the
+   * outcome: two documents from the same country resolve the symbol identically, so the
+   * cached extractor is the resolved one rather than a fallback.
+   */
+  @Test
+  void testRepeatedDocumentsFromOneCountryResolveIdentically() {
+    final RegionAwareMoneyAnnotator annotator = new RegionAwareMoneyAnnotator();
+    final Document first = annotator.annotate(withBallot("the grant is $5", "CA"));
+    final Document second = annotator.annotate(withBallot("the rebate is $9", "CA"));
+    assertEquals("CAD", first.get(MoneyAnnotator.MONEY).get(0).value().currency());
+    assertEquals("CAD", second.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
   @Test
   void testUnknownCountryFallsBackToTheDefaultTable() {
     final Document document = new RegionAwareMoneyAnnotator()
