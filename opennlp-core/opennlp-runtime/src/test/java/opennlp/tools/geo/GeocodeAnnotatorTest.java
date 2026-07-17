@@ -267,6 +267,30 @@ public class GeocodeAnnotatorTest {
   }
 
   @Test
+  void testResolutionOutsideTheGivenMentionsIsRejected() {
+    // The Geocoder contract binds every returned mention() to one of the input spans.
+    // A geocoder that trims the span it was handed breaks that contract, and the layer
+    // it would produce could no longer be matched back to its entity, so the violation
+    // is reported instead of being carried into the layer.
+    final Geocoder trimming = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(
+            new Span(mention.getStart(), mention.getEnd() - 1),
+            entry("Sydney", "AU"), 0.8));
+      }
+      return resolutions;
+    };
+    final String text = "a Sydney landmark";
+    final Document input = Document.of(text).with(Layers.ENTITIES,
+        List.of(new Annotation<>(new Span(2, 8), "location")));
+
+    final IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(trimming).annotate(input));
+    assertTrue(thrown.getMessage().contains("mention"), thrown.getMessage());
+  }
+
+  @Test
   void testTypeSetValidation() {
     final Geocoder geocoder = tableGeocoder(Map.of(), 0.5);
     assertThrows(IllegalArgumentException.class,
