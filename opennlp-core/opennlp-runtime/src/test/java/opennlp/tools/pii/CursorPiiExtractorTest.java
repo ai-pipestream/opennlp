@@ -334,6 +334,26 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies that number boundaries are judged in code points: a supplementary-plane
+   * letter glued to a digit run continues a word exactly like a basic-plane letter,
+   * although its trailing surrogate alone reads as a non-letter, so neither a card
+   * nor a phone is reported inside such a word, while a space restores the boundary.
+   */
+  @Test
+  void testSupplementaryLetterNeighborBlocksNumberBoundaries() {
+    // U+10428, DESERET SMALL LETTER LONG I, a supplementary-plane letter
+    final String letter = "\uD801\uDC28";
+    Assertions.assertTrue(extractor.extract(letter + "4111111111111111").isEmpty());
+    Assertions.assertTrue(extractor.extract("4111111111111111" + letter).isEmpty());
+    Assertions.assertTrue(extractor.extract(letter + "555-123-4567").isEmpty());
+
+    final List<PiiMention> spaced = extractor.extract(letter + " 4111111111111111");
+    Assertions.assertEquals(1, spaced.size());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, spaced.get(0).type());
+    Assertions.assertEquals(2, spaced.get(0).span().getStart());
+  }
+
+  /**
    * Verifies the multi-boundary backoff path on a card that itself contains
    * separators: the greedy candidate ends in a trailing three-digit group, forming a
    * nineteen-digit candidate that is in range but fails the Luhn check, and the scan
