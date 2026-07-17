@@ -19,6 +19,7 @@ package opennlp.tools.glossary;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
@@ -39,9 +40,12 @@ import opennlp.tools.util.Span;
  * inside {@code concatenate}. Overlapping hits are resolved leftmost first, then longest,
  * then by registration order, and the reported hits never overlap.</p>
  *
- * <p>When the matcher ignores case, terms and text are compared through per-character
- * lowercasing, which keeps spans exact but does not apply locale or multi-character case
- * folding.</p>
+ * <p>When the matcher ignores case, terms and text are compared through the
+ * per-code-point UnicodeData lowercase mapping, the same mapping
+ * {@link opennlp.tools.util.StringUtil#toLowerCase(CharSequence)} applies, which keeps
+ * spans exact but does not apply locale or multi-character case folding. Word
+ * boundaries and case comparison both work in code points, so supplementary letters
+ * neighbor and fold like any others.</p>
  *
  * <p>The automaton is built once in the constructor; matching holds no per-call state
  * and is safe to share between threads.</p>
@@ -59,13 +63,20 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /** The term length of each entry, aligned with {@link #entries} by index. */
   private final int[] termLengths;
 
-  /** Whether terms and text are compared through per-character lowercasing. */
+  /** Whether terms and text are compared through per-code-point lowercasing. */
   private final boolean ignoreCase;
 
-  /** The goto function: per state, the outgoing edges keyed by normalized character. */
-  private final List<Map<Character, Integer>> transitions;
+  /**
+   * The goto function, frozen per state into a sorted code point array with a parallel
+   * target array, so a step on the per-character scan path is one binary search and
+   * never boxes the code point the way a map keyed by {@link Character} would.
+   */
+  private final int[][] edgeCodePoints;
 
-  /** The failure function: per state, the state to fall back to on a character miss. */
+  /** The goto targets, aligned with {@link #edgeCodePoints} per state. */
+  private final int[][] edgeTargets;
+
+  /** The failure function: per state, the state to fall back to on a code point miss. */
   private final int[] fail;
 
   /** Per state, the indexes into {@link #entries} of the terms that end at that state. */
@@ -94,7 +105,7 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
     this.ignoreCase = ignoreCase;
     this.termLengths = new int[entries.size()];
 
-    this.transitions = new ArrayList<>();
+    final List<Map<Integer, Integer>> transitions = new ArrayList<>();
     final List<List<Integer>> nodeOutputs = new ArrayList<>();
     transitions.add(new HashMap<>());
     nodeOutputs.add(new ArrayList<>());
@@ -103,8 +114,9 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
       final String term = entries.get(pattern).term();
       termLengths[pattern] = term.length();
       int state = ROOT;
-      for (int i = 0; i < term.length(); i++) {
-        final char c = normalize(term.charAt(i));
+      for (int i = 0; i < term.length(); ) {
+        final int c = normalize(term.codePointAt(i));
+        i += Character.charCount(term.codePointAt(i));
         Integer next = transitions.get(state).get(c);
         if (next == null) {
           next = transitions.size();
@@ -117,18 +129,36 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
       nodeOutputs.get(state).add(pattern);
     }
 
+    this.edgeCodePoints = new int[transitions.size()][];
+    this.edgeTargets = new int[transitions.size()][];
+    for (int state = 0; state < transitions.size(); state++) {
+      final Map<Integer, Integer> edges = transitions.get(state);
+      final int[] codePoints = new int[edges.size()];
+      int e = 0;
+      for (final int codePoint : edges.keySet()) {
+        codePoints[e++] = codePoint;
+      }
+      Arrays.sort(codePoints);
+      final int[] targets = new int[codePoints.length];
+      for (int k = 0; k < codePoints.length; k++) {
+        targets[k] = edges.get(codePoints[k]);
+      }
+      edgeCodePoints[state] = codePoints;
+      edgeTargets[state] = targets;
+    }
+
     this.fail = new int[transitions.size()];
     final Deque<Integer> queue = new ArrayDeque<>();
-    for (final int child : transitions.get(ROOT).values()) {
+    for (final int child : edgeTargets[ROOT]) {
       fail[child] = ROOT;
       queue.add(child);
     }
     while (!queue.isEmpty()) {
       final int state = queue.remove();
       nodeOutputs.get(state).addAll(nodeOutputs.get(fail[state]));
-      for (final Map.Entry<Character, Integer> edge : transitions.get(state).entrySet()) {
-        final int child = edge.getValue();
-        fail[child] = step(fail[state], edge.getKey());
+      for (int e = 0; e < edgeCodePoints[state].length; e++) {
+        final int child = edgeTargets[state][e];
+        fail[child] = step(fail[state], edgeCodePoints[state][e]);
         queue.add(child);
       }
     }
@@ -150,12 +180,14 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
     }
     final List<int[]> hits = new ArrayList<>();
     int state = ROOT;
-    for (int i = 0; i < text.length(); i++) {
-      state = step(state, normalize(text.charAt(i)));
+    for (int i = 0; i < text.length(); ) {
+      final int codePoint = Character.codePointAt(text, i);
+      i += Character.charCount(codePoint);
+      state = step(state, normalize(codePoint));
       for (final int pattern : outputs[state]) {
-        final int start = i + 1 - termLengths[pattern];
-        if (onWordBoundary(text, start, i + 1)) {
-          hits.add(new int[] {start, i + 1, pattern});
+        final int start = i - termLengths[pattern];
+        if (onWordBoundary(text, start, i)) {
+          hits.add(new int[] {start, i, pattern});
         }
       }
     }
@@ -163,33 +195,48 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Advances the automaton by one character, following failure links on a miss.
+   * Advances the automaton by one code point, following failure links on a miss.
    *
    * @param state The current state.
-   * @param c The normalized input character.
+   * @param codePoint The normalized input code point.
    * @return The next state.
    */
-  private int step(int state, char c) {
-    Integer next = transitions.get(state).get(c);
-    while (next == null && state != ROOT) {
+  private int step(int state, int codePoint) {
+    int next = target(state, codePoint);
+    while (next < 0 && state != ROOT) {
       state = fail[state];
-      next = transitions.get(state).get(c);
+      next = target(state, codePoint);
     }
-    return next == null ? ROOT : next;
+    return next < 0 ? ROOT : next;
   }
 
   /**
-   * Normalizes one character for comparison.
+   * Looks up one goto edge.
    *
-   * @param c The character.
-   * @return The lowercased character when case is ignored, otherwise {@code c}.
+   * @param state The state to leave.
+   * @param codePoint The normalized code point to follow.
+   * @return The target state, or {@code -1} when the state has no such edge.
    */
-  private char normalize(char c) {
-    return ignoreCase ? Character.toLowerCase(c) : c;
+  private int target(int state, int codePoint) {
+    final int index = Arrays.binarySearch(edgeCodePoints[state], codePoint);
+    return index >= 0 ? edgeTargets[state][index] : -1;
   }
 
   /**
-   * Checks that a candidate hit does not continue a word on either side.
+   * Normalizes one code point for comparison, with the per-code-point UnicodeData
+   * lowercase mapping the project's case seam defines.
+   *
+   * @param codePoint The code point.
+   * @return The lowercased code point when case is ignored, otherwise the code point.
+   */
+  private int normalize(int codePoint) {
+    return ignoreCase ? Character.toLowerCase(codePoint) : codePoint;
+  }
+
+  /**
+   * Checks that a candidate hit does not continue a word on either side. Neighbors are
+   * read as whole code points, so a supplementary letter or digit next to a hit blocks
+   * it exactly like a basic-plane one.
    *
    * @param text The text being scanned.
    * @param start The hit start, inclusive.
@@ -197,12 +244,13 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
    * @return {@code true} if the hit sits on word boundaries.
    */
   private static boolean onWordBoundary(CharSequence text, int start, int end) {
-    if (start > 0 && Character.isLetterOrDigit(text.charAt(start))
-        && Character.isLetterOrDigit(text.charAt(start - 1))) {
+    if (start > 0 && Character.isLetterOrDigit(Character.codePointAt(text, start))
+        && Character.isLetterOrDigit(Character.codePointBefore(text, start))) {
       return false;
     }
-    return end >= text.length() || !Character.isLetterOrDigit(text.charAt(end - 1))
-        || !Character.isLetterOrDigit(text.charAt(end));
+    return end >= text.length()
+        || !Character.isLetterOrDigit(Character.codePointBefore(text, end))
+        || !Character.isLetterOrDigit(Character.codePointAt(text, end));
   }
 
   /**
