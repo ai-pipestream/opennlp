@@ -46,27 +46,12 @@ public record GlossaryMatch(Span span, String id, String term) {
     if (span == null) {
       throw new IllegalArgumentException("span must not be null");
     }
-    if (id == null || blank(id)) {
+    if (id == null || StringUtil.isBlank(id)) {
       throw new IllegalArgumentException("id must not be null or blank");
     }
-    if (term == null || blank(term)) {
+    if (term == null || StringUtil.isBlank(term)) {
       throw new IllegalArgumentException("term must not be null or blank");
     }
   }
 
-  /**
-   * Reports whether a value is blank under the project whitespace definition, which
-   * unlike the JDK's includes no-break spaces, so a value spelled entirely from them
-   * cannot pass as content.
-   */
-  private static boolean blank(String value) {
-    for (int i = 0; i < value.length(); ) {
-      final int cp = value.codePointAt(i);
-      if (!StringUtil.isWhitespace(cp)) {
-        return false;
-      }
-      i += Character.charCount(cp);
-    }
-    return true;
-  }
 }
