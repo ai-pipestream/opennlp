@@ -276,14 +276,36 @@ public class CursorPiiExtractorTest {
 
   /**
    * Verifies rejected phone-like forms: a bare ten-digit run without any formatting, a
-   * separated run with only nine digits, and an international candidate with only
-   * seven digits, which is below the minimum of eight.
+   * separated run with only nine digits, and an international candidate whose digits
+   * admit no split into an assigned calling code and a plausible national length.
    */
   @Test
   void testPhoneRejectedForms() {
     Assertions.assertTrue(extractor.extract("Order 4155550123 shipped.").isEmpty());
     Assertions.assertTrue(extractor.extract("Ref 415-555-012 code.").isEmpty());
     Assertions.assertTrue(extractor.extract("+1234567 is short").isEmpty());
+  }
+
+  /**
+   * Verifies that international candidates are judged against the per-calling-code
+   * national lengths: a four-digit national number under a code that assigns that
+   * length is accepted even though the whole number is short, while a
+   * plausible-looking number under an unassigned code and a valid code with a
+   * national length no territory assigns are both rejected.
+   */
+  @Test
+  void testPhoneInternationalLengthsFollowCallingCode() {
+    final List<PiiMention> shortValid = extractor.extract("Call +683 4002 now.");
+    Assertions.assertEquals(1, shortValid.size());
+    Assertions.assertEquals(PiiMention.TYPE_PHONE, shortValid.get(0).type());
+    Assertions.assertEquals("+6834002", shortValid.get(0).normalized());
+
+    final List<PiiMention> greenland = extractor.extract("Call +299 123456 today.");
+    Assertions.assertEquals(1, greenland.size());
+    Assertions.assertEquals("+299123456", greenland.get(0).normalized());
+
+    Assertions.assertTrue(extractor.extract("Call +999 1234 5678 now.").isEmpty());
+    Assertions.assertTrue(extractor.extract("Call +65 123 456 now.").isEmpty());
   }
 
   /**
