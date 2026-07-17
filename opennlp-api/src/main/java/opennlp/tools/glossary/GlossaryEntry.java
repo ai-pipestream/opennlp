@@ -17,6 +17,8 @@
 
 package opennlp.tools.glossary;
 
+import opennlp.tools.util.StringUtil;
+
 /**
  * One glossary entry: a surface form to find in text and the stable identifier it
  * resolves to. An identifier with several aliases is registered as several entries
@@ -38,11 +40,27 @@ public record GlossaryEntry(String id, String term) {
    *         {@code null} or blank.
    */
   public GlossaryEntry {
-    if (id == null || id.isBlank()) {
+    if (id == null || blank(id)) {
       throw new IllegalArgumentException("id must not be null or blank");
     }
-    if (term == null || term.isBlank()) {
+    if (term == null || blank(term)) {
       throw new IllegalArgumentException("term must not be null or blank");
     }
+  }
+
+  /**
+   * Reports whether a value is blank under the project whitespace definition, which
+   * unlike the JDK's includes no-break spaces, so a value spelled entirely from them
+   * cannot pass as content.
+   */
+  private static boolean blank(String value) {
+    for (int i = 0; i < value.length(); ) {
+      final int cp = value.codePointAt(i);
+      if (!StringUtil.isWhitespace(cp)) {
+        return false;
+      }
+      i += Character.charCount(cp);
+    }
+    return true;
   }
 }
