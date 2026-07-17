@@ -22,7 +22,6 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import opennlp.tools.document.Annotation;
@@ -31,6 +30,7 @@ import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Geocodes the location entities of a document: reads {@link Layers#ENTITIES} and
@@ -94,13 +94,29 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     }
     final Set<String> lowered = new HashSet<>(locationTypes.size());
     for (final String type : locationTypes) {
-      if (type == null || type.isBlank()) {
+      if (type == null || blank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
-      lowered.add(type.toLowerCase(Locale.ROOT));
+      lowered.add(StringUtil.toLowerCase(type));
     }
     this.geocoder = geocoder;
     this.locationTypes = Set.copyOf(lowered);
+  }
+
+  /**
+   * Reports whether a type label is blank under the project whitespace definition,
+   * which unlike the JDK's includes no-break spaces, so a label spelled entirely from
+   * them cannot slip past the constructor as a dead entry.
+   */
+  private static boolean blank(String label) {
+    for (int i = 0; i < label.length(); ) {
+      final int cp = label.codePointAt(i);
+      if (!StringUtil.isWhitespace(cp)) {
+        return false;
+      }
+      i += Character.charCount(cp);
+    }
+    return true;
   }
 
   /**
@@ -111,13 +127,17 @@ public class GeocodeAnnotator implements DocumentAnnotator {
    * becomes one annotation at its mention's span. A document without qualifying
    * mentions gets an empty layer without any geocoder call.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}; a document
-   *                 without an entity layer is treated as having no entities.
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link Layers#ENTITIES} layer, which may be empty. An absent
+   *                 entity layer is a pipeline error rather than an entity-free
+   *                 document, because a missing entity stage would otherwise silence
+   *                 every location of every document.
    * @return A new {@link Document} with the {@link #LOCATIONS} layer added. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, already
-   *         carries the {@link #LOCATIONS} layer, or the geocoder returns a resolution
-   *         whose mention span is not one of the spans it was given.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, lacks
+   *         the entity layer, already carries the {@link #LOCATIONS} layer, or the
+   *         geocoder returns a resolution whose mention span matches none of the spans
+   *         it was given by character offsets.
    * @throws UncheckedIOException Thrown if the geocoder fails with an I/O error.
    */
   @Override
@@ -125,9 +145,13 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    if (!document.layers().contains(Layers.ENTITIES)) {
+      throw new IllegalArgumentException("document lacks the required layer "
+          + Layers.ENTITIES);
+    }
     final List<Span> mentions = new ArrayList<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
-      if (locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
+      if (locationTypes.contains(StringUtil.toLowerCase(entity.value()))) {
         mentions.add(entity.span());
       }
     }
@@ -139,9 +163,15 @@ public class GeocodeAnnotator implements DocumentAnnotator {
       } catch (IOException e) {
         throw new UncheckedIOException("geocoding failed", e);
       }
-      final Set<Span> given = new HashSet<>(mentions);
+      // Membership is judged by character offsets alone: entity spans carry a type,
+      // and a geocoder rebuilding its result spans without one still refers to the
+      // same stretch of text, which is all the downstream offset-keyed alignment uses.
+      final Set<Long> given = new HashSet<>(mentions.size());
+      for (final Span mention : mentions) {
+        given.add(offsets(mention));
+      }
       for (final GeoResolution resolution : resolutions) {
-        if (!given.contains(resolution.mention())) {
+        if (!given.contains(offsets(resolution.mention()))) {
           throw new IllegalArgumentException("geocoder resolved the mention span "
               + resolution.mention() + ", which is not one of the given mentions");
         }
@@ -149,6 +179,11 @@ public class GeocodeAnnotator implements DocumentAnnotator {
       }
     }
     return document.with(LOCATIONS, resolved);
+  }
+
+  /** Collapses a span to its offsets, so typed and untyped spans match by position. */
+  private static long offsets(Span span) {
+    return ((long) span.getStart() << 32) | span.getEnd();
   }
 
   @Override

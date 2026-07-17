@@ -206,12 +206,78 @@ public class GeocodeAnnotatorTest {
 
   @Test
   void testZeroEntitiesYieldAnEmptyLocationsLayer() {
-    // A document without an entity layer reads as zero entities; the layer is still
-    // provided, just empty, and the geocoder is never called.
-    final Document document =
-        new GeocodeAnnotator(unreachableGeocoder()).annotate(Document.of("no places"));
+    // A present-but-empty entity layer reads as zero entities; the locations layer is
+    // still provided, just empty, and the geocoder is never called.
+    final Document document = new GeocodeAnnotator(unreachableGeocoder())
+        .annotate(Document.of("no places").with(Layers.ENTITIES, List.of()));
     assertTrue(document.get(GeocodeAnnotator.LOCATIONS).isEmpty());
     assertTrue(document.layers().contains(GeocodeAnnotator.LOCATIONS));
+  }
+
+  /**
+   * Verifies that a document without an entity layer is rejected with a message naming
+   * the missing layer, matching the sibling region annotator: an absent required layer
+   * is a pipeline error, not an entity-free document, so a missing entity stage cannot
+   * silence every location of every document.
+   */
+  @Test
+  void testAbsentEntityLayerThrowsWithExactMessage() {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(unreachableGeocoder()).annotate(Document.of("bare")));
+    assertEquals("document lacks the required layer entities<String>", e.getMessage());
+  }
+
+  /**
+   * Verifies that mention membership is judged by character offsets, not by
+   * {@link Span#equals(Object)}: entity spans carry their type, and a geocoder that
+   * rebuilds its result spans without one still resolves the same stretch of text, so
+   * its resolutions are accepted rather than rejected as foreign spans.
+   */
+  @Test
+  void testUntypedResolutionSpanForTypedMentionIsAccepted() {
+    final Geocoder untypedRebuilder = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(
+            new Span(mention.getStart(), mention.getEnd()),
+            entry("sydney", "Sydney", "AU"), 0.8));
+      }
+      return resolutions;
+    };
+    final String text = "a Sydney landmark";
+    final Document input = Document.of(text).with(Layers.ENTITIES,
+        List.of(new Annotation<>(new Span(2, 8, "location"), "location")));
+
+    final List<Annotation<GeoResolution>> locations = new GeocodeAnnotator(untypedRebuilder)
+        .annotate(input).get(GeocodeAnnotator.LOCATIONS);
+    assertEquals(1, locations.size());
+    assertEquals(2, locations.get(0).span().getStart());
+    assertEquals(8, locations.get(0).span().getEnd());
+    assertEquals("AU", locations.get(0).value().entry().countryCode());
+  }
+
+  /**
+   * Verifies the production shape end to end: typed entity spans, as the name-finder
+   * adapter emits them, pass through a geocoder that returns the given spans unchanged
+   * and are matched back without loss.
+   */
+  @Test
+  void testTypedMentionSpansRoundTripThroughTheMembershipCheck() {
+    final Geocoder passThrough = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(mention, entry("sydney", "Sydney", "AU"), 0.8));
+      }
+      return resolutions;
+    };
+    final String text = "a Sydney landmark";
+    final Document input = Document.of(text).with(Layers.ENTITIES,
+        List.of(new Annotation<>(new Span(2, 8, "location"), "location")));
+
+    final List<Annotation<GeoResolution>> locations = new GeocodeAnnotator(passThrough)
+        .annotate(input).get(GeocodeAnnotator.LOCATIONS);
+    assertEquals(1, locations.size());
+    assertEquals(new Span(2, 8, "location"), locations.get(0).span());
   }
 
   @Test
@@ -262,7 +328,8 @@ public class GeocodeAnnotatorTest {
   void testAnnotatingTwiceRejectsTheDuplicateLayer() {
     final Geocoder geocoder = tableGeocoder(Map.of(), 0.5);
     final GeocodeAnnotator annotator = new GeocodeAnnotator(geocoder);
-    final Document once = annotator.annotate(Document.of("plain text"));
+    final Document once = annotator
+        .annotate(Document.of("plain text").with(Layers.ENTITIES, List.of()));
     assertThrows(IllegalArgumentException.class, () -> annotator.annotate(once));
   }
 
@@ -299,5 +366,9 @@ public class GeocodeAnnotatorTest {
         () -> new GeocodeAnnotator(geocoder, Set.of(" ")));
     assertThrows(IllegalArgumentException.class,
         () -> new GeocodeAnnotator(geocoder, Collections.singleton(null)));
+    // U+00A0, the no-break space: blank under the project whitespace definition even
+    // though the JDK's own blank check does not cover it
+    assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(geocoder, Set.of("\u00A0")));
   }
 }

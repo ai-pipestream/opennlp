@@ -120,7 +120,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
-      lowered.add(type.toLowerCase(Locale.ROOT));
+      lowered.add(StringUtil.toLowerCase(type));
     }
     this.locationTypes = Set.copyOf(lowered);
   }
@@ -172,12 +172,12 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
-      if (!locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
+      if (!locationTypes.contains(StringUtil.toLowerCase(entity.value()))) {
         continue;
       }
       final Span span = entity.span();
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
-      final String named = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
+      final String named = COUNTRY_NAMES.get(StringUtil.toLowerCase(mention));
       if (named != null) {
         weights.merge(named, COUNTRY_NAME_WEIGHT, Double::sum);
         continue;
@@ -284,7 +284,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     for (final String code : Locale.getISOCountries()) {
       final String name = Locale.of("", code).getDisplayCountry(Locale.ENGLISH);
       if (!name.isEmpty() && !name.equals(code)) {
-        names.put(name.toLowerCase(Locale.ROOT), code);
+        names.put(StringUtil.toLowerCase(name), code);
       }
     }
     return Map.copyOf(names);

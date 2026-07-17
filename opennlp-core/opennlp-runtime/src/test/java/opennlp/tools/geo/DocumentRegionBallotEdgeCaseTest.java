@@ -235,6 +235,29 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
+   * Verifies that a best candidate without a country code casts no vote through the
+   * resolution path: the mention is no country name, so nothing short-circuits ahead of
+   * the resolution lookup, and the countryless entry leaves the ballot empty rather
+   * than voting for a null key or failing.
+   */
+  @Test
+  void testBestCandidateWithoutCountryCodeCastsNoVote() {
+    final Geocoder geocoder = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(mention, entry("Springfield", null), 0.9));
+      }
+      return resolutions;
+    };
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("dateline Springfield", "Springfield")));
+
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+  }
+
+  /**
    * Verifies that a {@code null} document is rejected with a clear exception before any
    * layer is touched.
    */
