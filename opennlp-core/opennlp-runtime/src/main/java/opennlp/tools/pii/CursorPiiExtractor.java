@@ -127,8 +127,9 @@ public class CursorPiiExtractor implements PiiExtractor {
       }
       if (end == i + 1
           || !validDomain(text.subSequence(i + 1, end).toString())
-          || (start > 0 && Character.isLetterOrDigit(text.charAt(start - 1)))
-          || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))) {
+          || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
+          || (end < text.length()
+              && Character.isLetterOrDigit(Character.codePointAt(text, end)))) {
         continue;
       }
       final String normalized =
@@ -204,7 +205,7 @@ public class CursorPiiExtractor implements PiiExtractor {
   private static void scanIbans(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       if (!isAsciiUpper(text.charAt(i))
-          || (i > 0 && Character.isLetterOrDigit(text.charAt(i - 1)))
+          || (i > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, i)))
           || i + 3 >= text.length()
           || !isAsciiUpper(text.charAt(i + 1))
           || !isAsciiDigit(text.charAt(i + 2))
@@ -232,7 +233,8 @@ public class CursorPiiExtractor implements PiiExtractor {
         final int textEnd = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < IBAN_MIN_LENGTH || length > IBAN_MAX_LENGTH
-            || (textEnd < text.length() && Character.isLetterOrDigit(text.charAt(textEnd)))) {
+            || (textEnd < text.length()
+                && Character.isLetterOrDigit(Character.codePointAt(text, textEnd)))) {
           continue;
         }
         final String candidate = compact.substring(0, length);
@@ -290,7 +292,8 @@ public class CursorPiiExtractor implements PiiExtractor {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
-            || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
+            || (end < text.length()
+                && Character.isLetterOrDigit(Character.codePointAt(text, end)))
             || !luhnValid(digits.substring(0, length))) {
           continue;
         }
@@ -370,7 +373,8 @@ public class CursorPiiExtractor implements PiiExtractor {
             ? count >= PHONE_MIN_INTERNATIONAL_DIGITS && count <= PHONE_MAX_DIGITS
             : (count == 10 || count == 11) && visiblySeparated;
         if (!lengthOk
-            || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
+            || (end < text.length()
+                && Character.isLetterOrDigit(Character.codePointAt(text, end)))
             || (end + 1 < text.length() && text.charAt(end) == '.'
                 && isAsciiDigit(text.charAt(end + 1)))) {
           continue;
@@ -401,7 +405,7 @@ public class CursorPiiExtractor implements PiiExtractor {
     if (start == 0) {
       return true;
     }
-    final char previous = text.charAt(start - 1);
+    final int previous = Character.codePointBefore(text, start);
     if (Character.isLetterOrDigit(previous)) {
       return false;
     }
