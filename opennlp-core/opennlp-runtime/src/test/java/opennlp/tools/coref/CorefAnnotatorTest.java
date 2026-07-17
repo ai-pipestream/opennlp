@@ -279,6 +279,124 @@ public class CorefAnnotatorTest {
   }
 
   /**
+   * The strict head match sieve links two orderings of one name that neither exact
+   * match nor containment can relate: the heads match and neither mention carries a
+   * content word the other chain lacks.
+   */
+  @Test
+  void testStrictHeadMatchLinksReorderedName() {
+    final String text = "The Florida Supreme Court ruled. The Supreme Court of Florida agreed.";
+    final List<Annotation<String>> toks = tokens(text,
+        "The", "Florida", "Supreme", "Court", "ruled", ".",
+        "The", "Supreme", "Court", "of", "Florida", "agreed", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 32), "s"),
+            new Annotation<>(new Span(33, 69), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "DT", "NNP", "NNP", "NNP", "VBD", ".",
+            "DT", "NNP", "NNP", "IN", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(4, 25), "organization"),
+            new Annotation<>(new Span(37, 61), "organization"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(0, chains.get(1).value().chain());
+  }
+
+  /**
+   * A shared head word alone never links two names: word inclusion refuses the pair
+   * because each mention carries a content word the other chain lacks.
+   */
+  @Test
+  void testStrictHeadMatchRejectsSameHeadWithForeignWords() {
+    final String text = "Stanford University welcomed guests. Harvard University declined.";
+    final List<Annotation<String>> toks = tokens(text,
+        "Stanford", "University", "welcomed", "guests", ".",
+        "Harvard", "University", "declined", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 36), "s"),
+            new Annotation<>(new Span(37, 65), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "NNP", "VBD", "NNS", ".",
+            "NNP", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 19), "organization"),
+            new Annotation<>(new Span(37, 55), "organization"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(1, chains.get(1).value().chain());
+  }
+
+  /**
+   * The strict head match sieve honors the type guard: a head match with word
+   * inclusion still never links mentions whose known types differ.
+   */
+  @Test
+  void testStrictHeadMatchHonorsTypeGuard() {
+    final String text = "Acme Court expanded. Court is a town.";
+    final List<Annotation<String>> toks = tokens(text,
+        "Acme", "Court", "expanded", ".", "Court", "is", "a", "town", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 20), "s"),
+            new Annotation<>(new Span(21, 37), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "NNP", "VBD", ".", "NNP", "VBZ", "DT", "NN", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 10), "organization"),
+            new Annotation<>(new Span(21, 26), "location"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(1, chains.get(1).value().chain());
+  }
+
+  /**
+   * Word inclusion works at chain level: once two orderings of a name share a chain, a
+   * third variant whose words all appear in that chain joins it, even though no single
+   * earlier mention contains them verbatim.
+   */
+  @Test
+  void testStrictHeadMatchAccumulatesChainWords() {
+    final String text = "The Florida Supreme Court ruled. The Supreme Court of Florida agreed."
+        + " The Florida Court closed.";
+    final List<Annotation<String>> toks = tokens(text,
+        "The", "Florida", "Supreme", "Court", "ruled", ".",
+        "The", "Supreme", "Court", "of", "Florida", "agreed", ".",
+        "The", "Florida", "Court", "closed", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 32), "s"),
+            new Annotation<>(new Span(33, 69), "s"),
+            new Annotation<>(new Span(70, 95), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "DT", "NNP", "NNP", "NNP", "VBD", ".",
+            "DT", "NNP", "NNP", "IN", "NNP", "VBD", ".",
+            "DT", "NNP", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(4, 25), "organization"),
+            new Annotation<>(new Span(37, 61), "organization"),
+            new Annotation<>(new Span(74, 87), "organization"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(3, chains.size());
+    for (final Annotation<CorefMention> mention : chains) {
+      Assertions.assertEquals(0, mention.value().chain());
+    }
+  }
+
+  /**
    * A neutral pronoun never resolves to a person entity, so {@code It} after a lone
    * person mention stays a singleton chain instead of linking to the wrong antecedent.
    */
