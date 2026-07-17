@@ -311,6 +311,72 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies that a card followed by a space-separated expiry date is reported at the
+   * exact card span: the greedy candidate swallows the expiry digits and fails the
+   * Luhn check, so the scanner must back off to the separator boundary instead of
+   * dropping the card. Flipping the final card digit makes every prefix fail the
+   * checksum, so nothing may be reported in that case.
+   */
+  @Test
+  void testCardFollowedByExpiryBacksOffToTheCard() {
+    final String text = "Card 4111111111111111 12/26";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    final PiiMention mention = mentions.get(0);
+    Assertions.assertEquals(PiiMention.TYPE_CARD, mention.type());
+    Assertions.assertEquals(5, mention.span().getStart());
+    Assertions.assertEquals(21, mention.span().getEnd());
+    Assertions.assertEquals("4111111111111111", mention.normalized());
+    Assertions.assertEquals("4111111111111111", text.substring(5, 21));
+
+    Assertions.assertTrue(extractor.extract("Card 4111111111111112 12/26").isEmpty());
+  }
+
+  /**
+   * Verifies that a nineteen-digit card, the maximum accepted length, still matches as
+   * a whole, alone and with a space-separated expiry date after it, so prefix backoff
+   * never shortens a candidate that is valid at its full length.
+   */
+  @Test
+  void testNineteenDigitCardMatchesWhole() {
+    final List<PiiMention> alone = extractor.extract("card 4111111111111111110 on file");
+    Assertions.assertEquals(1, alone.size());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, alone.get(0).type());
+    Assertions.assertEquals(5, alone.get(0).span().getStart());
+    Assertions.assertEquals(24, alone.get(0).span().getEnd());
+    Assertions.assertEquals("4111111111111111110", alone.get(0).normalized());
+
+    final List<PiiMention> withExpiry = extractor.extract("card 4111111111111111110 12/26");
+    Assertions.assertEquals(1, withExpiry.size());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, withExpiry.get(0).type());
+    Assertions.assertEquals(5, withExpiry.get(0).span().getStart());
+    Assertions.assertEquals(24, withExpiry.get(0).span().getEnd());
+    Assertions.assertEquals("4111111111111111110", withExpiry.get(0).normalized());
+  }
+
+  /**
+   * Verifies that two Luhn-valid cards separated by a single space are reported as two
+   * separate mentions: backoff accepts the first card at the separator boundary and
+   * the scan resumes after it in time to find the second card.
+   */
+  @Test
+  void testTwoSpaceSeparatedCardsBothReported() {
+    final String text = "cards 4111111111111111 5500005555555559 on file";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(2, mentions.size());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(0).type());
+    Assertions.assertEquals(6, mentions.get(0).span().getStart());
+    Assertions.assertEquals(22, mentions.get(0).span().getEnd());
+    Assertions.assertEquals("4111111111111111", mentions.get(0).normalized());
+    Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(1).type());
+    Assertions.assertEquals(23, mentions.get(1).span().getStart());
+    Assertions.assertEquals(39, mentions.get(1).span().getEnd());
+    Assertions.assertEquals("5500005555555559", mentions.get(1).normalized());
+  }
+
+  /**
    * Verifies that empty text and text without any PII both yield an empty result
    * rather than {@code null} or an exception.
    */
