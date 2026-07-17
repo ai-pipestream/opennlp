@@ -67,6 +67,13 @@ public class FeedforwardPOSTagger implements POSTagger {
     this.tags = model.tags();
   }
 
+  /**
+   * Assigns the sentence of tokens pos tags.
+   *
+   * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
+   * @return One pos tag per token of {@code sentence}. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
+   */
   @Override
   public String[] tag(String[] sentence) {
     return decode(sentence, null);
@@ -164,12 +171,21 @@ public class FeedforwardPOSTagger implements POSTagger {
    *             and the result strictly positive.
    * @return The model's probability of the tag at {@code best}, in the range
    *         {@code (0, 1]}.
+   * @throws IllegalStateException Thrown if a score is not finite, which no trained
+   *         model produces; the {@code NaN} such a score would yield violates the
+   *         documented range and silently corrupts every score-ordered collection
+   *         downstream.
    */
   private static double probability(double[] scores, int best) {
     double total = 0.0;
     for (final double score : scores) {
       total += StrictMath.exp(score - scores[best]);
     }
-    return 1.0 / total;
+    final double probability = 1.0 / total;
+    if (Double.isNaN(probability)) {
+      throw new IllegalStateException(
+          "the model produced a non-finite tag score; the model file is corrupt");
+    }
+    return probability;
   }
 }

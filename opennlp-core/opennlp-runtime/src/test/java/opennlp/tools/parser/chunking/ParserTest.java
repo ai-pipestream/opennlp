@@ -53,4 +53,28 @@ public class ParserTest extends AbstractParserModelTest {
     Assertions.assertFalse(model.isLoadedFromSerialized());
   }
 
+  /**
+   * Verifies the caller-supplied tagger seam: the public tagger-accepting constructor
+   * builds a working parser around any {@link opennlp.tools.postag.POSTagger}, here
+   * the maxent implementation passed explicitly, and a {@code null} tagger is
+   * rejected loudly.
+   */
+  @org.junit.jupiter.api.Test
+  void testCallerSuppliedTaggerDrivesTheParser() {
+    final Parser parser = new Parser(model,
+        new opennlp.tools.postag.POSTaggerME(model.getParserTaggerModel()),
+        opennlp.tools.parser.AbstractBottomUpParser.defaultBeamSize,
+        opennlp.tools.parser.AbstractBottomUpParser.defaultAdvancePercentage);
+    final Parse sentence = Parse.parseParse(
+        "(TOP  (S (NP (NNS Sales) (NNS executives)) (VP (VBD were)) (. .) ))");
+    final Parse parsed = parser.parse(sentence);
+    Assertions.assertNotNull(parsed);
+    Assertions.assertTrue(parsed.complete());
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new Parser(model, null,
+            opennlp.tools.parser.AbstractBottomUpParser.defaultBeamSize,
+            opennlp.tools.parser.AbstractBottomUpParser.defaultAdvancePercentage));
+  }
+
 }
