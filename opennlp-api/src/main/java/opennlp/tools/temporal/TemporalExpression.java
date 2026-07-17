@@ -24,9 +24,9 @@ import opennlp.tools.util.Span;
  * normalized calendar value, and its granularity.
  *
  * <p>The value follows the ISO 8601 style at the mention's granularity:
- * {@code 2026-07-14} for a day, {@code 2026-07} for a month, and {@code 2024-Q3} for a
- * quarter. Day-level values are calendar-validated, so {@code February 30} is never
- * reported.</p>
+ * {@code 2026-07-14} for a day, {@code 2026-W29} for an ISO week, {@code 2026-07} for
+ * a month, {@code 2024-Q3} for a quarter, and {@code 2026} for a year. Day-level
+ * values are calendar-validated, so {@code February 30} is never reported.</p>
  *
  * @param span The location of the mention in the original text. Must not be {@code null}.
  * @param value The normalized calendar value. Must not be {@code null} or blank.
@@ -42,10 +42,14 @@ public record TemporalExpression(Span span, String value, Granularity granularit
   public enum Granularity {
     /** A calendar day, valued as {@code yyyy-MM-dd}. */
     DAY,
+    /** An ISO 8601 week, valued as {@code yyyy-Www} in the week-based year. */
+    WEEK,
     /** A calendar month, valued as {@code yyyy-MM}. */
     MONTH,
     /** A calendar quarter, valued as {@code yyyy-Qn}. */
-    QUARTER
+    QUARTER,
+    /** A calendar year, valued as {@code yyyy}. */
+    YEAR
   }
 
   /**

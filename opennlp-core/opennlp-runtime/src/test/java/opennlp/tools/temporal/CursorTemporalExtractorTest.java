@@ -174,4 +174,82 @@ public class CursorTemporalExtractorTest {
     assertThrows(IllegalArgumentException.class,
         () -> new TemporalAnnotator(extractor).annotate(null));
   }
+
+  /**
+   * Verifies the reference-resolved relative day words: today, yesterday, and
+   * tomorrow each resolve to their calendar day against the reference, with exact
+   * spans, and the whole family is case-insensitive.
+   */
+  @Test
+  void testRelativeDayWordsResolveAgainstTheReference() {
+    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
+    final List<TemporalExpression> mentions =
+        extractor.extract("filed Yesterday, due tomorrow, signed today", reference);
+    assertEquals(3, mentions.size());
+    assertEquals("2026-07-16", mentions.get(0).value());
+    assertEquals(Granularity.DAY, mentions.get(0).granularity());
+    assertEquals(new Span(6, 15), mentions.get(0).span());
+    assertEquals("2026-07-18", mentions.get(1).value());
+    assertEquals("2026-07-17", mentions.get(2).value());
+  }
+
+  /**
+   * Verifies the shifted-unit forms at each unit's own granularity: last week is an
+   * ISO week, next month a month, last year a year, and next quarter a quarter, all
+   * against the reference of 2026-07-17, which falls in ISO week 29.
+   */
+  @Test
+  void testShiftedUnitsResolveAtTheirOwnGranularity() {
+    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
+    final List<TemporalExpression> mentions = extractor.extract(
+        "last week we planned; next month it ships; last year it began; next quarter it scales",
+        reference);
+    assertEquals(4, mentions.size());
+    assertEquals("2026-W28", mentions.get(0).value());
+    assertEquals(Granularity.WEEK, mentions.get(0).granularity());
+    assertEquals("2026-08", mentions.get(1).value());
+    assertEquals(Granularity.MONTH, mentions.get(1).granularity());
+    assertEquals("2025", mentions.get(2).value());
+    assertEquals(Granularity.YEAR, mentions.get(2).granularity());
+    assertEquals("2026-Q4", mentions.get(3).value());
+    assertEquals(Granularity.QUARTER, mentions.get(3).granularity());
+  }
+
+  /**
+   * Verifies the counted forms in both directions: a count with {@code ago} shifts
+   * backward and {@code in} with a count shifts forward, each at the unit's own
+   * granularity, crossing a month boundary where the arithmetic demands it.
+   */
+  @Test
+  void testCountedShiftsResolveInBothDirections() {
+    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
+    final List<TemporalExpression> mentions = extractor.extract(
+        "3 days ago it rained; in 2 weeks it ships; 14 months ago it started",
+        reference);
+    assertEquals(3, mentions.size());
+    assertEquals("2026-07-14", mentions.get(0).value());
+    assertEquals("2026-W31", mentions.get(1).value());
+    assertEquals(Granularity.WEEK, mentions.get(1).granularity());
+    assertEquals("2025-05", mentions.get(2).value());
+  }
+
+  /**
+   * Verifies the guard rails: without a reference date no relative expression is
+   * reported at all, near-miss phrasings stay untouched, and absolute mentions keep
+   * working with a reference present.
+   */
+  @Test
+  void testRelativeGuardRails() {
+    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
+    assertTrue(extractor.extract("due yesterday and next month").isEmpty());
+    assertTrue(extractor
+        .extract("in cold water; last stand; 3 days late", reference).isEmpty());
+    final List<TemporalExpression> mixed =
+        extractor.extract("signed 2026-07-14, due tomorrow", reference);
+    assertEquals(2, mixed.size());
+    assertEquals("2026-07-14", mixed.get(0).value());
+    assertEquals("2026-07-18", mixed.get(1).value());
+    assertThrows(IllegalArgumentException.class,
+        () -> extractor.extract("text", null));
+  }
 }
