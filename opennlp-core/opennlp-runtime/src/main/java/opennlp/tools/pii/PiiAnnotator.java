@@ -25,6 +25,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Adapts a {@link PiiExtractor} to the document pipeline: scans the document text and
@@ -41,7 +42,7 @@ public class PiiAnnotator implements DocumentAnnotator {
   /**
    * PII mentions; each annotation covers one mention and carries its {@link PiiMention}.
    */
-  public static final LayerKey<PiiMention> PII = LayerKey.of("pii", PiiMention.class);
+  public static final LayerKey<PiiMention> PII = Layers.key("pii", PiiMention.class);
 
   private final PiiExtractor extractor;
 
