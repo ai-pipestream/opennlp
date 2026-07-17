@@ -53,7 +53,13 @@ import opennlp.tools.util.StringUtil;
  * name finder's mentions arrive with, has an unknown type rather than a mismatching
  * one: it satisfies every type guard, so it links to identical or contained names of
  * any type and to every pronoun class. The sieves cannot discriminate on a type that
- * carries no information, so they must not silently exclude it.</p>
+ * carries no information, so they must not silently exclude it. What an unknown type
+ * never does is bridge: every chain carries the one known type of its members, an
+ * unknown-typed mention joining a chain adopts that type, and two chains whose known
+ * types differ never merge, so a name shared by a person and a place cannot collapse
+ * their chains through an untyped mention between them. Type labels are compared
+ * case-insensitively throughout, so any label spelling the untyped label in another
+ * case reads as the unknown type as well.</p>
  *
  * <p>Every mention is reported, including those that found no partner, as singleton
  * chains; consumers interested only in links filter by chain size. Chains are numbered
@@ -187,18 +193,15 @@ public class CorefAnnotator implements DocumentAnnotator {
     }
 
     final List<Mention> mentions = collectMentions(text, sentences, tokens, tags, entities);
-    final int[] parent = new int[mentions.size()];
-    for (int i = 0; i < parent.length; i++) {
-      parent[i] = i;
-    }
-    exactMatchSieve(mentions, parent);
-    containmentSieve(mentions, parent);
-    pronounSieve(mentions, parent);
+    final Chains chains = new Chains(mentions);
+    exactMatchSieve(mentions, chains);
+    containmentSieve(mentions, chains);
+    pronounSieve(mentions, chains);
 
     final Map<Integer, Integer> chainIds = new HashMap<>();
     final List<Annotation<CorefMention>> layer = new ArrayList<>(mentions.size());
     for (int i = 0; i < mentions.size(); i++) {
-      final int root = find(parent, i);
+      final int root = chains.find(i);
       final int chain = chainIds.computeIfAbsent(root, key -> chainIds.size());
       final Mention mention = mentions.get(i);
       layer.add(new Annotation<>(mention.span(),
@@ -268,9 +271,9 @@ public class CorefAnnotator implements DocumentAnnotator {
    * distance.
    *
    * @param mentions The mentions in text order.
-   * @param parent The union-find forest over mention indices.
+   * @param chains The chain forest over mention indices.
    */
-  private static void exactMatchSieve(List<Mention> mentions, int[] parent) {
+  private static void exactMatchSieve(List<Mention> mentions, Chains chains) {
     final Map<String, List<Integer>> earlierByText = new HashMap<>();
     for (int i = 0; i < mentions.size(); i++) {
       final Mention mention = mentions.get(i);
@@ -280,8 +283,8 @@ public class CorefAnnotator implements DocumentAnnotator {
       final List<Integer> earlier =
           earlierByText.computeIfAbsent(mention.normalized(), key -> new ArrayList<>());
       for (final int candidate : earlier) {
-        if (typesCompatible(mentions.get(candidate).type(), mention.type())) {
-          union(parent, candidate, i);
+        if (typesCompatible(mentions.get(candidate).type(), mention.type())
+            && chains.union(candidate, i)) {
           break;
         }
       }
@@ -294,9 +297,9 @@ public class CorefAnnotator implements DocumentAnnotator {
    * prefix or suffix of the other, with no limit on their distance.
    *
    * @param mentions The mentions in text order.
-   * @param parent The union-find forest over mention indices.
+   * @param chains The chain forest over mention indices.
    */
-  private static void containmentSieve(List<Mention> mentions, int[] parent) {
+  private static void containmentSieve(List<Mention> mentions, Chains chains) {
     for (int i = 0; i < mentions.size(); i++) {
       final Mention a = mentions.get(i);
       if (a.entity() == CorefMention.NO_ENTITY) {
@@ -309,7 +312,7 @@ public class CorefAnnotator implements DocumentAnnotator {
         }
         if (containsAsWords(a.normalized(), b.normalized())
             || containsAsWords(b.normalized(), a.normalized())) {
-          union(parent, i, j);
+          chains.union(i, j);
         }
       }
     }
@@ -341,9 +344,9 @@ public class CorefAnnotator implements DocumentAnnotator {
    * when no candidate in range is compatible.
    *
    * @param mentions The mentions in text order.
-   * @param parent The union-find forest over mention indices.
+   * @param chains The chain forest over mention indices.
    */
-  private void pronounSieve(List<Mention> mentions, int[] parent) {
+  private void pronounSieve(List<Mention> mentions, Chains chains) {
     for (int i = 0; i < mentions.size(); i++) {
       final Mention pronoun = mentions.get(i);
       if (pronoun.entity() != CorefMention.NO_ENTITY) {
@@ -357,8 +360,8 @@ public class CorefAnnotator implements DocumentAnnotator {
         if (pronoun.sentence() - candidate.sentence() > MAX_SENTENCE_DISTANCE) {
           break;
         }
-        if (compatible(pronoun.normalized(), candidate.type())) {
-          union(parent, j, i);
+        if (compatible(pronoun.normalized(), candidate.type())
+            && chains.union(j, i)) {
           break;
         }
       }
@@ -457,17 +460,72 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Merges two mentions' sets, keeping the earlier root.
-   *
-   * @param parent The union-find forest.
-   * @param a The first mention index.
-   * @param b The second mention index.
+   * A union-find forest over mention indices that carries each chain's resolved
+   * entity type. A chain's resolved type is the known type of any of its members;
+   * mentions of the unknown type join a chain of any type and adopt it, but two
+   * chains whose known types differ never merge, so an unknown-typed mention can
+   * never bridge, for example, a person chain and a location chain into one.
    */
-  private static void union(int[] parent, int a, int b) {
-    final int rootA = find(parent, a);
-    final int rootB = find(parent, b);
-    if (rootA != rootB) {
-      parent[Math.max(rootA, rootB)] = Math.min(rootA, rootB);
+  private static final class Chains {
+
+    private final int[] parent;
+
+    /** The resolved type at each root; {@code null} while no member has a known type. */
+    private final String[] type;
+
+    /**
+     * Initializes one singleton chain per mention, resolved to the mention's own type
+     * when it is known.
+     *
+     * @param mentions The mentions in text order.
+     */
+    Chains(List<Mention> mentions) {
+      parent = new int[mentions.size()];
+      type = new String[mentions.size()];
+      for (int i = 0; i < parent.length; i++) {
+        parent[i] = i;
+        final String label = mentions.get(i).type();
+        type[i] = label == null || NameFinderAnnotator.UNTYPED.equals(label)
+            ? null : label;
+      }
+    }
+
+    /**
+     * Finds the root of a mention's chain, compressing the walked path.
+     *
+     * @param i The mention index.
+     * @return The root index.
+     */
+    int find(int i) {
+      return CorefAnnotator.find(parent, i);
+    }
+
+    /**
+     * Merges two mentions' chains unless their resolved types differ. The earlier
+     * root survives, and the merged chain resolves to the known type of either side.
+     *
+     * @param a The first mention index.
+     * @param b The second mention index.
+     * @return {@code true} if the two mentions share a chain when the call returns,
+     *         {@code false} if the merge was refused over a type conflict.
+     */
+    boolean union(int a, int b) {
+      final int rootA = find(a);
+      final int rootB = find(b);
+      if (rootA == rootB) {
+        return true;
+      }
+      if (type[rootA] != null && type[rootB] != null
+          && !type[rootA].equals(type[rootB])) {
+        return false;
+      }
+      final int keep = Math.min(rootA, rootB);
+      final int drop = Math.max(rootA, rootB);
+      parent[drop] = keep;
+      if (type[keep] == null) {
+        type[keep] = type[drop];
+      }
+      return true;
     }
   }
 }
