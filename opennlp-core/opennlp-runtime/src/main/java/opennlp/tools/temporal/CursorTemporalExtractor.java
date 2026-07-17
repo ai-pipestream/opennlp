@@ -19,6 +19,7 @@ package opennlp.tools.temporal;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.time.temporal.IsoFields;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,11 +42,19 @@ import opennlp.tools.util.Span;
  * mentions are calendar-validated through {@code java.time}, so {@code February 30}
  * is never reported.</p>
  *
- * <p>Out of scope in this version, by design: relative expressions such as
- * {@code next Tuesday} (they need a reference date, which is an interface question to
- * settle first), times of day, bare years, day-and-month without a year, and numeric
- * formats with slashes, whose day and month order is locale-dependent. The extractor
- * holds no per-call state and is safe to share between threads.</p>
+ * <p>With a reference date, {@link #extract(CharSequence, LocalDate)} additionally
+ * resolves relative expressions: {@code today}, {@code yesterday}, {@code tomorrow};
+ * {@code last}, {@code this}, or {@code next} week, month, quarter, or year; a count
+ * of days, weeks, months, or years followed by {@code ago}; and {@code in} followed
+ * by such a count. Each resolves against the reference at the granularity its unit
+ * names, so {@code last week} is an ISO week and {@code 3 days ago} a calendar day.
+ * Without a reference date, relative expressions are not reported at all rather than
+ * being guessed against the wall clock.</p>
+ *
+ * <p>Out of scope in this version, by design: named weekdays such as
+ * {@code next Tuesday}, times of day, bare years, day-and-month without a year, and
+ * numeric formats with slashes, whose day and month order is locale-dependent. The
+ * extractor holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
@@ -58,13 +67,29 @@ public class CursorTemporalExtractor implements TemporalExtractor {
 
   @Override
   public List<TemporalExpression> extract(CharSequence text) {
+    return scan(text, null);
+  }
+
+  @Override
+  public List<TemporalExpression> extract(CharSequence text, LocalDate reference) {
+    if (reference == null) {
+      throw new IllegalArgumentException("reference must not be null");
+    }
+    return scan(text, reference);
+  }
+
+  /**
+   * The shared forward scan; a {@code null} reference means relative expressions are
+   * not recognized at all.
+   */
+  private List<TemporalExpression> scan(CharSequence text, LocalDate reference) {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
     final List<TemporalExpression> mentions = new ArrayList<>();
     int i = 0;
     while (i < text.length()) {
-      final TemporalExpression mention = matchAt(text, i);
+      final TemporalExpression mention = matchAt(text, i, reference);
       if (mention != null) {
         mentions.add(mention);
         i = mention.span().getEnd();
@@ -76,25 +101,150 @@ public class CursorTemporalExtractor implements TemporalExtractor {
   }
 
   /**
-   * Tries the mention shapes at one position: ISO date or day-first at a digit, quarter
-   * or month-first at a letter. Returns {@code null} when none matches.
+   * Tries the mention shapes at one position: ISO date, day-first, or a relative
+   * count at a digit; quarter, month-first, or a relative keyword at a letter.
+   * Returns {@code null} when none matches.
    */
-  private TemporalExpression matchAt(CharSequence text, int start) {
+  private TemporalExpression matchAt(CharSequence text, int start, LocalDate reference) {
     if (!NumberScan.boundaryBefore(text, start)) {
       return null;
     }
     final char c = NumberScan.charAt(text, start);
     if (NumberScan.isAsciiDigit(c)) {
       final TemporalExpression iso = isoDate(text, start);
-      return iso != null ? iso : dayFirst(text, start);
+      if (iso != null) {
+        return iso;
+      }
+      final TemporalExpression dayFirst = dayFirst(text, start);
+      if (dayFirst != null) {
+        return dayFirst;
+      }
+      return reference == null ? null : countAgo(text, start, reference);
     }
     if ((c == 'Q' || c == 'q') && NumberScan.isAsciiDigit(NumberScan.charAt(text, start + 1))) {
       return quarter(text, start);
     }
     if (Character.isLetter(c)) {
-      return monthFirst(text, start);
+      final TemporalExpression monthFirst = monthFirst(text, start);
+      if (monthFirst != null) {
+        return monthFirst;
+      }
+      return reference == null ? null : relativeKeyword(text, start, reference);
     }
     return null;
+  }
+
+  /**
+   * Matches the keyword-led relative forms: the day words {@code today},
+   * {@code yesterday}, and {@code tomorrow}; {@code last}, {@code this}, or
+   * {@code next} followed by a unit; and {@code in} followed by a count and a unit.
+   */
+  private TemporalExpression relativeKeyword(CharSequence text, int start,
+      LocalDate reference) {
+    final Word keyword = word(text, start);
+    if (keyword == null) {
+      return null;
+    }
+    switch (keyword.lower()) {
+      case "today":
+        return resolved(start, keyword.end(), reference, Granularity.DAY);
+      case "yesterday":
+        return resolved(start, keyword.end(), reference.minusDays(1), Granularity.DAY);
+      case "tomorrow":
+        return resolved(start, keyword.end(), reference.plusDays(1), Granularity.DAY);
+      case "last":
+      case "this":
+      case "next": {
+        if (NumberScan.charAt(text, keyword.end()) != ' ') {
+          return null;
+        }
+        final Word unit = word(text, keyword.end() + 1);
+        if (unit == null) {
+          return null;
+        }
+        final int steps = switch (keyword.lower()) {
+          case "last" -> -1;
+          case "next" -> 1;
+          default -> 0;
+        };
+        return shifted(text, start, unit.end(), unit.lower(), steps, reference);
+      }
+      case "in": {
+        if (NumberScan.charAt(text, keyword.end()) != ' ') {
+          return null;
+        }
+        final NumberInText count = shortNumber(text, keyword.end() + 1);
+        if (count == null || NumberScan.charAt(text, count.end()) != ' ') {
+          return null;
+        }
+        final Word unit = word(text, count.end() + 1);
+        if (unit == null) {
+          return null;
+        }
+        return shifted(text, start, unit.end(), singular(unit.lower()), count.value(),
+            reference);
+      }
+      default:
+        return null;
+    }
+  }
+
+  /** Matches {@code 3 days ago} and its week, month, and year siblings. */
+  private TemporalExpression countAgo(CharSequence text, int start, LocalDate reference) {
+    final NumberInText count = shortNumber(text, start);
+    if (count == null || NumberScan.charAt(text, count.end()) != ' ') {
+      return null;
+    }
+    final Word unit = word(text, count.end() + 1);
+    if (unit == null || NumberScan.charAt(text, unit.end()) != ' ') {
+      return null;
+    }
+    final Word ago = word(text, unit.end() + 1);
+    if (ago == null || !"ago".equals(ago.lower())) {
+      return null;
+    }
+    return shifted(text, start, ago.end(), singular(unit.lower()), -count.value(),
+        reference);
+  }
+
+  /**
+   * Resolves a unit word shifted by a number of steps against the reference, at the
+   * granularity the unit names.
+   */
+  private TemporalExpression shifted(CharSequence text, int start, int end, String unit,
+      int steps, LocalDate reference) {
+    return switch (unit) {
+      case "day" -> resolved(start, end, reference.plusDays(steps), Granularity.DAY);
+      case "week" -> resolved(start, end, reference.plusWeeks(steps), Granularity.WEEK);
+      case "month" -> resolved(start, end, reference.plusMonths(steps), Granularity.MONTH);
+      case "quarter" -> resolved(start, end, reference.plusMonths(3L * steps),
+          Granularity.QUARTER);
+      case "year" -> resolved(start, end, reference.plusYears(steps), Granularity.YEAR);
+      default -> null;
+    };
+  }
+
+  /** Reduces a plural unit word to its singular; other words pass through. */
+  private static String singular(String unit) {
+    return unit.endsWith("s") && unit.length() > 1
+        ? unit.substring(0, unit.length() - 1) : unit;
+  }
+
+  /** Builds a resolved relative mention at a granularity's ISO value. */
+  private static TemporalExpression resolved(int start, int end, LocalDate date,
+      Granularity granularity) {
+    final String value = switch (granularity) {
+      case DAY -> String.format(Locale.ROOT, "%04d-%02d-%02d",
+          date.getYear(), date.getMonthValue(), date.getDayOfMonth());
+      case WEEK -> String.format(Locale.ROOT, "%04d-W%02d",
+          date.get(IsoFields.WEEK_BASED_YEAR), date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR));
+      case MONTH -> String.format(Locale.ROOT, "%04d-%02d",
+          date.getYear(), date.getMonthValue());
+      case QUARTER -> String.format(Locale.ROOT, "%04d-Q%d",
+          date.getYear(), date.get(IsoFields.QUARTER_OF_YEAR));
+      case YEAR -> String.format(Locale.ROOT, "%04d", date.getYear());
+    };
+    return new TemporalExpression(new Span(start, end), value, granularity);
   }
 
   /** Matches {@code 2026-07-14}. */

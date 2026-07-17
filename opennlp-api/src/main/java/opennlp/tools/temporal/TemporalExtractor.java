@@ -17,6 +17,7 @@
 
 package opennlp.tools.temporal;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -37,4 +38,24 @@ public interface TemporalExtractor {
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   List<TemporalExpression> extract(CharSequence text);
+
+  /**
+   * Extracts all temporal mentions from a text, resolving relative expressions such
+   * as {@code yesterday} or {@code next month} against a reference date. An
+   * implementation that recognizes no relative expressions reports the same mentions
+   * as {@link #extract(CharSequence)}, which is this method's default behavior.
+   *
+   * @param text The text to scan. Must not be {@code null}.
+   * @param reference The date relative expressions resolve against, typically the
+   *                  document date. Must not be {@code null}.
+   * @return The mentions in text order, non-overlapping. Never {@code null}; empty
+   *         when the text contains no temporal mention.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   */
+  default List<TemporalExpression> extract(CharSequence text, LocalDate reference) {
+    if (reference == null) {
+      throw new IllegalArgumentException("reference must not be null");
+    }
+    return extract(text);
+  }
 }
