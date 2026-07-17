@@ -81,7 +81,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * {@link CorefMention}, ordered by text position.
    */
   public static final LayerKey<CorefMention> CHAINS =
-      LayerKey.of("chains", CorefMention.class);
+      Layers.key("chains", CorefMention.class);
 
   /** How many sentences back a pronoun may find its antecedent. */
   private static final int MAX_SENTENCE_DISTANCE = 1;
