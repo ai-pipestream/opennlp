@@ -17,8 +17,12 @@
 
 package opennlp.geo;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -345,80 +349,100 @@ public final class ContainmentSpine implements PlaceHierarchy {
    * field and content after a field's closing quote both fail loud, because either
    * would otherwise splice neighboring fields or rows together silently.
    *
+   * <p>The file is streamed, never materialized whole, so a table of any size parses
+   * in memory proportional to its longest row.</p>
+   *
    * @param file The CSV file, UTF-8.
    * @param consumer Receives each completed row with its starting line.
    * @throws IOException Thrown if reading fails, a quoted field is never closed, a
    *         quote appears inside an unquoted field, or content follows a closing quote.
    */
   private static void parseCsv(Path file, CsvRows consumer) throws IOException {
-    final String content;
-    try (InputStream in = Files.newInputStream(file)) {
-      content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-    }
-    final StringBuilder field = new StringBuilder();
-    List<String> fields = new ArrayList<>();
-    boolean quoted = false;
-    boolean closedQuote = false;
-    int line = 1;
-    int rowLine = 1;
-    int quoteLine = 1;
-    for (int i = 0; i < content.length(); i++) {
-      final char c = content.charAt(i);
-      final boolean lineBreak = c == '\n'
-          || c == '\r' && i + 1 < content.length() && content.charAt(i + 1) == '\n';
-      if (quoted) {
-        if (c == '"' && i + 1 < content.length() && content.charAt(i + 1) == '"') {
-          field.append('"');
-          i++;
-        } else if (c == '"') {
-          quoted = false;
-          closedQuote = true;
-        } else if (lineBreak) {
-          field.append('\n');
-          line++;
-          if (c == '\r') {
-            i++;
+    // The file streams through a replacing UTF-8 decoder, so tables larger than any
+    // in-memory buffer parse in constant memory and stray malformed bytes read as
+    // replacement characters instead of aborting the load.
+    try (Reader in = new BufferedReader(new InputStreamReader(Files.newInputStream(file),
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)))) {
+      final StringBuilder field = new StringBuilder();
+      List<String> fields = new ArrayList<>();
+      boolean quoted = false;
+      boolean closedQuote = false;
+      int line = 1;
+      int rowLine = 1;
+      int quoteLine = 1;
+      // One character of pushback covers the two lookahead cases, the CRLF pair and
+      // the doubled quote; NONE marks an empty pushback slot.
+      final int none = -2;
+      int pending = none;
+      while (true) {
+        final int read = pending != none ? pending : in.read();
+        pending = none;
+        if (read < 0) {
+          break;
+        }
+        final char c = (char) read;
+        boolean lineBreak = c == '\n';
+        if (c == '\r') {
+          final int follow = in.read();
+          if (follow == '\n') {
+            lineBreak = true;
+          } else {
+            pending = follow;
           }
+        }
+        if (quoted) {
+          if (c == '"') {
+            final int follow = in.read();
+            if (follow == '"') {
+              field.append('"');
+            } else {
+              quoted = false;
+              closedQuote = true;
+              pending = follow;
+            }
+          } else if (lineBreak) {
+            field.append('\n');
+            line++;
+          } else {
+            field.append(c);
+          }
+        } else if (c == '"') {
+          if (field.length() > 0 || closedQuote) {
+            throw new IOException("stray quote in an unquoted field at line " + line
+                + " in " + file);
+          }
+          quoted = true;
+          quoteLine = line;
+        } else if (c == ',') {
+          fields.add(field.toString());
+          field.setLength(0);
+          closedQuote = false;
+        } else if (lineBreak) {
+          fields.add(field.toString());
+          field.setLength(0);
+          closedQuote = false;
+          emitRow(consumer, rowLine, fields);
+          fields = new ArrayList<>();
+          line++;
+          rowLine = line;
         } else {
+          if (closedQuote) {
+            throw new IOException("content after a closing quote at line " + line
+                + " in " + file);
+          }
           field.append(c);
         }
-      } else if (c == '"') {
-        if (field.length() > 0 || closedQuote) {
-          throw new IOException("stray quote in an unquoted field at line " + line
-              + " in " + file);
-        }
-        quoted = true;
-        quoteLine = line;
-      } else if (c == ',') {
-        fields.add(field.toString());
-        field.setLength(0);
-        closedQuote = false;
-      } else if (lineBreak) {
-        if (c == '\r') {
-          i++;
-        }
-        fields.add(field.toString());
-        field.setLength(0);
-        closedQuote = false;
-        emitRow(consumer, rowLine, fields);
-        fields = new ArrayList<>();
-        line++;
-        rowLine = line;
-      } else {
-        if (closedQuote) {
-          throw new IOException("content after a closing quote at line " + line
-              + " in " + file);
-        }
-        field.append(c);
       }
-    }
-    if (quoted) {
-      throw new IOException("unterminated quoted field starting at line " + quoteLine
-          + " in " + file);
-    }
-    if (field.length() > 0 || !fields.isEmpty() || closedQuote) {
-      fields.add(field.toString());
-      emitRow(consumer, rowLine, fields);
+      if (quoted) {
+        throw new IOException("unterminated quoted field starting at line " + quoteLine
+            + " in " + file);
+      }
+      if (field.length() > 0 || !fields.isEmpty() || closedQuote) {
+        fields.add(field.toString());
+        emitRow(consumer, rowLine, fields);
+      }
     }
   }
 
