@@ -223,7 +223,7 @@ public class HierarchyAnnotatorTest {
         IllegalArgumentException.class,
         () -> new HierarchyAnnotator(spine()).annotate(Document.of("bare")));
     Assertions.assertEquals(
-        "document lacks the required layer locations<GeoResolution>", e.getMessage());
+        "document lacks the required layer opennlp:locations<GeoResolution>", e.getMessage());
   }
 
   /**
