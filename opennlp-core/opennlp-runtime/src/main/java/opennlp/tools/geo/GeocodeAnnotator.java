@@ -61,7 +61,7 @@ public class GeocodeAnnotator implements DocumentAnnotator {
    * {@link GeoResolution}.
    */
   public static final LayerKey<GeoResolution> LOCATIONS =
-      LayerKey.of("locations", GeoResolution.class);
+      Layers.key("locations", GeoResolution.class);
 
   private final Geocoder geocoder;
   private final Set<String> locationTypes;
