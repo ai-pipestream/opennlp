@@ -183,6 +183,87 @@ public class ContainmentSpineTest {
     Assertions.assertEquals("locality", chain.get(0).type());
   }
 
+  /**
+   * Asserts that a quoted field carrying an embedded newline stays one record, as RFC
+   * 4180 requires: the place name keeps its newline, the row keeps its columns, and the
+   * remainder of the name never becomes a record of its own.
+   */
+  @Test
+  void testWofMetaCsvKeepsQuotedNewlinesInOneRecord(@TempDir Path dir) throws IOException {
+    final Path meta = dir.resolve("wof-locality-latest.csv");
+    Files.write(meta, String.join("\n",
+        "id,parent_id,name,placetype",
+        "999,123,Child,neighbourhood",
+        "123,456,\"Sao Paulo\nZona Norte\",locality",
+        "456,-1,Brazil,country",
+        "").getBytes(StandardCharsets.UTF_8));
+
+    final ContainmentSpine spine = ContainmentSpine.builder().addWofMeta(meta).build();
+
+    Assertions.assertEquals(List.of(
+        new PlaceAncestor("123", "Sao Paulo\nZona Norte", "locality"),
+        new PlaceAncestor("456", "Brazil", "country")),
+        spine.ancestors("999"));
+  }
+
+  /**
+   * Asserts that a quoted field the file never closes fails loud and names the line the
+   * quoted field started on, instead of silently swallowing the rest of the table.
+   */
+  @Test
+  void testWofMetaCsvUnterminatedQuoteFailsLoud(@TempDir Path dir) throws IOException {
+    final Path meta = dir.resolve("unterminated.csv");
+    Files.write(meta, String.join("\n",
+        "id,parent_id,name,placetype",
+        "123,456,\"Sao Paulo,locality",
+        "456,-1,Brazil,country",
+        "").getBytes(StandardCharsets.UTF_8));
+
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> ContainmentSpine.builder().addWofMeta(meta));
+    Assertions.assertTrue(e.getMessage().contains("unterminated quoted field"),
+        e.getMessage());
+    Assertions.assertTrue(e.getMessage().contains("line 2"), e.getMessage());
+  }
+
+  /**
+   * Asserts that a row whose name column is empty fails loud and names the offending
+   * row and identifier, rather than being dropped so that every chain through that
+   * place silently ends at a dangling parent.
+   */
+  @Test
+  void testWofMetaRowWithEmptyNameFailsLoud(@TempDir Path dir) throws IOException {
+    final Path meta = dir.resolve("empty-name.csv");
+    Files.write(meta, String.join("\n",
+        "id,parent_id,name,placetype",
+        "857,86,,county",
+        "").getBytes(StandardCharsets.UTF_8));
+
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> ContainmentSpine.builder().addWofMeta(meta));
+    Assertions.assertTrue(e.getMessage().contains("empty name"), e.getMessage());
+    Assertions.assertTrue(e.getMessage().contains("857"), e.getMessage());
+    Assertions.assertTrue(e.getMessage().contains("line 2"), e.getMessage());
+  }
+
+  /**
+   * Asserts that a row whose placetype column is empty fails loud and names the
+   * offending row and identifier.
+   */
+  @Test
+  void testWofMetaRowWithEmptyPlacetypeFailsLoud(@TempDir Path dir) throws IOException {
+    final Path meta = dir.resolve("empty-type.csv");
+    Files.write(meta, String.join("\n",
+        "id,parent_id,name,placetype",
+        "857,86,Kings County,",
+        "").getBytes(StandardCharsets.UTF_8));
+
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> ContainmentSpine.builder().addWofMeta(meta));
+    Assertions.assertTrue(e.getMessage().contains("empty placetype"), e.getMessage());
+    Assertions.assertTrue(e.getMessage().contains("857"), e.getMessage());
+  }
+
   @Test
   void testMalformedTablesFailLoud(@TempDir Path dir) throws IOException {
     final Path bad = dir.resolve("bad.tsv");

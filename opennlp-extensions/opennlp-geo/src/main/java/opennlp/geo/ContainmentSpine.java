@@ -189,21 +189,32 @@ public final class ContainmentSpine implements PlaceHierarchy {
      * parent identifier become roots, matching the source convention for places
      * without a usable parent.
      *
+     * <p>The file is read as RFC 4180 CSV: a field may be quoted, a quoted field may
+     * carry commas, doubled quotes, and line breaks, and such a field stays part of the
+     * single row it belongs to.</p>
+     *
+     * <p>Every row of the file must describe a usable place. A row that is too short to
+     * reach a required column, a row whose name or placetype column is empty, and a
+     * quoted field the file never closes each fail loud, naming the line the offending
+     * row starts on; no row is dropped silently, because a dropped row would end every
+     * containment chain running through that place at a dangling parent.</p>
+     *
      * @param metaCsv The meta CSV file, UTF-8. Must not be {@code null}.
      * @return This builder.
-     * @throws IOException Thrown if reading fails, a required column is missing, or a
-     *         row is malformed.
+     * @throws IOException Thrown if reading fails, the file is empty, a required column
+     *         is missing, a quoted field is unterminated, or a row is short, has an
+     *         empty name column, or has an empty placetype column.
      * @throws IllegalArgumentException Thrown if {@code metaCsv} is {@code null}.
      */
     public Builder addWofMeta(Path metaCsv) throws IOException {
       if (metaCsv == null) {
         throw new IllegalArgumentException("metaCsv must not be null");
       }
-      final List<String> lines = readLines(metaCsv);
-      if (lines.isEmpty()) {
+      final List<Row> rows = readCsvRows(metaCsv);
+      if (rows.isEmpty()) {
         throw new IOException("empty meta CSV: " + metaCsv);
       }
-      final List<String> header = parseCsvRecord(lines.get(0));
+      final List<String> header = rows.get(0).fields();
       final int idColumn = header.indexOf("id");
       final int parentColumn = header.indexOf("parent_id");
       final int nameColumn = header.indexOf("name");
@@ -212,22 +223,27 @@ public final class ContainmentSpine implements PlaceHierarchy {
         throw new IOException(
             "meta CSV lacks id, parent_id, name, or placetype columns: " + metaCsv);
       }
-      for (int i = 1; i < lines.size(); i++) {
-        if (lines.get(i).isEmpty()) {
-          continue;
+      final int lastColumn = Math.max(Math.max(idColumn, parentColumn),
+          Math.max(nameColumn, typeColumn));
+      for (int i = 1; i < rows.size(); i++) {
+        final Row row = rows.get(i);
+        final List<String> fields = row.fields();
+        if (fields.size() <= lastColumn) {
+          throw new IOException("short row at line " + row.line() + " in " + metaCsv);
         }
-        final List<String> fields = parseCsvRecord(lines.get(i));
-        if (fields.size() <= Math.max(Math.max(idColumn, parentColumn),
-            Math.max(nameColumn, typeColumn))) {
-          throw new IOException("short row " + (i + 1) + " in " + metaCsv);
-        }
+        final String id = fields.get(idColumn).trim();
         final String name = fields.get(nameColumn).trim();
         final String type = fields.get(typeColumn).trim();
-        if (name.isEmpty() || type.isEmpty()) {
-          continue;
+        if (name.isEmpty()) {
+          throw new IOException("empty name column at line " + row.line() + " in "
+              + metaCsv + ": id " + id);
+        }
+        if (type.isEmpty()) {
+          throw new IOException("empty placetype column at line " + row.line() + " in "
+              + metaCsv + ": id " + id);
         }
         final String parent = fields.get(parentColumn).trim();
-        add(fields.get(idColumn).trim(), positiveOrNull(parent), name, type);
+        add(id, positiveOrNull(parent), name, type);
       }
       return this;
     }
@@ -285,34 +301,88 @@ public final class ContainmentSpine implements PlaceHierarchy {
     return fields;
   }
 
-  /** Parses one CSV record with double-quote quoting and doubled-quote escapes. */
-  private static List<String> parseCsvRecord(String line) {
-    final List<String> fields = new ArrayList<>();
+  /** One CSV row: its fields and the one-based line the row starts on. */
+  private record Row(int line, List<String> fields) {
+  }
+
+  /**
+   * Parses a whole CSV file into rows, with double-quote quoting, doubled-quote
+   * escapes, and quoted fields that may span lines, so a row is only ended by a line
+   * break outside a quoted field. Blank lines between rows are dropped. Both {@code LF}
+   * and {@code CRLF} end a line, inside a quoted field as well as outside, and a quoted
+   * line break is kept in the field as a single {@code LF}.
+   *
+   * @param file The CSV file, UTF-8.
+   * @return The rows of the file, header first.
+   * @throws IOException Thrown if reading fails or a quoted field is never closed.
+   */
+  private static List<Row> readCsvRows(Path file) throws IOException {
+    final String content;
+    try (InputStream in = Files.newInputStream(file)) {
+      content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+    final List<Row> rows = new ArrayList<>();
     final StringBuilder field = new StringBuilder();
+    List<String> fields = new ArrayList<>();
     boolean quoted = false;
-    for (int i = 0; i < line.length(); i++) {
-      final char c = line.charAt(i);
+    int line = 1;
+    int rowLine = 1;
+    int quoteLine = 1;
+    for (int i = 0; i < content.length(); i++) {
+      final char c = content.charAt(i);
+      final boolean lineBreak = c == '\n'
+          || c == '\r' && i + 1 < content.length() && content.charAt(i + 1) == '\n';
       if (quoted) {
-        if (c == '"') {
-          if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
-            field.append('"');
+        if (c == '"' && i + 1 < content.length() && content.charAt(i + 1) == '"') {
+          field.append('"');
+          i++;
+        } else if (c == '"') {
+          quoted = false;
+        } else if (lineBreak) {
+          field.append('\n');
+          line++;
+          if (c == '\r') {
             i++;
-          } else {
-            quoted = false;
           }
         } else {
           field.append(c);
         }
       } else if (c == '"') {
         quoted = true;
+        quoteLine = line;
       } else if (c == ',') {
         fields.add(field.toString());
         field.setLength(0);
+      } else if (lineBreak) {
+        if (c == '\r') {
+          i++;
+        }
+        fields.add(field.toString());
+        field.setLength(0);
+        addRow(rows, rowLine, fields);
+        fields = new ArrayList<>();
+        line++;
+        rowLine = line;
       } else {
         field.append(c);
       }
     }
-    fields.add(field.toString());
-    return fields;
+    if (quoted) {
+      throw new IOException("unterminated quoted field starting at line " + quoteLine
+          + " in " + file);
+    }
+    if (field.length() > 0 || !fields.isEmpty()) {
+      fields.add(field.toString());
+      addRow(rows, rowLine, fields);
+    }
+    return rows;
+  }
+
+  /** Appends the row unless it is a blank line, which carries no fields at all. */
+  private static void addRow(List<Row> rows, int line, List<String> fields) {
+    if (fields.size() == 1 && fields.get(0).isEmpty()) {
+      return;
+    }
+    rows.add(new Row(line, List.copyOf(fields)));
   }
 }

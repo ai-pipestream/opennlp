@@ -140,6 +140,63 @@ public class HierarchyAnnotatorTest {
         chains.get(0).value());
   }
 
+  /**
+   * Asserts the one-chain-per-mention contract against the several annotations a
+   * multi-candidate mention carries in the locations layer: the mention gets exactly one
+   * containment annotation, built from the first candidate of the layer, which is the
+   * geocoder's best, and the contradicting chain of a lower-ranked candidate is not
+   * emitted.
+   */
+  @Test
+  void testMultiCandidateMentionGetsOneChainFromTheBestCandidate() {
+    final String text = "A week in Paris.";
+    final Span mention = new Span(10, 15);
+    final ContainmentSpine spine = ContainmentSpine.builder()
+        .add("101", "102", "Paris", "locality")
+        .add("102", null, "France", "country")
+        .add("201", "202", "Paris", "locality")
+        .add("202", null, "United States", "country")
+        .build();
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(
+            new Annotation<>(mention,
+                new GeoResolution(mention, entry("Paris", "101"), 0.7)),
+            new Annotation<>(mention,
+                new GeoResolution(mention, entry("Paris", "201"), 0.3))));
+
+    final Document annotated = new HierarchyAnnotator(spine).annotate(document);
+
+    final List<Annotation<ContainmentChain>> chains =
+        annotated.get(HierarchyAnnotator.CONTAINMENT);
+    Assertions.assertEquals(1, chains.size());
+    Assertions.assertEquals(mention, chains.get(0).span());
+    Assertions.assertEquals(new ContainmentChain(List.of(
+        new PlaceAncestor("102", "France", "country"))),
+        chains.get(0).value());
+  }
+
+  /**
+   * Asserts that the best candidate alone decides a mention's chain: when the first
+   * candidate of a multi-candidate mention cannot be expanded, the mention gets no
+   * containment annotation rather than the chain of a lower-ranked candidate that
+   * resolves elsewhere.
+   */
+  @Test
+  void testUnexpandableBestCandidateSuppressesTheMentionsChain() {
+    final String text = "A week in Paris.";
+    final Span mention = new Span(10, 15);
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(
+            new Annotation<>(mention,
+                new GeoResolution(mention, entry("Paris", null), 0.7)),
+            new Annotation<>(mention,
+                new GeoResolution(mention, entry("Paris", "85865587"), 0.3))));
+
+    final Document annotated = new HierarchyAnnotator(spine()).annotate(document);
+
+    Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
+  }
+
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

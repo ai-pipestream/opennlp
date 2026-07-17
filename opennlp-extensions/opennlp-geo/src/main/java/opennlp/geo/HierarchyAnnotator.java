@@ -18,6 +18,7 @@
 package opennlp.geo;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -32,6 +33,7 @@ import opennlp.tools.geo.GeoResolution;
 import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.PlaceAncestor;
 import opennlp.tools.geo.PlaceHierarchy;
+import opennlp.tools.util.Span;
 
 /**
  * Expands each resolved location into the places that contain it: reads the geocoded
@@ -44,6 +46,13 @@ import opennlp.tools.geo.PlaceHierarchy;
  * simply gets no annotation; nothing is invented. The default join key is the
  * conventional Who's On First attribute, matching the identifiers the bundled
  * gazetteer derivations carry.</p>
+ *
+ * <p>A {@link GeocodeAnnotator} gives a mention it ranks against several candidates one
+ * annotation per candidate, in the geocoder's order. Only the first annotation of a
+ * span, which carries the geocoder's best candidate, decides that mention's chain: the
+ * lower-ranked candidates are ignored, so one span never carries two contradicting
+ * chains, and a mention whose best candidate cannot be expanded gets no annotation
+ * rather than the chain of a candidate the geocoder ranked lower.</p>
  *
  * <p>The annotator holds no per-call state; it is as thread-safe as its hierarchy.</p>
  *
@@ -92,14 +101,33 @@ public class HierarchyAnnotator implements DocumentAnnotator {
     this.attributeKey = attributeKey;
   }
 
+  /**
+   * Annotates the document with the {@link #CONTAINMENT} layer.
+   *
+   * <p>Each mention of the locations layer is expanded at most once: the first
+   * annotation of a span decides the mention's chain, and any further annotation of the
+   * same span, which a multi-candidate mention carries for each lower-ranked candidate,
+   * is ignored. A document without a locations layer is treated as having no resolved
+   * mentions and gets an empty layer.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #CONTAINMENT} layer added, one
+   *         annotation per expandable mention. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
+   *         already carries the {@link #CONTAINMENT} layer.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
     final List<Annotation<ContainmentChain>> chains = new ArrayList<>();
+    final Set<Span> expanded = new HashSet<>();
     for (final Annotation<GeoResolution> location
         : document.get(GeocodeAnnotator.LOCATIONS)) {
+      if (!expanded.add(location.span())) {
+        continue;
+      }
       final AttributeValue joinId =
           location.value().entry().attributes().get(attributeKey);
       if (joinId == null) {
