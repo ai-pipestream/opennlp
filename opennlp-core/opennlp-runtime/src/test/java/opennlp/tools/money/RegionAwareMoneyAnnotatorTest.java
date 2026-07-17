@@ -22,9 +22,12 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Currency;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
@@ -141,6 +144,49 @@ public class RegionAwareMoneyAnnotatorTest {
         .annotate(withBallot("the grant is $5", "CA"));
     assertEquals("CAD",
         document.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
+  /**
+   * Verifies that the installed-locale scan skips candidates whose currency symbol is
+   * not a single currency sign, using Guinea as the discriminating case in the JDK's
+   * locale data: {@code en-GN} and the lexicographically first Guinean locale
+   * ({@code ff-Adlm-GN}, which spells the franc {@code FG}) are both unusable, so only
+   * the symbol filter makes the scan pass them over for {@code nqo-GN}, whose
+   * single-sign spelling (U+07FF, the N'Ko taman sign) resolves {@code GNF}. The
+   * assumptions skip the test if the runtime's locale data changes shape.
+   */
+  @Test
+  void testLocaleScanSkipsUnusableSymbolCandidates() {
+    Assumptions.assumeFalse(singleCurrencySign(Locale.of("en", "GN")));
+    Assumptions.assumeFalse(singleCurrencySign(Locale.forLanguageTag("ff-Adlm-GN")));
+    Assumptions.assumeTrue(singleCurrencySign(Locale.forLanguageTag("nqo-GN")));
+
+    final Document document = new RegionAwareMoneyAnnotator()
+        .annotate(withBallot("price 100\u07FF today", "GN"));
+    assertEquals("GNF",
+        document.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
+  /**
+   * Mirrors the annotator's usability rule for the assumption guards above: a locale is
+   * usable when its currency is written there as one currency-sign code point.
+   *
+   * @param locale The locale to test. Must not be {@code null}.
+   * @return {@code true} if the locale's currency symbol is a single currency sign.
+   */
+  private static boolean singleCurrencySign(Locale locale) {
+    final Currency currency;
+    try {
+      currency = Currency.getInstance(locale);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+    if (currency == null) {
+      return false;
+    }
+    final String symbol = currency.getSymbol(locale);
+    return symbol.codePointCount(0, symbol.length()) == 1
+        && Character.getType(symbol.codePointAt(0)) == Character.CURRENCY_SYMBOL;
   }
 
   /**
