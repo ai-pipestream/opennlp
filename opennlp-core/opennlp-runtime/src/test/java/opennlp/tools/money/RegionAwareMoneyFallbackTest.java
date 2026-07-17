@@ -27,7 +27,6 @@ import opennlp.tools.document.Document;
 import opennlp.tools.geo.DocumentRegionAnnotator;
 import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
-import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -50,8 +49,7 @@ public class RegionAwareMoneyFallbackTest {
    */
   private static Document withBallot(String text, String countryCode) {
     return Document.of(text).with(DocumentRegionAnnotator.REGIONS,
-        List.of(new Annotation<>(new Span(0, text.length()),
-            new RegionVote(countryCode, 1.0))));
+        List.of(Annotation.of(new RegionVote(countryCode, 1.0))));
   }
 
   /**

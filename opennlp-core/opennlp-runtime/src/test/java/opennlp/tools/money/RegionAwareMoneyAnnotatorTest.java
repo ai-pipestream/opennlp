@@ -56,8 +56,7 @@ public class RegionAwareMoneyAnnotatorTest {
 
   private static Document withBallot(String text, String countryCode) {
     return Document.of(text).with(DocumentRegionAnnotator.REGIONS,
-        List.of(new Annotation<>(new Span(0, text.length()),
-            new RegionVote(countryCode, 1.0))));
+        List.of(Annotation.of(new RegionVote(countryCode, 1.0))));
   }
 
   @Test
