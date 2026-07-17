@@ -38,11 +38,15 @@ import opennlp.tools.util.StringUtil;
  * third-person pronouns are linked by precision-ordered sieves and provided as
  * {@link #CHAINS}, one annotation per mention carrying its {@link CorefMention}.
  *
- * <p>Three sieves run in order of decreasing precision. Exact match links entity
+ * <p>Five sieves run in order of decreasing precision. Exact match links entity
  * mentions of the same type with identical normalized text, regardless of how far apart
- * they are. Name containment links entity mentions of the same type where one is a
- * whitespace-delimited prefix or suffix of the other, so a surname finds its full name.
- * Pronoun resolution links each third-person
+ * they are. Strict head match links entity mentions of the same type whose head words
+ * match when every content word of the later mention's chain already appears in the
+ * earlier chain, so reordered forms of one name meet; it runs twice, first also
+ * requiring the later mention's modifiers to appear in the candidate mention, then
+ * without that requirement. Name containment links entity mentions of the same type
+ * where one is a whitespace-delimited prefix or suffix of the other, so a surname finds
+ * its full name. Pronoun resolution links each third-person
  * pronoun to the nearest preceding compatible entity mention in the same or the
  * directly preceding sentence: gendered pronouns to person entities, neutral pronouns
  * to the configured non-person types, and plural pronouns to either. First and second
@@ -95,6 +99,15 @@ public class CorefAnnotator implements DocumentAnnotator {
 
   /** Third-person neutral pronoun forms that resolve only to non-person entities. */
   private static final Set<String> NEUTRAL_PRONOUNS = Set.of("it", "its", "itself");
+
+  /**
+   * Words carrying no name content, excluded from word inclusion and modifier checks
+   * so that shared articles and linkers alone never support a strict head match link.
+   */
+  private static final Set<String> STOP_WORDS = Set.of("the", "a", "an", "of", "and");
+
+  /** The preposition that separates a name's head segment from a trailing qualifier. */
+  private static final String OF = "of";
 
   /** Lowercased entity type labels gendered pronouns may resolve to. */
   private final Set<String> personTypes;
@@ -195,6 +208,8 @@ public class CorefAnnotator implements DocumentAnnotator {
     final List<Mention> mentions = collectMentions(text, sentences, tokens, tags, entities);
     final Chains chains = new Chains(mentions);
     exactMatchSieve(mentions, chains);
+    strictHeadMatchSieve(mentions, chains, true);
+    strictHeadMatchSieve(mentions, chains, false);
     containmentSieve(mentions, chains);
     pronounSieve(mentions, chains);
 
@@ -290,6 +305,158 @@ public class CorefAnnotator implements DocumentAnnotator {
       }
       earlier.add(i);
     }
+  }
+
+  /**
+   * Links entity mentions of compatible types whose head words match, scanning earlier
+   * mentions nearest first and taking the first candidate that passes every guard. A
+   * candidate passes when the later mention's head appears among the head words of the
+   * candidate's chain and every non-stop word accumulated in the later mention's chain
+   * already appears in the candidate's chain, so a name never gains content words by
+   * being linked. With {@code requireCompatibleModifiers}, the later mention's own
+   * non-head words must additionally appear in the candidate mention itself; the
+   * annotator runs that stricter form first, following the precision ranking of
+   * <a href="https://aclanthology.org/J13-4004/">Lee et al. (Computational Linguistics
+   * 2013), "Deterministic Coreference Resolution Based on Entity-Centric,
+   * Precision-Ranked Rules"</a>.
+   *
+   * @param mentions The mentions in text order.
+   * @param chains The chain forest over mention indices.
+   * @param requireCompatibleModifiers Whether the later mention's non-head words must
+   *        all appear in the candidate mention.
+   */
+  private static void strictHeadMatchSieve(List<Mention> mentions, Chains chains,
+      boolean requireCompatibleModifiers) {
+    final List<List<String>> words = new ArrayList<>(mentions.size());
+    final List<String> heads = new ArrayList<>(mentions.size());
+    for (final Mention mention : mentions) {
+      if (mention.entity() == CorefMention.NO_ENTITY) {
+        words.add(null);
+        heads.add(null);
+      } else {
+        // a blank mention has no words and no head and never takes part in this sieve
+        final List<String> mentionWords = wordsOf(mention.normalized());
+        words.add(mentionWords);
+        heads.add(mentionWords.isEmpty() ? null : headOf(mentionWords));
+      }
+    }
+    // The words and heads accumulated in each chain, keyed by the chain's current root.
+    final Map<Integer, Set<String>> chainWords = new HashMap<>();
+    final Map<Integer, Set<String>> chainHeads = new HashMap<>();
+    for (int i = 0; i < mentions.size(); i++) {
+      if (heads.get(i) == null) {
+        continue;
+      }
+      final int root = chains.find(i);
+      chainWords.computeIfAbsent(root, key -> new HashSet<>()).addAll(words.get(i));
+      chainHeads.computeIfAbsent(root, key -> new HashSet<>()).add(heads.get(i));
+    }
+    for (int j = 0; j < mentions.size(); j++) {
+      if (heads.get(j) == null) {
+        continue;
+      }
+      for (int i = j - 1; i >= 0; i--) {
+        if (heads.get(i) == null) {
+          continue;
+        }
+        final int rootI = chains.find(i);
+        final int rootJ = chains.find(j);
+        if (rootI == rootJ) {
+          break;
+        }
+        if (!typesCompatible(mentions.get(i).type(), mentions.get(j).type())
+            || !chainHeads.get(rootI).contains(heads.get(j))
+            || !containsAllNonStop(chainWords.get(rootI), chainWords.get(rootJ))) {
+          continue;
+        }
+        if (requireCompatibleModifiers
+            && !modifiersAppearIn(words.get(j), heads.get(j), words.get(i))) {
+          continue;
+        }
+        if (chains.union(i, j)) {
+          final int kept = chains.find(j);
+          final int dropped = kept == rootI ? rootJ : rootI;
+          chainWords.get(kept).addAll(chainWords.remove(dropped));
+          chainHeads.get(kept).addAll(chainHeads.remove(dropped));
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * Splits a normalized mention text into its whitespace-delimited words.
+   *
+   * @param normalized The lowercased mention text.
+   * @return The words in order; empty only for a blank mention. Never {@code null}.
+   */
+  private static List<String> wordsOf(String normalized) {
+    final List<String> words = new ArrayList<>();
+    int start = -1;
+    for (int i = 0; i < normalized.length(); i++) {
+      if (StringUtil.isWhitespace(normalized.charAt(i))) {
+        if (start >= 0) {
+          words.add(normalized.substring(start, i));
+          start = -1;
+        }
+      } else if (start < 0) {
+        start = i;
+      }
+    }
+    if (start >= 0) {
+      words.add(normalized.substring(start));
+    }
+    return words;
+  }
+
+  /**
+   * Approximates the head word of a name mention: the last word, or the word preceding
+   * the first {@code of} when the name carries a prepositional tail, so the same
+   * institution keeps one head whether its qualifier leads or trails.
+   *
+   * @param words The mention's words. Must not be empty.
+   * @return The head word. Never {@code null}.
+   */
+  private static String headOf(List<String> words) {
+    final int of = words.indexOf(OF);
+    return of > 0 ? words.get(of - 1) : words.get(words.size() - 1);
+  }
+
+  /**
+   * Checks whether every non-stop word of one chain appears in another chain's words.
+   *
+   * @param antecedent The words of the earlier chain.
+   * @param later The words of the later chain.
+   * @return {@code true} if {@code antecedent} covers every non-stop word of
+   *         {@code later}.
+   */
+  private static boolean containsAllNonStop(Set<String> antecedent, Set<String> later) {
+    for (final String word : later) {
+      if (!STOP_WORDS.contains(word) && !antecedent.contains(word)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Checks whether every non-head, non-stop word of a mention appears among another
+   * mention's words.
+   *
+   * @param mentionWords The later mention's words.
+   * @param head The later mention's head word.
+   * @param candidateWords The candidate mention's words.
+   * @return {@code true} if the candidate carries every modifier of the mention.
+   */
+  private static boolean modifiersAppearIn(List<String> mentionWords, String head,
+      List<String> candidateWords) {
+    for (final String word : mentionWords) {
+      if (!word.equals(head) && !STOP_WORDS.contains(word)
+          && !candidateWords.contains(word)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
