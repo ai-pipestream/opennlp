@@ -163,7 +163,10 @@ public class CursorMoneyExtractor implements MoneyExtractor {
 
   /**
    * Tries the three mention shapes at one position: symbol first, ISO code first,
-   * number first. Returns {@code null} when none matches.
+   * number first. A leading {@code -} counts as a minus sign only at a left boundary,
+   * on the symbol-first path exactly as on the number-first path, so the hyphen in a
+   * range such as {@code $100-$200} never negates the second amount. Returns
+   * {@code null} when none matches.
    */
   private MoneyAmount matchAt(CharSequence text, int start) {
     int i = start;
@@ -173,7 +176,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       i++;
     }
     final int cp = NumberScan.codePointAt(text, i);
-    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)) {
+    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)
+        && (!negative || NumberScan.boundaryBefore(text, start))) {
       return symbolFirst(text, start, i, negative);
     }
     if (!negative && isUpperAscii(cp) && NumberScan.boundaryBefore(text, i)) {

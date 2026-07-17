@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import opennlp.tools.extraction.NumberScan;
@@ -146,7 +147,8 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     final NumberInText year = yearAt(text, month.end() + 1);
     if (year != null) {
       return new TemporalExpression(new Span(start, year.end()),
-          String.format("%04d-%02d", year.value(), monthOfYear), Granularity.MONTH);
+          String.format(Locale.ROOT, "%04d-%02d", year.value(), monthOfYear),
+          Granularity.MONTH);
     }
     final NumberInText day = shortNumber(text, month.end() + 1);
     if (day == null) {
@@ -177,7 +179,7 @@ public class CursorTemporalExtractor implements TemporalExtractor {
       return null;
     }
     return new TemporalExpression(new Span(start, year.end()),
-        String.format("%04d-Q%d", year.value(), number), Granularity.QUARTER);
+        String.format(Locale.ROOT, "%04d-Q%d", year.value(), number), Granularity.QUARTER);
   }
 
   /** Builds a calendar-validated day mention, or {@code null} for an impossible date. */
@@ -192,7 +194,8 @@ public class CursorTemporalExtractor implements TemporalExtractor {
       return null;
     }
     return new TemporalExpression(new Span(start, end),
-        String.format("%04d-%02d-%02d", year, month, dayOfMonth), Granularity.DAY);
+        String.format(Locale.ROOT, "%04d-%02d-%02d", year, month, dayOfMonth),
+        Granularity.DAY);
   }
 
   /** Reads a bounded four-digit year in range, or {@code null}. */

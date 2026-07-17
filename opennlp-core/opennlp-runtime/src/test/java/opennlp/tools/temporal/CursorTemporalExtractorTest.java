@@ -18,6 +18,7 @@
 package opennlp.tools.temporal;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -119,6 +120,24 @@ public class CursorTemporalExtractorTest {
     assertEquals(new Span(3, 13), mentions.get(0).span());
     assertEquals("2026-04", mentions.get(0).value());
     assertEquals(Granularity.MONTH, mentions.get(0).granularity());
+  }
+
+  /**
+   * Verifies that the normalized values stay pure ASCII ISO 8601 under a default
+   * locale whose numbering system is not Latin: formatting must not localize digits.
+   */
+  @Test
+  void testNormalizedValuesAreAsciiUnderNonLatinDigitLocale() {
+    final Locale saved = Locale.getDefault();
+    try {
+      Locale.setDefault(
+          new Locale.Builder().setLanguage("ar").setExtension('u', "nu-arab").build());
+      assertEquals("2026-07-14", extractor.extract("14 July 2026").get(0).value());
+      assertEquals("2026-07", extractor.extract("July 2026").get(0).value());
+      assertEquals("2024-Q3", extractor.extract("Q3 2024").get(0).value());
+    } finally {
+      Locale.setDefault(saved);
+    }
   }
 
   @Test

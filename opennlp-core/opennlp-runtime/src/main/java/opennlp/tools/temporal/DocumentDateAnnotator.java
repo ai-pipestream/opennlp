@@ -18,6 +18,7 @@
 package opennlp.tools.temporal;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 
@@ -49,6 +50,16 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
   public static final LayerKey<LocalDate> DOCUMENT_DATE =
       LayerKey.of("document.date", LocalDate.class);
 
+  /**
+   * Elects the document date from the first day-granularity temporal mention.
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return The document with the {@link #DOCUMENT_DATE} layer added. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, or if
+   *         the electing day-granularity mention carries a value that is not an ISO 8601
+   *         calendar date in the {@code yyyy-MM-dd} form, as a third-party
+   *         {@link TemporalExtractor} may supply.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
@@ -57,8 +68,15 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
     for (final Annotation<TemporalExpression> mention
         : document.get(TemporalAnnotator.TEMPORALS)) {
       if (mention.value().granularity() == TemporalExpression.Granularity.DAY) {
-        return document.with(DOCUMENT_DATE, List.of(
-            new Annotation<>(mention.span(), LocalDate.parse(mention.value().value()))));
+        final LocalDate date;
+        try {
+          date = LocalDate.parse(mention.value().value());
+        } catch (DateTimeParseException e) {
+          throw new IllegalArgumentException("not an ISO 8601 day value at "
+              + mention.span() + ": " + mention.value().value(), e);
+        }
+        return document.with(DOCUMENT_DATE,
+            List.of(new Annotation<>(mention.span(), date)));
       }
     }
     return document.with(DOCUMENT_DATE, List.of());
