@@ -204,8 +204,9 @@ public class DocumentRegionBallotEdgeCaseTest {
   void testZeroConfidenceResolutionCastsNoVote() {
     final Geocoder geocoder = tableGeocoder(Map.of(
         "Bilbao", new ScoredCountry("ES", 0.0)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("a dispatch from Bilbao", "Bilbao"));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("a dispatch from Bilbao", "Bilbao")));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
     assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
@@ -222,8 +223,9 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = tableGeocoder(Map.of(
         "Bilbao", new ScoredCountry("ES", 0.0),
         "Sydney", new ScoredCountry("AU", 0.8)));
-    final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney")));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
