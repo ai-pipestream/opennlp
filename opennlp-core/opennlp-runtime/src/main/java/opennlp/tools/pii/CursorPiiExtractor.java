@@ -45,7 +45,10 @@ import opennlp.tools.util.Span;
  *   applied.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
  *   validated with the Luhn check and required to start with a digit between 2 and 6,
- *   the range that covers the major card networks.</li>
+ *   the range that covers the major card networks. When the full run fails the check,
+ *   shorter separator-delimited prefixes are tried longest first, so a trailing
+ *   separated digit group, such as an expiry date, does not hide the card before
+ *   it.</li>
  * </ul>
  *
  * <p>When candidates overlap, the leftmost wins, then the longest, then the more
@@ -245,7 +248,10 @@ public class CursorPiiExtractor implements PiiExtractor {
 
   /**
    * Finds payment card numbers: a digit run with optional single space or hyphen
-   * separators, an accepted leading digit, and a passing Luhn check.
+   * separators, an accepted leading digit, and a passing Luhn check. Candidates are
+   * tried longest first at separator boundaries until the Luhn check passes, so a card
+   * directly followed by another separated digit group, such as an expiry date, is
+   * still found instead of being swallowed into one over-long rejected candidate.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -256,6 +262,7 @@ public class CursorPiiExtractor implements PiiExtractor {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
+      final List<int[]> groupEnds = new ArrayList<>();
       int lastDigit = -1;
       boolean previousSeparator = false;
       int p = i;
@@ -267,23 +274,31 @@ public class CursorPiiExtractor implements PiiExtractor {
           previousSeparator = false;
           p++;
         } else if ((c == ' ' || c == '-') && !previousSeparator) {
+          groupEnds.add(new int[] {lastDigit + 1, digits.length()});
           previousSeparator = true;
           p++;
         } else {
           break;
         }
       }
-      final int end = lastDigit + 1;
+      groupEnds.add(new int[] {lastDigit + 1, digits.length()});
       final char first = digits.charAt(0);
-      if (digits.length() < CARD_MIN_DIGITS || digits.length() > CARD_MAX_DIGITS
-          || first < '2' || first > '6'
-          || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
-          || !luhnValid(digits.toString())) {
+      if (first < '2' || first > '6') {
         continue;
       }
-      hits.add(new Hit(i, end, PRIORITY_CARD,
-          new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, digits.toString())));
-      i = end;
+      for (int g = groupEnds.size() - 1; g >= 0; g--) {
+        final int end = groupEnds.get(g)[0];
+        final int length = groupEnds.get(g)[1];
+        if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
+            || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
+            || !luhnValid(digits.substring(0, length))) {
+          continue;
+        }
+        hits.add(new Hit(i, end, PRIORITY_CARD,
+            new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, digits.substring(0, length))));
+        i = end;
+        break;
+      }
     }
   }
 
