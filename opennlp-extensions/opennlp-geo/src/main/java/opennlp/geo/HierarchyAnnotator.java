@@ -26,6 +26,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 import opennlp.tools.geo.AttributeValue;
 import opennlp.tools.geo.ContainmentChain;
 import opennlp.tools.geo.GazetteerEntry;
@@ -66,7 +67,7 @@ public class HierarchyAnnotator implements DocumentAnnotator {
    * {@link ContainmentChain}.
    */
   public static final LayerKey<ContainmentChain> CONTAINMENT =
-      LayerKey.of("containment", ContainmentChain.class);
+      Layers.key("containment", ContainmentChain.class);
 
   private final PlaceHierarchy hierarchy;
   private final String attributeKey;
