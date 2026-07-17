@@ -58,6 +58,12 @@ import opennlp.tools.util.normalizer.EmojiFlags;
  * vote. Mentions with no kind of evidence do not vote; a document without usable
  * evidence gets an empty layer.</p>
  *
+ * <p>When the geocoder ranks several candidates for one mention, the locations layer holds
+ * them in the geocoder's order, best first, and the mention votes with that best candidate
+ * alone. The order is the geocoder's ranking, which is authoritative: confidence is
+ * resolver-defined and not comparable across implementations, so it ranks nothing by
+ * itself.</p>
+ *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
@@ -133,19 +139,25 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   /**
    * Annotates the document with the {@link #REGIONS} ballot.
    *
-   * <p>Location entities are matched to their resolutions by exact span. A resolved
-   * mention votes with its confidence, an unresolved mention votes as a country name
-   * when its text is one, and country flag emoji vote directly from the text. When
-   * several resolutions share one span, the last one in the locations layer casts
-   * that mention's vote.</p>
+   * <p>Every location entity casts at most one vote. A mention is matched to the
+   * locations layer by exact span and votes for its best candidate's country with that
+   * candidate's confidence; a mention with no candidates votes as a country name when
+   * its text is one. A mention that is neither, or whose best candidate carries no
+   * country code, casts no vote. Country flag emoji vote directly from the text,
+   * independently of any entity.</p>
    *
-   * @param document The document to annotate. Must not be {@code null} and must carry
-   *                 the {@link Layers#ENTITIES} and {@link GeocodeAnnotator#LOCATIONS}
-   *                 layers.
+   * <p>The required layers must be present, but they may be empty: a document with a
+   * present but empty locations layer is a document nothing geocoded, and its country-name
+   * and flag evidence still votes. An absent required layer is a pipeline error rather
+   * than an evidence-free document, because a missing {@link GeocodeAnnotator} stage would
+   * otherwise drop every geocoded vote silently.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry the
+   *                 {@link Layers#ENTITIES} and {@link GeocodeAnnotator#LOCATIONS} layers.
    * @return A new {@link Document} with the {@link #REGIONS} layer added. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, a
-   *         required layer is absent, or the document already carries the
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the entity
+   *         layer or the locations layer is absent, or the document already carries the
    *         {@link #REGIONS} layer.
    */
   @Override
@@ -155,9 +167,11 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     DocumentAnnotators.requireLayers(document, Layers.ENTITIES, GeocodeAnnotator.LOCATIONS);
     final CharSequence text = document.text();
+    // The layer holds a mention's candidates in the geocoder's ranking, best first, so
+    // the first entry for a span is the one that votes.
     final Map<Long, GeoResolution> resolutionsBySpan = new HashMap<>();
     for (final Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATIONS)) {
-      resolutionsBySpan.put(spanKey(location.span()), location.value());
+      resolutionsBySpan.putIfAbsent(spanKey(location.span()), location.value());
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
