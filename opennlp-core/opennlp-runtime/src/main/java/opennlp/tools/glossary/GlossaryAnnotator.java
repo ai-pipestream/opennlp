@@ -25,6 +25,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Adapts a {@link GlossaryMatcher} to the document pipeline: scans the document text and
@@ -41,7 +42,7 @@ public class GlossaryAnnotator implements DocumentAnnotator {
    * Glossary hits; each annotation covers one hit and carries its {@link GlossaryMatch}.
    */
   public static final LayerKey<GlossaryMatch> GLOSSARY =
-      LayerKey.of("glossary", GlossaryMatch.class);
+      Layers.key("glossary", GlossaryMatch.class);
 
   /** The matcher that produces the hits this annotator records as a layer. */
   private final GlossaryMatcher matcher;
