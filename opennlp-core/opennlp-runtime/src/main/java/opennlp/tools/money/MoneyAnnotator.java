@@ -25,6 +25,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Adapts a {@link MoneyExtractor} to the document pipeline: scans the document text and
@@ -42,7 +43,7 @@ public class MoneyAnnotator implements DocumentAnnotator {
    * Monetary mentions; each annotation covers one mention and carries the normalized
    * {@link MoneyAmount}.
    */
-  public static final LayerKey<MoneyAmount> MONEY = LayerKey.of("money", MoneyAmount.class);
+  public static final LayerKey<MoneyAmount> MONEY = Layers.key("money", MoneyAmount.class);
 
   private final MoneyExtractor extractor;
 

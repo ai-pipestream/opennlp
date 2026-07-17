@@ -30,6 +30,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 import opennlp.tools.temporal.DocumentDateAnnotator;
 
 /**
@@ -53,7 +54,7 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    * span, omitting mentions without a usable rate.
    */
   public static final LayerKey<MoneyAmount> CONVERTED_MONEY =
-      LayerKey.of("money.converted", MoneyAmount.class);
+      Layers.key("money.converted", MoneyAmount.class);
 
   private static final Logger logger =
       LoggerFactory.getLogger(MoneyConversionAnnotator.class);
