@@ -26,6 +26,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Elects the document's reference date from the temporal layer and provides
@@ -48,7 +49,7 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
    * elected it.
    */
   public static final LayerKey<LocalDate> DOCUMENT_DATE =
-      LayerKey.of("document.date", LocalDate.class);
+      Layers.key("document.date", LocalDate.class);
 
   /**
    * Elects the document date from the first day-granularity temporal mention.

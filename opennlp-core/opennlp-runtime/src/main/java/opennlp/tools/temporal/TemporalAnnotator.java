@@ -25,6 +25,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Adapts a {@link TemporalExtractor} to the document pipeline: scans the document text
@@ -43,7 +44,7 @@ public class TemporalAnnotator implements DocumentAnnotator {
    * {@link TemporalExpression}.
    */
   public static final LayerKey<TemporalExpression> TEMPORALS =
-      LayerKey.of("temporals", TemporalExpression.class);
+      Layers.key("temporals", TemporalExpression.class);
 
   private final TemporalExtractor extractor;
 

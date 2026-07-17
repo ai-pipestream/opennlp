@@ -25,6 +25,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
 
 /**
  * Adapts a {@link QuantityExtractor} to the document pipeline: scans the document text
@@ -43,7 +44,7 @@ public class QuantityAnnotator implements DocumentAnnotator {
    * {@link Quantity}.
    */
   public static final LayerKey<Quantity> QUANTITIES =
-      LayerKey.of("quantities", Quantity.class);
+      Layers.key("quantities", Quantity.class);
 
   private final QuantityExtractor extractor;
 
