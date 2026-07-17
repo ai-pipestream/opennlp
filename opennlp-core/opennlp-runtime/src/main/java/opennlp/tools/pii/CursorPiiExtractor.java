@@ -35,10 +35,12 @@ import opennlp.tools.util.Span;
  *   <li>Email: a local part of ASCII letters, digits, and {@code . _ % + -} followed by
  *   {@code @} and a dotted domain whose final label is alphabetic with at least two
  *   letters.</li>
- *   <li>Phone: an international form with {@code +} and 8 to 15 digits, or a domestic
- *   form with 10 or 11 digits that shows formatting evidence, at least one space,
- *   hyphen, or parenthesis between the digits. A bare digit run is never a phone
- *   number. Dots are not accepted as separators, which keeps decimal numbers out.</li>
+ *   <li>Phone: an international form with {@code +} whose digits split into an
+ *   assigned calling code and a national number of a length some territory under that
+ *   code assigns, or a domestic form with 10 or 11 digits that shows formatting
+ *   evidence, at least one space, hyphen, or parenthesis between the digits. A bare
+ *   digit run is never a phone number. Dots are not accepted as separators, which
+ *   keeps decimal numbers out.</li>
  *   <li>IBAN: two uppercase letters, two check digits, and 11 to 30 more uppercase
  *   letters or digits, 15 to 34 characters in total, optionally in space-separated
  *   groups, validated with the mod-97 check. Country-specific length tables are not
@@ -71,7 +73,6 @@ public class CursorPiiExtractor implements PiiExtractor {
   private static final int IBAN_MAX_LENGTH = 34;
   private static final int CARD_MIN_DIGITS = 13;
   private static final int CARD_MAX_DIGITS = 19;
-  private static final int PHONE_MIN_INTERNATIONAL_DIGITS = 8;
   private static final int PHONE_MAX_DIGITS = 15;
 
   /**
@@ -306,12 +307,13 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds phone numbers: an international form starting with {@code +}, or a domestic
-   * form whose digits are visibly formatted with spaces, hyphens, or parentheses.
-   * Candidates are tried longest first at separator boundaries until the length and
-   * form checks pass, exactly like the card scan, so a phone directly followed by
-   * another separated digit group, such as an extension or a count, is still found
-   * instead of being swallowed into one over-long rejected candidate.
+   * Finds phone numbers: an international form starting with {@code +} and validated
+   * against {@link PhoneNumberLengths}, or a domestic form whose digits are visibly
+   * formatted with spaces, hyphens, or parentheses. Candidates are tried longest first
+   * at separator boundaries until the length and form checks pass, exactly like the
+   * card scan, so a phone directly followed by another separated digit group, such as
+   * an extension or a count, is still found instead of being swallowed into one
+   * over-long rejected candidate.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -330,6 +332,7 @@ public class CursorPiiExtractor implements PiiExtractor {
       int close = 0;
       boolean separated = false;
       boolean previousSeparator = false;
+      final StringBuilder digitRun = new StringBuilder();
       // Each entry is a candidate cut at a separator boundary: the exclusive text end,
       // the digit count, whether the digits were visibly separated, and the
       // parenthesis counts up to the cut, so every prefix is judged by its own form.
@@ -342,6 +345,7 @@ public class CursorPiiExtractor implements PiiExtractor {
             separated = true;
           }
           digits++;
+          digitRun.append(ch);
           lastDigit = p;
           previousSeparator = false;
           p++;
@@ -369,8 +373,9 @@ public class CursorPiiExtractor implements PiiExtractor {
         if (count == 0 || groups.get(g)[3] != groups.get(g)[4]) {
           continue;
         }
+        final String candidate = digitRun.substring(0, count);
         final boolean lengthOk = plus
-            ? count >= PHONE_MIN_INTERNATIONAL_DIGITS && count <= PHONE_MAX_DIGITS
+            ? count <= PHONE_MAX_DIGITS && PhoneNumberLengths.plausibleInternational(candidate)
             : (count == 10 || count == 11) && visiblySeparated;
         if (!lengthOk
             || (end < text.length()
@@ -379,14 +384,9 @@ public class CursorPiiExtractor implements PiiExtractor {
                 && isAsciiDigit(text.charAt(end + 1)))) {
           continue;
         }
-        final StringBuilder normalized = new StringBuilder(plus ? "+" : "");
-        for (int q = i; q < end; q++) {
-          if (isAsciiDigit(text.charAt(q))) {
-            normalized.append(text.charAt(q));
-          }
-        }
         hits.add(new Hit(i, end, PRIORITY_PHONE,
-            new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE, normalized.toString())));
+            new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE,
+                plus ? "+" + candidate : candidate)));
         i = end;
         break;
       }
