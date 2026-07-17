@@ -139,13 +139,13 @@ public final class ContainmentSpine implements PlaceHierarchy {
      *         blank.
      */
     public Builder add(String id, String parentId, String name, String type) {
-      if (id == null || blank(id)) {
+      if (id == null || StringUtil.isBlank(id)) {
         throw new IllegalArgumentException("id must not be null or blank");
       }
-      if (name == null || blank(name)) {
+      if (name == null || StringUtil.isBlank(name)) {
         throw new IllegalArgumentException("name must not be null or blank");
       }
-      if (type == null || blank(type)) {
+      if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("type must not be null or blank");
       }
       places.put(id, new Node(parentId, name, type));
@@ -431,20 +431,6 @@ public final class ContainmentSpine implements PlaceHierarchy {
     consumer.row(line, List.copyOf(fields));
   }
 
-  /**
-   * Reports whether a value is blank under the project whitespace definition, which
-   * unlike the JDK's includes no-break spaces.
-   */
-  private static boolean blank(String value) {
-    for (int i = 0; i < value.length(); ) {
-      final int cp = value.codePointAt(i);
-      if (!StringUtil.isWhitespace(cp)) {
-        return false;
-      }
-      i += Character.charCount(cp);
-    }
-    return true;
-  }
 
   /**
    * Strips leading and trailing whitespace under the project whitespace definition, so

@@ -95,7 +95,7 @@ public class HierarchyAnnotator implements DocumentAnnotator {
     if (hierarchy == null) {
       throw new IllegalArgumentException("hierarchy must not be null");
     }
-    if (attributeKey == null || blank(attributeKey)) {
+    if (attributeKey == null || StringUtil.isBlank(attributeKey)) {
       throw new IllegalArgumentException("attributeKey must not be null or blank");
     }
     this.hierarchy = hierarchy;
@@ -157,20 +157,6 @@ public class HierarchyAnnotator implements DocumentAnnotator {
     return ((long) span.getStart() << 32) | span.getEnd();
   }
 
-  /**
-   * Reports whether a value is blank under the project whitespace definition, which
-   * unlike the JDK's includes no-break spaces.
-   */
-  private static boolean blank(String value) {
-    for (int i = 0; i < value.length(); ) {
-      final int cp = value.codePointAt(i);
-      if (!StringUtil.isWhitespace(cp)) {
-        return false;
-      }
-      i += Character.charCount(cp);
-    }
-    return true;
-  }
 
   @Override
   public Set<LayerKey<?>> requires() {
