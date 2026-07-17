@@ -129,6 +129,19 @@ public class EcbFxRatesTest {
     assertThrows(IllegalArgumentException.class, () -> EcbFxRates.load((InputStream) null));
   }
 
+  /**
+   * Verifies that a malformed rate cell fails loud as {@link IllegalArgumentException}
+   * naming the cell and the row, matching the date-cell handling in the same loop.
+   */
+  @Test
+  void testMalformedRateCellFailsLoudWithRowContext() {
+    final String csv = "Date,USD,JPY,\n2026-07-10,1.08x,160.00,\n";
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> EcbFxRates.load(new ByteArrayInputStream(csv.getBytes())));
+    assertEquals("not a reference history rate for USD: 1.08x in row: "
+        + "2026-07-10,1.08x,160.00,", e.getMessage());
+  }
+
   @Test
   void testArgumentValidation() throws IOException {
     final EcbFxRates rates = rates();

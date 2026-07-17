@@ -96,6 +96,51 @@ public class CursorMoneyExtractorTest {
     assertEquals("EUR", mentions.get(1).currency());
   }
 
+  /**
+   * Verifies that the hyphen in a price range is not read as a minus sign: both
+   * amounts of {@code $100-$200} are positive and their spans exclude the hyphen.
+   */
+  @Test
+  void testHyphenatedRangeYieldsTwoPositiveMentions() {
+    final List<MoneyAmount> mentions = extractor.extract("$100-$200");
+    assertEquals(2, mentions.size());
+    assertEquals(new Span(0, 4), mentions.get(0).span());
+    assertEquals(0, new BigDecimal("100").compareTo(mentions.get(0).amount()));
+    assertEquals(new Span(5, 9), mentions.get(1).span());
+    assertEquals(0, new BigDecimal("200").compareTo(mentions.get(1).amount()));
+  }
+
+  /**
+   * Verifies that a hyphen directly after a letter is ordinary prose punctuation, not
+   * a minus sign, so {@code pre-$5 deal} reports a positive amount.
+   */
+  @Test
+  void testHyphenAfterLetterIsNotAMinus() {
+    final MoneyAmount mention = single("pre-$5 deal");
+    assertEquals(new Span(4, 6), mention.span());
+    assertEquals(0, new BigDecimal("5").compareTo(mention.amount()));
+  }
+
+  /**
+   * Verifies that a genuinely negative symbol-first mention keeps its sign at every
+   * boundary the number-first shape accepts: the text start, after whitespace, and
+   * after non-alphanumeric punctuation.
+   */
+  @Test
+  void testNegativeSymbolFirstAtBoundariesKeepsTheSign() {
+    final MoneyAmount atStart = single("-$5");
+    assertEquals(new Span(0, 3), atStart.span());
+    assertEquals(0, new BigDecimal("-5").compareTo(atStart.amount()));
+
+    final MoneyAmount afterSpace = single("balance -$5");
+    assertEquals(new Span(8, 11), afterSpace.span());
+    assertEquals(0, new BigDecimal("-5").compareTo(afterSpace.amount()));
+
+    final MoneyAmount afterParenthesis = single("(-$5)");
+    assertEquals(new Span(1, 4), afterParenthesis.span());
+    assertEquals(0, new BigDecimal("-5").compareTo(afterParenthesis.amount()));
+  }
+
   @Test
   void testInvalidGroupingEndsTheMatchAtTheLastValidPosition() {
     final MoneyAmount mention = single("$1,23");

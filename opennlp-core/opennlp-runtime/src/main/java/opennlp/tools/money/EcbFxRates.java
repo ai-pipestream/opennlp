@@ -126,7 +126,12 @@ public class EcbFxRates implements FxRates {
         final String value = fields[i].trim();
         final String currency = currencies[i].trim();
         if (!value.isEmpty() && !NOT_AVAILABLE.equals(value) && !currency.isEmpty()) {
-          rates.put(currency, new BigDecimal(value));
+          try {
+            rates.put(currency, new BigDecimal(value));
+          } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("not a reference history rate for "
+                + currency + ": " + value + " in row: " + line, e);
+          }
         }
       }
       table.put(date, rates);
