@@ -17,6 +17,8 @@
 
 package opennlp.tools.geo;
 
+import opennlp.tools.util.StringUtil;
+
 /**
  * One step of a place's containment chain: an enclosing place with its identifier in
  * the hierarchy source, its name, and its place type.
@@ -36,13 +38,13 @@ public record PlaceAncestor(String id, String name, String type) {
    * @throws IllegalArgumentException Thrown if a component is {@code null} or blank.
    */
   public PlaceAncestor {
-    if (id == null || id.isBlank()) {
+    if (id == null || StringUtil.isBlank(id)) {
       throw new IllegalArgumentException("id must not be null or blank");
     }
-    if (name == null || name.isBlank()) {
+    if (name == null || StringUtil.isBlank(name)) {
       throw new IllegalArgumentException("name must not be null or blank");
     }
-    if (type == null || type.isBlank()) {
+    if (type == null || StringUtil.isBlank(type)) {
       throw new IllegalArgumentException("type must not be null or blank");
     }
   }
