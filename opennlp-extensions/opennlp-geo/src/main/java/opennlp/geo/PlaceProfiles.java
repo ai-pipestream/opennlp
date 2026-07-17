@@ -43,6 +43,13 @@ import opennlp.tools.util.StringUtil;
  * zero and unit variance at load, so heterogeneous units contribute comparably; a
  * constant column contributes nothing.</p>
  *
+ * <p>Every value the table holds must be a finite number, and every column must
+ * standardize within the range of a double. A column of finite values whose sum or
+ * whose summed squared deviations exceed that range is rejected at load, naming the
+ * metric, rather than being silently reduced to zeros or to {@code NaN}: such a column
+ * carries signal that the arithmetic cannot express, and a caller who rescales it into
+ * range gets the same similarities back. Scores are therefore always real numbers.</p>
+ *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
  * @since 3.0.0
@@ -73,7 +80,8 @@ public final class PlaceProfiles {
    *              names, then one place per line. Must not be {@code null}.
    * @return The loaded profiles. Never {@code null}.
    * @throws IOException Thrown if reading fails, the table has no header, a row does
-   *         not list exactly one value per metric, or a value is not a finite number.
+   *         not list exactly one value per metric, a value is not a finite number, or a
+   *         metric column overflows a double.
    * @throws IllegalArgumentException Thrown if {@code table} is {@code null}.
    */
   public static PlaceProfiles load(Path table) throws IOException {
@@ -93,10 +101,15 @@ public final class PlaceProfiles {
    * not ignored. Identifiers and values are stripped of surrounding whitespace. If an
    * identifier appears on more than one row, the last row wins.
    *
+   * <p>Columns are standardized once every row has been read, so a column that
+   * overflows a double is reported by metric name rather than by row: no single row is
+   * at fault when every cell in the column is finite.</p>
+   *
    * @param tableStream The table content. Must not be {@code null}. Not closed.
    * @return The loaded profiles. Never {@code null}.
    * @throws IOException Thrown if reading fails, the table has no header, a row does
-   *         not list exactly one value per metric, or a value is not a finite number.
+   *         not list exactly one value per metric, a value is not a finite number, or a
+   *         metric column overflows a double.
    * @throws IllegalArgumentException Thrown if {@code tableStream} is {@code null}.
    */
   public static PlaceProfiles load(InputStream tableStream) throws IOException {
@@ -140,9 +153,9 @@ public final class PlaceProfiles {
     if (raw.isEmpty()) {
       throw new IOException("the profile table lists no places");
     }
-    standardize(raw, width);
-    return new PlaceProfiles(Map.copyOf(raw),
-        List.copyOf(header.subList(1, header.size())));
+    final List<String> metricNames = List.copyOf(header.subList(1, header.size()));
+    standardize(raw, metricNames);
+    return new PlaceProfiles(Map.copyOf(raw), metricNames);
   }
 
   /**
@@ -232,14 +245,32 @@ public final class PlaceProfiles {
 
   /**
    * Rescales every column to mean zero and unit variance, in place, using the
-   * population standard deviation over the listed places. A constant column has zero
-   * deviation and standardizes to all zeros instead of dividing by zero, so it
-   * contributes nothing to any similarity.
+   * population standard deviation over the listed places.
+   *
+   * <p>A constant column has zero deviation and standardizes to all zeros instead of
+   * dividing by zero, so it contributes nothing to any similarity. That is the honest
+   * answer for such a column, because a metric that never varies genuinely
+   * distinguishes no two places.</p>
+   *
+   * <p>A column that overflows a double is rejected instead, even though every cell in
+   * it is finite. Zeroing it would report the same thing as a constant column, that the
+   * metric carries no signal, about a column that demonstrably does carry signal and
+   * merely exceeds the arithmetic. Overflow is caught in both of the places it appears.
+   * The summed column can exceed the range, leaving an infinite mean, an infinite
+   * centered value, and a {@code NaN} profile that no downstream guard rejects because
+   * those guards compare against {@code 0.0}. The summed squared deviations can exceed
+   * it too, leaving an infinite deviation that would divide every value in the column
+   * down to zero. Both describe a table the caller can trivially rescale, so both say
+   * so rather than answering from a discarded metric.</p>
    *
    * @param profiles The raw profiles, keyed by place identifier; mutated in place.
-   * @param width The number of metric columns in every profile.
+   * @param metrics The metric names in column order, used to name a rejected column.
+   * @throws IOException Thrown if the mean or the standard deviation of a column is not
+   *         finite, which means the column overflows a double.
    */
-  private static void standardize(Map<String, double[]> profiles, int width) {
+  private static void standardize(Map<String, double[]> profiles, List<String> metrics)
+      throws IOException {
+    final int width = metrics.size();
     final double[] mean = new double[width];
     for (final double[] profile : profiles.values()) {
       for (int m = 0; m < width; m++) {
@@ -248,6 +279,7 @@ public final class PlaceProfiles {
     }
     for (int m = 0; m < width; m++) {
       mean[m] /= profiles.size();
+      checkColumnFinite(mean[m], metrics.get(m));
     }
     final double[] variance = new double[width];
     for (final double[] profile : profiles.values()) {
@@ -256,11 +288,32 @@ public final class PlaceProfiles {
         variance[m] += centered * centered;
       }
     }
+    final double[] deviation = new double[width];
+    for (int m = 0; m < width; m++) {
+      deviation[m] = Math.sqrt(variance[m] / profiles.size());
+      checkColumnFinite(deviation[m], metrics.get(m));
+    }
     for (final double[] profile : profiles.values()) {
       for (int m = 0; m < width; m++) {
-        final double deviation = Math.sqrt(variance[m] / profiles.size());
-        profile[m] = deviation == 0.0 ? 0.0 : (profile[m] - mean[m]) / deviation;
+        profile[m] = deviation[m] == 0.0 ? 0.0 : (profile[m] - mean[m]) / deviation[m];
       }
+    }
+  }
+
+  /**
+   * Checks one computed column statistic, a mean or a standard deviation, for
+   * finiteness.
+   *
+   * @param statistic The computed column statistic.
+   * @param metric The name of the column the statistic was computed over, for the
+   *               failure message.
+   * @throws IOException Thrown if the statistic is not finite, which means the column
+   *         overflows a double.
+   */
+  private static void checkColumnFinite(double statistic, String metric)
+      throws IOException {
+    if (!Double.isFinite(statistic)) {
+      throw new IOException("metric column overflows a double: " + metric);
     }
   }
 
@@ -285,11 +338,16 @@ public final class PlaceProfiles {
   /**
    * Compares two places by the cosine of their standardized profiles.
    *
+   * <p>The score is always a real number. Standardized profiles are finite and bounded,
+   * because {@link #load(InputStream)} rejects both non-finite cells and columns that
+   * overflow a double, so neither the profiles nor the sums taken over them here can
+   * reach an infinity or a {@code NaN}.</p>
+   *
    * @param id The first place identifier. Must be listed.
    * @param otherId The second place identifier. Must be listed.
-   * @return The cosine similarity, nominally in {@code [-1, 1]} although rounding can
-   *         place it up to one ulp outside; {@code 0} when either profile has no
-   *         variance at all.
+   * @return The cosine similarity, never {@code NaN}, nominally in {@code [-1, 1]}
+   *         although rounding can place it up to one ulp outside; {@code 0} when either
+   *         profile has no variance at all.
    * @throws IllegalArgumentException Thrown if an identifier is {@code null} or not
    *         listed.
    */
@@ -354,6 +412,16 @@ public final class PlaceProfiles {
   /**
    * Computes the cosine of two equal-length vectors: the dot product divided by the
    * product of the norms.
+   *
+   * <p>The sums here need no overflow guard of their own, because standardization
+   * bounds what can reach them. Over the {@code n} listed places a standardized column
+   * sums its squares to exactly {@code n}, so no single standardized value exceeds
+   * {@code sqrt(n)} in magnitude, and each of the three sums below is bounded by
+   * {@code n} times the number of metrics. Both factors are sizes of in-memory
+   * structures, so their product cannot approach the range of a double; a table large
+   * enough to overflow these sums could not be held in the first place. This holds only
+   * because the caller cannot reach here with an infinite or {@code NaN} profile, which
+   * is what the load-time cell and column checks guarantee.</p>
    *
    * @param a The first vector.
    * @param b The second vector, of the same length as {@code a}.
