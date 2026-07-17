@@ -136,6 +136,43 @@ public class FeedforwardPOSTaggerTest {
   }
 
   /**
+   * Pins the scoring cache against the direct path: the tagger built in setup turned
+   * the cache on for the shared model, so scoring the same features through a fresh
+   * reloaded model, which no tagger has touched, must agree to float rounding and
+   * pick the same tag.
+   *
+   * @throws IOException Thrown if the round trip fails.
+   */
+  @Test
+  void testScoringCacheMatchesTheDirectPath() throws IOException {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    model.serialize(out);
+    final FeedforwardPOSModel direct =
+        FeedforwardPOSModel.load(new ByteArrayInputStream(out.toByteArray()));
+    final String[] sentence = {"the", "dog", "barks"};
+    final int[] features = model.featureIds(
+        FeedforwardPOSContext.extract(sentence, 1, "DT", null));
+
+    for (int round = 0; round < 3; round++) {
+      final double[] cached = model.score(features);
+      final double[] plain = direct.score(features);
+      int bestCached = 0;
+      int bestPlain = 0;
+      for (int o = 0; o < cached.length; o++) {
+        assertEquals(plain[o], cached[o],
+            Math.max(1.0e-6, Math.abs(plain[o]) * 1.0e-6));
+        if (cached[o] > cached[bestCached]) {
+          bestCached = o;
+        }
+        if (plain[o] > plain[bestPlain]) {
+          bestPlain = o;
+        }
+      }
+      assertEquals(bestPlain, bestCached);
+    }
+  }
+
+  /**
    * Pins the probabilities against the model's actual behavior rather than the range
    * alone: the tiny network memorizes its training corpus, so every per-token
    * probability of a memorized sentence must be near certainty. A decoder that
