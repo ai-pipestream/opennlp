@@ -65,6 +65,8 @@ public class FeedforwardPOSTagger implements POSTagger {
     }
     this.model = model;
     this.tags = model.tags();
+    // A tagger only ever reads a frozen model, so the scoring cache is safe here.
+    model.enableScoringCache();
   }
 
   /**
