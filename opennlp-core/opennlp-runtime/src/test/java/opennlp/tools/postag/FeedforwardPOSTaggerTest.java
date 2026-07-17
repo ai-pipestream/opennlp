@@ -135,6 +135,49 @@ public class FeedforwardPOSTaggerTest {
     assertEquals(expectedScore, sequences[0].getScore(), 1.0e-9);
   }
 
+  /**
+   * Pins the probabilities against the model's actual behavior rather than the range
+   * alone: the tiny network memorizes its training corpus, so every per-token
+   * probability of a memorized sentence must be near certainty. A decoder that
+   * reported any fixed placeholder constant in the unit interval would fail here.
+   */
+  @Test
+  void testMemorizedSentenceProbabilitiesAreConfident() {
+    final Sequence[] sequences = tagger.topKSequences(new String[] {"the", "dog", "barks"});
+    for (final double prob : sequences[0].getProbs()) {
+      assertTrue(prob > 0.9, "memorized token should be tagged near certainty: " + prob);
+    }
+  }
+
+  /**
+   * Pins the javadoc-promised boundary: every sentence yields a length-one array, so
+   * an empty sentence yields one empty sequence with no outcomes, no probabilities,
+   * and a score of zero, the empty sum of log probabilities.
+   */
+  @Test
+  void testTopKSequencesOnEmptySentenceYieldsOneEmptySequence() {
+    final Sequence[] sequences = tagger.topKSequences(new String[0]);
+    assertEquals(1, sequences.length);
+    assertEquals(List.of(), sequences[0].getOutcomes());
+    assertEquals(0, sequences[0].getProbs().length);
+    assertEquals(0.0, sequences[0].getScore());
+  }
+
+  /**
+   * Pins the null rejection across all four tagging overloads, which share one
+   * decoder: each throws the documented exception rather than a raw
+   * {@link NullPointerException}.
+   */
+  @Test
+  void testNullSentenceIsRejectedByEveryOverload() {
+    assertThrows(IllegalArgumentException.class, () -> tagger.tag(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> tagger.tag(null, new Object[0]));
+    assertThrows(IllegalArgumentException.class, () -> tagger.topKSequences(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> tagger.topKSequences(null, new Object[0]));
+  }
+
   @Test
   void testTopKSequencesIgnoresAdditionalContext() {
     final String[] sentence = {"she", "eats", "fish"};
