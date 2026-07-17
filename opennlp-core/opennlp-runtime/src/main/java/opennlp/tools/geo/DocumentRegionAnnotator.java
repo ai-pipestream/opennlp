@@ -131,7 +131,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
-      lowered.add(type.toLowerCase(Locale.ROOT));
+      lowered.add(StringUtil.toLowerCase(type));
     }
     this.locationTypes = Set.copyOf(lowered);
   }
@@ -175,7 +175,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
-      if (!locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
+      if (!locationTypes.contains(StringUtil.toLowerCase(entity.value()))) {
         continue;
       }
       final Span span = entity.span();
@@ -335,9 +335,8 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * @return The normalized name. Never {@code null}.
    */
   private static String normalize(String name) {
-    return Normalizer.normalize(name, Normalizer.Form.NFKC)
-        .replace(RIGHT_SINGLE_QUOTATION_MARK, '\'')
-        .toLowerCase(Locale.ROOT);
+    return StringUtil.toLowerCase(Normalizer.normalize(name, Normalizer.Form.NFKC)
+        .replace(RIGHT_SINGLE_QUOTATION_MARK, '\''));
   }
 
   /**
