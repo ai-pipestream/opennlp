@@ -36,6 +36,7 @@ import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -167,7 +168,7 @@ public class GeocodeAnnotatorTest {
     assertEquals(1, ballot.size());
     assertEquals("DE", ballot.get(0).value().countryCode());
     assertEquals(1.0, ballot.get(0).value().share(), 1e-9);
-    assertEquals(new Span(0, text.length()), ballot.get(0).span());
+    assertNull(ballot.get(0).span());
   }
 
   @Test
@@ -224,7 +225,7 @@ public class GeocodeAnnotatorTest {
   void testAbsentEntityLayerThrowsWithExactMessage() {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> new GeocodeAnnotator(unreachableGeocoder()).annotate(Document.of("bare")));
-    assertEquals("document lacks the required layer entities<String>", e.getMessage());
+    assertEquals("document lacks the required layer opennlp:entities<String>", e.getMessage());
   }
 
   /**
