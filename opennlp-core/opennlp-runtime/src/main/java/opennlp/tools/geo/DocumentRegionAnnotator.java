@@ -150,13 +150,21 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * Turns the weight sums into a ranked ballot: each country's share is its weight over
    * the weight total, so shares sum to one, and rows are ordered by descending share
    * with ties broken by ascending country code. Every row spans the whole document.
+   *
+   * <p>A country whose weight sums to zero carries no evidence, which a resolution at
+   * confidence {@code 0.0} is entitled to report, so it casts no vote and gets no row.
+   * When no country has a positive weight the ballot is empty rather than a set of
+   * undefined shares.</p>
    */
   private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights, int length) {
     double total = 0.0;
-    for (final double weight : weights.values()) {
-      total += weight;
+    final List<Map.Entry<String, Double>> ranked = new ArrayList<>(weights.size());
+    for (final Map.Entry<String, Double> entry : weights.entrySet()) {
+      if (entry.getValue() > 0.0) {
+        total += entry.getValue();
+        ranked.add(entry);
+      }
     }
-    final List<Map.Entry<String, Double>> ranked = new ArrayList<>(weights.entrySet());
     ranked.sort(Map.Entry.<String, Double>comparingByValue().reversed()
         .thenComparing(Map.Entry.comparingByKey()));
     final Span documentSpan = new Span(0, length);

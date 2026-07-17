@@ -199,6 +199,44 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
+   * Verifies that a resolution at confidence {@code 0.0}, which the {@link GeoResolution}
+   * contract allows, carries no evidence and therefore casts no vote: the sole mention of
+   * the document resolves at zero confidence, so the region layer is present and empty
+   * rather than the annotator failing on a share of {@code 0.0 / 0.0}.
+   */
+  @Test
+  void testZeroConfidenceResolutionCastsNoVote() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Bilbao", new ScoredCountry("ES", 0.0)));
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(withLocations("a dispatch from Bilbao", "Bilbao"));
+
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  }
+
+  /**
+   * Verifies that a zero-confidence resolution neither dilutes nor blocks the ballot: a
+   * mention resolving at confidence {@code 0.0} shares the document with a mention
+   * resolving at {@code 0.8}, so the ballot holds exactly one row, the confident country
+   * at the full share.
+   */
+  @Test
+  void testZeroConfidenceResolutionDoesNotDiluteTheBallot() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Bilbao", new ScoredCountry("ES", 0.0),
+        "Sydney", new ScoredCountry("AU", 0.8)));
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
    * Verifies that a {@code null} document is rejected with a clear exception before any
    * layer is touched.
    */
