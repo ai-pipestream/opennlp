@@ -94,29 +94,13 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     }
     final Set<String> lowered = new HashSet<>(locationTypes.size());
     for (final String type : locationTypes) {
-      if (type == null || blank(type)) {
+      if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
       lowered.add(StringUtil.toLowerCase(type));
     }
     this.geocoder = geocoder;
     this.locationTypes = Set.copyOf(lowered);
-  }
-
-  /**
-   * Reports whether a type label is blank under the project whitespace definition,
-   * which unlike the JDK's includes no-break spaces, so a label spelled entirely from
-   * them cannot slip past the constructor as a dead entry.
-   */
-  private static boolean blank(String label) {
-    for (int i = 0; i < label.length(); ) {
-      final int cp = label.codePointAt(i);
-      if (!StringUtil.isWhitespace(cp)) {
-        return false;
-      }
-      i += Character.charCount(cp);
-    }
-    return true;
   }
 
   /**
