@@ -334,6 +334,66 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies the multi-boundary backoff path on a card that itself contains
+   * separators: the greedy candidate ends in a trailing three-digit group, forming a
+   * nineteen-digit candidate that is in range but fails the Luhn check, and the scan
+   * then accepts the sixteen-digit candidate at the previous separator boundary. The
+   * card is reported on its own span and the trailing group stays outside it.
+   */
+  @Test
+  void testSeparatedCardBacksOffThroughLuhnFailingPrefix() {
+    final String text = "Card 4111 1111 1111 1111 123 on file";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    final PiiMention mention = mentions.get(0);
+    Assertions.assertEquals(PiiMention.TYPE_CARD, mention.type());
+    Assertions.assertEquals(5, mention.span().getStart());
+    Assertions.assertEquals(24, mention.span().getEnd());
+    Assertions.assertEquals("4111 1111 1111 1111", text.substring(5, 24));
+    Assertions.assertEquals("4111111111111111", mention.normalized());
+  }
+
+  /**
+   * Verifies that the phone scan backs off at separator boundaries the way the card
+   * scan does: a domestic number followed by another separated digit group would make
+   * the greedy candidate twelve digits and be rejected as a whole, so the ten-digit
+   * candidate at the previous boundary is accepted, and the trailing group is not
+   * swallowed and does not suppress the phone.
+   */
+  @Test
+  void testPhoneFollowedBySeparatedDigitGroupBacksOffToThePhone() {
+    final String text = "call 555-123-4567 99 times";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    final PiiMention mention = mentions.get(0);
+    Assertions.assertEquals(PiiMention.TYPE_PHONE, mention.type());
+    Assertions.assertEquals(5, mention.span().getStart());
+    Assertions.assertEquals(17, mention.span().getEnd());
+    Assertions.assertEquals("555-123-4567", text.substring(5, 17));
+    Assertions.assertEquals("5551234567", mention.normalized());
+  }
+
+  /**
+   * Verifies the backoff on the parenthesized domestic form: the candidate cut at the
+   * separator boundary keeps its balanced parentheses and its visible separation, so
+   * the phone is found in front of a trailing digit group.
+   */
+  @Test
+  void testParenthesizedPhoneBacksOffBeforeTrailingGroup() {
+    final String text = "dial (212) 555-0199 77 now";
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    final PiiMention mention = mentions.get(0);
+    Assertions.assertEquals(PiiMention.TYPE_PHONE, mention.type());
+    Assertions.assertEquals("(212) 555-0199", text.substring(
+        mention.span().getStart(), mention.span().getEnd()));
+    Assertions.assertEquals("2125550199", mention.normalized());
+  }
+
+  /**
    * Verifies that a nineteen-digit card, the maximum accepted length, still matches as
    * a whole, alone and with a space-separated expiry date after it, so prefix backoff
    * never shortens a candidate that is valid at its full length.

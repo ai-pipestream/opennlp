@@ -258,7 +258,11 @@ public class CursorPiiExtractor implements PiiExtractor {
    */
   private static void scanCards(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
-      if (!isAsciiDigit(text.charAt(i)) || !onNumberStartBoundary(text, i)) {
+      final char first = text.charAt(i);
+      // The leading-digit gate runs before anything is allocated: a digit run that can
+      // never be a card, which is most digit runs in most text, costs one comparison.
+      if (first < '2' || first > '6'
+          || !isAsciiDigit(first) || !onNumberStartBoundary(text, i)) {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
@@ -282,10 +286,6 @@ public class CursorPiiExtractor implements PiiExtractor {
         }
       }
       groupEnds.add(new int[] {lastDigit + 1, digits.length()});
-      final char first = digits.charAt(0);
-      if (first < '2' || first > '6') {
-        continue;
-      }
       for (int g = groupEnds.size() - 1; g >= 0; g--) {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
@@ -305,6 +305,10 @@ public class CursorPiiExtractor implements PiiExtractor {
   /**
    * Finds phone numbers: an international form starting with {@code +}, or a domestic
    * form whose digits are visibly formatted with spaces, hyphens, or parentheses.
+   * Candidates are tried longest first at separator boundaries until the length and
+   * form checks pass, exactly like the card scan, so a phone directly followed by
+   * another separated digit group, such as an extension or a count, is still found
+   * instead of being swallowed into one over-long rejected candidate.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -323,6 +327,10 @@ public class CursorPiiExtractor implements PiiExtractor {
       int close = 0;
       boolean separated = false;
       boolean previousSeparator = false;
+      // Each entry is a candidate cut at a separator boundary: the exclusive text end,
+      // the digit count, whether the digits were visibly separated, and the
+      // parenthesis counts up to the cut, so every prefix is judged by its own form.
+      final List<int[]> groups = new ArrayList<>();
       int p = plus ? i + 1 : i;
       while (p < text.length() && digits <= PHONE_MAX_DIGITS) {
         final char ch = text.charAt(p);
@@ -335,6 +343,7 @@ public class CursorPiiExtractor implements PiiExtractor {
           previousSeparator = false;
           p++;
         } else if ((ch == ' ' || ch == '-') && !previousSeparator) {
+          groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
           previousSeparator = true;
           p++;
         } else if (ch == '(' && open == 0) {
@@ -349,28 +358,34 @@ public class CursorPiiExtractor implements PiiExtractor {
           break;
         }
       }
-      if (digits == 0 || open != close) {
-        continue;
-      }
-      final int end = lastDigit + 1;
-      final boolean lengthOk = plus
-          ? digits >= PHONE_MIN_INTERNATIONAL_DIGITS && digits <= PHONE_MAX_DIGITS
-          : (digits == 10 || digits == 11) && separated;
-      if (!lengthOk
-          || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
-          || (end + 1 < text.length() && text.charAt(end) == '.'
-              && isAsciiDigit(text.charAt(end + 1)))) {
-        continue;
-      }
-      final StringBuilder normalized = new StringBuilder(plus ? "+" : "");
-      for (int q = i; q < end; q++) {
-        if (isAsciiDigit(text.charAt(q))) {
-          normalized.append(text.charAt(q));
+      groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
+      for (int g = groups.size() - 1; g >= 0; g--) {
+        final int end = groups.get(g)[0];
+        final int count = groups.get(g)[1];
+        final boolean visiblySeparated = groups.get(g)[2] == 1;
+        if (count == 0 || groups.get(g)[3] != groups.get(g)[4]) {
+          continue;
         }
+        final boolean lengthOk = plus
+            ? count >= PHONE_MIN_INTERNATIONAL_DIGITS && count <= PHONE_MAX_DIGITS
+            : (count == 10 || count == 11) && visiblySeparated;
+        if (!lengthOk
+            || (end < text.length() && Character.isLetterOrDigit(text.charAt(end)))
+            || (end + 1 < text.length() && text.charAt(end) == '.'
+                && isAsciiDigit(text.charAt(end + 1)))) {
+          continue;
+        }
+        final StringBuilder normalized = new StringBuilder(plus ? "+" : "");
+        for (int q = i; q < end; q++) {
+          if (isAsciiDigit(text.charAt(q))) {
+            normalized.append(text.charAt(q));
+          }
+        }
+        hits.add(new Hit(i, end, PRIORITY_PHONE,
+            new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE, normalized.toString())));
+        i = end;
+        break;
       }
-      hits.add(new Hit(i, end, PRIORITY_PHONE,
-          new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE, normalized.toString())));
-      i = end;
     }
   }
 
