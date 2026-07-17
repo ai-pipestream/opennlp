@@ -32,8 +32,9 @@ import opennlp.tools.document.LayerKey;
  * {@code float[]} values on the same spans.
  *
  * <p>The provided layer's identifier is the source layer's identifier prefixed with
- * {@code "embeddings:"}, for example {@code embeddings:tokens} for a source layer with
- * the identifier {@code tokens}. Because the identifier is derived from the source, one
+ * {@code "embeddings:"}, for example {@code embeddings:opennlp:tokens} for a source
+ * layer with the identifier {@code opennlp:tokens}, mirroring the {@code gold:} prefix
+ * convention. Because the identifier is derived from the source, one
  * pipeline can carry token and sentence embeddings side by side by adding two instances
  * over different source layers; read each instance's provided layer through
  * {@link #layer()}.</p>

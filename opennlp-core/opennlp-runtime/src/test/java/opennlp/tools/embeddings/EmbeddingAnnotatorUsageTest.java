@@ -134,7 +134,7 @@ public class EmbeddingAnnotatorUsageTest {
         new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS);
     final Document embedded = annotator.annotate(tokenized);
 
-    Assertions.assertEquals("embeddings:tokens", annotator.layer().id());
+    Assertions.assertEquals("embeddings:opennlp:tokens", annotator.layer().id());
     Assertions.assertEquals(float[].class, annotator.layer().type());
 
     final List<Annotation<String>> tokens = embedded.get(Layers.TOKENS);
@@ -177,8 +177,8 @@ public class EmbeddingAnnotatorUsageTest {
     final EmbeddingAnnotator overSentences = new EmbeddingAnnotator(embedder, Layers.SENTENCES);
     final Document document = overSentences.annotate(overTokens.annotate(base));
 
-    Assertions.assertEquals("embeddings:tokens", overTokens.layer().id());
-    Assertions.assertEquals("embeddings:sentences", overSentences.layer().id());
+    Assertions.assertEquals("embeddings:opennlp:tokens", overTokens.layer().id());
+    Assertions.assertEquals("embeddings:opennlp:sentences", overSentences.layer().id());
     Assertions.assertTrue(document.layers().contains(overTokens.layer()));
     Assertions.assertTrue(document.layers().contains(overSentences.layer()));
 
