@@ -32,11 +32,12 @@ import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Votes on where a document speaks from: every location mention casts a ballot for a
- * country, and the layer reports the ranked result as {@link RegionVote} shares over
- * the whole document span.
+ * country, and the document-scoped layer reports the ranked result as
+ * {@link RegionVote} shares without spans.
  *
  * <p>Two kinds of evidence vote. A mention whose text is an English country name, for
  * example {@code Australia}, votes for that country directly, recognized through JDK
@@ -53,11 +54,12 @@ import opennlp.tools.util.Span;
 public class DocumentRegionAnnotator implements DocumentAnnotator {
 
   /**
-   * The document's region ballot: one annotation per candidate country over the whole
-   * document span, ordered by descending share, with equal shares ranked by ascending
-   * country code so the order is deterministic.
+   * The document's region ballot: a document-scoped layer with one span-less annotation
+   * per candidate country, ordered by descending share, with equal shares ranked by
+   * ascending country code so the order is deterministic.
    */
-  public static final LayerKey<RegionVote> REGIONS = LayerKey.of("regions", RegionVote.class);
+  public static final LayerKey<RegionVote> REGIONS =
+      Layers.documentKey("regions", RegionVote.class);
 
   /**
    * The vote weight of a direct country-name mention, sitting near the top of the
@@ -100,7 +102,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     this.geocoder = geocoder;
     final Set<String> lowered = new java.util.HashSet<>(locationTypes.size());
     for (final String type : locationTypes) {
-      if (type == null || type.isBlank()) {
+      if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
       }
       lowered.add(type.toLowerCase(Locale.ROOT));
@@ -143,20 +145,21 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
         }
       }
     }
-    return document.with(REGIONS, ballot(weights, text.length()));
+    return document.with(REGIONS, ballot(weights));
   }
 
   /**
    * Turns the weight sums into a ranked ballot: each country's share is its weight over
    * the weight total, so shares sum to one, and rows are ordered by descending share
-   * with ties broken by ascending country code. Every row spans the whole document.
+   * with ties broken by ascending country code. The rows carry no spans, since the
+   * ballot describes the document as a whole.
    *
    * <p>A country whose weight sums to zero carries no evidence, which a resolution at
    * confidence {@code 0.0} is entitled to report, so it casts no vote and gets no row.
    * When no country has a positive weight the ballot is empty rather than a set of
    * undefined shares.</p>
    */
-  private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights, int length) {
+  private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights) {
     double total = 0.0;
     final List<Map.Entry<String, Double>> ranked = new ArrayList<>(weights.size());
     for (final Map.Entry<String, Double> entry : weights.entrySet()) {
@@ -167,11 +170,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     ranked.sort(Map.Entry.<String, Double>comparingByValue().reversed()
         .thenComparing(Map.Entry.comparingByKey()));
-    final Span documentSpan = new Span(0, length);
     final List<Annotation<RegionVote>> votes = new ArrayList<>(ranked.size());
     for (final Map.Entry<String, Double> entry : ranked) {
-      votes.add(new Annotation<>(documentSpan,
-          new RegionVote(entry.getKey(), entry.getValue() / total)));
+      votes.add(Annotation.of(new RegionVote(entry.getKey(), entry.getValue() / total)));
     }
     return votes;
   }

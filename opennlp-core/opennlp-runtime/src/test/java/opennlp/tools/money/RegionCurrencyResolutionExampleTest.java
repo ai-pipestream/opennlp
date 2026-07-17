@@ -36,6 +36,7 @@ import opennlp.tools.geo.RegionVote;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Demonstrates per-document currency symbol resolution end to end on one realistic
@@ -111,7 +112,7 @@ public class RegionCurrencyResolutionExampleTest {
   /**
    * Runs the example: the entity layer feeds the region ballot, and the ballot winner
    * picks the symbol table for the money layer. Asserts the exact ranked shares, that
-   * every ballot row covers the whole document span, and that the {@code $} amount is
+   * every ballot row is span-less under the document-scoped key, and that the {@code $} amount is
    * identified as {@code MXN} because Mexico wins the ballot.
    */
   @Test
@@ -130,8 +131,8 @@ public class RegionCurrencyResolutionExampleTest {
     assertEquals(GUADALAJARA_CONFIDENCE / total, ballot.get(0).value().share(), 0.0);
     assertEquals("US", ballot.get(1).value().countryCode());
     assertEquals(BOSTON_CONFIDENCE / total, ballot.get(1).value().share(), 0.0);
-    assertEquals(new Span(0, TEXT.length()), ballot.get(0).span());
-    assertEquals(new Span(0, TEXT.length()), ballot.get(1).span());
+    assertNull(ballot.get(0).span());
+    assertNull(ballot.get(1).span());
 
     final List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
     assertEquals(1, money.size());

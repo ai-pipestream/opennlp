@@ -30,6 +30,7 @@ import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,7 +84,7 @@ public class DocumentRegionAnnotatorTest {
     assertEquals("AU", ballot.get(0).value().countryCode());
     assertEquals(2.0 / 3.0, ballot.get(0).value().share(), 1e-9);
     assertEquals("NZ", ballot.get(1).value().countryCode());
-    assertEquals(new Span(0, text.length()), ballot.get(0).span());
+    assertNull(ballot.get(0).span());
   }
 
   @Test
