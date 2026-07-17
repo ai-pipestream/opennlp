@@ -85,6 +85,21 @@ public class CursorQuantityExtractorTest {
   }
 
   /**
+   * Verifies that the hyphen in a percentage range is not read as a minus sign: both
+   * amounts of {@code 5%-10%} are positive, although the code point before the hyphen
+   * is a percent sign rather than a digit.
+   */
+  @Test
+  void testHyphenatedPercentRangeYieldsTwoPositiveMentions() {
+    final List<Quantity> mentions = extractor.extract("5%-10%");
+    assertEquals(2, mentions.size());
+    assertEquals(new Span(0, 2), mentions.get(0).span());
+    assertEquals(0, new BigDecimal("5").compareTo(mentions.get(0).value()));
+    assertEquals(new Span(3, 6), mentions.get(1).span());
+    assertEquals(0, new BigDecimal("10").compareTo(mentions.get(1).value()));
+  }
+
+  /**
    * Verifies what the scanner accepts for a European-style written number: the decimal
    * comma is not a decimal marker, so the scan restarts after the comma and only the
    * trailing digit with its unit is reported.

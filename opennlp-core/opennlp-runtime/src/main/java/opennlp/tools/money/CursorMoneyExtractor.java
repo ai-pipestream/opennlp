@@ -177,7 +177,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     }
     final int cp = NumberScan.codePointAt(text, i);
     if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)
-        && (!negative || NumberScan.boundaryBefore(text, start))) {
+        && (!negative || NumberScan.signBoundaryBefore(text, start))) {
       return symbolFirst(text, start, i, negative);
     }
     if (!negative && isUpperAscii(cp) && NumberScan.boundaryBefore(text, i)) {
@@ -187,7 +187,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       }
     }
     if (NumberScan.isAsciiDigit(cp)
-        && NumberScan.boundaryBefore(text, negative ? start : i)) {
+        && (negative ? NumberScan.signBoundaryBefore(text, start)
+            : NumberScan.boundaryBefore(text, i))) {
       return numberFirst(text, start, i, negative);
     }
     return null;

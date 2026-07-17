@@ -117,6 +117,26 @@ public class DocumentDateAnnotatorTest {
         "not an ISO 8601 day value at [6..19): July 14, 2026", e.getMessage());
   }
 
+  /**
+   * Verifies that a value in {@code yyyy-MM-dd} shape that is not a real calendar day,
+   * such as a February 30th, fails loud the same way as a value that is not ISO-shaped
+   * at all: the javadoc promises rejection of any value that is not an ISO 8601
+   * calendar date, not merely of un-ISO-shaped text.
+   */
+  @Test
+  void testIsoShapedImpossibleDayFailsLoudWithValueAndSpan() {
+    final Document document = Document.of("Filed 2026-02-30.")
+        .with(TemporalAnnotator.TEMPORALS, List.of(
+            new Annotation<>(new Span(6, 16), new TemporalExpression(
+                new Span(6, 16), "2026-02-30", TemporalExpression.Granularity.DAY))));
+
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new DocumentDateAnnotator().annotate(document));
+    Assertions.assertEquals(
+        "not an ISO 8601 day value at [6..16): 2026-02-30", e.getMessage());
+  }
+
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

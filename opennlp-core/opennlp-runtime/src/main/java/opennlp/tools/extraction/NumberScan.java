@@ -162,6 +162,28 @@ public final class NumberScan {
   }
 
   /**
+   * Checks whether a minus sign at the position may open a negative amount: the
+   * position is at the text start or the preceding code point could not have ended a
+   * numeric mention. A letter, a digit, a currency symbol, or a percent sign before
+   * the minus makes it a range or prose hyphen, so {@code 50\u20AC-60\u20AC} (euro
+   * signs) and {@code 5%-10%} read as two positive mentions rather than one positive
+   * and one negated one.
+   *
+   * @param text The text. Must not be {@code null}.
+   * @param index The offset of the minus sign.
+   * @return {@code true} if a negative amount may start at {@code index}.
+   */
+  public static boolean signBoundaryBefore(CharSequence text, int index) {
+    if (index == 0) {
+      return true;
+    }
+    final int cp = Character.codePointBefore(text, index);
+    return !Character.isLetterOrDigit(cp)
+        && Character.getType(cp) != Character.CURRENCY_SYMBOL
+        && cp != '%';
+  }
+
+  /**
    * Checks whether a match may end here: the position is at the text end or the code
    * point at it is neither a letter nor a digit.
    *

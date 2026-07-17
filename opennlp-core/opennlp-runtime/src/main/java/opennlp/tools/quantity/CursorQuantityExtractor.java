@@ -123,7 +123,8 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       i++;
     }
     if (!NumberScan.isAsciiDigit(NumberScan.charAt(text, i))
-        || !NumberScan.boundaryBefore(text, start)) {
+        || !(negative ? NumberScan.signBoundaryBefore(text, start)
+            : NumberScan.boundaryBefore(text, start))) {
       return null;
     }
     final NumberScan.Result number = NumberScan.parse(text, i, false);

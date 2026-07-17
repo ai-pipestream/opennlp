@@ -111,6 +111,40 @@ public class CursorMoneyExtractorTest {
   }
 
   /**
+   * Verifies that the hyphen in a range of symbol-suffix mentions is not read as a
+   * minus sign: both amounts of {@code 50\u20AC-60\u20AC} (euro signs) are positive,
+   * although the code point before the hyphen is a currency symbol rather than a
+   * digit.
+   */
+  @Test
+  void testHyphenatedSymbolSuffixRangeYieldsTwoPositiveMentions() {
+    final List<MoneyAmount> mentions = extractor.extract("50\u20AC-60\u20AC");
+    assertEquals(2, mentions.size());
+    assertEquals(new Span(0, 3), mentions.get(0).span());
+    assertEquals(0, new BigDecimal("50").compareTo(mentions.get(0).amount()));
+    assertEquals("EUR", mentions.get(0).currency());
+    assertEquals(new Span(4, 7), mentions.get(1).span());
+    assertEquals(0, new BigDecimal("60").compareTo(mentions.get(1).amount()));
+    assertEquals("EUR", mentions.get(1).currency());
+  }
+
+  /**
+   * Verifies that a hyphen after a symbol-suffix mention never negates a following
+   * symbol-first mention either: {@code 50\u20AC-$60} (euro sign) reports two positive
+   * amounts in their own currencies.
+   */
+  @Test
+  void testHyphenBetweenSuffixAndPrefixMentionsIsNotAMinus() {
+    final List<MoneyAmount> mentions = extractor.extract("50\u20AC-$60");
+    assertEquals(2, mentions.size());
+    assertEquals(0, new BigDecimal("50").compareTo(mentions.get(0).amount()));
+    assertEquals("EUR", mentions.get(0).currency());
+    assertEquals(new Span(4, 7), mentions.get(1).span());
+    assertEquals(0, new BigDecimal("60").compareTo(mentions.get(1).amount()));
+    assertEquals("USD", mentions.get(1).currency());
+  }
+
+  /**
    * Verifies that a hyphen directly after a letter is ordinary prose punctuation, not
    * a minus sign, so {@code pre-$5 deal} reports a positive amount.
    */
