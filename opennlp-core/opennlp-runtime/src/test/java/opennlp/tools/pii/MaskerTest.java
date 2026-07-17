@@ -74,6 +74,21 @@ public class MaskerTest {
     Assertions.assertEquals(text, Masker.mask(document, PiiAnnotator.PII, '*'));
   }
 
+  /**
+   * Verifies that a card number followed by its space-separated expiry date is fully
+   * masked while the expiry stays readable: the redacted copy must not leak a single
+   * card digit.
+   */
+  @Test
+  void testMasksCardFollowedByExpiry() {
+    final String text = "Card 4111111111111111 12/26";
+    final Document document =
+        new PiiAnnotator(new CursorPiiExtractor()).annotate(Document.of(text));
+
+    Assertions.assertEquals("Card **************** 12/26",
+        Masker.mask(document, PiiAnnotator.PII, '*'));
+  }
+
   @Test
   void testInvalidArguments() {
     final Document document = Document.of("some text");
