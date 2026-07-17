@@ -98,6 +98,25 @@ public class DocumentDateAnnotatorTest {
     Assertions.assertTrue(dated.get(DocumentDateAnnotator.DOCUMENT_DATE).isEmpty());
   }
 
+  /**
+   * Verifies that a day-granularity mention whose value is not an ISO 8601 date, as a
+   * third-party extractor may supply, fails loud as {@link IllegalArgumentException}
+   * naming the offending value and its span, not as a raw parse exception.
+   */
+  @Test
+  void testNonIsoDayValueFailsLoudWithValueAndSpan() {
+    final Document document = Document.of("Filed July 14, 2026.")
+        .with(TemporalAnnotator.TEMPORALS, List.of(
+            new Annotation<>(new Span(6, 19), new TemporalExpression(
+                new Span(6, 19), "July 14, 2026", TemporalExpression.Granularity.DAY))));
+
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new DocumentDateAnnotator().annotate(document));
+    Assertions.assertEquals(
+        "not an ISO 8601 day value at [6..19): July 14, 2026", e.getMessage());
+  }
+
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
