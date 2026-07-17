@@ -30,6 +30,8 @@ import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.document.NameFinderAnnotator;
+import opennlp.tools.namefind.TokenNameFinder;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
@@ -180,6 +182,87 @@ public class CorefPipelineExampleTest {
   }
 
   /**
+   * A {@link TokenNameFinder} standing in for a single-type model: it locates fixed
+   * token sequences and returns their spans without a type, the way an untyped model
+   * reports its findings.
+   */
+  private static final class UntypedLexiconNameFinder implements TokenNameFinder {
+
+    private final List<String[]> patterns;
+
+    /**
+     * Initializes the finder with the token sequences it reports.
+     *
+     * @param patterns The token sequences to locate, tried in the given order at every
+     *                 position, so longer sequences should come first. Must not be
+     *                 {@code null}.
+     * @throws IllegalArgumentException Thrown if {@code patterns} is {@code null}.
+     */
+    UntypedLexiconNameFinder(List<String[]> patterns) {
+      if (patterns == null) {
+        throw new IllegalArgumentException("patterns must not be null");
+      }
+      this.patterns = List.copyOf(patterns);
+    }
+
+    /**
+     * Scans the tokens left to right and reports every non-overlapping pattern match as
+     * an untyped span.
+     *
+     * @param tokens The tokens to scan.
+     * @return The untyped spans of the matches. Never {@code null}.
+     */
+    @Override
+    public Span[] find(String[] tokens) {
+      final List<Span> spans = new ArrayList<>();
+      int i = 0;
+      while (i < tokens.length) {
+        final int matched = matchedLengthAt(tokens, i);
+        if (matched > 0) {
+          spans.add(new Span(i, i + matched));
+          i += matched;
+        } else {
+          i++;
+        }
+      }
+      return spans.toArray(new Span[0]);
+    }
+
+    /**
+     * Tries every pattern at one position.
+     *
+     * @param tokens The tokens to scan.
+     * @param at The position the patterns are tried at.
+     * @return The length of the first matching pattern, or zero if none matches.
+     */
+    private int matchedLengthAt(String[] tokens, int at) {
+      for (final String[] pattern : patterns) {
+        if (at + pattern.length > tokens.length) {
+          continue;
+        }
+        boolean all = true;
+        for (int k = 0; k < pattern.length; k++) {
+          if (!pattern[k].equals(tokens[at + k])) {
+            all = false;
+            break;
+          }
+        }
+        if (all) {
+          return pattern.length;
+        }
+      }
+      return 0;
+    }
+
+    /**
+     * Does nothing, since the finder holds no adaptive data.
+     */
+    @Override
+    public void clearAdaptiveData() {
+    }
+  }
+
+  /**
    * Builds an entity annotation over the first occurrence of a surface form at or after
    * the given offset.
    *
@@ -273,6 +356,39 @@ public class CorefPipelineExampleTest {
         chainSurfaces(document, chains, 0));
     Assertions.assertEquals(List.of("Orion Labs", "its"),
         chainSurfaces(document, chains, 1));
+  }
+
+  /**
+   * Runs the pipeline with an untyped name finder behind a {@link NameFinderAnnotator},
+   * so every entity carries {@link NameFinderAnnotator#UNTYPED}. The coreference
+   * annotator treats that label as an unknown type: the recurring name still chains
+   * through containment, and both the neutral and the gendered pronoun link to the
+   * nearest preceding entity mention instead of staying singletons.
+   */
+  @Test
+  void testUntypedEntitiesResolvePronouns() {
+    final String text =
+        "Ada Lovelace advised Orion Labs daily. Later Lovelace saw its potential. She was right.";
+    final Document document = DocumentAnalyzer.builder()
+        .add(new PeriodSentenceAnnotator())
+        .add(new WhitespaceTokenTagAnnotator())
+        .add(new NameFinderAnnotator(new UntypedLexiconNameFinder(List.of(
+            new String[] {"Ada", "Lovelace"},
+            new String[] {"Orion", "Labs"},
+            new String[] {"Lovelace"}))))
+        .add(new CorefAnnotator())
+        .build()
+        .analyze(text);
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(5, chains.size());
+    Assertions.assertEquals(List.of("Ada Lovelace", "Orion Labs", "Lovelace", "its", "She"),
+        surfaces(document, chains));
+    Assertions.assertArrayEquals(new int[] {0, 1, 0, 0, 0},
+        chains.stream().mapToInt(a -> a.value().chain()).toArray());
+    Assertions.assertEquals(List.of("Ada Lovelace", "Lovelace", "its", "She"),
+        chainSurfaces(document, chains, 0));
+    Assertions.assertEquals(List.of("Orion Labs"), chainSurfaces(document, chains, 1));
   }
 
   /**

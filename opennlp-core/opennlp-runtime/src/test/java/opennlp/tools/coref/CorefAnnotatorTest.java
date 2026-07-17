@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
+import opennlp.tools.document.NameFinderAnnotator;
 import opennlp.tools.util.Span;
 
 public class CorefAnnotatorTest {
@@ -424,6 +425,65 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(2, customChains.size());
     Assertions.assertEquals(0, customChains.get(0).value().chain());
     Assertions.assertEquals(0, customChains.get(1).value().chain());
+  }
+
+  /**
+   * In a document mixing typed and untyped entities, the typed rules are unchanged and
+   * the untyped entities participate as unknown types: the neutral pronoun still skips
+   * the person mention but links to the untyped {@code Acme}, and the gendered pronoun
+   * links to the person mention as before.
+   */
+  @Test
+  void testMixedTypedAndUntypedEntitiesResolve() {
+    final String text = "John Smith joined Acme. Smith praised it. He stayed.";
+    final List<Annotation<String>> toks = tokens(text,
+        "John", "Smith", "joined", "Acme", ".",
+        "Smith", "praised", "it", ".", "He", "stayed", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 23), "s"),
+            new Annotation<>(new Span(24, 41), "s"),
+            new Annotation<>(new Span(42, 52), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks,
+            "NNP", "NNP", "VBD", "NNP", ".",
+            "NNP", "VBD", "PRP", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 10), "person"),
+            new Annotation<>(new Span(18, 22), NameFinderAnnotator.UNTYPED),
+            new Annotation<>(new Span(24, 29), "person"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(5, chains.size());
+    Assertions.assertArrayEquals(new int[] {0, 1, 0, 1, 0},
+        chains.stream().mapToInt(a -> a.value().chain()).toArray());
+    Assertions.assertEquals(new Span(38, 40), chains.get(3).span());
+    Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(3).value().kind());
+    Assertions.assertEquals(new Span(42, 44), chains.get(4).span());
+    Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(4).value().kind());
+  }
+
+  /**
+   * An untyped entity is type-unknown, not type-mismatched: the exact match sieve links
+   * it to a typed mention with identical text, unlike two differently typed mentions,
+   * which stay apart.
+   */
+  @Test
+  void testUntypedEntityMatchesTypedEntityWithSameText() {
+    final String text = "Paris met Paris.";
+    final List<Annotation<String>> toks = tokens(text, "Paris", "met", "Paris", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 16), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "PROPN", "VERB", "PROPN", "PUNCT"))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, 5), "person"),
+            new Annotation<>(new Span(10, 15), NameFinderAnnotator.UNTYPED))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(0, chains.get(1).value().chain());
   }
 
   /**
