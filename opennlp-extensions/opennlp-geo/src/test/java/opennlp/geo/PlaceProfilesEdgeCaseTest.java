@@ -276,21 +276,73 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts the behavior at magnitudes whose squared deviations overflow a double:
-   * around {@code 1e200} the summed squares become infinite, the standard deviation
-   * becomes infinite, every standardized value collapses to zero, and the column is
-   * effectively treated as having no variance, so all similarities are exactly
-   * {@code 0.0}, self-similarity included.
+   * Asserts that a column whose values are finite but whose sum overflows a double is
+   * rejected at load, naming the metric. Every cell here passes the per-cell finite
+   * check, so nothing is caught while the row is still in hand; the column mean is the
+   * first infinite quantity, and dividing an infinite centered value by an infinite
+   * deviation would yield a {@code NaN} profile that no downstream guard fires on,
+   * because those guards compare against {@code 0.0}. The failure therefore has to
+   * happen where the column statistics are computed.
    */
   @Test
-  void testMagnitudesBeyondSquaredDoubleRangeCollapseToNoVariance() throws IOException {
-    final PlaceProfiles profiles = load(String.join("\n",
-        "id\tv",
-        "a\t3e200",
-        "b\t1e200",
+  void testColumnSumBeyondDoubleRangeFailsLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tv",
+            "x\t1e308",
+            "y\t1.5e308",
+            "")));
+    Assertions.assertEquals("metric column overflows a double: v", e.getMessage());
+  }
+
+  /**
+   * Asserts that a column whose squared deviations overflow a double is rejected at
+   * load with the same failure as a column whose sum overflows. Around {@code 1e200}
+   * the summed squares become infinite and the standard deviation with them, which
+   * would drive every standardized value to zero and make a column that plainly does
+   * carry signal, {@code 3e200} and {@code 1e200} are not equal, indistinguishable
+   * from a constant column that genuinely carries none. Reporting no signal for
+   * measured signal is the same silent wrongness as the {@code NaN} case, so both
+   * overflow paths fail loud rather than one of them answering {@code 0.0}.
+   */
+  @Test
+  void testMagnitudesBeyondSquaredDoubleRangeFailLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tv",
+            "a\t3e200",
+            "b\t1e200",
+            "")));
+    Assertions.assertEquals("metric column overflows a double: v", e.getMessage());
+  }
+
+  /**
+   * Asserts that the overflow rejection names the metric that actually overflowed
+   * rather than the first column, and that the remedy the failure implies works: the
+   * same table with the offending column rescaled into range, every ratio within it
+   * preserved, loads and scores. Standardization divides each column by its own
+   * deviation, so the units the caller chooses for a column cannot change any score,
+   * and the rejected table is only ever a division away from a usable one.
+   */
+  @Test
+  void testOverflowNamesTheOffendingMetricAndRescalingRepairsIt() throws IOException {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tsmall\thuge",
+            "x\t1\t1e308",
+            "y\t2\t1.5e308",
+            "z\t3\t1e308",
+            "")));
+    Assertions.assertEquals("metric column overflows a double: huge", e.getMessage());
+    final PlaceProfiles rescaled = load(String.join("\n",
+        "id\tsmall\thuge",
+        "x\t1\t1.0",
+        "y\t2\t1.5",
+        "z\t3\t1.0",
         ""));
-    Assertions.assertEquals(0.0, profiles.similarity("a", "b"));
-    Assertions.assertEquals(0.0, profiles.similarity("a", "a"));
+    Assertions.assertEquals(-0.4999999999999996, rescaled.similarity("x", "z"), 1e-12);
+    Assertions.assertEquals(-0.5000000000000002, rescaled.similarity("x", "y"), 1e-12);
+    Assertions.assertEquals(0.9999999999999998, rescaled.similarity("x", "x"), 1e-12);
   }
 
   /**
