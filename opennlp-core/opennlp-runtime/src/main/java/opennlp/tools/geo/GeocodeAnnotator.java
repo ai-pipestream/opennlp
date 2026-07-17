@@ -42,7 +42,12 @@ import opennlp.tools.util.Span;
  * lets an implementation use co-occurring mentions to disambiguate. A mention the
  * geocoder cannot resolve simply has no annotation in the layer, and a mention the
  * geocoder ranks against several candidates gets one annotation per candidate, in the
- * geocoder's order.</p>
+ * geocoder's order, so the candidates of a mention stay ranked best first in the layer.</p>
+ *
+ * <p>The {@link Geocoder} contract binds every resolution's mention span to one of the
+ * spans handed in. That is what lets a consumer match an annotation back to the entity it
+ * came from by span, so a geocoder returning a span it was not given is rejected rather
+ * than silently producing a layer nothing downstream can align.</p>
  *
  * <p>The annotator holds no per-call state; it is safe to share between threads
  * whenever its geocoder honors the {@link Geocoder} thread-safety contract.</p>
@@ -110,8 +115,9 @@ public class GeocodeAnnotator implements DocumentAnnotator {
    *                 without an entity layer is treated as having no entities.
    * @return A new {@link Document} with the {@link #LOCATIONS} layer added. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         already carries the {@link #LOCATIONS} layer.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, already
+   *         carries the {@link #LOCATIONS} layer, or the geocoder returns a resolution
+   *         whose mention span is not one of the spans it was given.
    * @throws UncheckedIOException Thrown if the geocoder fails with an I/O error.
    */
   @Override
@@ -133,7 +139,12 @@ public class GeocodeAnnotator implements DocumentAnnotator {
       } catch (IOException e) {
         throw new UncheckedIOException("geocoding failed", e);
       }
+      final Set<Span> given = new HashSet<>(mentions);
       for (final GeoResolution resolution : resolutions) {
+        if (!given.contains(resolution.mention())) {
+          throw new IllegalArgumentException("geocoder resolved the mention span "
+              + resolution.mention() + ", which is not one of the given mentions");
+        }
         resolved.add(new Annotation<>(resolution.mention(), resolution));
       }
     }

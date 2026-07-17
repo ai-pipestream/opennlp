@@ -24,7 +24,9 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.Layers;
 import opennlp.tools.geo.DocumentRegionAnnotator;
+import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.RegionVote;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,14 +55,19 @@ public class RegionAwareMoneyFallbackTest {
 
   /**
    * Verifies the empty-ballot fallback on a ballot the region annotator itself
-   * produced: a document without location entities gets an empty region layer, so the
-   * money annotator uses the default symbol table and identifies {@code $7} as
-   * {@code USD}.
+   * produced: a document that ran the pipeline but holds no location entity and nothing
+   * geocoded gets an empty region layer, so the money annotator uses the default symbol
+   * table and identifies {@code $7} as {@code USD}. The region annotator's required
+   * layers are present and empty, which is what a location-free document looks like
+   * downstream of the geocoding stage.
    */
   @Test
   void testPipelineProducedEmptyBallotUsesTheDefaultTable() {
+    final Document input = Document.of("the fee is $7")
+        .with(Layers.ENTITIES, List.of())
+        .with(GeocodeAnnotator.LOCATIONS, List.of());
     final Document document = new RegionAwareMoneyAnnotator().annotate(
-        new DocumentRegionAnnotator().annotate(Document.of("the fee is $7")));
+        new DocumentRegionAnnotator().annotate(input));
 
     final List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
     assertEquals(1, money.size());
