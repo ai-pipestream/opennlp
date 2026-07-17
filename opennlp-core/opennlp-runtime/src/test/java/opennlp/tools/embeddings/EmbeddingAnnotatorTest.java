@@ -164,7 +164,7 @@ public class EmbeddingAnnotatorTest {
     final IllegalArgumentException e = Assertions.assertThrows(
         IllegalArgumentException.class, () -> annotator.annotate(annotated));
     Assertions.assertTrue(e.getMessage().contains("already present"));
-    Assertions.assertTrue(e.getMessage().contains("embeddings:tokens"));
+    Assertions.assertTrue(e.getMessage().contains("embeddings:opennlp:tokens"));
   }
 
   /**
