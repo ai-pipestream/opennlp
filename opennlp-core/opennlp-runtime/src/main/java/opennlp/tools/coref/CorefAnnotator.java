@@ -29,6 +29,7 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.document.NameFinderAnnotator;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
@@ -47,6 +48,12 @@ import opennlp.tools.util.StringUtil;
  * to the configured non-person types, and plural pronouns to either. First and second
  * person pronouns are not resolved, since they refer to speakers the text alone does
  * not identify.</p>
+ *
+ * <p>An entity whose type is {@link NameFinderAnnotator#UNTYPED}, the label an untyped
+ * name finder's mentions arrive with, has an unknown type rather than a mismatching
+ * one: it satisfies every type guard, so it links to identical or contained names of
+ * any type and to every pronoun class. The sieves cannot discriminate on a type that
+ * carries no information, so they must not silently exclude it.</p>
  *
  * <p>Every mention is reported, including those that found no partner, as singleton
  * chains; consumers interested only in links filter by chain size. Chains are numbered
@@ -256,29 +263,34 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Links entity mentions of the same type with identical normalized text. Every later
-   * occurrence is linked to the first one, with no limit on their distance.
+   * Links entity mentions of compatible types with identical normalized text. Every
+   * later occurrence is linked to the earliest compatible one, with no limit on their
+   * distance.
    *
    * @param mentions The mentions in text order.
    * @param parent The union-find forest over mention indices.
    */
   private static void exactMatchSieve(List<Mention> mentions, int[] parent) {
-    final Map<String, Integer> firstByKey = new HashMap<>();
+    final Map<String, List<Integer>> earlierByText = new HashMap<>();
     for (int i = 0; i < mentions.size(); i++) {
       final Mention mention = mentions.get(i);
       if (mention.entity() == CorefMention.NO_ENTITY) {
         continue;
       }
-      final String key = mention.type() + ' ' + mention.normalized();
-      final Integer first = firstByKey.putIfAbsent(key, i);
-      if (first != null) {
-        union(parent, first, i);
+      final List<Integer> earlier =
+          earlierByText.computeIfAbsent(mention.normalized(), key -> new ArrayList<>());
+      for (final int candidate : earlier) {
+        if (typesCompatible(mentions.get(candidate).type(), mention.type())) {
+          union(parent, candidate, i);
+          break;
+        }
       }
+      earlier.add(i);
     }
   }
 
   /**
-   * Links entity mentions of the same type where one text is a whitespace-delimited
+   * Links entity mentions of compatible types where one text is a whitespace-delimited
    * prefix or suffix of the other, with no limit on their distance.
    *
    * @param mentions The mentions in text order.
@@ -292,7 +304,7 @@ public class CorefAnnotator implements DocumentAnnotator {
       }
       for (int j = i + 1; j < mentions.size(); j++) {
         final Mention b = mentions.get(j);
-        if (b.entity() == CorefMention.NO_ENTITY || !a.type().equals(b.type())) {
+        if (b.entity() == CorefMention.NO_ENTITY || !typesCompatible(a.type(), b.type())) {
           continue;
         }
         if (containsAsWords(a.normalized(), b.normalized())
@@ -354,13 +366,17 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Checks whether a pronoun may refer to an entity type.
+   * Checks whether a pronoun may refer to an entity type. The unknown type
+   * {@link NameFinderAnnotator#UNTYPED} is accepted by every pronoun class.
    *
    * @param pronoun The lowercased pronoun form.
    * @param type The lowercased entity type.
    * @return {@code true} if the pronoun class accepts the type.
    */
   private boolean compatible(String pronoun, String type) {
+    if (NameFinderAnnotator.UNTYPED.equals(type)) {
+      return true;
+    }
     if (GENDERED_PRONOUNS.contains(pronoun)) {
       return personTypes.contains(type);
     }
@@ -368,6 +384,20 @@ public class CorefAnnotator implements DocumentAnnotator {
       return neutralTypes.contains(type);
     }
     return personTypes.contains(type) || neutralTypes.contains(type);
+  }
+
+  /**
+   * Checks whether two entity mentions may corefer by type: their types are equal, or
+   * one of them is the unknown type {@link NameFinderAnnotator#UNTYPED}, which never
+   * blocks a link.
+   *
+   * @param a The first lowercased entity type.
+   * @param b The second lowercased entity type.
+   * @return {@code true} if the types do not rule the link out.
+   */
+  private static boolean typesCompatible(String a, String b) {
+    return a.equals(b)
+        || NameFinderAnnotator.UNTYPED.equals(a) || NameFinderAnnotator.UNTYPED.equals(b);
   }
 
   /**
