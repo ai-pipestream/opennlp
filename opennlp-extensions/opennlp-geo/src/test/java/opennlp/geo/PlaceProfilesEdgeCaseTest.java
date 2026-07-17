@@ -276,73 +276,134 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that a column whose values are finite but whose sum overflows a double is
-   * rejected at load, naming the metric. Every cell here passes the per-cell finite
-   * check, so nothing is caught while the row is still in hand; the column mean is the
-   * first infinite quantity, and dividing an infinite centered value by an infinite
-   * deviation would yield a {@code NaN} profile that no downstream guard fires on,
-   * because those guards compare against {@code 0.0}. The failure therefore has to
-   * happen where the column statistics are computed.
+   * Asserts that a column whose plain sum would overflow a double still standardizes
+   * to its correct values: the mean is accumulated from per-place contributions
+   * already divided by the place count, so no intermediate quantity crosses the
+   * double range, and the two near-maximum values come out exactly mirrored.
    */
   @Test
-  void testColumnSumBeyondDoubleRangeFailsLoud() {
-    final IOException e = Assertions.assertThrows(IOException.class,
-        () -> load(String.join("\n",
-            "id\tv",
-            "x\t1e308",
-            "y\t1.5e308",
-            "")));
-    Assertions.assertEquals("metric column overflows a double: v", e.getMessage());
+  void testColumnWhosePlainSumWouldOverflowStandardizesCorrectly() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\tv",
+        "x\t1e308",
+        "y\t1.5e308",
+        ""));
+    Assertions.assertEquals(-1.0, profiles.similarity("x", "y"));
+    Assertions.assertEquals(1.0, profiles.similarity("x", "x"));
   }
 
   /**
-   * Asserts that a column whose squared deviations overflow a double is rejected at
-   * load with the same failure as a column whose sum overflows. Around {@code 1e200}
-   * the summed squares become infinite and the standard deviation with them, which
-   * would drive every standardized value to zero and make a column that plainly does
-   * carry signal, {@code 3e200} and {@code 1e200} are not equal, indistinguishable
-   * from a constant column that genuinely carries none. Reporting no signal for
-   * measured signal is the same silent wrongness as the {@code NaN} case, so both
-   * overflow paths fail loud rather than one of them answering {@code 0.0}.
+   * Asserts that a column whose squared deviations would overflow a double under
+   * naive summation still standardizes to its correct values: the deviation is taken
+   * over centered distances divided by the column's largest centered distance, so the
+   * summed squares stay between one and the place count, and {@code 3e200} against
+   * {@code 1e200} reads as measured signal instead of overflowing or collapsing to a
+   * variance-free column.
    */
   @Test
-  void testMagnitudesBeyondSquaredDoubleRangeFailLoud() {
-    final IOException e = Assertions.assertThrows(IOException.class,
-        () -> load(String.join("\n",
-            "id\tv",
-            "a\t3e200",
-            "b\t1e200",
-            "")));
-    Assertions.assertEquals("metric column overflows a double: v", e.getMessage());
+  void testMagnitudesBeyondSquaredDoubleRangeStandardizeCorrectly() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\tv",
+        "a\t3e200",
+        "b\t1e200",
+        ""));
+    Assertions.assertEquals(-1.0, profiles.similarity("a", "b"));
   }
 
   /**
-   * Asserts that the overflow rejection names the metric that actually overflowed
-   * rather than the first column, and that the remedy the failure implies works: the
-   * same table with the offending column rescaled into range, every ratio within it
-   * preserved, loads and scores. Standardization divides each column by its own
-   * deviation, so the units the caller chooses for a column cannot change any score,
-   * and the rejected table is only ever a division away from a usable one.
+   * Asserts the mirrored boundary at the small end: a column of subnormal-scale
+   * magnitudes, whose squared deviations underflow to zero under naive summation,
+   * keeps its signal instead of silently standardizing to a variance-free column.
    */
   @Test
-  void testOverflowNamesTheOffendingMetricAndRescalingRepairsIt() throws IOException {
+  void testTinyMagnitudesKeepTheirSignal() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\tv",
+        "a\t1e-200",
+        "b\t3e-200",
+        ""));
+    Assertions.assertEquals(-1.0, profiles.similarity("a", "b"));
+  }
+
+  /**
+   * Asserts that a varying column whose deviation is too small for a double to hold
+   * is rejected at load, naming the metric: seven places at zero and one at the
+   * smallest subnormal double leave a deviation that rounds to zero, and zeroing a
+   * column that does vary would report a false absence of signal.
+   */
+  @Test
+  void testDeviationBelowSubnormalRangeFailsLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tv",
+            "p1\t0", "p2\t0", "p3\t0", "p4\t0",
+            "p5\t0", "p6\t0", "p7\t0",
+            "p8\t4.9e-324",
+            "")));
+    Assertions.assertEquals("metric column underflows a double: v", e.getMessage());
+  }
+
+  /**
+   * Asserts that a genuinely inexpressible column is still rejected, naming the
+   * metric that overflowed rather than the first column: the spread between the
+   * maximum double and its negation twice over exceeds what any centered distance can
+   * hold, so this column, unlike any merely large one, cannot be standardized.
+   */
+  @Test
+  void testSpreadBeyondDoubleRangeFailsLoudNamingTheMetric() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load(String.join("\n",
             "id\tsmall\thuge",
-            "x\t1\t1e308",
-            "y\t2\t1.5e308",
-            "z\t3\t1e308",
+            "x\t1\t1.7976931348623157e308",
+            "y\t2\t-1.7976931348623157e308",
+            "z\t3\t-1.7976931348623157e308",
             "")));
     Assertions.assertEquals("metric column overflows a double: huge", e.getMessage());
+  }
+
+  /**
+   * Asserts that standardization is scale-invariant across the double range: the same
+   * table with one column written near the maximum double and rescaled by 308 orders
+   * of magnitude produces the same similarities, because each column is divided by
+   * its own deviation and the scaled statistics never overflow on the way. The units
+   * a caller chooses for a column therefore cannot change any score.
+   */
+  @Test
+  void testStandardizationIsScaleInvariantAcrossTheDoubleRange() throws IOException {
+    final PlaceProfiles huge = load(String.join("\n",
+        "id\tsmall\thuge",
+        "x\t1\t1e308",
+        "y\t2\t1.5e308",
+        "z\t3\t1e308",
+        ""));
     final PlaceProfiles rescaled = load(String.join("\n",
         "id\tsmall\thuge",
         "x\t1\t1.0",
         "y\t2\t1.5",
         "z\t3\t1.0",
         ""));
-    Assertions.assertEquals(-0.4999999999999996, rescaled.similarity("x", "z"), 1e-12);
-    Assertions.assertEquals(-0.5000000000000002, rescaled.similarity("x", "y"), 1e-12);
-    Assertions.assertEquals(0.9999999999999998, rescaled.similarity("x", "x"), 1e-12);
+    Assertions.assertEquals(rescaled.similarity("x", "z"), huge.similarity("x", "z"), 1e-12);
+    Assertions.assertEquals(rescaled.similarity("x", "y"), huge.similarity("x", "y"), 1e-12);
+    Assertions.assertEquals(-0.4999999999999996, huge.similarity("x", "z"), 1e-12);
+    Assertions.assertEquals(-0.5000000000000002, huge.similarity("x", "y"), 1e-12);
+  }
+
+  /**
+   * Asserts the constant-column contract at a magnitude whose plain sum would
+   * overflow: a constant column of near-maximum values is recognized by its equal
+   * smallest and largest value, contributes nothing to any similarity, and the
+   * varying column alone determines the scores.
+   */
+  @Test
+  void testConstantColumnOfHugeValuesContributesNothing() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\tv\tconstant",
+        "a\t1\t1e308",
+        "b\t3\t1e308",
+        "c\t1e308\t1e308",
+        ""));
+    Assertions.assertEquals(List.of("v", "constant"), profiles.metrics());
+    Assertions.assertEquals(-1.0, Math.signum(profiles.similarity("a", "c")));
   }
 
   /**
@@ -412,6 +473,86 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals(List.of("x", "y"), profiles.metrics());
     Assertions.assertTrue(profiles.contains("north"));
     Assertions.assertEquals(-1.0, profiles.similarity("north", "south"));
+  }
+
+  /**
+   * Asserts the documented comment rule inside the data region: a line whose first
+   * non-blank character is {@code #} is a comment wherever it appears, so an indented
+   * comment between data rows is skipped rather than read as a malformed row.
+   */
+  @Test
+  void testIndentedCommentBetweenDataRowsIsSkipped() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\tx\ty",
+        "north\t1\t0",
+        "   # a note between rows",
+        "south\t-1\t0",
+        ""));
+    Assertions.assertTrue(profiles.contains("north"));
+    Assertions.assertTrue(profiles.contains("south"));
+    Assertions.assertEquals(-1.0, profiles.similarity("north", "south"));
+  }
+
+  /**
+   * Asserts that metric names are stripped of surrounding whitespace like every other
+   * cell, so the names reported by {@link PlaceProfiles#metrics()} and used in failure
+   * messages match what the header means rather than how it was padded.
+   */
+  @Test
+  void testHeaderMetricNamesAreStripped() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
+        "id\t population \tarea ",
+        "a\t1\t2",
+        "b\t2\t1",
+        ""));
+    Assertions.assertEquals(List.of("population", "area"), profiles.metrics());
+  }
+
+  /**
+   * Asserts that an empty metric name in the header fails loud, naming the column: a
+   * nameless column could never be reported usefully by any later failure message.
+   */
+  @Test
+  void testEmptyMetricNameInHeaderFailsLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tpopulation\t\tarea",
+            "a\t1\t2\t3",
+            "")));
+    Assertions.assertEquals("empty metric name in header column 3", e.getMessage());
+  }
+
+  /**
+   * Asserts that an identifier that strips to nothing fails loud with its row number:
+   * accepting it would register a place under the empty string and silently merge
+   * every such row into one phantom place.
+   */
+  @Test
+  void testWhitespaceOnlyIdFailsLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tv",
+            " \t1",
+            "b\t2",
+            "")));
+    Assertions.assertEquals("empty id in row 2", e.getMessage());
+  }
+
+  /**
+   * Asserts that Java's hexadecimal floating-point notation is rejected like the
+   * {@code f} and {@code d} literal suffixes: it is source syntax, not table data,
+   * and its acceptance would mean the generating program leaked literals into the
+   * table.
+   */
+  @Test
+  void testHexadecimalFloatLiteralFailsLoud() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tv",
+            "a\t0x1.8p1",
+            "b\t2",
+            "")));
+    Assertions.assertEquals("malformed value in row 2: 0x1.8p1", e.getMessage());
   }
 
   /**

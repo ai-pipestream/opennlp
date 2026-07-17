@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -43,12 +44,13 @@ import opennlp.tools.util.StringUtil;
  * zero and unit variance at load, so heterogeneous units contribute comparably; a
  * constant column contributes nothing.</p>
  *
- * <p>Every value the table holds must be a finite number, and every column must
- * standardize within the range of a double. A column of finite values whose sum or
- * whose summed squared deviations exceed that range is rejected at load, naming the
- * metric, rather than being silently reduced to zeros or to {@code NaN}: such a column
- * carries signal that the arithmetic cannot express, and a caller who rescales it into
- * range gets the same similarities back. Scores are therefore always real numbers.</p>
+ * <p>Every value the table holds must be a finite number. Standardization computes
+ * each column's statistics in scaled form, so columns anywhere in the double range,
+ * from subnormal magnitudes to near the maximum, standardize to their correct values
+ * rather than overflowing or collapsing to zeros on the way. The rare column whose
+ * spread itself exceeds the range of a double, or whose deviation is too small for a
+ * double to hold, is rejected at load naming the metric, never answered from a
+ * discarded or zeroed column. Scores are therefore always real numbers.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -79,9 +81,10 @@ public final class PlaceProfiles {
    * @param table The tab-separated table, UTF-8: a header with {@code id} and metric
    *              names, then one place per line. Must not be {@code null}.
    * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails, the table has no header, a row does
-   *         not list exactly one value per metric, a value is not a finite number, or a
-   *         metric column overflows a double.
+   * @throws IOException Thrown if reading fails, the table has no header, a metric
+   *         name or an identifier is empty, a row does not list exactly one value per
+   *         metric, a value is not a finite number, or a metric column's spread
+   *         overflows a double or its deviation underflows one.
    * @throws IllegalArgumentException Thrown if {@code table} is {@code null}.
    */
   public static PlaceProfiles load(Path table) throws IOException {
@@ -107,9 +110,10 @@ public final class PlaceProfiles {
    *
    * @param tableStream The table content. Must not be {@code null}. Not closed.
    * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails, the table has no header, a row does
-   *         not list exactly one value per metric, a value is not a finite number, or a
-   *         metric column overflows a double.
+   * @throws IOException Thrown if reading fails, the table has no header, a metric
+   *         name or an identifier is empty, a row does not list exactly one value per
+   *         metric, a value is not a finite number, or a metric column's spread
+   *         overflows a double or its deviation underflows one.
    * @throws IllegalArgumentException Thrown if {@code tableStream} is {@code null}.
    */
   public static PlaceProfiles load(InputStream tableStream) throws IOException {
@@ -144,16 +148,28 @@ public final class PlaceProfiles {
         throw new IOException("row " + (i + 1) + " has " + fields.size()
             + " fields, expected " + header.size());
       }
+      final String id = strip(fields.get(0));
+      if (id.isEmpty()) {
+        throw new IOException("empty id in row " + (i + 1));
+      }
       final double[] profile = new double[width];
       for (int m = 0; m < width; m++) {
         profile[m] = metricValue(strip(fields.get(m + 1)), i + 1);
       }
-      raw.put(strip(fields.get(0)), profile);
+      raw.put(id, profile);
     }
     if (raw.isEmpty()) {
       throw new IOException("the profile table lists no places");
     }
-    final List<String> metricNames = List.copyOf(header.subList(1, header.size()));
+    final List<String> strippedNames = new ArrayList<>(width);
+    for (int m = 1; m < header.size(); m++) {
+      final String name = strip(header.get(m));
+      if (name.isEmpty()) {
+        throw new IOException("empty metric name in header column " + (m + 1));
+      }
+      strippedNames.add(name);
+    }
+    final List<String> metricNames = List.copyOf(strippedNames);
     standardize(raw, metricNames);
     return new PlaceProfiles(Map.copyOf(raw), metricNames);
   }
@@ -168,9 +184,10 @@ public final class PlaceProfiles {
    * and deviation over the whole column, so one non-finite cell turns every profile in
    * the table into non-finite values, and the guards downstream, which compare against
    * {@code 0.0}, do not fire for them. It also accepts the Java {@code f} and {@code d}
-   * literal suffixes, which are Java source syntax rather than table data and indicate
-   * that whatever generated the table leaked its own literal syntax into the output.
-   * Both are rejected here, at the only point where the offending row is still known.</p>
+   * literal suffixes and Java's hexadecimal floating-point notation, which are Java
+   * source syntax rather than table data and indicate that whatever generated the
+   * table leaked its own literal syntax into the output. All of them are rejected
+   * here, at the only point where the offending row is still known.</p>
    *
    * @param text The cell content, already stripped of surrounding whitespace.
    * @param row The one-based line number of the row, for the failure message.
@@ -179,7 +196,7 @@ public final class PlaceProfiles {
    *         suffix, or is not finite.
    */
   private static double metricValue(String text, int row) throws IOException {
-    if (hasJavaLiteralSuffix(text)) {
+    if (hasJavaLiteralSuffix(text) || hasHexMarker(text)) {
       throw new IOException("malformed value in row " + row + ": " + text);
     }
     final double value;
@@ -209,6 +226,18 @@ public final class PlaceProfiles {
     }
     final char last = text.charAt(text.length() - 1);
     return last == 'f' || last == 'F' || last == 'd' || last == 'D';
+  }
+
+  /**
+   * Checks whether a cell uses Java's hexadecimal floating-point syntax, which like
+   * the literal suffixes is Java source syntax rather than table data: no decimal
+   * number contains an {@code x}, so its presence alone marks the cell.
+   *
+   * @param text The cell content, already stripped of surrounding whitespace.
+   * @return {@code true} if the cell contains {@code x} or {@code X}.
+   */
+  private static boolean hasHexMarker(String text) {
+    return text.indexOf('x') >= 0 || text.indexOf('X') >= 0;
   }
 
   /**
@@ -250,48 +279,77 @@ public final class PlaceProfiles {
    * <p>A constant column has zero deviation and standardizes to all zeros instead of
    * dividing by zero, so it contributes nothing to any similarity. That is the honest
    * answer for such a column, because a metric that never varies genuinely
-   * distinguishes no two places.</p>
+   * distinguishes no two places. Constant columns are recognized directly, by their
+   * smallest and largest value being equal, so a constant column of any magnitude a
+   * double can hold gets this answer without touching any arithmetic that could
+   * overflow.</p>
    *
-   * <p>A column that overflows a double is rejected instead, even though every cell in
-   * it is finite. Zeroing it would report the same thing as a constant column, that the
-   * metric carries no signal, about a column that demonstrably does carry signal and
-   * merely exceeds the arithmetic. Overflow is caught in both of the places it appears.
-   * The summed column can exceed the range, leaving an infinite mean, an infinite
-   * centered value, and a {@code NaN} profile that no downstream guard rejects because
-   * those guards compare against {@code 0.0}. The summed squared deviations can exceed
-   * it too, leaving an infinite deviation that would divide every value in the column
-   * down to zero. Both describe a table the caller can trivially rescale, so both say
-   * so rather than answering from a discarded metric.</p>
+   * <p>The statistics of a varying column are computed in scaled form. The mean sums
+   * per-place contributions already divided by the place count, and the deviation is
+   * taken over each value's centered distance divided by the column's largest centered
+   * distance, so the summed squares lie between one and the place count and neither
+   * overflow nor underflow, whatever the column's magnitude. The summed squares are
+   * order-independent in every way that matters: no intermediate value can cross the
+   * double range, so acceptance never depends on the iteration order of the underlying
+   * map. Standardized values are bounded by the square root of the place count.</p>
+   *
+   * <p>Only genuinely inexpressible columns are rejected, naming the metric. A column
+   * whose centered distances exceed the largest double, which requires a spread beyond
+   * {@code Double.MAX_VALUE}, overflows; a varying column whose deviation is smaller
+   * than the smallest subnormal double underflows. Both describe a table the caller
+   * can trivially rescale, and the failure says so rather than answering from a
+   * discarded or zeroed metric.</p>
    *
    * @param profiles The raw profiles, keyed by place identifier; mutated in place.
    * @param metrics The metric names in column order, used to name a rejected column.
-   * @throws IOException Thrown if the mean or the standard deviation of a column is not
-   *         finite, which means the column overflows a double.
+   * @throws IOException Thrown if a column's spread overflows a double or a varying
+   *         column's deviation underflows one.
    */
   private static void standardize(Map<String, double[]> profiles, List<String> metrics)
       throws IOException {
     final int width = metrics.size();
+    final int count = profiles.size();
+    final double[] min = new double[width];
+    final double[] max = new double[width];
+    Arrays.fill(min, Double.POSITIVE_INFINITY);
+    Arrays.fill(max, Double.NEGATIVE_INFINITY);
+    for (final double[] profile : profiles.values()) {
+      for (int m = 0; m < width; m++) {
+        min[m] = Math.min(min[m], profile[m]);
+        max[m] = Math.max(max[m], profile[m]);
+      }
+    }
     final double[] mean = new double[width];
     for (final double[] profile : profiles.values()) {
       for (int m = 0; m < width; m++) {
-        mean[m] += profile[m];
+        mean[m] += profile[m] / count;
       }
     }
-    for (int m = 0; m < width; m++) {
-      mean[m] /= profiles.size();
-      checkColumnFinite(mean[m], metrics.get(m));
-    }
-    final double[] variance = new double[width];
+    final double[] scale = new double[width];
     for (final double[] profile : profiles.values()) {
       for (int m = 0; m < width; m++) {
-        final double centered = profile[m] - mean[m];
-        variance[m] += centered * centered;
+        if (min[m] != max[m]) {
+          final double centered = profile[m] - mean[m];
+          checkColumnFinite(centered, metrics.get(m));
+          scale[m] = Math.max(scale[m], Math.abs(centered));
+        }
+      }
+    }
+    final double[] squares = new double[width];
+    for (final double[] profile : profiles.values()) {
+      for (int m = 0; m < width; m++) {
+        if (scale[m] > 0.0) {
+          final double ratio = (profile[m] - mean[m]) / scale[m];
+          squares[m] += ratio * ratio;
+        }
       }
     }
     final double[] deviation = new double[width];
     for (int m = 0; m < width; m++) {
-      deviation[m] = Math.sqrt(variance[m] / profiles.size());
-      checkColumnFinite(deviation[m], metrics.get(m));
+      deviation[m] = scale[m] == 0.0 ? 0.0 : scale[m] * Math.sqrt(squares[m] / count);
+      if (min[m] != max[m] && deviation[m] == 0.0) {
+        throw new IOException("metric column underflows a double: " + metrics.get(m));
+      }
     }
     for (final double[] profile : profiles.values()) {
       for (int m = 0; m < width; m++) {
@@ -301,14 +359,14 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Checks one computed column statistic, a mean or a standard deviation, for
-   * finiteness.
+   * Checks one computed column quantity, a centered distance from the column mean,
+   * for finiteness.
    *
-   * @param statistic The computed column statistic.
-   * @param metric The name of the column the statistic was computed over, for the
+   * @param statistic The computed quantity.
+   * @param metric The name of the column the quantity was computed over, for the
    *               failure message.
-   * @throws IOException Thrown if the statistic is not finite, which means the column
-   *         overflows a double.
+   * @throws IOException Thrown if the quantity is not finite, which means the column's
+   *         spread overflows a double.
    */
   private static void checkColumnFinite(double statistic, String metric)
       throws IOException {
