@@ -1,0 +1,44 @@
+name: publish-preview
+
+# Publishes the preview artifacts from the krickert-main integration branch to the
+# org's GitHub Packages Maven registry. The version is read from the provenance
+# manifest, so a publish always matches what the regen actually built. Manual
+# dispatch only: a regen is pushed first, then this is triggered against it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: github
+
+      - name: Read preview version from the provenance manifest
+        run: |
+          VERSION=$(awk '/^version:/{print $2}' PIPESTREAM-PROVENANCE.txt)
+          test -n "$VERSION"
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Publishing $VERSION"
+
+      - name: Set the preview version
+        run: ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DgenerateBackupPoms=false
+
+      - name: Deploy to GitHub Packages
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+          -DaltDeploymentRepository=github::https://maven.pkg.github.com/ai-pipestream/opennlp
