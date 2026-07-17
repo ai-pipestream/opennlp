@@ -31,6 +31,7 @@ import java.util.Set;
 
 import opennlp.tools.geo.PlaceAncestor;
 import opennlp.tools.geo.PlaceHierarchy;
+import opennlp.tools.util.StringUtil;
 
 /**
  * An immutable, in-memory containment hierarchy over user-supplied place tables: each
@@ -138,13 +139,13 @@ public final class ContainmentSpine implements PlaceHierarchy {
      *         blank.
      */
     public Builder add(String id, String parentId, String name, String type) {
-      if (id == null || id.isBlank()) {
+      if (id == null || blank(id)) {
         throw new IllegalArgumentException("id must not be null or blank");
       }
-      if (name == null || name.isBlank()) {
+      if (name == null || blank(name)) {
         throw new IllegalArgumentException("name must not be null or blank");
       }
-      if (type == null || type.isBlank()) {
+      if (type == null || blank(type)) {
         throw new IllegalArgumentException("type must not be null or blank");
       }
       places.put(id, new Node(parentId, name, type));
@@ -176,9 +177,9 @@ public final class ContainmentSpine implements PlaceHierarchy {
           throw new IOException("malformed containment line " + lineNumber
               + " in " + table);
         }
-        final String parent = fields.get(1).trim();
-        add(fields.get(0).trim(), parent.isEmpty() ? null : parent,
-            fields.get(2).trim(), fields.get(3).trim());
+        final String parent = stripped(fields.get(1));
+        add(stripped(fields.get(0)), parent.isEmpty() ? null : parent,
+            stripped(fields.get(2)), stripped(fields.get(3)));
       }
       return this;
     }
@@ -210,40 +211,10 @@ public final class ContainmentSpine implements PlaceHierarchy {
       if (metaCsv == null) {
         throw new IllegalArgumentException("metaCsv must not be null");
       }
-      final List<Row> rows = readCsvRows(metaCsv);
-      if (rows.isEmpty()) {
+      final WofMetaRows consumer = new WofMetaRows(this, metaCsv);
+      parseCsv(metaCsv, consumer);
+      if (!consumer.sawHeader) {
         throw new IOException("empty meta CSV: " + metaCsv);
-      }
-      final List<String> header = rows.get(0).fields();
-      final int idColumn = header.indexOf("id");
-      final int parentColumn = header.indexOf("parent_id");
-      final int nameColumn = header.indexOf("name");
-      final int typeColumn = header.indexOf("placetype");
-      if (idColumn < 0 || parentColumn < 0 || nameColumn < 0 || typeColumn < 0) {
-        throw new IOException(
-            "meta CSV lacks id, parent_id, name, or placetype columns: " + metaCsv);
-      }
-      final int lastColumn = Math.max(Math.max(idColumn, parentColumn),
-          Math.max(nameColumn, typeColumn));
-      for (int i = 1; i < rows.size(); i++) {
-        final Row row = rows.get(i);
-        final List<String> fields = row.fields();
-        if (fields.size() <= lastColumn) {
-          throw new IOException("short row at line " + row.line() + " in " + metaCsv);
-        }
-        final String id = fields.get(idColumn).trim();
-        final String name = fields.get(nameColumn).trim();
-        final String type = fields.get(typeColumn).trim();
-        if (name.isEmpty()) {
-          throw new IOException("empty name column at line " + row.line() + " in "
-              + metaCsv + ": id " + id);
-        }
-        if (type.isEmpty()) {
-          throw new IOException("empty placetype column at line " + row.line() + " in "
-              + metaCsv + ": id " + id);
-        }
-        final String parent = fields.get(parentColumn).trim();
-        add(id, positiveOrNull(parent), name, type);
       }
       return this;
     }
@@ -301,30 +272,93 @@ public final class ContainmentSpine implements PlaceHierarchy {
     return fields;
   }
 
-  /** One CSV row: its fields and the one-based line the row starts on. */
-  private record Row(int line, List<String> fields) {
+  /** Consumes CSV rows as the parser completes them, with the row's starting line. */
+  private interface CsvRows {
+    void row(int line, List<String> fields) throws IOException;
   }
 
   /**
-   * Parses a whole CSV file into rows, with double-quote quoting, doubled-quote
-   * escapes, and quoted fields that may span lines, so a row is only ended by a line
-   * break outside a quoted field. Blank lines between rows are dropped. Both {@code LF}
-   * and {@code CRLF} end a line, inside a quoted field as well as outside, and a quoted
-   * line break is kept in the field as a single {@code LF}.
+   * Consumes meta CSV rows as the parser completes them, so the table is never
+   * materialized as a whole: the first row binds the header columns, and every further
+   * row is validated and added to the builder immediately.
+   */
+  private static final class WofMetaRows implements CsvRows {
+
+    private final Builder builder;
+    private final Path file;
+    private boolean sawHeader;
+    private int idColumn;
+    private int parentColumn;
+    private int nameColumn;
+    private int typeColumn;
+    private int lastColumn;
+
+    private WofMetaRows(Builder builder, Path file) {
+      this.builder = builder;
+      this.file = file;
+    }
+
+    @Override
+    public void row(int line, List<String> fields) throws IOException {
+      if (!sawHeader) {
+        sawHeader = true;
+        idColumn = fields.indexOf("id");
+        parentColumn = fields.indexOf("parent_id");
+        nameColumn = fields.indexOf("name");
+        typeColumn = fields.indexOf("placetype");
+        if (idColumn < 0 || parentColumn < 0 || nameColumn < 0 || typeColumn < 0) {
+          throw new IOException(
+              "meta CSV lacks id, parent_id, name, or placetype columns: " + file);
+        }
+        lastColumn = Math.max(Math.max(idColumn, parentColumn),
+            Math.max(nameColumn, typeColumn));
+        return;
+      }
+      if (fields.size() <= lastColumn) {
+        throw new IOException("short row at line " + line + " in " + file);
+      }
+      final String id = stripped(fields.get(idColumn));
+      final String name = stripped(fields.get(nameColumn));
+      final String type = stripped(fields.get(typeColumn));
+      if (id.isEmpty()) {
+        throw new IOException("empty id column at line " + line + " in " + file);
+      }
+      if (name.isEmpty()) {
+        throw new IOException("empty name column at line " + line + " in "
+            + file + ": id " + id);
+      }
+      if (type.isEmpty()) {
+        throw new IOException("empty placetype column at line " + line + " in "
+            + file + ": id " + id);
+      }
+      final String parent = stripped(fields.get(parentColumn));
+      builder.add(id, Builder.positiveOrNull(parent), name, type);
+    }
+  }
+
+  /**
+   * Parses a CSV file row by row, with double-quote quoting, doubled-quote escapes,
+   * and quoted fields that may span lines, so a row is only ended by a line break
+   * outside a quoted field. Blank lines between rows are dropped. Both {@code LF} and
+   * {@code CRLF} end a line, inside a quoted field as well as outside, and a quoted
+   * line break is kept in the field as a single {@code LF}. A quote inside an unquoted
+   * field and content after a field's closing quote both fail loud, because either
+   * would otherwise splice neighboring fields or rows together silently.
    *
    * @param file The CSV file, UTF-8.
-   * @return The rows of the file, header first.
-   * @throws IOException Thrown if reading fails or a quoted field is never closed.
+   * @param consumer Receives each completed row with its starting line.
+   * @throws IOException Thrown if reading fails, a quoted field is never closed, a
+   *         quote appears inside an unquoted field, or content follows a closing quote.
    */
-  private static List<Row> readCsvRows(Path file) throws IOException {
+  private static void parseCsv(Path file, CsvRows consumer) throws IOException {
     final String content;
     try (InputStream in = Files.newInputStream(file)) {
       content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
     }
-    final List<Row> rows = new ArrayList<>();
     final StringBuilder field = new StringBuilder();
     List<String> fields = new ArrayList<>();
     boolean quoted = false;
+    boolean closedQuote = false;
     int line = 1;
     int rowLine = 1;
     int quoteLine = 1;
@@ -338,6 +372,7 @@ public final class ContainmentSpine implements PlaceHierarchy {
           i++;
         } else if (c == '"') {
           quoted = false;
+          closedQuote = true;
         } else if (lineBreak) {
           field.append('\n');
           line++;
@@ -348,22 +383,32 @@ public final class ContainmentSpine implements PlaceHierarchy {
           field.append(c);
         }
       } else if (c == '"') {
+        if (field.length() > 0 || closedQuote) {
+          throw new IOException("stray quote in an unquoted field at line " + line
+              + " in " + file);
+        }
         quoted = true;
         quoteLine = line;
       } else if (c == ',') {
         fields.add(field.toString());
         field.setLength(0);
+        closedQuote = false;
       } else if (lineBreak) {
         if (c == '\r') {
           i++;
         }
         fields.add(field.toString());
         field.setLength(0);
-        addRow(rows, rowLine, fields);
+        closedQuote = false;
+        emitRow(consumer, rowLine, fields);
         fields = new ArrayList<>();
         line++;
         rowLine = line;
       } else {
+        if (closedQuote) {
+          throw new IOException("content after a closing quote at line " + line
+              + " in " + file);
+        }
         field.append(c);
       }
     }
@@ -371,18 +416,57 @@ public final class ContainmentSpine implements PlaceHierarchy {
       throw new IOException("unterminated quoted field starting at line " + quoteLine
           + " in " + file);
     }
-    if (field.length() > 0 || !fields.isEmpty()) {
+    if (field.length() > 0 || !fields.isEmpty() || closedQuote) {
       fields.add(field.toString());
-      addRow(rows, rowLine, fields);
+      emitRow(consumer, rowLine, fields);
     }
-    return rows;
   }
 
-  /** Appends the row unless it is a blank line, which carries no fields at all. */
-  private static void addRow(List<Row> rows, int line, List<String> fields) {
+  /** Hands the row to the consumer unless it is a blank line, which carries no fields. */
+  private static void emitRow(CsvRows consumer, int line, List<String> fields)
+      throws IOException {
     if (fields.size() == 1 && fields.get(0).isEmpty()) {
       return;
     }
-    rows.add(new Row(line, List.copyOf(fields)));
+    consumer.row(line, List.copyOf(fields));
+  }
+
+  /**
+   * Reports whether a value is blank under the project whitespace definition, which
+   * unlike the JDK's includes no-break spaces.
+   */
+  private static boolean blank(String value) {
+    for (int i = 0; i < value.length(); ) {
+      final int cp = value.codePointAt(i);
+      if (!StringUtil.isWhitespace(cp)) {
+        return false;
+      }
+      i += Character.charCount(cp);
+    }
+    return true;
+  }
+
+  /**
+   * Strips leading and trailing whitespace under the project whitespace definition, so
+   * cells padded with no-break spaces read like cells padded with spaces.
+   */
+  private static String stripped(String value) {
+    int start = 0;
+    int end = value.length();
+    while (start < end) {
+      final int cp = value.codePointAt(start);
+      if (!StringUtil.isWhitespace(cp)) {
+        break;
+      }
+      start += Character.charCount(cp);
+    }
+    while (end > start) {
+      final int cp = value.codePointBefore(end);
+      if (!StringUtil.isWhitespace(cp)) {
+        break;
+      }
+      end -= Character.charCount(cp);
+    }
+    return value.substring(start, end);
   }
 }

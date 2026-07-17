@@ -203,7 +203,52 @@ public class HierarchyAnnotatorTest {
         () -> new HierarchyAnnotator(null));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new HierarchyAnnotator(spine(), " "));
+    // U+00A0, the no-break space: blank under the project whitespace definition even
+    // though the JDK's own blank check does not cover it
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new HierarchyAnnotator(spine(), "\u00A0"));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new HierarchyAnnotator(spine()).annotate(null));
+  }
+
+  /**
+   * Verifies that a document without a locations layer is rejected with a message
+   * naming the missing layer, matching the sibling annotators: an absent required
+   * layer is a pipeline error, not a location-free document, so a missing geocode
+   * stage cannot silence every containment chain of every document.
+   */
+  @Test
+  void testAbsentLocationsLayerThrowsWithExactMessage() {
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new HierarchyAnnotator(spine()).annotate(Document.of("bare")));
+    Assertions.assertEquals(
+        "document lacks the required layer locations<GeoResolution>", e.getMessage());
+  }
+
+  /**
+   * Verifies that mention identity is judged by character offsets alone: a typed and
+   * an untyped span over the same text are one mention, so the second annotation is
+   * the mention's lower-ranked candidate and contributes no second chain.
+   */
+  @Test
+  void testTypedAndUntypedSpansOverSameOffsetsAreOneMention() {
+    final String text = "A stroll through Park Slope.";
+    final Span typed = new Span(17, 27, "location");
+    final Span untyped = new Span(17, 27);
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(
+            new Annotation<>(typed,
+                new GeoResolution(typed, entry("Park Slope", "85865587"), 0.9)),
+            new Annotation<>(untyped,
+                new GeoResolution(untyped, entry("Park Slope", "421205765"), 0.4))));
+
+    final Document annotated = new HierarchyAnnotator(spine()).annotate(document);
+
+    final List<Annotation<ContainmentChain>> chains =
+        annotated.get(HierarchyAnnotator.CONTAINMENT);
+    Assertions.assertEquals(1, chains.size());
+    Assertions.assertEquals(List.of("Brooklyn", "New York"),
+        chains.get(0).value().ancestors().stream().map(a -> a.name()).toList());
   }
 }

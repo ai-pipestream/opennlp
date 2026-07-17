@@ -34,6 +34,7 @@ import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.PlaceAncestor;
 import opennlp.tools.geo.PlaceHierarchy;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Expands each resolved location into the places that contain it: reads the geocoded
@@ -94,7 +95,7 @@ public class HierarchyAnnotator implements DocumentAnnotator {
     if (hierarchy == null) {
       throw new IllegalArgumentException("hierarchy must not be null");
     }
-    if (attributeKey == null || attributeKey.isBlank()) {
+    if (attributeKey == null || blank(attributeKey)) {
       throw new IllegalArgumentException("attributeKey must not be null or blank");
     }
     this.hierarchy = hierarchy;
@@ -105,27 +106,37 @@ public class HierarchyAnnotator implements DocumentAnnotator {
    * Annotates the document with the {@link #CONTAINMENT} layer.
    *
    * <p>Each mention of the locations layer is expanded at most once: the first
-   * annotation of a span decides the mention's chain, and any further annotation of the
-   * same span, which a multi-candidate mention carries for each lower-ranked candidate,
-   * is ignored. A document without a locations layer is treated as having no resolved
-   * mentions and gets an empty layer.</p>
+   * annotation of a span's character offsets decides the mention's chain, and any
+   * further annotation over the same offsets, which a multi-candidate mention carries
+   * for each lower-ranked candidate, is ignored. The offsets alone key the mention, so
+   * a typed and an untyped span over the same text are one mention, matching the
+   * offset-keyed alignment of the sibling annotators.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
+   * <p>The locations layer must be present, but it may be empty: an absent layer is a
+   * pipeline error rather than a location-free document, because a missing geocode
+   * stage would otherwise silence every containment chain of every document.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link GeocodeAnnotator#LOCATIONS} layer.
    * @return A new {@link Document} with the {@link #CONTAINMENT} layer added, one
    *         annotation per expandable mention. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         already carries the {@link #CONTAINMENT} layer.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, lacks
+   *         the locations layer, or already carries the {@link #CONTAINMENT} layer.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    if (!document.layers().contains(GeocodeAnnotator.LOCATIONS)) {
+      throw new IllegalArgumentException("document lacks the required layer "
+          + GeocodeAnnotator.LOCATIONS);
+    }
     final List<Annotation<ContainmentChain>> chains = new ArrayList<>();
-    final Set<Span> expanded = new HashSet<>();
+    final Set<Long> expanded = new HashSet<>();
     for (final Annotation<GeoResolution> location
         : document.get(GeocodeAnnotator.LOCATIONS)) {
-      if (!expanded.add(location.span())) {
+      if (!expanded.add(offsets(location.span()))) {
         continue;
       }
       final AttributeValue joinId =
@@ -139,6 +150,26 @@ public class HierarchyAnnotator implements DocumentAnnotator {
       }
     }
     return document.with(CONTAINMENT, chains);
+  }
+
+  /** Collapses a span to its offsets, so typed and untyped spans key one mention. */
+  private static long offsets(Span span) {
+    return ((long) span.getStart() << 32) | span.getEnd();
+  }
+
+  /**
+   * Reports whether a value is blank under the project whitespace definition, which
+   * unlike the JDK's includes no-break spaces.
+   */
+  private static boolean blank(String value) {
+    for (int i = 0; i < value.length(); ) {
+      final int cp = value.codePointAt(i);
+      if (!StringUtil.isWhitespace(cp)) {
+        return false;
+      }
+      i += Character.charCount(cp);
+    }
+    return true;
   }
 
   @Override
