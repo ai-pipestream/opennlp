@@ -18,6 +18,7 @@
 package opennlp.tools.glossary;
 
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * One glossary hit in a text: the {@link Span} it covers in the original text, the
@@ -45,11 +46,27 @@ public record GlossaryMatch(Span span, String id, String term) {
     if (span == null) {
       throw new IllegalArgumentException("span must not be null");
     }
-    if (id == null || id.isBlank()) {
+    if (id == null || blank(id)) {
       throw new IllegalArgumentException("id must not be null or blank");
     }
-    if (term == null || term.isBlank()) {
+    if (term == null || blank(term)) {
       throw new IllegalArgumentException("term must not be null or blank");
     }
+  }
+
+  /**
+   * Reports whether a value is blank under the project whitespace definition, which
+   * unlike the JDK's includes no-break spaces, so a value spelled entirely from them
+   * cannot pass as content.
+   */
+  private static boolean blank(String value) {
+    for (int i = 0; i < value.length(); ) {
+      final int cp = value.codePointAt(i);
+      if (!StringUtil.isWhitespace(cp)) {
+        return false;
+      }
+      i += Character.charCount(cp);
+    }
+    return true;
   }
 }
