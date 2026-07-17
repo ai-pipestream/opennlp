@@ -39,16 +39,28 @@ import opennlp.tools.util.normalizer.EmojiFlags;
  * country, and the document-scoped layer reports the ranked result as
  * {@link RegionVote} shares without spans.
  *
- * <p>Three kinds of evidence vote. A location entity resolved by the
- * {@link GeocodeAnnotator} votes for its entry's country weighted by the resolution
- * confidence, so a coherence-aware geocoder makes the ballot sharper. A location
- * entity the geocoder left unresolved still votes when its text is an English country
- * name, recognized through JDK locale data, which covers gazetteers that carry no
- * country entries. A country flag emoji anywhere in the text, a regional indicator
- * pair naming an assigned ISO 3166-1 code, votes for its country and needs no entity
- * layer support at all; subdivision tag-sequence flags name no country and cast no
- * vote. Mentions with no kind of evidence do not vote; a document without usable
- * evidence gets an empty layer.</p>
+ * <p>Three kinds of evidence vote. A location entity whose text is an English country
+ * name, recognized through JDK locale data, votes for that country at a fixed weight. A
+ * location entity resolved by the {@link GeocodeAnnotator} votes for its entry's country
+ * weighted by the resolution confidence, so a coherence-aware geocoder makes the ballot
+ * sharper. A country flag emoji anywhere in the text, a regional indicator pair naming an
+ * assigned ISO 3166-1 code, votes for its country and needs no entity layer support at
+ * all; subdivision tag-sequence flags name no country and cast no vote. Mentions with no
+ * kind of evidence do not vote; a document without usable evidence gets an empty
+ * layer.</p>
+ *
+ * <p>Country-name evidence takes precedence over a gazetteer resolution for the same
+ * mention: an entity spelled exactly like a country is direct evidence for that country,
+ * while a gazetteer hit on the same text can be any same-named place, so a mention reading
+ * {@code Georgia} votes for the country and not for the US state a gazetteer resolves it
+ * to. A resolution is therefore consulted only for mentions that are not country names,
+ * and every mention casts at most one vote.</p>
+ *
+ * <p>When the geocoder ranks several candidates for one mention, the locations layer holds
+ * them in the geocoder's order, best first, and the mention votes with that best candidate
+ * alone. The order is the geocoder's ranking, which is authoritative: confidence is
+ * resolver-defined and not comparable across implementations, so it ranks nothing by
+ * itself.</p>
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
@@ -116,28 +128,47 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   /**
    * Annotates the document with the {@link #REGIONS} ballot.
    *
-   * <p>Location entities are matched to their resolutions by exact span. A resolved
-   * mention votes with its confidence, an unresolved mention votes as a country name
-   * when its text is one, and country flag emoji vote directly from the text. When
-   * several resolutions share one span, the last one in the locations layer casts
-   * that mention's vote.</p>
+   * <p>Every location entity casts at most one vote. A mention spelled like an English
+   * country name votes for that country at the country-name weight; otherwise the mention
+   * is matched to the locations layer by exact span and votes for its best candidate's
+   * country with that candidate's confidence. A mention that is neither, or whose best
+   * candidate carries no country code, casts no vote. Country flag emoji vote directly
+   * from the text, independently of any entity.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}; absent entity
-   *                 or locations layers are treated as empty.
+   * <p>The required layers must be present, but they may be empty: a document with a
+   * present but empty locations layer is a document nothing geocoded, and its country-name
+   * and flag evidence still votes. An absent required layer is a pipeline error rather
+   * than an evidence-free document, because a missing {@link GeocodeAnnotator} stage would
+   * otherwise drop every geocoded vote silently.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry the
+   *                 {@link Layers#ENTITIES} and {@link GeocodeAnnotator#LOCATIONS} layers.
    * @return A new {@link Document} with the {@link #REGIONS} layer added. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         already carries the {@link #REGIONS} layer.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the entity
+   *         layer or the locations layer is absent, or the document already carries the
+   *         {@link #REGIONS} layer.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    final Set<LayerKey<?>> present = document.layers();
+    if (!present.contains(Layers.ENTITIES)) {
+      throw new IllegalArgumentException("document lacks the required layer "
+          + Layers.ENTITIES);
+    }
+    if (!present.contains(GeocodeAnnotator.LOCATIONS)) {
+      throw new IllegalArgumentException("document lacks the required layer "
+          + GeocodeAnnotator.LOCATIONS);
+    }
     final CharSequence text = document.text();
+    // The layer holds a mention's candidates in the geocoder's ranking, best first, so
+    // the first entry for a span is the one that votes.
     final Map<Long, GeoResolution> resolutionsBySpan = new HashMap<>();
     for (final Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATIONS)) {
-      resolutionsBySpan.put(spanKey(location.span()), location.value());
+      resolutionsBySpan.putIfAbsent(spanKey(location.span()), location.value());
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
@@ -145,18 +176,19 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
         continue;
       }
       final Span span = entity.span();
-      final GeoResolution resolution = resolutionsBySpan.get(spanKey(span));
-      if (resolution != null) {
-        final String countryCode = resolution.entry().countryCode();
-        if (countryCode != null) {
-          weights.merge(countryCode, resolution.confidence(), Double::sum);
-        }
+      final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
+      final String named = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
+      if (named != null) {
+        weights.merge(named, COUNTRY_NAME_WEIGHT, Double::sum);
         continue;
       }
-      final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
-      final String countryCode = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
+      final GeoResolution resolution = resolutionsBySpan.get(spanKey(span));
+      if (resolution == null) {
+        continue;
+      }
+      final String countryCode = resolution.entry().countryCode();
       if (countryCode != null) {
-        weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
+        weights.merge(countryCode, resolution.confidence(), Double::sum);
       }
     }
     flagVotes(text, weights);
