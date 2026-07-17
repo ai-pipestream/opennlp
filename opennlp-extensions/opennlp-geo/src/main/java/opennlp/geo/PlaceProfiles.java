@@ -23,9 +23,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import opennlp.tools.util.StringUtil;
 
 /**
  * Metadata-grounded place similarity: each place carries a numeric profile from a
@@ -69,7 +72,8 @@ public final class PlaceProfiles {
    * @param table The tab-separated table, UTF-8: a header with {@code id} and metric
    *              names, then one place per line. Must not be {@code null}.
    * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the table is malformed.
+   * @throws IOException Thrown if reading fails, the table has no header, a row does
+   *         not list exactly one value per metric, or a value is not a finite number.
    * @throws IllegalArgumentException Thrown if {@code table} is {@code null}.
    */
   public static PlaceProfiles load(Path table) throws IOException {
@@ -82,13 +86,17 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Loads a profile table from a stream. Lines may end with LF or CRLF; blank lines
-   * and lines whose first character is {@code #} are ignored. If an identifier
-   * appears on more than one row, the last row wins.
+   * Loads a profile table from a stream. Lines may end with LF or CRLF. A line is
+   * ignored wherever it appears, ahead of the header as readily as between rows, when
+   * it is blank or when its first non-blank character is {@code #}, so a table may
+   * carry an attribution comment above its header. The header is the first line that is
+   * not ignored. Identifiers and values are stripped of surrounding whitespace. If an
+   * identifier appears on more than one row, the last row wins.
    *
    * @param tableStream The table content. Must not be {@code null}. Not closed.
    * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the table is malformed.
+   * @throws IOException Thrown if reading fails, the table has no header, a row does
+   *         not list exactly one value per metric, or a value is not a finite number.
    * @throws IllegalArgumentException Thrown if {@code tableStream} is {@code null}.
    */
   public static PlaceProfiles load(InputStream tableStream) throws IOException {
@@ -97,18 +105,25 @@ public final class PlaceProfiles {
     }
     final List<String> lines =
         splitLines(new String(tableStream.readAllBytes(), StandardCharsets.UTF_8));
-    if (lines.isEmpty() || lines.get(0).isEmpty()) {
+    int headerLine = -1;
+    for (int i = 0; i < lines.size(); i++) {
+      if (!isIgnored(lines.get(i))) {
+        headerLine = i;
+        break;
+      }
+    }
+    if (headerLine < 0) {
       throw new IOException("the profile table has no header");
     }
-    final List<String> header = splitTabs(lines.get(0));
-    if (header.size() < 2 || !"id".equals(header.get(0).trim())) {
+    final List<String> header = splitTabs(lines.get(headerLine));
+    if (header.size() < 2 || !"id".equals(strip(header.get(0)))) {
       throw new IOException("the header must be: id, then at least one metric");
     }
     final int width = header.size() - 1;
     final Map<String, double[]> raw = new HashMap<>();
-    for (int i = 1; i < lines.size(); i++) {
+    for (int i = headerLine + 1; i < lines.size(); i++) {
       final String line = lines.get(i);
-      if (line.isEmpty() || line.startsWith("#")) {
+      if (isIgnored(line)) {
         continue;
       }
       final List<String> fields = splitTabs(line);
@@ -118,13 +133,9 @@ public final class PlaceProfiles {
       }
       final double[] profile = new double[width];
       for (int m = 0; m < width; m++) {
-        try {
-          profile[m] = Double.parseDouble(fields.get(m + 1).trim());
-        } catch (NumberFormatException e) {
-          throw new IOException("malformed value in row " + (i + 1), e);
-        }
+        profile[m] = metricValue(strip(fields.get(m + 1)), i + 1);
       }
-      raw.put(fields.get(0).trim(), profile);
+      raw.put(strip(fields.get(0)), profile);
     }
     if (raw.isEmpty()) {
       throw new IOException("the profile table lists no places");
@@ -132,6 +143,91 @@ public final class PlaceProfiles {
     standardize(raw, width);
     return new PlaceProfiles(Map.copyOf(raw),
         List.copyOf(header.subList(1, header.size())));
+  }
+
+  /**
+   * Parses one metric cell, accepting only the finite numbers a metric table can
+   * meaningfully hold.
+   *
+   * <p>{@link Double#parseDouble} is deliberately not trusted on its own. It accepts
+   * {@code NaN}, {@code Infinity} and {@code -Infinity}, none of which is a measurement,
+   * and a single such cell would not stay in its own row: standardization takes the mean
+   * and deviation over the whole column, so one non-finite cell turns every profile in
+   * the table into non-finite values, and the guards downstream, which compare against
+   * {@code 0.0}, do not fire for them. It also accepts the Java {@code f} and {@code d}
+   * literal suffixes, which are Java source syntax rather than table data and indicate
+   * that whatever generated the table leaked its own literal syntax into the output.
+   * Both are rejected here, at the only point where the offending row is still known.</p>
+   *
+   * @param text The cell content, already stripped of surrounding whitespace.
+   * @param row The one-based line number of the row, for the failure message.
+   * @return The parsed value, always finite.
+   * @throws IOException Thrown if the cell is not a number, carries a Java literal
+   *         suffix, or is not finite.
+   */
+  private static double metricValue(String text, int row) throws IOException {
+    if (hasJavaLiteralSuffix(text)) {
+      throw new IOException("malformed value in row " + row + ": " + text);
+    }
+    final double value;
+    try {
+      value = Double.parseDouble(text);
+    } catch (NumberFormatException e) {
+      throw new IOException("malformed value in row " + row + ": " + text, e);
+    }
+    if (!Double.isFinite(value)) {
+      throw new IOException("non-finite value in row " + row + ": " + text);
+    }
+    return value;
+  }
+
+  /**
+   * Checks whether a cell ends in a Java float or double literal suffix. No decimal or
+   * hexadecimal number written as data ends in one of these letters, so testing the
+   * final character is enough and no grammar has to be restated here.
+   *
+   * @param text The cell content, already stripped of surrounding whitespace.
+   * @return {@code true} if the final character is {@code f}, {@code F}, {@code d} or
+   *         {@code D}.
+   */
+  private static boolean hasJavaLiteralSuffix(String text) {
+    if (text.isEmpty()) {
+      return false;
+    }
+    final char last = text.charAt(text.length() - 1);
+    return last == 'f' || last == 'F' || last == 'd' || last == 'D';
+  }
+
+  /**
+   * Checks whether a line carries no data: one that is blank or whose first non-blank
+   * character opens a comment.
+   *
+   * @param line The raw line, without its line ending.
+   * @return {@code true} if the line must be skipped.
+   */
+  private static boolean isIgnored(String line) {
+    final String stripped = strip(line);
+    return stripped.isEmpty() || stripped.charAt(0) == '#';
+  }
+
+  /**
+   * Removes leading and trailing whitespace, using the toolkit's whitespace definition
+   * rather than {@link String#trim()}, which leaves the no-break spaces that tables
+   * copied out of a PDF or a rendered web table routinely carry.
+   *
+   * @param text The text to strip.
+   * @return The text without surrounding whitespace. Never {@code null}.
+   */
+  private static String strip(String text) {
+    int start = 0;
+    int end = text.length();
+    while (start < end && StringUtil.isWhitespace(text.charAt(start))) {
+      start++;
+    }
+    while (end > start && StringUtil.isWhitespace(text.charAt(end - 1))) {
+      end--;
+    }
+    return text.substring(start, end);
   }
 
   /**
@@ -204,11 +300,17 @@ public final class PlaceProfiles {
   /**
    * Finds the places most similar to one place.
    *
+   * <p>Places with equal scores are ordered by ascending identifier. The tie-break is
+   * part of the contract rather than an implementation detail: it decides which places
+   * survive the {@code count} cut when more of them tie than there is room for, so the
+   * same query against the same table always answers with the same places in the same
+   * order.</p>
+   *
    * @param id The query place identifier. Must be listed.
    * @param count The maximum number of neighbors. Must be positive.
-   * @return The other places ordered by descending similarity, at most {@code count};
-   *         the query place itself is never included, and places with equal scores
-   *         appear in no particular relative order. Never {@code null}.
+   * @return The other places ordered by descending similarity and, among equal scores,
+   *         by ascending identifier, at most {@code count}; the query place itself is
+   *         never included. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code id} is {@code null} or not
    *         listed, or {@code count} is not positive.
    */
@@ -224,7 +326,8 @@ public final class PlaceProfiles {
             cosine(query, candidate.getValue())));
       }
     }
-    neighbors.sort((a, b) -> Double.compare(b.similarity(), a.similarity()));
+    neighbors.sort(Comparator.comparingDouble(Neighbor::similarity).reversed()
+        .thenComparing(Neighbor::id));
     return List.copyOf(neighbors.subList(0, Math.min(count, neighbors.size())));
   }
 
