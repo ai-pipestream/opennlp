@@ -22,15 +22,21 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.parser.AbstractBottomUpParser;
+import opennlp.tools.parser.HeadRules;
+import opennlp.tools.parser.Parse;
 import opennlp.tools.util.ObjectStreamUtils;
+import opennlp.tools.util.Sequence;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the pure-Java neural tagging tier end to end: training on a tiny corpus must
@@ -114,9 +120,81 @@ public class FeedforwardPOSTaggerTest {
   }
 
   @Test
-  void testTopKSequencesIsUnsupported() {
-    assertThrows(UnsupportedOperationException.class,
-        () -> tagger.topKSequences(new String[] {"the"}));
+  void testTopKSequencesReturnsTheGreedyTaggingWithRealProbabilities() {
+    final String[] sentence = {"the", "dog", "barks"};
+    final Sequence[] sequences = tagger.topKSequences(sentence);
+    assertEquals(1, sequences.length);
+    assertEquals(List.of(tagger.tag(sentence)), sequences[0].getOutcomes());
+    final double[] probs = sequences[0].getProbs();
+    assertEquals(sentence.length, probs.length);
+    double expectedScore = 0.0;
+    for (final double prob : probs) {
+      assertTrue(prob > 0.0 && prob <= 1.0, "probability out of range: " + prob);
+      expectedScore += StrictMath.log(prob);
+    }
+    assertEquals(expectedScore, sequences[0].getScore(), 1.0e-9);
+  }
+
+  @Test
+  void testTopKSequencesIgnoresAdditionalContext() {
+    final String[] sentence = {"she", "eats", "fish"};
+    assertArrayEquals(tagger.topKSequences(sentence),
+        tagger.topKSequences(sentence, new Object[] {"ignored"}));
+  }
+
+  /**
+   * Pins the contract {@link opennlp.tools.parser.AbstractBottomUpParser#advanceTags}
+   * depends on: it calls {@code topKSequences} unconditionally and turns every returned
+   * probability into a log probability, so the tagger must return at least one sequence
+   * whose probabilities are strictly positive.
+   */
+  @Test
+  void testTopKSequencesFeedsTheBottomUpParser() {
+    final Parse tokens = Parse.createFromTokens(new String[] {"the", "dog", "barks"});
+    final Parse[] tagged = new TagOnlyParser(tagger).advanceTagsOf(tokens);
+    assertEquals(1, tagged.length);
+    assertTrue(Double.isFinite(tagged[0].getProb()),
+        "the parser derived a non-finite probability: " + tagged[0].getProb());
+  }
+
+  /**
+   * The smallest possible {@link AbstractBottomUpParser} that exercises the real
+   * {@code advanceTags} implementation without needing a chunker or a parser model.
+   */
+  private static final class TagOnlyParser extends AbstractBottomUpParser {
+
+    TagOnlyParser(POSTagger tagger) {
+      super(tagger, null, new NoPunctuationHeadRules(), defaultBeamSize,
+          defaultAdvancePercentage);
+    }
+
+    Parse[] advanceTagsOf(Parse p) {
+      return advanceTags(p);
+    }
+
+    @Override
+    protected Parse[] advanceParses(Parse p, double probMass) {
+      return new Parse[0];
+    }
+
+    @Override
+    protected void advanceTop(Parse p) {
+      // Tagging is the only stage under test, so there is no top stage to advance.
+    }
+  }
+
+  /** Head rules that model no punctuation, which is all the tagging stage consults. */
+  private static final class NoPunctuationHeadRules implements HeadRules {
+
+    @Override
+    public Parse getHead(Parse[] constituents, String type) {
+      return null;
+    }
+
+    @Override
+    public Set<String> getPunctuationTags() {
+      return Set.of();
+    }
   }
 
   @Test
