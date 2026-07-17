@@ -174,7 +174,7 @@ public class DocumentRegionAnnotatorTest {
     assertEquals(1, ballot.size());
     assertEquals("AU", ballot.get(0).value().countryCode());
     assertEquals(1.0, ballot.get(0).value().share(), 1e-9);
-    assertEquals(new Span(0, text.length()), ballot.get(0).span());
+    assertNull(ballot.get(0).span());
   }
 
   @Test
