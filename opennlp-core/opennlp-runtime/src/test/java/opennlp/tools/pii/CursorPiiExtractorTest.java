@@ -350,7 +350,8 @@ public class CursorPiiExtractorTest {
     final List<PiiMention> spaced = extractor.extract(letter + " 4111111111111111");
     Assertions.assertEquals(1, spaced.size());
     Assertions.assertEquals(PiiMention.TYPE_CARD, spaced.get(0).type());
-    Assertions.assertEquals(2, spaced.get(0).span().getStart());
+    // the supplementary letter is two chars, so the card starts at offset 3
+    Assertions.assertEquals(3, spaced.get(0).span().getStart());
   }
 
   /**
