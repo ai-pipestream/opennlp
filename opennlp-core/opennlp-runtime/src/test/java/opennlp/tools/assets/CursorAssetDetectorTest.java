@@ -20,8 +20,12 @@ package opennlp.tools.assets;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -171,6 +175,82 @@ public class CursorAssetDetectorTest {
     assertEquals(EmbeddedAsset.FORMAT_WAV, assets.get(3).format());
     assertEquals(EmbeddedAsset.FORMAT_PDF, assets.get(4).format());
     assertEquals(EmbeddedAsset.FORMAT_ZIP, assets.get(5).format());
+  }
+
+  /**
+   * The header bytes of every remaining recognized format, each the format's magic as
+   * its specification publishes it.
+   *
+   * @return One case per format: the expected format tag, media type, and header.
+   */
+  private static Stream<Arguments> knownFormatHeaders() {
+    final ByteArrayOutputStream sqlite = new ByteArrayOutputStream();
+    sqlite.writeBytes("SQLite format 3".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    sqlite.write(0);
+    return Stream.of(
+        Arguments.of(EmbeddedAsset.FORMAT_TIFF, "image/tiff",
+            new byte[] {'I', 'I', 0x2A, 0x00}),
+        Arguments.of(EmbeddedAsset.FORMAT_TIFF, "image/tiff",
+            new byte[] {'M', 'M', 0x00, 0x2A}),
+        Arguments.of(EmbeddedAsset.FORMAT_GZIP, "application/gzip",
+            new byte[] {0x1F, (byte) 0x8B, 0x08}),
+        Arguments.of(EmbeddedAsset.FORMAT_SEVEN_ZIP, "application/x-7z-compressed",
+            new byte[] {'7', 'z', (byte) 0xBC, (byte) 0xAF, 0x27, 0x1C}),
+        Arguments.of(EmbeddedAsset.FORMAT_RAR, "application/vnd.rar",
+            new byte[] {'R', 'a', 'r', '!', 0x1A, 0x07, 0x00}),
+        Arguments.of(EmbeddedAsset.FORMAT_FLAC, "audio/flac",
+            new byte[] {'f', 'L', 'a', 'C'}),
+        Arguments.of(EmbeddedAsset.FORMAT_OGG, "application/ogg",
+            new byte[] {'O', 'g', 'g', 'S'}),
+        Arguments.of(EmbeddedAsset.FORMAT_MIDI, "audio/midi",
+            new byte[] {'M', 'T', 'h', 'd'}),
+        Arguments.of(EmbeddedAsset.FORMAT_SQLITE, "application/vnd.sqlite3",
+            sqlite.toByteArray()),
+        Arguments.of(EmbeddedAsset.FORMAT_ELF, "application/x-elf",
+            new byte[] {0x7F, 'E', 'L', 'F', 2, 1, 1}),
+        Arguments.of(EmbeddedAsset.FORMAT_PE, "application/vnd.microsoft.portable-executable",
+            new byte[] {'M', 'Z', (byte) 0x90, 0x00}),
+        Arguments.of(EmbeddedAsset.FORMAT_CLASS, "application/java-vm",
+            new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE, 0, 0, 0, 0x37}),
+        Arguments.of(EmbeddedAsset.FORMAT_WOFF, "font/woff",
+            new byte[] {'w', 'O', 'F', 'F'}),
+        Arguments.of(EmbeddedAsset.FORMAT_WOFF2, "font/woff2",
+            new byte[] {'w', 'O', 'F', '2'}));
+  }
+
+  @ParameterizedTest
+  @MethodSource("knownFormatHeaders")
+  void testExpandedMagicTableIdentifies(String format, String mediaType, byte[] header) {
+    final String encoded = Base64.getEncoder().encodeToString(padded(header));
+    final List<EmbeddedAsset> assets = detector.detect("x " + encoded + " y");
+    assertEquals(1, assets.size());
+    assertEquals(format, assets.get(0).format());
+    assertEquals(mediaType, assets.get(0).mediaType());
+    assertEquals(encoded, assets.get(0).span().getCoveredText("x " + encoded + " y").toString());
+  }
+
+  /**
+   * A TIFF-looking run whose fourth byte breaks the magic: the base64 prefix pins only
+   * the first two bits of that byte, so the decoded header check must reject it.
+   */
+  @Test
+  void testTiffPrefixWithBrokenMagicByteIsIgnored() {
+    final String lookalike = Base64.getEncoder().encodeToString(
+        padded(new byte[] {'I', 'I', 0x2A, 0x01}));
+    assertTrue(lookalike.startsWith("SUkqA"));
+    assertEquals(List.of(), detector.detect("x " + lookalike + " y"));
+  }
+
+  /**
+   * A PE-looking run whose fourth byte breaks the DOS-stub magic: the prefix matches,
+   * the decoded header check rejects.
+   */
+  @Test
+  void testPePrefixWithBrokenStubByteIsIgnored() {
+    final String lookalike = Base64.getEncoder().encodeToString(
+        padded(new byte[] {'M', 'Z', (byte) 0x90, 0x01}));
+    assertTrue(lookalike.startsWith("TVqQA"));
+    assertEquals(List.of(), detector.detect("x " + lookalike + " y"));
   }
 
   /** A short base64-looking token, such as a URL path segment, is never an asset. */
