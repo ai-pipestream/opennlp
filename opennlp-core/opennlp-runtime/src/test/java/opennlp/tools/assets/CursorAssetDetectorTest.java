@@ -158,14 +158,15 @@ public class CursorAssetDetectorTest {
         padded(new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0}));
     final String webp = Base64.getEncoder().encodeToString(riff("WEBP"));
     final String wave = Base64.getEncoder().encodeToString(riff("WAVE"));
+    final String avi = Base64.getEncoder().encodeToString(riff("AVI "));
     final String pdf = Base64.getEncoder().encodeToString(
         padded("%PDF-1.7 stub content".getBytes(
             java.nio.charset.StandardCharsets.US_ASCII)));
     final String zip = Base64.getEncoder().encodeToString(
         padded(new byte[] {'P', 'K', 3, 4}));
-    final String text = String.join("\n", gif, jpeg, webp, wave, pdf, zip);
+    final String text = String.join("\n", gif, jpeg, webp, wave, avi, pdf, zip);
     final List<EmbeddedAsset> assets = detector.detect(text);
-    assertEquals(6, assets.size());
+    assertEquals(7, assets.size());
     assertEquals(EmbeddedAsset.FORMAT_GIF, assets.get(0).format());
     assertEquals(12, assets.get(0).width());
     assertEquals(34, assets.get(0).height());
@@ -173,8 +174,10 @@ public class CursorAssetDetectorTest {
     assertEquals(-1, assets.get(1).width());
     assertEquals(EmbeddedAsset.FORMAT_WEBP, assets.get(2).format());
     assertEquals(EmbeddedAsset.FORMAT_WAV, assets.get(3).format());
-    assertEquals(EmbeddedAsset.FORMAT_PDF, assets.get(4).format());
-    assertEquals(EmbeddedAsset.FORMAT_ZIP, assets.get(5).format());
+    assertEquals(EmbeddedAsset.FORMAT_AVI, assets.get(4).format());
+    assertEquals("video/x-msvideo", assets.get(4).mediaType());
+    assertEquals(EmbeddedAsset.FORMAT_PDF, assets.get(5).format());
+    assertEquals(EmbeddedAsset.FORMAT_ZIP, assets.get(6).format());
   }
 
   /**
@@ -215,7 +218,37 @@ public class CursorAssetDetectorTest {
         Arguments.of(EmbeddedAsset.FORMAT_WOFF, "font/woff",
             new byte[] {'w', 'O', 'F', 'F'}),
         Arguments.of(EmbeddedAsset.FORMAT_WOFF2, "font/woff2",
-            new byte[] {'w', 'O', 'F', '2'}));
+            new byte[] {'w', 'O', 'F', '2'}),
+        Arguments.of(EmbeddedAsset.FORMAT_MP3, "audio/mpeg",
+            new byte[] {'I', 'D', '3', 3, 0, 0}),
+        Arguments.of(EmbeddedAsset.FORMAT_OLE2, "application/x-ole-storage",
+            new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0,
+                (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1}),
+        Arguments.of(EmbeddedAsset.FORMAT_ZSTD, "application/zstd",
+            new byte[] {0x28, (byte) 0xB5, 0x2F, (byte) 0xFD}),
+        Arguments.of(EmbeddedAsset.FORMAT_WASM, "application/wasm",
+            new byte[] {0, 'a', 's', 'm', 1, 0, 0, 0}),
+        Arguments.of("rtf", "application/rtf",
+            "{\\rtf1\\ansi minimal".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+        Arguments.of("xz", "application/x-xz",
+            new byte[] {(byte) 0xFD, '7', 'z', 'X', 'Z', 0}),
+        Arguments.of("matroska", "application/x-matroska",
+            new byte[] {0x1A, 0x45, (byte) 0xDF, (byte) 0xA3}),
+        Arguments.of("psd", "image/vnd.adobe.photoshop",
+            new byte[] {'8', 'B', 'P', 'S', 0, 1}),
+        Arguments.of("ico", "image/vnd.microsoft.icon",
+            new byte[] {0, 0, 1, 0}),
+        Arguments.of("macho", "application/x-mach-o",
+            new byte[] {(byte) 0xFE, (byte) 0xED, (byte) 0xFA, (byte) 0xCE}),
+        Arguments.of("pem-cert", "application/x-x509-cert",
+            "-----BEGIN CERTIFICATE-----".getBytes(
+                java.nio.charset.StandardCharsets.US_ASCII)),
+        Arguments.of("torrent", "application/x-bittorrent",
+            "d8:announce27:http".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+        Arguments.of("php", "text/x-php",
+            "<?php echo 'shell';".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+        Arguments.of("parquet", "application/x-parquet",
+            new byte[] {'P', 'A', 'R', '1'}));
   }
 
   @ParameterizedTest
