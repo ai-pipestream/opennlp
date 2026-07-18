@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.function.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +43,12 @@ import opennlp.tools.util.StringUtil;
  * <p>Words and suffixes below their frequency cutoffs share learned unknown embeddings;
  * positions outside the sentence share a learned padding embedding. Training is
  * deterministic for a fixed {@link Settings#seed()}.</p>
+ *
+ * <p>Pretrained word vectors are an opt-in through
+ * {@link #train(ObjectStream, Settings, Function)}: the vectors of the words seen in
+ * training extend the input layer as a frozen window block and are stored inside the
+ * model, so the resulting model infers without any embedding component. Training
+ * without the option is unchanged and produces the original model format.</p>
  *
  * @since 3.0.0
  */
@@ -119,6 +126,48 @@ public final class FeedforwardPOSTrainer {
    */
   public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
       Settings settings) throws IOException {
+    return trainWith(samples, settings, null);
+  }
+
+  /**
+   * Trains a model from POS samples with pretrained word vectors extending the input
+   * layer. For every distinct normalized (lowercased) training word the function is
+   * asked once for a vector; {@code null} means the word has none. The returned
+   * vectors must all share one length, they are never updated by training, and the
+   * collected slice is stored inside the model, so tagging later needs no embedding
+   * component and a word without a stored vector scores the block as zeros.
+   *
+   * @param samples The training samples. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source consulted at training time. Must not be
+   *                    {@code null}; must return vectors of one consistent positive
+   *                    length and a vector for at least one training word.
+   * @return A trained {@link FeedforwardPOSModel} carrying the vector block. Never
+   *         {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
+   *         samples contain no token, or {@code wordVectors} violates its contract.
+   */
+  public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
+      Settings settings, Function<CharSequence, float[]> wordVectors) throws IOException {
+    if (wordVectors == null) {
+      throw new IllegalArgumentException("wordVectors must not be null");
+    }
+    return trainWith(samples, settings, wordVectors);
+  }
+
+  /**
+   * The shared training path behind both public entry points.
+   *
+   * @param samples The training samples. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source, or {@code null} to train without the
+   *                    vector block.
+   * @return A trained {@link FeedforwardPOSModel}. Never {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   */
+  private static FeedforwardPOSModel trainWith(ObjectStream<POSSample> samples,
+      Settings settings, Function<CharSequence, float[]> wordVectors) throws IOException {
     if (samples == null || settings == null) {
       throw new IllegalArgumentException("samples and settings must not be null");
     }
@@ -132,7 +181,7 @@ public final class FeedforwardPOSTrainer {
     if (corpus.isEmpty()) {
       throw new IllegalArgumentException("no trainable examples in the samples");
     }
-    final FeedforwardPOSModel model = initialize(corpus, settings);
+    final FeedforwardPOSModel model = initialize(corpus, settings, wordVectors);
 
     final Map<String, Integer> outputIds = new HashMap<>();
     final String[] tags = model.tags();
@@ -140,6 +189,8 @@ public final class FeedforwardPOSTrainer {
       outputIds.put(tags[i], i);
     }
     final List<int[]> featureList = new ArrayList<>();
+    final List<int[]> pretrainedList =
+        model.usesPretrainedVectors() ? new ArrayList<>() : null;
     final List<Integer> goldList = new ArrayList<>();
     for (final POSSample s : corpus) {
       final String[] sentence = s.getSentence();
@@ -147,10 +198,13 @@ public final class FeedforwardPOSTrainer {
       for (int i = 0; i < sentence.length; i++) {
         featureList.add(model.featureIds(FeedforwardPOSContext.extract(sentence, i,
             i > 0 ? gold[i - 1] : null, i > 1 ? gold[i - 2] : null)));
+        if (pretrainedList != null) {
+          pretrainedList.add(model.pretrainedRows(sentence, i));
+        }
         goldList.add(outputIds.get(gold[i]));
       }
     }
-    optimize(model, featureList, goldList, settings);
+    optimize(model, featureList, pretrainedList, goldList, settings);
     return model;
   }
 
@@ -164,7 +218,7 @@ public final class FeedforwardPOSTrainer {
    * @return An untrained model with all vocabularies in place. Never {@code null}.
    */
   private static FeedforwardPOSModel initialize(List<POSSample> corpus,
-      Settings settings) {
+      Settings settings, Function<CharSequence, float[]> wordVectors) {
     final Map<String, Integer> wordCounts = new LinkedHashMap<>();
     final Map<String, Integer> suffixCounts = new LinkedHashMap<>();
     final Map<String, Integer> tagSet = new LinkedHashMap<>();
@@ -223,8 +277,37 @@ public final class FeedforwardPOSTrainer {
       tagIds.put(tag, row++);
     }
 
+    int pretrainedSize = 0;
+    final Map<String, Integer> pretrainedIds = new LinkedHashMap<>();
+    final List<float[]> pretrainedVectors = new ArrayList<>();
+    if (wordVectors != null) {
+      for (final String word : wordCounts.keySet()) {
+        final float[] vector = wordVectors.apply(word);
+        if (vector == null) {
+          continue;
+        }
+        if (pretrainedSize == 0) {
+          if (vector.length == 0) {
+            throw new IllegalArgumentException(
+                "wordVectors returned an empty vector for: " + word);
+          }
+          pretrainedSize = vector.length;
+        } else if (vector.length != pretrainedSize) {
+          throw new IllegalArgumentException("wordVectors returned a vector of length "
+              + vector.length + " after length " + pretrainedSize + " for: " + word);
+        }
+        pretrainedIds.put(word, pretrainedVectors.size());
+        pretrainedVectors.add(vector.clone());
+      }
+      if (pretrainedVectors.isEmpty()) {
+        throw new IllegalArgumentException(
+            "wordVectors supplied no vector for any training word");
+      }
+    }
+
     final Random random = new Random(settings.seed());
-    final int inputSize = FeedforwardPOSContext.SLOTS * settings.embeddingSize();
+    final int inputSize = FeedforwardPOSContext.SLOTS * settings.embeddingSize()
+        + FeedforwardPOSContext.PRETRAINED_SLOTS * pretrainedSize;
     final float[][] embeddings = uniform(random, row, settings.embeddingSize(), 0.01);
     final float[][] hiddenWeights = uniform(random, settings.hiddenSize(), inputSize,
         Math.sqrt(6.0 / (inputSize + settings.hiddenSize())));
@@ -232,7 +315,8 @@ public final class FeedforwardPOSTrainer {
         Math.sqrt(6.0 / (settings.hiddenSize() + tags.length)));
     return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
         settings.embeddingSize(), embeddings, hiddenWeights,
-        new float[settings.hiddenSize()], outputWeights, new float[tags.length]);
+        new float[settings.hiddenSize()], outputWeights, new float[tags.length],
+        pretrainedSize, pretrainedIds, pretrainedVectors.toArray(new float[0][]));
   }
 
   /**
@@ -243,14 +327,21 @@ public final class FeedforwardPOSTrainer {
    *
    * @param model The freshly initialized model whose weight arrays are updated.
    * @param featureList The embedding row indices of every training example.
+   * @param pretrainedList The pretrained vector rows of every training example, or
+   *                       {@code null} when the model carries no vector block. The
+   *                       vectors themselves stay frozen: their input deltas are
+   *                       simply never applied anywhere, while the hidden weights
+   *                       over the block train normally.
    * @param goldList The gold output index of every training example, aligned with
    *                 {@code featureList}.
    * @param settings The hyperparameters controlling the optimization.
    */
   private static void optimize(FeedforwardPOSModel model, List<int[]> featureList,
-      List<Integer> goldList, Settings settings) {
+      List<int[]> pretrainedList, List<Integer> goldList, Settings settings) {
     final int exampleCount = featureList.size();
     final int[][] features = featureList.toArray(new int[0][]);
+    final int[][] pretrained =
+        pretrainedList == null ? null : pretrainedList.toArray(new int[0][]);
     final int[] gold = new int[exampleCount];
     for (int i = 0; i < exampleCount; i++) {
       gold[i] = goldList.get(i);
@@ -264,7 +355,10 @@ public final class FeedforwardPOSTrainer {
     final int embeddingSize = settings.embeddingSize();
     final int hiddenSize = settings.hiddenSize();
     final int outputSize = outputBias.length;
-    final int inputSize = features[0].length * embeddingSize;
+    final int discreteInput = features[0].length * embeddingSize;
+    final int inputSize = hiddenWeights[0].length;
+    final int pretrainedSize = model.pretrainedSize();
+    final float[][] pretrainedVectors = model.pretrainedVectors();
 
     final double[][] embeddingAccumulator = new double[embeddings.length][embeddingSize];
     final double[][] hiddenAccumulator = new double[hiddenSize][inputSize];
@@ -315,6 +409,20 @@ public final class FeedforwardPOSTrainer {
             final int offset = f * embeddingSize;
             for (int d = 0; d < embeddingSize; d++) {
               x[offset + d] = embedding[d];
+            }
+          }
+          if (pretrained != null) {
+            final int[] rows = pretrained[order[b]];
+            for (int po = 0; po < rows.length; po++) {
+              final int offset = discreteInput + po * pretrainedSize;
+              if (rows[po] == FeedforwardPOSModel.NO_VECTOR) {
+                Arrays.fill(x, offset, offset + pretrainedSize, 0.0);
+              } else {
+                final float[] vector = pretrainedVectors[rows[po]];
+                for (int d = 0; d < pretrainedSize; d++) {
+                  x[offset + d] = vector[d];
+                }
+              }
             }
           }
           for (int j = 0; j < hiddenSize; j++) {
