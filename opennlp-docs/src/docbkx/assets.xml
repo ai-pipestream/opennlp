@@ -32,11 +32,15 @@
 			inside base64 runs. A PNG payload always starts <code>iVBORw0KGgo</code>, a
 			JPEG <code>/9j/</code>, a GIF <code>R0lGOD</code>, a RIFF container
 			<code>UklGR</code>, a PDF <code>JVBERi0</code>, and a zip archive
-			<code>UEsDB</code>. A bare run is only reported when it is long enough to be a
-			real payload, carries such a prefix, and its decoded leading bytes verify the
-			magic; a <code>data:</code> URI declares its media type and is reported at any
-			payload length. Decoding the leading bytes also yields image dimensions where
-			the format's header carries them.
+			<code>UEsDB</code>. The built-in table covers, with each prefix derived from
+			the magic bytes the format's specification publishes: images (PNG, JPEG, GIF,
+			WebP, TIFF), documents and archives (PDF, zip, gzip, 7z, RAR), audio (wave,
+			FLAC, Ogg, MIDI), fonts (WOFF, WOFF2), SQLite databases, and executable code
+			(ELF, Windows PE, Java class files). A bare run is only reported when it is
+			long enough to be a real payload, carries such a prefix, and its decoded
+			leading bytes verify the magic; a <code>data:</code> URI declares its media
+			type and is reported at any payload length. Decoding the leading bytes also
+			yields image dimensions where the format's header carries them.
 		</para>
 	</section>
 
