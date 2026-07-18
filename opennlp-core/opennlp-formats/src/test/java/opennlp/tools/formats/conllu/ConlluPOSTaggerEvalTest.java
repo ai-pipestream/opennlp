@@ -24,7 +24,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
@@ -250,12 +254,20 @@ public class ConlluPOSTaggerEvalTest {
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
     final double accuracy = evaluate(tagger, dir.resolve("test.conllu"));
     final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
+    final double[] profile = errorProfile(tagger, dir.resolve("train.conllu"),
+        dir.resolve("test.conllu"));
     logger.info("bilstm pretrained UPOS accuracy {} (lexicon: {}), throughput {} tokens/s",
         accuracy, lexicon == null ? "none" : lexicon.size() + " words", throughput);
+    logger.info("bilstm pretrained IV accuracy {}, OOV accuracy {}", profile[0],
+        profile[1]);
     record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy,
         bilstmLabel(settings));
     record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-tokens-per-s",
         throughput, bilstmLabel(settings));
+    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-iv-acc",
+        profile[0], bilstmLabel(settings));
+    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-oov-acc",
+        profile[1], bilstmLabel(settings));
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
@@ -300,6 +312,60 @@ public class ConlluPOSTaggerEvalTest {
       tagger.tag(sentence);
     }
     return tokens / ((System.nanoTime() - start) / 1e9d);
+  }
+
+  /**
+   * Splits tagging accuracy into in-vocabulary and out-of-vocabulary tokens against
+   * the training vocabulary (cutoff 2, normalized like the tagger does), the error
+   * profile that drives sweep decisions.
+   *
+   * @return {IV accuracy, OOV accuracy}; the OOV slot is 1.0 when there are no OOV
+   *         tokens.
+   */
+  private static double[] errorProfile(POSTagger tagger, Path trainConllu,
+      Path testConllu) throws IOException {
+    final Map<String, Integer> counts = new HashMap<>();
+    try (ObjectStream<POSSample> train = samples(trainConllu)) {
+      POSSample sample;
+      while ((sample = train.read()) != null) {
+        for (final String token : sample.getSentence()) {
+          counts.merge(BilstmPOSModel.normalize(token), 1, Integer::sum);
+        }
+      }
+    }
+    final Set<String> vocabulary = new HashSet<>();
+    for (final Map.Entry<String, Integer> entry : counts.entrySet()) {
+      if (entry.getValue() >= 2) {
+        vocabulary.add(entry.getKey());
+      }
+    }
+    long ivCorrect = 0;
+    long ivTotal = 0;
+    long oovCorrect = 0;
+    long oovTotal = 0;
+    try (ObjectStream<POSSample> test = samples(testConllu)) {
+      POSSample sample;
+      while ((sample = test.read()) != null) {
+        final String[] assigned = tagger.tag(sample.getSentence());
+        final String[] gold = sample.getTags();
+        for (int i = 0; i < gold.length; i++) {
+          if (vocabulary.contains(BilstmPOSModel.normalize(sample.getSentence()[i]))) {
+            ivTotal++;
+            if (assigned[i].equals(gold[i])) {
+              ivCorrect++;
+            }
+          }
+          else {
+            oovTotal++;
+            if (assigned[i].equals(gold[i])) {
+              oovCorrect++;
+            }
+          }
+        }
+      }
+    }
+    return new double[] {(double) ivCorrect / ivTotal,
+        oovTotal > 0 ? (double) oovCorrect / oovTotal : 1.0d};
   }
 
   /**

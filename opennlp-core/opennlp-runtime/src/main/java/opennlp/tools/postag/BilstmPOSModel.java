@@ -137,12 +137,13 @@ public class BilstmPOSModel {
 
   /**
    * Normalizes a token for vocabulary lookup by lowercasing it; the built-in symbols
-   * are returned unchanged.
+   * are returned unchanged. This is the lookup contract both training and tagging
+   * use, so evaluators may rely on it.
    *
    * @param token The token. Must not be {@code null}.
    * @return The lookup form. Never {@code null}.
    */
-  static String normalize(String token) {
+  public static String normalize(String token) {
     return token.startsWith("*") ? token : token.toLowerCase(Locale.ROOT);
   }
 
