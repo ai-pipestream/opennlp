@@ -53,7 +53,7 @@ class BilstmModelGradientTest {
         new POSSample(new String[] {"Cats", "sleep"},
             new String[] {"NOUN", "VERB"}));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
     sample = corpus.get(0);

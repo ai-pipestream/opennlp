@@ -82,11 +82,13 @@ public final class BilstmPOSTrainer {
    *                    with the unknown row, forcing the character and pretrained
    *                    paths to carry out-of-vocabulary words, which is exactly the
    *                    tagging-time condition they face.
+   * @param learningRateHalfLife Epochs between learning-rate halvings; zero disables
+   *                             decay.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
-      double wordDropout) {
+      double wordDropout, int learningRateHalfLife) {
 
     /**
      * Validates the hyperparameters.
@@ -116,6 +118,9 @@ public final class BilstmPOSTrainer {
       if (wordDropout < 0.0d || wordDropout >= 1.0d) {
         throw new IllegalArgumentException("wordDropout must be in [0, 1)");
       }
+      if (learningRateHalfLife < 0) {
+        throw new IllegalArgumentException("learningRateHalfLife must not be negative");
+      }
     }
 
     /**
@@ -124,7 +129,7 @@ public final class BilstmPOSTrainer {
      */
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
-          Runtime.getRuntime().availableProcessors(), 0.0d);
+          Runtime.getRuntime().availableProcessors(), 0.0d, 0);
     }
   }
 
@@ -235,6 +240,10 @@ public final class BilstmPOSTrainer {
     try {
       int timestep = 0;
       for (int epoch = 1; epoch <= settings.epochs(); epoch++) {
+        final double learningRate = settings.learningRateHalfLife() > 0
+            ? settings.learningRate()
+                * Math.pow(0.5d, (epoch - 1) / (double) settings.learningRateHalfLife())
+            : settings.learningRate();
         shuffle(order, shuffleRandom);
         double loss = 0.0d;
         int tokens = 0;
@@ -288,11 +297,11 @@ public final class BilstmPOSTrainer {
           if (norm > settings.clipNorm()) {
             context.adam.scaleGradients(settings.clipNorm() / norm);
           }
-          context.adam.step(settings.learningRate(), timestep);
+          context.adam.step(learningRate, timestep);
           context.adam.zero();
         }
-        logger.info("epoch {}/{} loss {} over {} tokens", epoch, settings.epochs(),
-            loss / tokens, tokens);
+        logger.info("epoch {}/{} loss {} over {} tokens (lr {})", epoch, settings.epochs(),
+            loss / tokens, tokens, learningRate);
       }
     }
     finally {
