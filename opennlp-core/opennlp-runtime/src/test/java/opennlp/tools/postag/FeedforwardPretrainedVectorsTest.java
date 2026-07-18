@@ -143,6 +143,52 @@ public class FeedforwardPretrainedVectorsTest {
         "the reloaded model must decide exactly like the original");
   }
 
+  /**
+   * Asserts the lexicon overload: two words absent from the training data get their
+   * vectors stored through the lexicon, so tagging separates them by vector class,
+   * while the same words on a model trained without the lexicon present identical
+   * inputs and provably tag identically.
+   */
+  @Test
+  void testLexiconExtendsCoverageBeyondTrainingWords() throws IOException {
+    final FeedforwardPOSModel withLexicon = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings(), VECTORS,
+        List.of("aazqy", "eezqy"));
+    final FeedforwardPOSTagger tagger = new FeedforwardPOSTagger(withLexicon);
+    assertEquals("A", tagger.tag(new String[] {"aazqy"})[0]);
+    assertEquals("B", tagger.tag(new String[] {"eezqy"})[0]);
+
+    final FeedforwardPOSModel without = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings(), VECTORS);
+    final FeedforwardPOSTagger withoutTagger = new FeedforwardPOSTagger(without);
+    assertEquals(withoutTagger.tag(new String[] {"aazqy"})[0],
+        withoutTagger.tag(new String[] {"eezqy"})[0],
+        "without the lexicon both words score the block as zeros and must tag alike");
+  }
+
+  /** A lexicon word the source has no vector for is skipped, not an error. */
+  @Test
+  void testLexiconWordsWithoutAVectorAreSkipped() throws IOException {
+    final Function<CharSequence, float[]> partial =
+        word -> word.charAt(0) == 'z' ? null : VECTORS.apply(word);
+    final FeedforwardPOSModel model = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings(), partial,
+        List.of("zzskip", "aazqy"));
+    assertTrue(model.usesPretrainedVectors());
+    assertEquals("A", new FeedforwardPOSTagger(model).tag(new String[] {"aazqy"})[0]);
+  }
+
+  @Test
+  void testLexiconRejectsContractViolations() {
+    assertThrows(IllegalArgumentException.class, () -> FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings(), VECTORS, null),
+        "a null lexicon must fail loud on the lexicon overload");
+    assertThrows(IllegalArgumentException.class, () -> FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings(), VECTORS,
+        java.util.Arrays.asList("aazqy", null)),
+        "a lexicon containing null must fail loud");
+  }
+
   /** A word the model never saw scores the vector block as zeros and still tags. */
   @Test
   void testWordsWithoutAStoredVectorStillTag() throws IOException {
