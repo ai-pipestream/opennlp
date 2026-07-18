@@ -174,14 +174,15 @@ public class ConlluPOSTaggerEvalTest {
         intProperty("maxWordLength", base.maxWordLength()),
         longProperty("seed", base.seed()),
         intProperty("threads", base.threads()),
-        doubleProperty("wordDropout", base.wordDropout()));
+        doubleProperty("wordDropout", base.wordDropout()),
+        intProperty("learningRateHalfLife", base.learningRateHalfLife()));
   }
 
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
     return "h" + s.hiddenSize() + ";e" + s.epochs() + ";b" + s.batchSize() + ";lr"
         + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
         + ";we" + s.wordEmbeddingSize() + ";ch" + s.charHiddenSize() + ";wd"
-        + s.wordDropout();
+        + s.wordDropout() + ";hl" + s.learningRateHalfLife();
   }
 
   private static int intProperty(String name, int fallback) {

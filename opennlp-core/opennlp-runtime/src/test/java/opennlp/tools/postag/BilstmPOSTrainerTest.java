@@ -43,7 +43,7 @@ class BilstmPOSTrainerTest {
       new POSSample(new String[] {"A", "fish", "swam"}, new String[] {"D", "N", "V"}));
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
-      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d);
+      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -113,7 +113,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            3, 0.0d));
+            3, 0.0d, 0));
     final String[] sentence = {"The", "cat", "ran"};
     final double[][] expected = sequential.score(sentence);
     final double[][] actual = parallel.score(sentence);
