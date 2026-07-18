@@ -1,6 +1,6 @@
 # Research branch map
 
-This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges; `krickert-main` is the regenerated integration line that merges every open pull request head and every staged feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`); everything else is one feature per branch, stacked on its true dependency. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-17.
+This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-17.
 
 ## Merge strategy
 
@@ -105,6 +105,6 @@ All staged branches are rebased onto current apache main, tested at their tips, 
 | `relation` | Predicate-driven relation mentions over dependency parses | Staged, on `depparse-annotator` | |
 | `embedding-annotator` | Embedding vectors for any span layer (tokens, sentences) | Staged, on #1152 | |
 
-## Graduation
+## The path upstream
 
-A branch graduates in this order: JIRA ticket filed and the branch renamed to its key, rebase onto its final parents, upstream pull request opened when the intake queue has room, and the upstream review then judges it on the project's normal standards. Until all of that happens for a given branch, treat its content as a demo.
+Moving a branch to Apache OpenNLP is a separate act from admitting it to the research arm, and it follows the upstream project's process, not ours: JIRA ticket filed and the branch renamed to its key, rebase onto its final parents, upstream pull request opened when the intake queue has room to review and vet it properly, and the upstream review then judges it on the project's normal standards. Until all of that happens for a given branch, treat its content as a demo.

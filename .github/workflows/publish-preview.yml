@@ -1,6 +1,6 @@
 name: publish-preview
 
-# Publishes the preview artifacts from the krickert-main integration branch to the
+# Publishes the preview artifacts from the kristian-3.x-features research branch to the
 # org's GitHub Packages Maven registry. The version is read from the provenance
 # manifest, so a publish always matches what the regen actually built. Manual
 # dispatch only: a regen is pushed first, then this is triggered against it.
