@@ -370,10 +370,10 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * Maps the vector window of a position onto stored vector rows: the previous, the
-   * current, and the next word, each normalized like the word vocabulary. A position
-   * outside the sentence and a word without a stored vector map to {@link #NO_VECTOR},
-   * which scores as zeros.
+   * Maps the vector window of a position onto stored vector rows: two words left, the
+   * word itself, and two words right, each normalized like the word vocabulary. A
+   * position outside the sentence and a word without a stored vector map to
+   * {@link #NO_VECTOR}, which scores as zeros.
    *
    * @param sentence The sentence tokens. Must not be {@code null}.
    * @param index The position to tag.
@@ -385,7 +385,7 @@ public class FeedforwardPOSModel {
     }
     final int[] rows = new int[FeedforwardPOSContext.PRETRAINED_SLOTS];
     for (int p = 0; p < rows.length; p++) {
-      final int position = index + p - 1;
+      final int position = index + p - 2;
       if (position < 0 || position >= sentence.length) {
         rows[p] = NO_VECTOR;
       } else {
