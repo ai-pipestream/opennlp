@@ -78,10 +78,15 @@ public final class BilstmPOSTrainer {
    *                order, so results are deterministic per (seed, threads) and
    *                agree across thread counts up to floating-point noise from JIT
    *                multiply-add contraction.
+   * @param wordDropout Probability of replacing a training token's word embedding
+   *                    with the unknown row, forcing the character and pretrained
+   *                    paths to carry out-of-vocabulary words, which is exactly the
+   *                    tagging-time condition they face.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
-      double dropout, int wordCutoff, int maxWordLength, long seed, int threads) {
+      double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
+      double wordDropout) {
 
     /**
      * Validates the hyperparameters.
@@ -108,6 +113,9 @@ public final class BilstmPOSTrainer {
       if (threads <= 0) {
         throw new IllegalArgumentException("threads must be positive");
       }
+      if (wordDropout < 0.0d || wordDropout >= 1.0d) {
+        throw new IllegalArgumentException("wordDropout must be in [0, 1)");
+      }
     }
 
     /**
@@ -116,7 +124,7 @@ public final class BilstmPOSTrainer {
      */
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
-          Runtime.getRuntime().availableProcessors());
+          Runtime.getRuntime().availableProcessors(), 0.0d);
     }
   }
 
@@ -638,13 +646,20 @@ public final class BilstmPOSTrainer {
       final LstmLayer.ForwardCache[] charBackwardCaches = new LstmLayer.ForwardCache[steps];
       final double[][] xs = new double[steps][inputSize];
       final double[][] masks = new double[steps][inputSize];
+      final int[] wordRows = new int[steps];
 
       for (int t = 0; t < steps; t++) {
         final String token = sentence[t];
         final int[] ids = charIds(token);
         charIdsPerToken[t] = ids;
+        int wordRow = wordId(token);
+        if (settings.wordDropout() > 0.0d
+            && random.nextDouble() < settings.wordDropout()) {
+          wordRow = 0;
+        }
+        wordRows[t] = wordRow;
         final double[] x = xs[t];
-        final double[] wordEmbedding = wordEmbeddings[wordId(token)];
+        final double[] wordEmbedding = wordEmbeddings[wordRow];
         System.arraycopy(wordEmbedding, 0, x, 0, wordSize);
         if (ids.length > 0) {
           final double[][] charXs = new double[ids.length][];
@@ -750,7 +765,7 @@ public final class BilstmPOSTrainer {
         for (int i = 0; i < inputSize; i++) {
           dx[i] = (dXsFwd[t][i] + dxBwd[i]) * mask[i];
         }
-        final int wordRow = wordId(sentence[t]);
+        final int wordRow = wordRows[t];
         for (int i = 0; i < wordSize; i++) {
           wordEmbeddingGrads[wordRow][i] += dx[i];
         }

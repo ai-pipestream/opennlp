@@ -47,7 +47,7 @@ class BilstmPOSModelTest {
 
   private static BilstmPOSModel tinyModel() throws IOException {
     return BilstmPOSTrainer.train(new CollectionObjectStream<>(CORPUS),
-        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2));
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d));
   }
 
   @Test
@@ -71,7 +71,7 @@ class BilstmPOSModelTest {
   void testSerializationRoundTripPreservesPretrainedTable() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(
         new CollectionObjectStream<>(CORPUS),
-        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d),
         w -> new float[] {w.length(), 1.0f}, List.of("unseen"));
     final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     model.serialize(buffer);
