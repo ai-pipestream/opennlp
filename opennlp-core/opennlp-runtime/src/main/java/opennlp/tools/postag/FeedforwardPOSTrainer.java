@@ -126,7 +126,7 @@ public final class FeedforwardPOSTrainer {
    */
   public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
       Settings settings) throws IOException {
-    return trainWith(samples, settings, null);
+    return trainWith(samples, settings, null, null);
   }
 
   /**
@@ -153,7 +153,41 @@ public final class FeedforwardPOSTrainer {
     if (wordVectors == null) {
       throw new IllegalArgumentException("wordVectors must not be null");
     }
-    return trainWith(samples, settings, wordVectors);
+    return trainWith(samples, settings, wordVectors, null);
+  }
+
+  /**
+   * Trains a model from POS samples with pretrained word vectors, storing vectors for
+   * the words of an additional lexicon besides the training words. Training itself is
+   * unchanged by the lexicon: the block weights are learned over the vector space from
+   * the training words alone, and a lexicon word's row is only read when a tagged
+   * sentence contains that word. The lexicon therefore widens tagging-time coverage to
+   * words never seen in training, which would otherwise score the block as zeros.
+   *
+   * @param samples The training samples. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source consulted at training time. Must not be
+   *                    {@code null}; must return vectors of one consistent positive
+   *                    length and a vector for at least one training word.
+   * @param lexicon Additional words to store vectors for, normalized like the training
+   *                words. Must not be {@code null} or contain {@code null}; words the
+   *                source has no vector for are skipped.
+   * @return A trained {@link FeedforwardPOSModel} carrying the vector block. Never
+   *         {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
+   *         samples contain no token, or {@code wordVectors} violates its contract.
+   */
+  public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
+      Settings settings, Function<CharSequence, float[]> wordVectors,
+      Iterable<? extends CharSequence> lexicon) throws IOException {
+    if (wordVectors == null) {
+      throw new IllegalArgumentException("wordVectors must not be null");
+    }
+    if (lexicon == null) {
+      throw new IllegalArgumentException("lexicon must not be null");
+    }
+    return trainWith(samples, settings, wordVectors, lexicon);
   }
 
   /**
@@ -163,11 +197,13 @@ public final class FeedforwardPOSTrainer {
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source, or {@code null} to train without the
    *                    vector block.
+   * @param lexicon Additional words to store vectors for, or {@code null} for none.
    * @return A trained {@link FeedforwardPOSModel}. Never {@code null}.
    * @throws IOException Thrown if reading the samples fails.
    */
   private static FeedforwardPOSModel trainWith(ObjectStream<POSSample> samples,
-      Settings settings, Function<CharSequence, float[]> wordVectors) throws IOException {
+      Settings settings, Function<CharSequence, float[]> wordVectors,
+      Iterable<? extends CharSequence> lexicon) throws IOException {
     if (samples == null || settings == null) {
       throw new IllegalArgumentException("samples and settings must not be null");
     }
@@ -181,7 +217,7 @@ public final class FeedforwardPOSTrainer {
     if (corpus.isEmpty()) {
       throw new IllegalArgumentException("no trainable examples in the samples");
     }
-    final FeedforwardPOSModel model = initialize(corpus, settings, wordVectors);
+    final FeedforwardPOSModel model = initialize(corpus, settings, wordVectors, lexicon);
 
     final Map<String, Integer> outputIds = new HashMap<>();
     final String[] tags = model.tags();
@@ -218,7 +254,8 @@ public final class FeedforwardPOSTrainer {
    * @return An untrained model with all vocabularies in place. Never {@code null}.
    */
   private static FeedforwardPOSModel initialize(List<POSSample> corpus,
-      Settings settings, Function<CharSequence, float[]> wordVectors) {
+      Settings settings, Function<CharSequence, float[]> wordVectors,
+      Iterable<? extends CharSequence> lexicon) {
     final Map<String, Integer> wordCounts = new LinkedHashMap<>();
     final Map<String, Integer> suffixCounts = new LinkedHashMap<>();
     final Map<String, Integer> tagSet = new LinkedHashMap<>();
@@ -302,6 +339,27 @@ public final class FeedforwardPOSTrainer {
       if (pretrainedVectors.isEmpty()) {
         throw new IllegalArgumentException(
             "wordVectors supplied no vector for any training word");
+      }
+      if (lexicon != null) {
+        for (final CharSequence entry : lexicon) {
+          if (entry == null) {
+            throw new IllegalArgumentException("lexicon must not contain null");
+          }
+          final String word = FeedforwardPOSModel.normalize(entry.toString());
+          if (word.isEmpty() || pretrainedIds.containsKey(word)) {
+            continue;
+          }
+          final float[] vector = wordVectors.apply(word);
+          if (vector == null) {
+            continue;
+          }
+          if (vector.length != pretrainedSize) {
+            throw new IllegalArgumentException("wordVectors returned a vector of length "
+                + vector.length + " after length " + pretrainedSize + " for: " + word);
+          }
+          pretrainedIds.put(word, pretrainedVectors.size());
+          pretrainedVectors.add(vector.clone());
+        }
       }
     }
 

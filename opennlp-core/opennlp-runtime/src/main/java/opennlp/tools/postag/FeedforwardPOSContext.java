@@ -42,11 +42,11 @@ final class FeedforwardPOSContext {
   static final int SLOTS = WORD_SLOTS + SUFFIX_SLOTS + SHAPE_SLOTS + TAG_SLOTS;
 
   /**
-   * Pretrained-vector window positions: the previous, current, and next word. Only
-   * models trained with word vectors carry this block; it follows the learned slots
-   * in the input layer.
+   * Pretrained-vector window positions: two left, the word itself, two right, matching
+   * the word window. Only models trained with word vectors carry this block; it follows
+   * the learned slots in the input layer.
    */
-  static final int PRETRAINED_SLOTS = 3;
+  static final int PRETRAINED_SLOTS = 5;
 
   private FeedforwardPOSContext() {
     // This class only describes the feature template and is never instantiated.
