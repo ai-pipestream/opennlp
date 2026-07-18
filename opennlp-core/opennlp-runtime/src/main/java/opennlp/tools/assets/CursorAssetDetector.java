@@ -61,6 +61,20 @@ public final class CursorAssetDetector implements AssetDetector {
       "UklGR",       // RIFF (WebP or wave)
       "JVBERi0",     // PDF %PDF-
       "UEsDB",       // zip PK\x03\x04
+      "SUkqA",       // TIFF little-endian II*\x00
+      "TU0AK",       // TIFF big-endian MM\x00*
+      "H4sI",        // gzip \x1f\x8b\x08
+      "N3q8rycc",    // 7z 7z\xBC\xAF\x27\x1C
+      "UmFyIRoH",    // RAR Rar!\x1a\x07, shared by the v4 and v5 signatures
+      "ZkxhQ",       // FLAC fLaC
+      "T2dnU",       // Ogg OggS
+      "TVRoZ",       // MIDI MThd
+      "U1FMaXRlIGZvcm1hdCAzA", // SQLite "SQLite format 3\x00"
+      "f0VMR",       // ELF \x7fELF
+      "TVqQA",       // PE MZ\x90\x00; bare MZ is too weak a magic to scan for
+      "yv66v",       // Java class 0xCAFEBABE
+      "d09GR",       // WOFF wOFF
+      "d09GM",       // WOFF2 wOF2
   };
 
   @Override
@@ -288,11 +302,55 @@ public final class CursorAssetDetector implements AssetDetector {
     if (startsWith(header, 'P', 'K', 0x03, 0x04)) {
       return EmbeddedAsset.FORMAT_ZIP;
     }
+    if (startsWith(header, 'I', 'I', 0x2A, 0x00)
+        || startsWith(header, 'M', 'M', 0x00, 0x2A)) {
+      return EmbeddedAsset.FORMAT_TIFF;
+    }
+    if (startsWith(header, 0x1F, 0x8B, 0x08)) {
+      return EmbeddedAsset.FORMAT_GZIP;
+    }
+    if (startsWith(header, '7', 'z', 0xBC, 0xAF, 0x27, 0x1C)) {
+      return EmbeddedAsset.FORMAT_SEVEN_ZIP;
+    }
+    if (startsWith(header, 'R', 'a', 'r', '!', 0x1A, 0x07)) {
+      return EmbeddedAsset.FORMAT_RAR;
+    }
+    if (startsWith(header, 'f', 'L', 'a', 'C')) {
+      return EmbeddedAsset.FORMAT_FLAC;
+    }
+    if (startsWith(header, 'O', 'g', 'g', 'S')) {
+      return EmbeddedAsset.FORMAT_OGG;
+    }
+    if (startsWith(header, 'M', 'T', 'h', 'd')) {
+      return EmbeddedAsset.FORMAT_MIDI;
+    }
+    if (startsWith(header, 'S', 'Q', 'L', 'i', 't', 'e', ' ', 'f', 'o', 'r', 'm',
+        'a', 't', ' ', '3', 0x00)) {
+      return EmbeddedAsset.FORMAT_SQLITE;
+    }
+    if (startsWith(header, 0x7F, 'E', 'L', 'F')) {
+      return EmbeddedAsset.FORMAT_ELF;
+    }
+    if (startsWith(header, 'M', 'Z', 0x90, 0x00)) {
+      return EmbeddedAsset.FORMAT_PE;
+    }
+    // 0xCAFEBABE is also the fat-binary magic of another executable format; the Java
+    // class file is by far the more common embedding, so the tag names it.
+    if (startsWith(header, 0xCA, 0xFE, 0xBA, 0xBE)) {
+      return EmbeddedAsset.FORMAT_CLASS;
+    }
+    if (startsWith(header, 'w', 'O', 'F', 'F')) {
+      return EmbeddedAsset.FORMAT_WOFF;
+    }
+    if (startsWith(header, 'w', 'O', 'F', '2')) {
+      return EmbeddedAsset.FORMAT_WOFF2;
+    }
     return null;
   }
 
   /**
-   * Maps a format to its media type.
+   * Maps a format to its media type: the IANA-registered type where a registration
+   * exists, otherwise the form in prevailing use.
    *
    * @param format The format constant, or {@code null}.
    * @return The media type, or {@code null} for an unknown format.
@@ -309,6 +367,19 @@ public final class CursorAssetDetector implements AssetDetector {
       case EmbeddedAsset.FORMAT_WAV -> "audio/wav";
       case EmbeddedAsset.FORMAT_PDF -> "application/pdf";
       case EmbeddedAsset.FORMAT_ZIP -> "application/zip";
+      case EmbeddedAsset.FORMAT_TIFF -> "image/tiff";
+      case EmbeddedAsset.FORMAT_GZIP -> "application/gzip";
+      case EmbeddedAsset.FORMAT_SEVEN_ZIP -> "application/x-7z-compressed";
+      case EmbeddedAsset.FORMAT_RAR -> "application/vnd.rar";
+      case EmbeddedAsset.FORMAT_FLAC -> "audio/flac";
+      case EmbeddedAsset.FORMAT_OGG -> "application/ogg";
+      case EmbeddedAsset.FORMAT_MIDI -> "audio/midi";
+      case EmbeddedAsset.FORMAT_SQLITE -> "application/vnd.sqlite3";
+      case EmbeddedAsset.FORMAT_ELF -> "application/x-elf";
+      case EmbeddedAsset.FORMAT_PE -> "application/vnd.microsoft.portable-executable";
+      case EmbeddedAsset.FORMAT_CLASS -> "application/java-vm";
+      case EmbeddedAsset.FORMAT_WOFF -> "font/woff";
+      case EmbeddedAsset.FORMAT_WOFF2 -> "font/woff2";
       default -> null;
     };
   }
