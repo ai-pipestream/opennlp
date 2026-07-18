@@ -50,32 +50,11 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final String BASE64_MARKER = ";base64,";
 
   /**
-   * The base64 images of the known magic bytes at payload start, longest match first
-   * where prefixes overlap.
+   * The base64 image of the RIFF container magic. RIFF is recognized apart from the
+   * {@link KnownMagics} table because its file type sits at offset eight, behind the
+   * chunk size, and is resolved from the decoded header.
    */
-  private static final String[] MAGIC_PREFIXES = {
-      "iVBORw0KGgo", // PNG \x89PNG\r\n\x1a\n
-      "/9j/",        // JPEG \xFF\xD8\xFF
-      "R0lGODdh",    // GIF87a
-      "R0lGODlh",    // GIF89a
-      "UklGR",       // RIFF (WebP or wave)
-      "JVBERi0",     // PDF %PDF-
-      "UEsDB",       // zip PK\x03\x04
-      "SUkqA",       // TIFF little-endian II*\x00
-      "TU0AK",       // TIFF big-endian MM\x00*
-      "H4sI",        // gzip \x1f\x8b\x08
-      "N3q8rycc",    // 7z 7z\xBC\xAF\x27\x1C
-      "UmFyIRoH",    // RAR Rar!\x1a\x07, shared by the v4 and v5 signatures
-      "ZkxhQ",       // FLAC fLaC
-      "T2dnU",       // Ogg OggS
-      "TVRoZ",       // MIDI MThd
-      "U1FMaXRlIGZvcm1hdCAzA", // SQLite "SQLite format 3\x00"
-      "f0VMR",       // ELF \x7fELF
-      "TVqQA",       // PE MZ\x90\x00; bare MZ is too weak a magic to scan for
-      "yv66v",       // Java class 0xCAFEBABE
-      "d09GR",       // WOFF wOFF
-      "d09GM",       // WOFF2 wOF2
-  };
+  private static final String RIFF_PREFIX = "UklGR";
 
   @Override
   public List<EmbeddedAsset> detect(CharSequence text) {
@@ -163,11 +142,13 @@ public final class CursorAssetDetector implements AssetDetector {
     if (end - start < MIN_BARE_PAYLOAD) {
       return;
     }
-    boolean magic = false;
-    for (final String prefix : MAGIC_PREFIXES) {
-      if (matches(text, start, prefix)) {
-        magic = true;
-        break;
+    boolean magic = matches(text, start, RIFF_PREFIX);
+    if (!magic) {
+      for (final String prefix : KnownMagics.PREFIXES) {
+        if (matches(text, start, prefix)) {
+          magic = true;
+          break;
+        }
       }
     }
     if (!magic) {
@@ -271,21 +252,16 @@ public final class CursorAssetDetector implements AssetDetector {
   }
 
   /**
-   * Identifies the format of decoded header bytes.
+   * Identifies the format of decoded header bytes: the longest matching magic in
+   * {@link KnownMagics}, then the RIFF container resolved by its file type.
    *
    * @param header The decoded leading bytes.
-   * @return The format constant, or {@code null} when the bytes match no known magic.
+   * @return The format tag, or {@code null} when the bytes match no known magic.
    */
   private static String formatOf(byte[] header) {
-    if (startsWith(header, 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A)) {
-      return EmbeddedAsset.FORMAT_PNG;
-    }
-    if (startsWith(header, 0xFF, 0xD8, 0xFF)) {
-      return EmbeddedAsset.FORMAT_JPEG;
-    }
-    if (startsWith(header, 'G', 'I', 'F', '8', '7', 'a')
-        || startsWith(header, 'G', 'I', 'F', '8', '9', 'a')) {
-      return EmbeddedAsset.FORMAT_GIF;
+    final String known = KnownMagics.formatOf(header);
+    if (known != null) {
+      return known;
     }
     if (startsWith(header, 'R', 'I', 'F', 'F') && header.length >= 12) {
       if (header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P') {
@@ -294,65 +270,19 @@ public final class CursorAssetDetector implements AssetDetector {
       if (header[8] == 'W' && header[9] == 'A' && header[10] == 'V' && header[11] == 'E') {
         return EmbeddedAsset.FORMAT_WAV;
       }
+      if (header[8] == 'A' && header[9] == 'V' && header[10] == 'I' && header[11] == ' ') {
+        return EmbeddedAsset.FORMAT_AVI;
+      }
       return null;
-    }
-    if (startsWith(header, '%', 'P', 'D', 'F', '-')) {
-      return EmbeddedAsset.FORMAT_PDF;
-    }
-    if (startsWith(header, 'P', 'K', 0x03, 0x04)) {
-      return EmbeddedAsset.FORMAT_ZIP;
-    }
-    if (startsWith(header, 'I', 'I', 0x2A, 0x00)
-        || startsWith(header, 'M', 'M', 0x00, 0x2A)) {
-      return EmbeddedAsset.FORMAT_TIFF;
-    }
-    if (startsWith(header, 0x1F, 0x8B, 0x08)) {
-      return EmbeddedAsset.FORMAT_GZIP;
-    }
-    if (startsWith(header, '7', 'z', 0xBC, 0xAF, 0x27, 0x1C)) {
-      return EmbeddedAsset.FORMAT_SEVEN_ZIP;
-    }
-    if (startsWith(header, 'R', 'a', 'r', '!', 0x1A, 0x07)) {
-      return EmbeddedAsset.FORMAT_RAR;
-    }
-    if (startsWith(header, 'f', 'L', 'a', 'C')) {
-      return EmbeddedAsset.FORMAT_FLAC;
-    }
-    if (startsWith(header, 'O', 'g', 'g', 'S')) {
-      return EmbeddedAsset.FORMAT_OGG;
-    }
-    if (startsWith(header, 'M', 'T', 'h', 'd')) {
-      return EmbeddedAsset.FORMAT_MIDI;
-    }
-    if (startsWith(header, 'S', 'Q', 'L', 'i', 't', 'e', ' ', 'f', 'o', 'r', 'm',
-        'a', 't', ' ', '3', 0x00)) {
-      return EmbeddedAsset.FORMAT_SQLITE;
-    }
-    if (startsWith(header, 0x7F, 'E', 'L', 'F')) {
-      return EmbeddedAsset.FORMAT_ELF;
-    }
-    if (startsWith(header, 'M', 'Z', 0x90, 0x00)) {
-      return EmbeddedAsset.FORMAT_PE;
-    }
-    // 0xCAFEBABE is also the fat-binary magic of another executable format; the Java
-    // class file is by far the more common embedding, so the tag names it.
-    if (startsWith(header, 0xCA, 0xFE, 0xBA, 0xBE)) {
-      return EmbeddedAsset.FORMAT_CLASS;
-    }
-    if (startsWith(header, 'w', 'O', 'F', 'F')) {
-      return EmbeddedAsset.FORMAT_WOFF;
-    }
-    if (startsWith(header, 'w', 'O', 'F', '2')) {
-      return EmbeddedAsset.FORMAT_WOFF2;
     }
     return null;
   }
 
   /**
-   * Maps a format to its media type: the IANA-registered type where a registration
-   * exists, otherwise the form in prevailing use.
+   * Maps a format to its media type through {@link KnownMagics}, covering the
+   * RIFF-carried formats that table cannot hold.
    *
-   * @param format The format constant, or {@code null}.
+   * @param format The format tag, or {@code null}.
    * @return The media type, or {@code null} for an unknown format.
    */
   private static String mediaTypeOf(String format) {
@@ -360,27 +290,10 @@ public final class CursorAssetDetector implements AssetDetector {
       return null;
     }
     return switch (format) {
-      case EmbeddedAsset.FORMAT_PNG -> "image/png";
-      case EmbeddedAsset.FORMAT_JPEG -> "image/jpeg";
-      case EmbeddedAsset.FORMAT_GIF -> "image/gif";
       case EmbeddedAsset.FORMAT_WEBP -> "image/webp";
       case EmbeddedAsset.FORMAT_WAV -> "audio/wav";
-      case EmbeddedAsset.FORMAT_PDF -> "application/pdf";
-      case EmbeddedAsset.FORMAT_ZIP -> "application/zip";
-      case EmbeddedAsset.FORMAT_TIFF -> "image/tiff";
-      case EmbeddedAsset.FORMAT_GZIP -> "application/gzip";
-      case EmbeddedAsset.FORMAT_SEVEN_ZIP -> "application/x-7z-compressed";
-      case EmbeddedAsset.FORMAT_RAR -> "application/vnd.rar";
-      case EmbeddedAsset.FORMAT_FLAC -> "audio/flac";
-      case EmbeddedAsset.FORMAT_OGG -> "application/ogg";
-      case EmbeddedAsset.FORMAT_MIDI -> "audio/midi";
-      case EmbeddedAsset.FORMAT_SQLITE -> "application/vnd.sqlite3";
-      case EmbeddedAsset.FORMAT_ELF -> "application/x-elf";
-      case EmbeddedAsset.FORMAT_PE -> "application/vnd.microsoft.portable-executable";
-      case EmbeddedAsset.FORMAT_CLASS -> "application/java-vm";
-      case EmbeddedAsset.FORMAT_WOFF -> "font/woff";
-      case EmbeddedAsset.FORMAT_WOFF2 -> "font/woff2";
-      default -> null;
+      case EmbeddedAsset.FORMAT_AVI -> "video/x-msvideo";
+      default -> KnownMagics.mediaTypeOf(format);
     };
   }
 
