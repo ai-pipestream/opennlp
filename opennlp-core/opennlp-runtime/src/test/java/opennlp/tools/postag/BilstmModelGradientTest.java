@@ -124,6 +124,55 @@ class BilstmModelGradientTest {
     }
   }
 
+  @Test
+  void testWordBackwardLstmGradients() {
+    final LstmLayer layer = context.testingWordBackward();
+    final double[][] analyticW = analyticGradients(11);
+    final double[][] analyticU = analyticGradients(12);
+    final double[][] analyticB = analyticGradients(13);
+    for (int r = 0; r < 4 * layer.hiddenSize(); r++) {
+      for (int k = 0; k < layer.inputSize(); k++) {
+        assertClose(analyticW[r][k], numerical(layer.w()[r], k),
+            "wordBackward.w[" + r + "][" + k + "]");
+      }
+      for (int k = 0; k < layer.hiddenSize(); k++) {
+        assertClose(analyticU[r][k], numerical(layer.u()[r], k),
+            "wordBackward.u[" + r + "][" + k + "]");
+      }
+      assertClose(analyticB[0][r], numerical(layer.b(), r), "wordBackward.b[" + r + "]");
+    }
+  }
+
+  @Test
+  void testCharLstmGradients() {
+    final LstmLayer forward = context.testingCharForward();
+    final double[][] analyticFwdW = analyticGradients(2);
+    final double[][] analyticFwdU = analyticGradients(3);
+    final double[][] analyticFwdB = analyticGradients(4);
+    final LstmLayer backward = context.testingCharBackward();
+    final double[][] analyticBwdW = analyticGradients(5);
+    final double[][] analyticBwdU = analyticGradients(6);
+    final double[][] analyticBwdB = analyticGradients(7);
+    for (int r = 0; r < 4 * forward.hiddenSize(); r++) {
+      for (int k = 0; k < forward.inputSize(); k++) {
+        assertClose(analyticFwdW[r][k], numerical(forward.w()[r], k),
+            "charForward.w[" + r + "][" + k + "]");
+        assertClose(analyticBwdW[r][k], numerical(backward.w()[r], k),
+            "charBackward.w[" + r + "][" + k + "]");
+      }
+      for (int k = 0; k < forward.hiddenSize(); k++) {
+        assertClose(analyticFwdU[r][k], numerical(forward.u()[r], k),
+            "charForward.u[" + r + "][" + k + "]");
+        assertClose(analyticBwdU[r][k], numerical(backward.u()[r], k),
+            "charBackward.u[" + r + "][" + k + "]");
+      }
+      assertClose(analyticFwdB[0][r], numerical(forward.b(), r),
+          "charForward.b[" + r + "]");
+      assertClose(analyticBwdB[0][r], numerical(backward.b(), r),
+          "charBackward.b[" + r + "]");
+    }
+  }
+
   private double[][] analyticGradients(int index) {
     AdamOptimizer.zero(worker.buffers());
     context.sentenceGradients(sample, new Random(0L), worker);
