@@ -257,19 +257,25 @@ public class ConlluPOSTaggerEvalTest {
     final double accuracy = evaluate(tagger, dir.resolve("test.conllu"));
     final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
     final double[] profile = errorProfile(tagger, dir.resolve("train.conllu"),
-        dir.resolve("test.conllu"));
+        dir.resolve("test.conllu"), vectors, lexicon);
     logger.info("bilstm pretrained UPOS accuracy {} (lexicon: {}), throughput {} tokens/s",
         accuracy, lexicon == null ? "none" : lexicon.size() + " words", throughput);
-    logger.info("bilstm pretrained IV accuracy {}, OOV accuracy {}", profile[0],
-        profile[1]);
-    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy,
-        bilstmLabel(settings));
-    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-tokens-per-s",
-        throughput, bilstmLabel(settings));
-    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-iv-acc",
-        profile[0], bilstmLabel(settings));
-    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-oov-acc",
-        profile[1], bilstmLabel(settings));
+    logger.info("bilstm pretrained IV {} OOV {} (vector-covered OOV {}, uncovered OOV {})",
+        profile[0], profile[1], profile[2], profile[3]);
+    final String runLabel = "bilstm-pretrained" + (lexicon == null ? "" : "-lexicon");
+    final String config = bilstmLabel(settings);
+    record(runLabel, accuracy, config);
+    record(runLabel + "-tokens-per-s", throughput, config);
+    record(runLabel + "-iv-acc", profile[0], config);
+    record(runLabel + "-oov-acc", profile[1], config);
+    record(runLabel + "-oov-vec-acc", profile[2], config);
+    record(runLabel + "-oov-novec-acc", profile[3], config);
+
+    final String saveModel = System.getProperty("opennlp.postag.saveModel");
+    if (saveModel != null && !saveModel.isBlank()) {
+      model.serialize(Path.of(saveModel));
+      logger.info("model written to {}", saveModel);
+    }
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
@@ -318,14 +324,17 @@ public class ConlluPOSTaggerEvalTest {
 
   /**
    * Splits tagging accuracy into in-vocabulary and out-of-vocabulary tokens against
-   * the training vocabulary (cutoff 2, normalized like the tagger does), the error
-   * profile that drives sweep decisions.
+   * the training vocabulary (cutoff 2, normalized like the tagger does), and further
+   * splits OOV by whether the token resolves a stored pretrained vector, the error
+   * profile that drives sweep decisions. Also writes the OOV gold-to-predicted
+   * confusion counts to {@code target/postag-oov-confusion.csv}.
    *
-   * @return {IV accuracy, OOV accuracy}; the OOV slot is 1.0 when there are no OOV
-   *         tokens.
+   * @return {IV accuracy, OOV accuracy, vector-covered OOV accuracy, uncovered OOV
+   *         accuracy}; empty splits come back as 1.0.
    */
   private static double[] errorProfile(POSTagger tagger, Path trainConllu,
-      Path testConllu) throws IOException {
+      Path testConllu, Function<CharSequence, float[]> vectors,
+      Iterable<String> lexicon) throws IOException {
     final Map<String, Integer> counts = new HashMap<>();
     try (ObjectStream<POSSample> train = samples(trainConllu)) {
       POSSample sample;
@@ -341,33 +350,80 @@ public class ConlluPOSTaggerEvalTest {
         vocabulary.add(entry.getKey());
       }
     }
+    final Set<String> vectorWords = new HashSet<>();
+    if (vectors != null) {
+      for (final String word : counts.keySet()) {
+        if (vectors.apply(word) != null) {
+          vectorWords.add(word);
+        }
+      }
+      if (lexicon != null) {
+        for (final String word : lexicon) {
+          final String normalized = BilstmPOSModel.normalize(word);
+          if (vectors.apply(normalized) != null) {
+            vectorWords.add(normalized);
+          }
+        }
+      }
+    }
     long ivCorrect = 0;
     long ivTotal = 0;
     long oovCorrect = 0;
     long oovTotal = 0;
+    long vecCorrect = 0;
+    long vecTotal = 0;
+    long noVecCorrect = 0;
+    long noVecTotal = 0;
+    final Map<String, Integer> confusion = new HashMap<>();
     try (ObjectStream<POSSample> test = samples(testConllu)) {
       POSSample sample;
       while ((sample = test.read()) != null) {
         final String[] assigned = tagger.tag(sample.getSentence());
         final String[] gold = sample.getTags();
         for (int i = 0; i < gold.length; i++) {
+          final boolean correct = assigned[i].equals(gold[i]);
           if (vocabulary.contains(BilstmPOSModel.normalize(sample.getSentence()[i]))) {
             ivTotal++;
-            if (assigned[i].equals(gold[i])) {
+            if (correct) {
               ivCorrect++;
             }
           }
           else {
             oovTotal++;
-            if (assigned[i].equals(gold[i])) {
+            if (correct) {
               oovCorrect++;
+            }
+            if (vectorWords.contains(BilstmPOSModel.normalize(sample.getSentence()[i]))) {
+              vecTotal++;
+              if (correct) {
+                vecCorrect++;
+              }
+            }
+            else {
+              noVecTotal++;
+              if (correct) {
+                noVecCorrect++;
+              }
+            }
+            if (!correct) {
+              confusion.merge(gold[i] + ">" + assigned[i], 1, Integer::sum);
             }
           }
         }
       }
     }
+    final List<Map.Entry<String, Integer>> sorted = new ArrayList<>(confusion.entrySet());
+    sorted.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+    final StringBuilder out = new StringBuilder();
+    for (final Map.Entry<String, Integer> entry : sorted) {
+      out.append(entry.getKey()).append(',').append(entry.getValue()).append('\n');
+    }
+    Files.writeString(Path.of("target", "postag-oov-confusion.csv"), out.toString(),
+        StandardCharsets.UTF_8);
     return new double[] {(double) ivCorrect / ivTotal,
-        oovTotal > 0 ? (double) oovCorrect / oovTotal : 1.0d};
+        oovTotal > 0 ? (double) oovCorrect / oovTotal : 1.0d,
+        vecTotal > 0 ? (double) vecCorrect / vecTotal : 1.0d,
+        noVecTotal > 0 ? (double) noVecCorrect / noVecTotal : 1.0d};
   }
 
   /**
