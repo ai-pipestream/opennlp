@@ -149,6 +149,56 @@ final class AdamOptimizer {
   }
 
   /**
+   * Allocates an independent, zeroed set of gradient buffers shaped like the
+   * registered gradients, for one parallel worker to accumulate into.
+   *
+   * @return The buffers, in registration order. Never {@code null}.
+   */
+  List<double[][]> newGradientBuffers() {
+    final List<double[][]> buffers = new ArrayList<>(gradients.size());
+    for (final double[][] gradient : gradients) {
+      final double[][] copy = new double[gradient.length][];
+      for (int r = 0; r < gradient.length; r++) {
+        copy[r] = new double[gradient[r].length];
+      }
+      buffers.add(copy);
+    }
+    return buffers;
+  }
+
+  /**
+   * Adds worker buffers into the registered gradient mirrors, in place. Called in a
+   * fixed worker order so parallel training stays deterministic.
+   *
+   * @param buffers The worker buffers, as allocated by {@link #newGradientBuffers()}.
+   *        Must not be {@code null}.
+   */
+  void absorb(List<double[][]> buffers) {
+    for (int p = 0; p < gradients.size(); p++) {
+      final double[][] gradient = gradients.get(p);
+      final double[][] buffer = buffers.get(p);
+      for (int r = 0; r < gradient.length; r++) {
+        for (int i = 0; i < gradient[r].length; i++) {
+          gradient[r][i] += buffer[r][i];
+        }
+      }
+    }
+  }
+
+  /**
+   * Resets worker buffers to zero.
+   *
+   * @param buffers The worker buffers. Must not be {@code null}.
+   */
+  static void zero(List<double[][]> buffers) {
+    for (final double[][] buffer : buffers) {
+      for (final double[] row : buffer) {
+        Arrays.fill(row, 0.0d);
+      }
+    }
+  }
+
+  /**
    * Resets every accumulated gradient to zero; moments are kept.
    */
   void zero() {
