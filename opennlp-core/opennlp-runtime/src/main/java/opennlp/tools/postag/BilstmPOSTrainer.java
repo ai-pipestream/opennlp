@@ -24,6 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -68,10 +73,15 @@ public final class BilstmPOSTrainer {
    * @param wordCutoff Minimum training count for a word-vocabulary entry.
    * @param maxWordLength Maximum characters of a token fed to the character BiLSTM.
    * @param seed The seed of both random streams.
+   * @param threads Worker threads for sentence-parallel batches. Dropout masks are
+   *                seeded per sentence and worker gradients are reduced in a fixed
+   *                order, so results are deterministic per (seed, threads) and
+   *                agree across thread counts up to floating-point noise from JIT
+   *                multiply-add contraction.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
-      double dropout, int wordCutoff, int maxWordLength, long seed) {
+      double dropout, int wordCutoff, int maxWordLength, long seed, int threads) {
 
     /**
      * Validates the hyperparameters.
@@ -95,13 +105,18 @@ public final class BilstmPOSTrainer {
       if (wordCutoff <= 0 || maxWordLength <= 0) {
         throw new IllegalArgumentException("wordCutoff and maxWordLength must be positive");
       }
+      if (threads <= 0) {
+        throw new IllegalArgumentException("threads must be positive");
+      }
     }
 
     /**
-     * @return The default hyperparameters. Never {@code null}.
+     * @return The default hyperparameters, with one worker per available processor.
+     *         Never {@code null}.
      */
     public static Settings defaults() {
-      return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L);
+      return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
+          Runtime.getRuntime().availableProcessors());
     }
   }
 
@@ -197,35 +212,91 @@ public final class BilstmPOSTrainer {
 
     final TrainingContext context = TrainingContext.build(corpus, settings, wordVectors,
         lexicon);
-    final Random trainRandom = new Random(settings.seed());
+    final Random shuffleRandom = new Random(settings.seed());
     final int[] order = new int[corpus.size()];
     for (int i = 0; i < order.length; i++) {
       order[i] = i;
     }
-    int timestep = 0;
-    for (int epoch = 1; epoch <= settings.epochs(); epoch++) {
-      shuffle(order, trainRandom);
-      double loss = 0.0d;
-      int tokens = 0;
-      for (int start = 0; start < order.length; start += settings.batchSize()) {
-        final int end = Math.min(order.length, start + settings.batchSize());
-        for (int i = start; i < end; i++) {
-          final POSSample sentence = corpus.get(order[i]);
-          loss += context.sentenceGradients(sentence, trainRandom);
-          tokens += sentence.getSentence().length;
+    final int threads = settings.threads();
+    final List<TrainingContext.Worker> workers = new ArrayList<>();
+    for (int w = 0; w < threads; w++) {
+      workers.add(context.newWorker());
+    }
+    final ExecutorService pool =
+        threads > 1 ? Executors.newFixedThreadPool(threads) : null;
+    try {
+      int timestep = 0;
+      for (int epoch = 1; epoch <= settings.epochs(); epoch++) {
+        shuffle(order, shuffleRandom);
+        double loss = 0.0d;
+        int tokens = 0;
+        final int currentEpoch = epoch;
+        for (int start = 0; start < order.length; start += settings.batchSize()) {
+          final int end = Math.min(order.length, start + settings.batchSize());
+          for (int i = start; i < end; i++) {
+            tokens += corpus.get(order[i]).getSentence().length;
+          }
+          if (pool == null) {
+            final TrainingContext.Worker worker = workers.get(0);
+            for (int i = start; i < end; i++) {
+              loss += context.sentenceGradients(corpus.get(order[i]),
+                  maskRandom(settings.seed(), currentEpoch, i), worker);
+            }
+          }
+          else {
+            final int batchStart = start;
+            final List<Callable<Double>> tasks = new ArrayList<>();
+            for (int w = 0; w < threads; w++) {
+              final int workerIndex = w;
+              tasks.add(() -> {
+                double workerLoss = 0.0d;
+                final TrainingContext.Worker worker = workers.get(workerIndex);
+                for (int i = batchStart + workerIndex; i < end; i += threads) {
+                  workerLoss += context.sentenceGradients(corpus.get(order[i]),
+                      maskRandom(settings.seed(), currentEpoch, i), worker);
+                }
+                return workerLoss;
+              });
+            }
+            try {
+              for (final Future<Double> result : pool.invokeAll(tasks)) {
+                loss += result.get();
+              }
+            }
+            catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException("training interrupted", e);
+            }
+            catch (ExecutionException e) {
+              throw new IllegalStateException("training worker failed", e.getCause());
+            }
+          }
+          for (final TrainingContext.Worker worker : workers) {
+            context.adam.absorb(worker.buffers());
+            AdamOptimizer.zero(worker.buffers());
+          }
+          timestep++;
+          final double norm = context.adam.globalNorm();
+          if (norm > settings.clipNorm()) {
+            context.adam.scaleGradients(settings.clipNorm() / norm);
+          }
+          context.adam.step(settings.learningRate(), timestep);
+          context.adam.zero();
         }
-        timestep++;
-        final double norm = context.adam.globalNorm();
-        if (norm > settings.clipNorm()) {
-          context.adam.scaleGradients(settings.clipNorm() / norm);
-        }
-        context.adam.step(settings.learningRate(), timestep);
-        context.adam.zero();
+        logger.info("epoch {}/{} loss {} over {} tokens", epoch, settings.epochs(),
+            loss / tokens, tokens);
       }
-      logger.info("epoch {}/{} loss {} over {} tokens", epoch, settings.epochs(),
-          loss / tokens, tokens);
+    }
+    finally {
+      if (pool != null) {
+        pool.shutdownNow();
+      }
     }
     return context.toModel();
+  }
+
+  private static Random maskRandom(long seed, int epoch, int position) {
+    return new Random(seed + epoch * 1000003L + position);
   }
 
   private static void shuffle(int[] order, Random random) {
@@ -262,14 +333,6 @@ public final class BilstmPOSTrainer {
     private final int pretrainedSize;
     private final int inputSize;
     final AdamOptimizer adam;
-    private final LstmLayer.Gradients charForwardGrads;
-    private final LstmLayer.Gradients charBackwardGrads;
-    private final LstmLayer.Gradients wordForwardGrads;
-    private final LstmLayer.Gradients wordBackwardGrads;
-    private final double[][] wordEmbeddingGrads;
-    private final double[][] charEmbeddingGrads;
-    private final double[][] outputWeightGrads;
-    private final double[] outputBiasGrads;
 
     private TrainingContext(Settings settings, LinkedHashMap<String, Integer> words,
         LinkedHashMap<String, Integer> chars, String[] tags,
@@ -296,18 +359,58 @@ public final class BilstmPOSTrainer {
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
       this.inputSize = inputSize;
       this.adam = adam;
-      wordEmbeddingGrads = adam.gradient(0);
-      charEmbeddingGrads = adam.gradient(1);
-      charForwardGrads = LstmLayer.Gradients.wrap(adam.gradient(2), adam.gradient(3),
-          adam.gradient(4)[0]);
-      charBackwardGrads = LstmLayer.Gradients.wrap(adam.gradient(5), adam.gradient(6),
-          adam.gradient(7)[0]);
-      wordForwardGrads = LstmLayer.Gradients.wrap(adam.gradient(8), adam.gradient(9),
-          adam.gradient(10)[0]);
-      wordBackwardGrads = LstmLayer.Gradients.wrap(adam.gradient(11), adam.gradient(12),
-          adam.gradient(13)[0]);
-      outputWeightGrads = adam.gradient(14);
-      outputBiasGrads = adam.gradient(15)[0];
+    }
+
+    /**
+     * Allocates a worker with its own gradient buffers, for sentence-parallel batch
+     * processing.
+     *
+     * @return A fresh worker. Never {@code null}.
+     */
+    Worker newWorker() {
+      return new Worker(adam.newGradientBuffers());
+    }
+
+    /**
+     * One parallel worker's gradient storage. A sentence's backward pass accumulates
+     * into the worker's own buffers, never into shared state, so workers are safe to
+     * run concurrently; the training loop reduces them into the optimizer in a fixed
+     * order, which keeps parallel training deterministic per (seed, threads).
+     */
+    static final class Worker {
+
+      private final List<double[][]> buffers;
+      private final LstmLayer.Gradients charForwardGrads;
+      private final LstmLayer.Gradients charBackwardGrads;
+      private final LstmLayer.Gradients wordForwardGrads;
+      private final LstmLayer.Gradients wordBackwardGrads;
+      private final double[][] wordEmbeddingGrads;
+      private final double[][] charEmbeddingGrads;
+      private final double[][] outputWeightGrads;
+      private final double[] outputBiasGrads;
+
+      private Worker(List<double[][]> buffers) {
+        this.buffers = buffers;
+        wordEmbeddingGrads = buffers.get(0);
+        charEmbeddingGrads = buffers.get(1);
+        charForwardGrads = LstmLayer.Gradients.wrap(buffers.get(2), buffers.get(3),
+            buffers.get(4)[0]);
+        charBackwardGrads = LstmLayer.Gradients.wrap(buffers.get(5), buffers.get(6),
+            buffers.get(7)[0]);
+        wordForwardGrads = LstmLayer.Gradients.wrap(buffers.get(8), buffers.get(9),
+            buffers.get(10)[0]);
+        wordBackwardGrads = LstmLayer.Gradients.wrap(buffers.get(11), buffers.get(12),
+            buffers.get(13)[0]);
+        outputWeightGrads = buffers.get(14);
+        outputBiasGrads = buffers.get(15)[0];
+      }
+
+      /**
+       * @return The gradient buffers in registration order. Never {@code null}.
+       */
+      List<double[][]> buffers() {
+        return buffers;
+      }
     }
 
     /** @return The live word embeddings, exposed for white-box gradient checks. */
@@ -489,13 +592,23 @@ public final class BilstmPOSTrainer {
 
     /**
      * Runs the full forward and backward pass of one sentence, accumulating every
-     * parameter gradient into the optimizer's mirrors.
+     * parameter gradient into the worker's buffers.
      *
      * @param sample The sentence with gold tags.
-     * @param random The dropout-mask random stream.
+     * @param random The dropout-mask random stream, seeded per sentence by the caller
+     *               so parallel training is deterministic per (seed, threads).
+     * @param worker The gradient-storage owner. Must not be {@code null}.
      * @return The summed cross-entropy loss of the sentence.
      */
-    double sentenceGradients(POSSample sample, Random random) {
+    double sentenceGradients(POSSample sample, Random random, Worker worker) {
+      final double[][] wordEmbeddingGrads = worker.wordEmbeddingGrads;
+      final double[][] charEmbeddingGrads = worker.charEmbeddingGrads;
+      final double[][] outputWeightGrads = worker.outputWeightGrads;
+      final double[] outputBiasGrads = worker.outputBiasGrads;
+      final LstmLayer.Gradients charForwardGrads = worker.charForwardGrads;
+      final LstmLayer.Gradients charBackwardGrads = worker.charBackwardGrads;
+      final LstmLayer.Gradients wordForwardGrads = worker.wordForwardGrads;
+      final LstmLayer.Gradients wordBackwardGrads = worker.wordBackwardGrads;
       final String[] sentence = sample.getSentence();
       final String[] goldTags = sample.getTags();
       final int steps = sentence.length;

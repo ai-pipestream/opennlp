@@ -43,7 +43,7 @@ class BilstmPOSTrainerTest {
       new POSSample(new String[] {"A", "fish", "swam"}, new String[] {"D", "N", "V"}));
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
-      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L);
+      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -101,6 +101,24 @@ class BilstmPOSTrainerTest {
     final double[][] secondScores = second.score(sentence);
     for (int t = 0; t < sentence.length; t++) {
       assertArrayEquals(firstScores[t], secondScores[t], 0.0d);
+    }
+  }
+
+  @Test
+  void testParallelTrainingMatchesSequential() throws IOException {
+    // strided batch assignment plus ordered reduction gives the same per-element
+    // accumulation order for any thread count; the only wobble is last-ulp noise
+    // from the JIT contracting multiply-adds differently between compilation paths,
+    // so the comparison is tight but not bit-exact
+    final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
+    final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
+            3));
+    final String[] sentence = {"The", "cat", "ran"};
+    final double[][] expected = sequential.score(sentence);
+    final double[][] actual = parallel.score(sentence);
+    for (int t = 0; t < sentence.length; t++) {
+      assertArrayEquals(expected[t], actual[t], 1e-6d);
     }
   }
 
