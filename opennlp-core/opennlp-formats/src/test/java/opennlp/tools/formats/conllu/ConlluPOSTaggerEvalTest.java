@@ -83,7 +83,7 @@ public class ConlluPOSTaggerEvalTest {
 
     final double accuracy = evaluate(model, dir.resolve("test.conllu"));
     logger.info("feedforward baseline UPOS accuracy {}", accuracy);
-    record("ff-baseline", accuracy);
+    record("ff-baseline", accuracy, "");
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
@@ -123,7 +123,7 @@ public class ConlluPOSTaggerEvalTest {
     final double accuracy = evaluate(model, dir.resolve("test.conllu"));
     logger.info("feedforward pretrained UPOS accuracy {} (lexicon: {})", accuracy,
         lexicon == null ? "none" : lexicon.size() + " words");
-    record("ff-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy);
+    record("ff-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy, "");
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
@@ -134,14 +134,63 @@ public class ConlluPOSTaggerEvalTest {
    * results survive quiet console output.
    *
    * @param run The run label.
-   * @param accuracy The measured UPOS word accuracy.
+   * @param accuracy The measured value (UPOS accuracy, or tokens/s for throughput rows).
+   * @param config The configuration label, empty when not applicable.
    * @throws IOException Thrown if the results file cannot be written.
    */
-  private static void record(String run, double accuracy) throws IOException {
+  private static void record(String run, double accuracy, String config)
+      throws IOException {
     final Path results = Path.of("target", "postag-eval-results.csv");
     Files.createDirectories(results.getParent());
-    Files.writeString(results, run + "," + accuracy + "\n", StandardCharsets.UTF_8,
+    Files.writeString(results,
+        run + "," + accuracy + "," + config + "\n", StandardCharsets.UTF_8,
         Files.exists(results) ? StandardOpenOption.APPEND : StandardOpenOption.CREATE);
+  }
+
+  /**
+   * Builds the BiLSTM training settings, letting sweep runs override any field with
+   * an {@code opennlp.postag.bilstm.<field>} system property while defaulting to
+   * {@link BilstmPOSTrainer.Settings#defaults()}.
+   *
+   * @return The effective settings. Never {@code null}.
+   */
+  private static BilstmPOSTrainer.Settings bilstmSettings() {
+    final BilstmPOSTrainer.Settings base = BilstmPOSTrainer.Settings.defaults();
+    return new BilstmPOSTrainer.Settings(
+        intProperty("wordEmbeddingSize", base.wordEmbeddingSize()),
+        intProperty("charEmbeddingSize", base.charEmbeddingSize()),
+        intProperty("charHiddenSize", base.charHiddenSize()),
+        intProperty("hiddenSize", base.hiddenSize()),
+        intProperty("epochs", base.epochs()),
+        intProperty("batchSize", base.batchSize()),
+        doubleProperty("learningRate", base.learningRate()),
+        doubleProperty("clipNorm", base.clipNorm()),
+        doubleProperty("dropout", base.dropout()),
+        intProperty("wordCutoff", base.wordCutoff()),
+        intProperty("maxWordLength", base.maxWordLength()),
+        longProperty("seed", base.seed()),
+        intProperty("threads", base.threads()));
+  }
+
+  private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
+    return "h" + s.hiddenSize() + ";e" + s.epochs() + ";b" + s.batchSize() + ";lr"
+        + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
+        + ";we" + s.wordEmbeddingSize() + ";ch" + s.charHiddenSize();
+  }
+
+  private static int intProperty(String name, int fallback) {
+    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    return value != null ? Integer.parseInt(value) : fallback;
+  }
+
+  private static long longProperty(String name, long fallback) {
+    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    return value != null ? Long.parseLong(value) : fallback;
+  }
+
+  private static double doubleProperty(String name, double fallback) {
+    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    return value != null ? Double.parseDouble(value) : fallback;
   }
 
   @Test
@@ -151,8 +200,9 @@ public class ConlluPOSTaggerEvalTest {
 
     final long trainStart = System.currentTimeMillis();
     final BilstmPOSModel model;
+    final BilstmPOSTrainer.Settings settings = bilstmSettings();
     try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
-      model = BilstmPOSTrainer.train(train, BilstmPOSTrainer.Settings.defaults());
+      model = BilstmPOSTrainer.train(train, settings);
     }
     logger.info("bilstm baseline trained in {} ms", System.currentTimeMillis() - trainStart);
 
@@ -161,8 +211,8 @@ public class ConlluPOSTaggerEvalTest {
     final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
     logger.info("bilstm baseline UPOS accuracy {}, throughput {} tokens/s", accuracy,
         throughput);
-    record("bilstm-baseline", accuracy);
-    record("bilstm-baseline-tokens-per-s", throughput);
+    record("bilstm-baseline", accuracy, bilstmLabel(settings));
+    record("bilstm-baseline-tokens-per-s", throughput, bilstmLabel(settings));
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
@@ -186,13 +236,13 @@ public class ConlluPOSTaggerEvalTest {
 
     final long trainStart = System.currentTimeMillis();
     final BilstmPOSModel model;
+    final BilstmPOSTrainer.Settings settings = bilstmSettings();
     try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
       if (lexicon == null) {
-        model = BilstmPOSTrainer.train(train, BilstmPOSTrainer.Settings.defaults(), vectors);
+        model = BilstmPOSTrainer.train(train, settings, vectors);
       }
       else {
-        model = BilstmPOSTrainer.train(train, BilstmPOSTrainer.Settings.defaults(),
-            vectors, lexicon);
+        model = BilstmPOSTrainer.train(train, settings, vectors, lexicon);
       }
     }
     logger.info("bilstm pretrained trained in {} ms", System.currentTimeMillis() - trainStart);
@@ -202,9 +252,10 @@ public class ConlluPOSTaggerEvalTest {
     final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
     logger.info("bilstm pretrained UPOS accuracy {} (lexicon: {}), throughput {} tokens/s",
         accuracy, lexicon == null ? "none" : lexicon.size() + " words", throughput);
-    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy);
+    record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy,
+        bilstmLabel(settings));
     record("bilstm-pretrained" + (lexicon == null ? "" : "-lexicon") + "-tokens-per-s",
-        throughput);
+        throughput, bilstmLabel(settings));
 
     // a regression floor, far below any plausible result; the log line is the measurement
     assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
