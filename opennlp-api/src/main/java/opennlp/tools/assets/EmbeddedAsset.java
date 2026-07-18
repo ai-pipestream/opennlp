@@ -27,8 +27,8 @@ import opennlp.tools.util.StringUtil;
  * payload characters are, and what the decoded bytes are.
  *
  * <p>The format is an open string so detectors can introduce new formats without an API
- * change; the constants on this record name the formats the built-in detector
- * recognizes. Detection never alters the text: an asset states exact offsets over the
+ * change; the constants on this record name the most common of the formats the built-in
+ * detector recognizes. Detection never alters the text: an asset states exact offsets over the
  * original, so a caller can extract the bytes, replace the span with text, or drop it,
  * without losing where it was.</p>
  *
@@ -109,6 +109,21 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
 
   /** A WOFF2 font. */
   public static final String FORMAT_WOFF2 = "woff2";
+
+  /** An MP3 audio stream carrying an ID3 metadata block. */
+  public static final String FORMAT_MP3 = "mp3";
+
+  /** An OLE2 compound document, the container of the legacy Office formats. */
+  public static final String FORMAT_OLE2 = "ole2";
+
+  /** A Zstandard-compressed stream. */
+  public static final String FORMAT_ZSTD = "zstd";
+
+  /** A WebAssembly module. */
+  public static final String FORMAT_WASM = "wasm";
+
+  /** A RIFF AVI video. */
+  public static final String FORMAT_AVI = "avi";
 
   /**
    * Validates the asset.
