@@ -40,6 +40,7 @@ class BilstmModelGradientTest {
   private static final double TOLERANCE = 1e-5d;
 
   private BilstmPOSTrainer.TrainingContext context;
+  private BilstmPOSTrainer.TrainingContext.Worker worker;
   private POSSample sample;
 
   @BeforeEach
@@ -52,8 +53,9 @@ class BilstmModelGradientTest {
         new POSSample(new String[] {"Cats", "sleep"},
             new String[] {"NOUN", "VERB"}));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
+    worker = context.newWorker();
     sample = corpus.get(0);
   }
 
@@ -123,9 +125,9 @@ class BilstmModelGradientTest {
   }
 
   private double[][] analyticGradients(int index) {
-    context.adam.zero();
-    context.sentenceGradients(sample, new Random(0L));
-    final double[][] source = context.adam.gradient(index);
+    AdamOptimizer.zero(worker.buffers());
+    context.sentenceGradients(sample, new Random(0L), worker);
+    final double[][] source = worker.buffers().get(index);
     final double[][] copy = new double[source.length][];
     for (int r = 0; r < source.length; r++) {
       copy[r] = source[r].clone();
@@ -136,9 +138,9 @@ class BilstmModelGradientTest {
   private double numerical(double[] row, int i) {
     final double original = row[i];
     row[i] = original + EPSILON;
-    final double plus = context.sentenceGradients(sample, new Random(0L));
+    final double plus = context.sentenceGradients(sample, new Random(0L), worker);
     row[i] = original - EPSILON;
-    final double minus = context.sentenceGradients(sample, new Random(0L));
+    final double minus = context.sentenceGradients(sample, new Random(0L), worker);
     row[i] = original;
     return (plus - minus) / (2.0d * EPSILON);
   }
