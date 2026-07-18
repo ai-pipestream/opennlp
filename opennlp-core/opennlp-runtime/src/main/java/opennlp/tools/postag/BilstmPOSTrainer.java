@@ -438,6 +438,21 @@ public final class BilstmPOSTrainer {
       return wordForward;
     }
 
+    /** @return The live backward sentence layer, exposed for white-box checks. */
+    LstmLayer testingWordBackward() {
+      return wordBackward;
+    }
+
+    /** @return The live forward char layer, exposed for white-box checks. */
+    LstmLayer testingCharForward() {
+      return charForward;
+    }
+
+    /** @return The live backward char layer, exposed for white-box checks. */
+    LstmLayer testingCharBackward() {
+      return charBackward;
+    }
+
     static TrainingContext build(List<POSSample> corpus, Settings settings,
         Function<CharSequence, float[]> wordVectors,
         Iterable<? extends CharSequence> lexicon) {
