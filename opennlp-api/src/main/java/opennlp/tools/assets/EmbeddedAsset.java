@@ -71,6 +71,45 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
   /** A zip archive, which is also the container of the common office formats. */
   public static final String FORMAT_ZIP = "zip";
 
+  /** A TIFF image, in either byte order. */
+  public static final String FORMAT_TIFF = "tiff";
+
+  /** A gzip-compressed stream. */
+  public static final String FORMAT_GZIP = "gzip";
+
+  /** A 7z archive. */
+  public static final String FORMAT_SEVEN_ZIP = "7z";
+
+  /** A RAR archive. */
+  public static final String FORMAT_RAR = "rar";
+
+  /** A FLAC audio stream. */
+  public static final String FORMAT_FLAC = "flac";
+
+  /** An Ogg container, the usual carrier of Vorbis and Opus audio. */
+  public static final String FORMAT_OGG = "ogg";
+
+  /** A standard MIDI file. */
+  public static final String FORMAT_MIDI = "midi";
+
+  /** A SQLite database file. */
+  public static final String FORMAT_SQLITE = "sqlite";
+
+  /** An ELF executable or shared object. */
+  public static final String FORMAT_ELF = "elf";
+
+  /** A Windows Portable Executable. */
+  public static final String FORMAT_PE = "pe";
+
+  /** A Java class file. */
+  public static final String FORMAT_CLASS = "class";
+
+  /** A WOFF font. */
+  public static final String FORMAT_WOFF = "woff";
+
+  /** A WOFF2 font. */
+  public static final String FORMAT_WOFF2 = "woff2";
+
   /**
    * Validates the asset.
    *
