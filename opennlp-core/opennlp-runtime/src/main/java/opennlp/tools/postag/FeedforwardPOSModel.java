@@ -44,6 +44,11 @@ import opennlp.tools.util.StringUtil;
  * with capitalization carried by the shape features instead. Instances are immutable
  * and safe to share between threads.</p>
  *
+ * <p>A model trained with pretrained word vectors additionally carries a frozen vector
+ * block: the vectors of the words seen in training are stored inside the model, so
+ * inference needs no embedding component, and a word without a stored vector scores as
+ * zeros. Models without the block keep the original format byte for byte.</p>
+ *
  * @see FeedforwardPOSTagger
  * @see FeedforwardPOSTrainer
  * @since 3.0.0
@@ -51,6 +56,12 @@ import opennlp.tools.util.StringUtil;
 public class FeedforwardPOSModel {
 
   private static final String MAGIC = "ONLP-FFPT-1";
+
+  /** The format of models carrying the optional pretrained word-vector block. */
+  private static final String MAGIC_PRETRAINED = "ONLP-FFPT-2";
+
+  /** The row marker of a word without a stored pretrained vector; scores as zeros. */
+  static final int NO_VECTOR = -1;
 
   static final String UNKNOWN = "*UNK*";
   static final String ABSENT = "*NULL*";
@@ -70,6 +81,11 @@ public class FeedforwardPOSModel {
   private final float[] hiddenBias;
   private final float[][] outputWeights;
   private final float[] outputBias;
+
+  /** The pretrained vector dimensionality; {@code 0} on models without the block. */
+  private final int pretrainedSize;
+  private final Map<String, Integer> pretrainedIds;
+  private final float[][] pretrainedVectors;
 
   /**
    * Initializes a model from its vocabularies and weight arrays. The trainer is the
@@ -92,6 +108,23 @@ public class FeedforwardPOSModel {
       Map<String, Integer> shapeIds, Map<String, Integer> tagIds, String[] tags,
       int embeddingSize, float[][] embeddings, float[][] hiddenWeights,
       float[] hiddenBias, float[][] outputWeights, float[] outputBias) {
+    this(wordIds, suffixIds, shapeIds, tagIds, tags, embeddingSize, embeddings,
+        hiddenWeights, hiddenBias, outputWeights, outputBias, 0, Map.of(), new float[0][]);
+  }
+
+  /**
+   * Initializes a model carrying the optional pretrained word-vector block. The trainer
+   * and the loader are the only callers; the arrays are taken over without copying.
+   *
+   * @param pretrainedSize The pretrained vector dimensionality, {@code 0} when absent.
+   * @param pretrainedIds The normalized word to vector row mapping; empty when absent.
+   * @param pretrainedVectors The stored vector slice, one row per mapped word.
+   */
+  FeedforwardPOSModel(Map<String, Integer> wordIds, Map<String, Integer> suffixIds,
+      Map<String, Integer> shapeIds, Map<String, Integer> tagIds, String[] tags,
+      int embeddingSize, float[][] embeddings, float[][] hiddenWeights,
+      float[] hiddenBias, float[][] outputWeights, float[] outputBias,
+      int pretrainedSize, Map<String, Integer> pretrainedIds, float[][] pretrainedVectors) {
     this.wordIds = wordIds;
     this.suffixIds = suffixIds;
     this.shapeIds = shapeIds;
@@ -103,17 +136,48 @@ public class FeedforwardPOSModel {
     this.hiddenBias = hiddenBias;
     this.outputWeights = outputWeights;
     this.outputBias = outputBias;
+    this.pretrainedSize = pretrainedSize;
+    this.pretrainedIds = pretrainedIds;
+    this.pretrainedVectors = pretrainedVectors;
   }
 
   /**
-   * Scores every tag for a position described by embedding row indices.
+   * Scores every tag for a position described by embedding row indices. Only valid on
+   * models without the pretrained vector block; a model trained with word vectors
+   * scores through {@link #score(int[], int[])}, and scoring it without its block
+   * would silently treat every word as unknown to the vectors.
    *
    * @param features The embedding rows of the position, as produced by
    *                 {@link #featureIds(String[])}. Must not be {@code null}.
    * @return One unnormalized score per tag, indexed like {@link #tags()}. Never
    *         {@code null}.
+   * @throws IllegalArgumentException Thrown if this model carries pretrained vectors.
    */
   public double[] score(int[] features) {
+    return score(features, null);
+  }
+
+  /**
+   * Scores every tag for a position described by embedding row indices and, on models
+   * trained with word vectors, the pretrained rows of the vector window.
+   *
+   * @param features The embedding rows of the position, as produced by
+   *                 {@link #featureIds(String[])}. Must not be {@code null}.
+   * @param pretrainedRows The vector rows of the window, as produced by
+   *                       {@link #pretrainedRows(String[], int)}, where
+   *                       {@link #NO_VECTOR} scores as zeros; {@code null} on models
+   *                       without the block.
+   * @return One unnormalized score per tag, indexed like {@link #tags()}. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if this model carries pretrained vectors
+   *         and {@code pretrainedRows} is {@code null}, or the other way round.
+   */
+  public double[] score(int[] features, int[] pretrainedRows) {
+    if ((pretrainedSize > 0) != (pretrainedRows != null)) {
+      throw new IllegalArgumentException(pretrainedSize > 0
+          ? "this model was trained with word vectors and needs their rows to score"
+          : "this model was trained without word vectors and cannot score vector rows");
+    }
     final int hidden = hiddenBias.length;
     final double[] h = new double[hidden];
     for (int j = 0; j < hidden; j++) {
@@ -135,6 +199,30 @@ public class FeedforwardPOSModel {
           double sum = 0.0;
           for (int d = 0; d < embeddingSize; d++) {
             sum += weights[offset + d] * embedding[d];
+          }
+          h[j] += sum;
+        }
+      }
+    }
+    if (pretrainedSize > 0) {
+      if (pretrainedRows.length != FeedforwardPOSContext.PRETRAINED_SLOTS) {
+        throw new IllegalArgumentException("the vector window has "
+            + FeedforwardPOSContext.PRETRAINED_SLOTS + " slots, got: "
+            + pretrainedRows.length);
+      }
+      final int base = FeedforwardPOSContext.SLOTS * embeddingSize;
+      for (int p = 0; p < pretrainedRows.length; p++) {
+        final int row = pretrainedRows[p];
+        if (row == NO_VECTOR) {
+          continue;
+        }
+        final float[] vector = pretrainedVectors[row];
+        final int offset = base + p * pretrainedSize;
+        for (int j = 0; j < hidden; j++) {
+          final float[] weights = hiddenWeights[j];
+          double sum = 0.0;
+          for (int d = 0; d < pretrainedSize; d++) {
+            sum += weights[offset + d] * vector[d];
           }
           h[j] += sum;
         }
@@ -273,6 +361,42 @@ public class FeedforwardPOSModel {
   }
 
   /**
+   * {@return {@code true} if this model was trained with pretrained word vectors}
+   * Such a model scores through {@link #score(int[], int[])} with the rows of
+   * {@link #pretrainedRows(String[], int)}.
+   */
+  public boolean usesPretrainedVectors() {
+    return pretrainedSize > 0;
+  }
+
+  /**
+   * Maps the vector window of a position onto stored vector rows: the previous, the
+   * current, and the next word, each normalized like the word vocabulary. A position
+   * outside the sentence and a word without a stored vector map to {@link #NO_VECTOR},
+   * which scores as zeros.
+   *
+   * @param sentence The sentence tokens. Must not be {@code null}.
+   * @param index The position to tag.
+   * @return One row per window slot, or {@code null} on a model without the block.
+   */
+  public int[] pretrainedRows(String[] sentence, int index) {
+    if (pretrainedSize == 0) {
+      return null;
+    }
+    final int[] rows = new int[FeedforwardPOSContext.PRETRAINED_SLOTS];
+    for (int p = 0; p < rows.length; p++) {
+      final int position = index + p - 1;
+      if (position < 0 || position >= sentence.length) {
+        rows[p] = NO_VECTOR;
+      } else {
+        final Integer row = pretrainedIds.get(normalize(sentence[position]));
+        rows[p] = row == null ? NO_VECTOR : row;
+      }
+    }
+    return rows;
+  }
+
+  /**
    * Lowercases a word symbol for the case-insensitive vocabulary lookup. Special
    * symbols starting with {@code *} and absent positions pass through unchanged.
    *
@@ -314,7 +438,7 @@ public class FeedforwardPOSModel {
       throw new IllegalArgumentException("out must not be null");
     }
     final DataOutputStream data = new DataOutputStream(new BufferedOutputStream(out));
-    data.writeUTF(MAGIC);
+    data.writeUTF(pretrainedSize > 0 ? MAGIC_PRETRAINED : MAGIC);
     writeVocabulary(data, wordIds);
     writeVocabulary(data, suffixIds);
     writeVocabulary(data, shapeIds);
@@ -329,6 +453,11 @@ public class FeedforwardPOSModel {
     writeVector(data, hiddenBias);
     writeMatrix(data, outputWeights);
     writeVector(data, outputBias);
+    if (pretrainedSize > 0) {
+      data.writeInt(pretrainedSize);
+      writeVocabulary(data, pretrainedIds);
+      writeMatrix(data, pretrainedVectors);
+    }
     data.flush();
   }
 
@@ -345,7 +474,8 @@ public class FeedforwardPOSModel {
     }
     final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
     final String magic = data.readUTF();
-    if (!MAGIC.equals(magic)) {
+    final boolean pretrained = MAGIC_PRETRAINED.equals(magic);
+    if (!pretrained && !MAGIC.equals(magic)) {
       throw new IOException("not a feedforward tagger model: " + magic);
     }
     final Map<String, Integer> wordIds = readVocabulary(data);
@@ -357,9 +487,19 @@ public class FeedforwardPOSModel {
       tags[i] = data.readUTF();
     }
     final int embeddingSize = data.readInt();
+    final float[][] embeddings = readMatrix(data);
+    final float[][] hiddenWeights = readMatrix(data);
+    final float[] hiddenBias = readVector(data);
+    final float[][] outputWeights = readMatrix(data);
+    final float[] outputBias = readVector(data);
+    if (!pretrained) {
+      return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
+          embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias);
+    }
+    final int pretrainedSize = data.readInt();
     return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
-        embeddingSize, readMatrix(data), readMatrix(data), readVector(data),
-        readMatrix(data), readVector(data));
+        embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias,
+        pretrainedSize, readVocabulary(data), readMatrix(data));
   }
 
   /**
@@ -406,6 +546,16 @@ public class FeedforwardPOSModel {
   /** @return The word symbol to embedding row mapping. */
   Map<String, Integer> wordIds() {
     return wordIds;
+  }
+
+  /** @return The pretrained vector dimensionality; {@code 0} without the block. */
+  int pretrainedSize() {
+    return pretrainedSize;
+  }
+
+  /** @return The stored pretrained vectors, exposed to the trainer's forward pass. */
+  float[][] pretrainedVectors() {
+    return pretrainedVectors;
   }
 
   /**

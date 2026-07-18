@@ -41,6 +41,13 @@ final class FeedforwardPOSContext {
   /** The total number of feature slots. */
   static final int SLOTS = WORD_SLOTS + SUFFIX_SLOTS + SHAPE_SLOTS + TAG_SLOTS;
 
+  /**
+   * Pretrained-vector window positions: the previous, current, and next word. Only
+   * models trained with word vectors carry this block; it follows the learned slots
+   * in the input layer.
+   */
+  static final int PRETRAINED_SLOTS = 3;
+
   private FeedforwardPOSContext() {
     // This class only describes the feature template and is never instantiated.
   }
