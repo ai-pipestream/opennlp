@@ -15,6 +15,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
+> [!WARNING]
+> ## Unsupported research branch, read this first
+>
+> This is an **unsupported research branch** of [Apache OpenNLP](https://github.com/apache/opennlp), made to eventually become part of the 3.x release line. It is in no way associated with the Apache Software Foundation beyond the intent to fully integrate this work into 3.x; nothing here is an Apache release, and the upstream project has not reviewed or endorsed it.
+>
+> Given the pace of development here, and to prevent a large backlog of proof-of-concept code that has not been fully vetted, these experiments are only **graduated** to Apache OpenNLP once there is room in the project's intake queue to review them and properly vet them, per the project's continuing high standards.
+>
+> Although I have personally reviewed all of the code in this branch, that review was not done with the rigor we apply before opening an upstream pull request. Much of the code, although reviewed by a human, was written by AI. None of it becomes part of OpenNLP until a rigorous review is performed and the design is approved through a proper JIRA ticket or project discussion.
+>
+> **Do not use this code in production.** It exists to demo and test upcoming features and to encourage others to help with the implementation.
+>
+> The branch map, what each branch offers, its status, and measured results live in [RESEARCH_BRANCHES.md](RESEARCH_BRANCHES.md). The provenance and licensing statement for preview builds is [README-PREVIEW.md](README-PREVIEW.md); every build records exactly which refs it contains in `PIPESTREAM-PROVENANCE.txt`.
+
+The original Apache OpenNLP README continues unchanged below.
+
+---
+
 Welcome to Apache OpenNLP!
 ===========
 
