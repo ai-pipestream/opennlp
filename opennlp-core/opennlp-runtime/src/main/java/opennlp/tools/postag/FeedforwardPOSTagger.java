@@ -144,9 +144,12 @@ public class FeedforwardPOSTagger implements POSTagger {
     }
     final String[] assigned = new String[sentence.length];
     for (int i = 0; i < sentence.length; i++) {
+      // pretrainedRows is null on models without the vector block, which is exactly
+      // what the two-argument score expects for them.
       final double[] scores = model.score(model.featureIds(
           FeedforwardPOSContext.extract(sentence, i,
-              i > 0 ? assigned[i - 1] : null, i > 1 ? assigned[i - 2] : null)));
+              i > 0 ? assigned[i - 1] : null, i > 1 ? assigned[i - 2] : null)),
+          model.pretrainedRows(sentence, i));
       int best = 0;
       for (int o = 1; o < scores.length; o++) {
         if (scores[o] > scores[best]) {
