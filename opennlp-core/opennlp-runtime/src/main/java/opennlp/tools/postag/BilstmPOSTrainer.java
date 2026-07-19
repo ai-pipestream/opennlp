@@ -23,6 +23,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -396,8 +398,7 @@ public final class BilstmPOSTrainer {
             }
           }
           for (final TrainingContext.Worker worker : workers) {
-            context.adam.absorb(worker.buffers());
-            AdamOptimizer.zero(worker.buffers());
+            context.absorb(worker);
           }
           timestep++;
           final double norm = context.adam.globalNorm();
@@ -552,8 +553,51 @@ public final class BilstmPOSTrainer {
      * @return A fresh worker. Never {@code null}.
      */
     Worker newWorker() {
-      return new Worker(adam.newGradientBuffers(), crfIndex, layer2Index, xposIndex,
-          featsIndex, tuningIndex);
+      return new Worker(adam.newGradientBuffers(tuningIndex), crfIndex, layer2Index,
+          xposIndex, featsIndex, tuningIndex);
+    }
+
+    /**
+     * Reduces one worker's gradients into the optimizer and resets the worker for
+     * the next batch; the sparse fine-tuning rows go through
+     * {@link AdamOptimizer#absorbSparse}.
+     *
+     * @param worker The worker to reduce. Must not be {@code null}.
+     */
+    void absorb(Worker worker) {
+      adam.absorb(worker.buffers());
+      if (tuningIndex >= 0) {
+        adam.absorbSparse(tuningIndex, worker.pretrainedGrads);
+        worker.pretrainedGrads.clear();
+      }
+      AdamOptimizer.zero(worker.buffers());
+    }
+
+    /**
+     * Resets a worker's gradient storage, dense buffers and sparse rows alike.
+     *
+     * @param worker The worker to reset. Must not be {@code null}.
+     */
+    void resetWorker(Worker worker) {
+      AdamOptimizer.zero(worker.buffers());
+      if (worker.pretrainedGrads != null) {
+        worker.pretrainedGrads.clear();
+      }
+    }
+
+    /**
+     * Materializes a worker's sparse fine-tuning gradients as a dense table, with
+     * untouched rows left at zero. Exposed for gradient checks.
+     *
+     * @param worker The worker holding the sparse rows. Must not be {@code null}.
+     * @return The dense table gradient, shaped like the vector table.
+     */
+    double[][] denseTuningGradient(Worker worker) {
+      final double[][] dense = new double[pretrainedTrainable.length][pretrainedSize];
+      for (final Map.Entry<Integer, double[]> entry : worker.pretrainedGrads.entrySet()) {
+        System.arraycopy(entry.getValue(), 0, dense[entry.getKey()], 0, pretrainedSize);
+      }
+      return dense;
     }
 
     /**
@@ -582,7 +626,7 @@ public final class BilstmPOSTrainer {
       private final double[] xposBiasGrads;
       private final double[][] featsWeightGrads;
       private final double[] featsBiasGrads;
-      private final double[][] pretrainedGrads;
+      private final SortedMap<Integer, double[]> pretrainedGrads;
 
       private Worker(List<double[][]> buffers, int crfIndex, int layer2Index,
           int xposIndex, int featsIndex, int tuningIndex) {
@@ -612,7 +656,7 @@ public final class BilstmPOSTrainer {
         xposBiasGrads = xposIndex >= 0 ? buffers.get(xposIndex + 1)[0] : null;
         featsWeightGrads = featsIndex >= 0 ? buffers.get(featsIndex) : null;
         featsBiasGrads = featsIndex >= 0 ? buffers.get(featsIndex + 1)[0] : null;
-        pretrainedGrads = tuningIndex >= 0 ? buffers.get(tuningIndex) : null;
+        pretrainedGrads = tuningIndex >= 0 ? new TreeMap<>() : null;
       }
 
       /**
@@ -1273,7 +1317,8 @@ public final class BilstmPOSTrainer {
         }
         if (pretrainedRows[t] >= 0 && !blockDropped[t] && worker.pretrainedGrads != null) {
           final int offset = wordSize + 2 * charHidden;
-          final double[] rowGrads = worker.pretrainedGrads[pretrainedRows[t]];
+          final double[] rowGrads = worker.pretrainedGrads.computeIfAbsent(
+              pretrainedRows[t], row -> new double[pretrainedSize]);
           for (int i = 0; i < pretrainedSize; i++) {
             rowGrads[i] += dx[offset + i];
           }
