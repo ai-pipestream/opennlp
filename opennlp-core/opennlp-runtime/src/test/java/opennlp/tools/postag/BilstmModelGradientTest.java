@@ -350,7 +350,9 @@ class BilstmModelGradientTest {
         BilstmPOSTrainer.TrainingContext.build(corpus, tuningSettings, vectors, null);
     final BilstmPOSTrainer.TrainingContext.Worker tuningWorker = tuningContext.newWorker();
     final double[][] table = tuningContext.testingPretrainedTrainable();
-    final double[][] analytic = analyticGradients(tuningContext, tuningWorker, 16);
+    tuningContext.resetWorker(tuningWorker);
+    tuningContext.sentenceGradients(sample, new Random(0L), tuningWorker);
+    final double[][] analytic = tuningContext.denseTuningGradient(tuningWorker);
     for (int r = 0; r < table.length; r++) {
       for (int i = 0; i < table[r].length; i++) {
         assertClose(analytic[r][i], numerical(tuningContext, tuningWorker, table[r], i),
