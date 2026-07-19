@@ -53,6 +53,7 @@ import java.util.Map;
 public class BilstmPOSModel {
 
   static final String MAGIC = "ONLP-BLPT-1";
+  static final String MAGIC_CRF = "ONLP-BLPT-2";
   static final String UNKNOWN = "*UNK*";
 
   private final LinkedHashMap<String, Integer> words;
@@ -70,6 +71,9 @@ public class BilstmPOSModel {
   private final int pretrainedSize;
   private final LinkedHashMap<String, Integer> pretrainedIds;
   private final float[][] pretrainedVectors;
+  private final double[][] transitionWeights;
+  private final double[] startWeights;
+  private final double[] endWeights;
 
   private volatile Map<String, double[]> representationCache;
 
@@ -79,6 +83,18 @@ public class BilstmPOSModel {
       LstmLayer wordBackward, double[][] outputWeights, double[] outputBias,
       int maxWordLength, LinkedHashMap<String, Integer> pretrainedIds,
       float[][] pretrainedVectors) {
+    this(words, chars, tags, wordEmbeddings, charEmbeddings, charForward, charBackward,
+        wordForward, wordBackward, outputWeights, outputBias, maxWordLength,
+        pretrainedIds, pretrainedVectors, null, null, null);
+  }
+
+  BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
+      String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
+      LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
+      LstmLayer wordBackward, double[][] outputWeights, double[] outputBias,
+      int maxWordLength, LinkedHashMap<String, Integer> pretrainedIds,
+      float[][] pretrainedVectors, double[][] transitionWeights, double[] startWeights,
+      double[] endWeights) {
     this.words = words;
     this.chars = chars;
     this.tags = tags;
@@ -94,6 +110,9 @@ public class BilstmPOSModel {
     this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
     this.pretrainedIds = pretrainedIds;
     this.pretrainedVectors = pretrainedVectors;
+    this.transitionWeights = transitionWeights;
+    this.startWeights = startWeights;
+    this.endWeights = endWeights;
   }
 
   /**
@@ -101,6 +120,36 @@ public class BilstmPOSModel {
    */
   public String[] tags() {
     return tags.clone();
+  }
+
+  /**
+   * @return {@code true} when this model carries a linear-chain CRF output layer and
+   *         decodes by Viterbi rather than per-position argmax.
+   */
+  public boolean isCrf() {
+    return transitionWeights != null;
+  }
+
+  /**
+   * @return The CRF transition scores, {@code [tags][tags]}, or {@code null} on a
+   *         softmax model.
+   */
+  double[][] transitionWeights() {
+    return transitionWeights;
+  }
+
+  /**
+   * @return The CRF start scores, or {@code null} on a softmax model.
+   */
+  double[] startWeights() {
+    return startWeights;
+  }
+
+  /**
+   * @return The CRF end scores, or {@code null} on a softmax model.
+   */
+  double[] endWeights() {
+    return endWeights;
   }
 
   /**
@@ -301,7 +350,7 @@ public class BilstmPOSModel {
   public void serialize(OutputStream out) throws IOException {
     final DataOutputStream data =
         new DataOutputStream(new BufferedOutputStream(out));
-    data.writeUTF(MAGIC);
+    data.writeUTF(isCrf() ? MAGIC_CRF : MAGIC);
     writeVocabulary(data, words);
     writeVocabulary(data, chars);
     data.writeInt(tags.length);
@@ -316,6 +365,11 @@ public class BilstmPOSModel {
     writeLstm(data, wordBackward);
     writeMatrix(data, outputWeights);
     writeVector(data, outputBias);
+    if (isCrf()) {
+      writeMatrix(data, transitionWeights);
+      writeVector(data, startWeights);
+      writeVector(data, endWeights);
+    }
     data.writeInt(maxWordLength);
     data.writeBoolean(pretrainedIds != null);
     if (pretrainedIds != null) {
@@ -354,8 +408,8 @@ public class BilstmPOSModel {
   public static BilstmPOSModel load(InputStream in) throws IOException {
     final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
     final String magic = data.readUTF();
-    if (!MAGIC.equals(magic)) {
-      throw new IOException("not an ONLP-BLPT-1 model: " + magic);
+    if (!MAGIC.equals(magic) && !MAGIC_CRF.equals(magic)) {
+      throw new IOException("not an ONLP-BLPT model: " + magic);
     }
     final LinkedHashMap<String, Integer> words = readVocabulary(data);
     final LinkedHashMap<String, Integer> chars = readVocabulary(data);
@@ -372,6 +426,14 @@ public class BilstmPOSModel {
     final LstmLayer wordBackward = readLstm(data);
     final double[][] outputWeights = readMatrix(data);
     final double[] outputBias = readVector(data);
+    double[][] transitionWeights = null;
+    double[] startWeights = null;
+    double[] endWeights = null;
+    if (MAGIC_CRF.equals(magic)) {
+      transitionWeights = readMatrix(data);
+      startWeights = readVector(data);
+      endWeights = readVector(data);
+    }
     final int maxWordLength = data.readInt();
     final boolean hasPretrained = data.readBoolean();
     LinkedHashMap<String, Integer> pretrainedIds = null;
@@ -389,7 +451,8 @@ public class BilstmPOSModel {
     }
     return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
         charForward, charBackward, wordForward, wordBackward, outputWeights,
-        outputBias, maxWordLength, pretrainedIds, pretrainedVectors);
+        outputBias, maxWordLength, pretrainedIds, pretrainedVectors, transitionWeights,
+        startWeights, endWeights);
   }
 
   /**

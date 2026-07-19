@@ -47,7 +47,7 @@ class BilstmPOSModelTest {
 
   private static BilstmPOSModel tinyModel() throws IOException {
     return BilstmPOSTrainer.train(new CollectionObjectStream<>(CORPUS),
-        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0));
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, false));
   }
 
   @Test
@@ -71,7 +71,7 @@ class BilstmPOSModelTest {
   void testSerializationRoundTripPreservesPretrainedTable() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(
         new CollectionObjectStream<>(CORPUS),
-        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, false),
         w -> new float[] {w.length(), 1.0f}, List.of("unseen"));
     final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     model.serialize(buffer);
@@ -79,6 +79,21 @@ class BilstmPOSModelTest {
         BilstmPOSModel.load(new ByteArrayInputStream(buffer.toByteArray()));
     assertArrayEquals(model.wordRepresentation("unseen"),
         loaded.wordRepresentation("unseen"), 0.0d);
+  }
+
+  @Test
+  void testSerializationRoundTripPreservesCrfLayer() throws IOException {
+    final BilstmPOSModel model = BilstmPOSTrainer.train(
+        new CollectionObjectStream<>(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, true));
+    final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    model.serialize(buffer);
+    final BilstmPOSModel loaded =
+        BilstmPOSModel.load(new ByteArrayInputStream(buffer.toByteArray()));
+    assertEquals(model.isCrf(), loaded.isCrf());
+    final String[] sentence = {"The", "dog", "sat"};
+    assertArrayEquals(new BilstmPOSTagger(model).tag(sentence),
+        new BilstmPOSTagger(loaded).tag(sentence));
   }
 
   @Test
