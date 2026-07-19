@@ -174,14 +174,16 @@ public class ConlluPOSTaggerEvalTest {
         intProperty("threads", base.threads()),
         doubleProperty("wordDropout", base.wordDropout()),
         intProperty("learningRateHalfLife", base.learningRateHalfLife()),
-        booleanProperty("crf", base.crf()));
+        booleanProperty("crf", base.crf()),
+        intProperty("encoderLayers", base.encoderLayers()));
   }
 
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
     return "h" + s.hiddenSize() + ";e" + s.epochs() + ";b" + s.batchSize() + ";lr"
         + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
         + ";we" + s.wordEmbeddingSize() + ";ch" + s.charHiddenSize() + ";wd"
-        + s.wordDropout() + ";hl" + s.learningRateHalfLife() + ";crf" + s.crf();
+        + s.wordDropout() + ";hl" + s.learningRateHalfLife() + ";crf" + s.crf()
+        + ";el" + s.encoderLayers();
   }
 
   private static int intProperty(String name, int fallback) {
