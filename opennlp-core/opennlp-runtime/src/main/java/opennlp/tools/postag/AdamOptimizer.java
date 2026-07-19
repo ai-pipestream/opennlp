@@ -39,6 +39,7 @@ final class AdamOptimizer {
   private final List<double[][]> gradients = new ArrayList<>();
   private final List<double[][]> firstMoments = new ArrayList<>();
   private final List<double[][]> secondMoments = new ArrayList<>();
+  private final List<Double> lrMultipliers = new ArrayList<>();
 
   /**
    * Registers a weight matrix, allocating zeroed gradient and moment mirrors.
@@ -48,8 +49,25 @@ final class AdamOptimizer {
    * @return The index used to reach the gradient mirror.
    */
   int register(double[][] weight) {
+    return register(weight, 1.0d);
+  }
+
+  /**
+   * Registers a weight matrix with a learning-rate multiplier, for parameter groups
+   * trained slower than the rest, allocating zeroed gradient and moment mirrors.
+   *
+   * @param weight The weight array, shared and updated in place. Must not be
+   *               {@code null}.
+   * @param lrMultiplier Multiplier applied to the learning rate for this group; must
+   *                     be positive.
+   * @return The index used to reach the gradient mirror.
+   */
+  int register(double[][] weight, double lrMultiplier) {
     if (weight == null) {
       throw new IllegalArgumentException("weight must not be null");
+    }
+    if (lrMultiplier <= 0.0d) {
+      throw new IllegalArgumentException("lrMultiplier must be positive");
     }
     weights.add(weight);
     final double[][] gradient = new double[weight.length][];
@@ -63,6 +81,7 @@ final class AdamOptimizer {
     gradients.add(gradient);
     firstMoments.add(first);
     secondMoments.add(second);
+    lrMultipliers.add(lrMultiplier);
     return weights.size() - 1;
   }
 
@@ -136,12 +155,13 @@ final class AdamOptimizer {
       final double[][] gradient = gradients.get(p);
       final double[][] first = firstMoments.get(p);
       final double[][] second = secondMoments.get(p);
+      final double scaledRate = learningRate * lrMultipliers.get(p);
       for (int r = 0; r < weight.length; r++) {
         for (int i = 0; i < weight[r].length; i++) {
           final double g = gradient[r][i];
           first[r][i] = BETA1 * first[r][i] + (1.0d - BETA1) * g;
           second[r][i] = BETA2 * second[r][i] + (1.0d - BETA2) * g * g;
-          weight[r][i] -= learningRate * biasCorrection * first[r][i]
+          weight[r][i] -= scaledRate * biasCorrection * first[r][i]
               / (Math.sqrt(second[r][i]) + EPSILON);
         }
       }

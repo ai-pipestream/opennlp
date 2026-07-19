@@ -51,10 +51,11 @@ class BilstmModelGradientTest {
   private BilstmPOSTrainer.TrainingContext.Worker dropoutWorker;
   private BilstmPOSTrainer.MultiTaskSample sample;
   private BilstmPOSTrainer.MultiTaskSample auxSample;
+  private List<BilstmPOSTrainer.MultiTaskSample> corpus;
 
   @BeforeEach
   void setUp() {
-    final List<BilstmPOSTrainer.MultiTaskSample> corpus = List.of(
+    corpus = List.of(
         new BilstmPOSTrainer.MultiTaskSample(new String[] {"The", "cat", "sat"},
             new String[] {"DET", "NOUN", "VERB"}, null, null),
         new BilstmPOSTrainer.MultiTaskSample(new String[] {"A", "dog", "ran"},
@@ -63,17 +64,17 @@ class BilstmModelGradientTest {
             new String[] {"NOUN", "VERB"}, null, null));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
-        0.0d, 0.0d, 1.0d);
+        0.0d, 0.0d, 1.0d, 0.0d);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
     final BilstmPOSTrainer.Settings crfSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true, 1,
-        0.0d, 0.0d, 1.0d);
+        0.0d, 0.0d, 1.0d, 0.0d);
     crfContext = BilstmPOSTrainer.TrainingContext.build(corpus, crfSettings, null, null);
     crfWorker = crfContext.newWorker();
     final BilstmPOSTrainer.Settings twoLayerSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
-        0.0d, 0.0d, 1.0d);
+        0.0d, 0.0d, 1.0d, 0.0d);
     twoLayerContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, twoLayerSettings, null, null);
     twoLayerWorker = twoLayerContext.newWorker();
@@ -90,7 +91,7 @@ class BilstmModelGradientTest {
             new String[] {"Number=Plur", "Tense=Pres"}));
     final BilstmPOSTrainer.Settings auxSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
-        0.0d, 0.0d, 0.7d);
+        0.0d, 0.0d, 0.7d, 0.0d);
     auxContext = BilstmPOSTrainer.TrainingContext.build(auxCorpus, auxSettings, null,
         null);
     auxWorker = auxContext.newWorker();
@@ -98,7 +99,7 @@ class BilstmModelGradientTest {
 
     final BilstmPOSTrainer.Settings dropoutSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
-        0.0d, 0.5d, 1.0d);
+        0.0d, 0.5d, 1.0d, 0.0d);
     dropoutContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, dropoutSettings, null, null);
     dropoutWorker = dropoutContext.newWorker();
@@ -332,6 +333,28 @@ class BilstmModelGradientTest {
         assertClose(analyticL1[r][k],
             numerical(dropoutContext, dropoutWorker, layer1.w()[r], k),
             "dropout wordForward.w[" + r + "][" + k + "]");
+      }
+    }
+  }
+
+  @Test
+  void testPretrainedTuningGradients() {
+    // the fine-tuned table rows must agree with finite differences, through the
+    // same sentence that flows into the shared encoder
+    final java.util.function.Function<CharSequence, float[]> vectors =
+        w -> new float[] {0.5f, -0.25f};
+    final BilstmPOSTrainer.Settings tuningSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 1.0d, 0.1d);
+    final BilstmPOSTrainer.TrainingContext tuningContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, tuningSettings, vectors, null);
+    final BilstmPOSTrainer.TrainingContext.Worker tuningWorker = tuningContext.newWorker();
+    final double[][] table = tuningContext.testingPretrainedTrainable();
+    final double[][] analytic = analyticGradients(tuningContext, tuningWorker, 16);
+    for (int r = 0; r < table.length; r++) {
+      for (int i = 0; i < table[r].length; i++) {
+        assertClose(analytic[r][i], numerical(tuningContext, tuningWorker, table[r], i),
+            "pretrainedTrainable[" + r + "][" + i + "]");
       }
     }
   }
