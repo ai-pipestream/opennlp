@@ -58,7 +58,7 @@ flowchart LR
   classDef cut fill:#e8f0e8,stroke:#555,color:#000;
 
   class merged mergedC;
-  class p1161,d1163 approved;
+  class d1163 approved;
   class p1177,d1152,d1154,d1155,d1165,d1166,d1167 draft;
   class p1182 foundation;
   class depp,fftag,inst,cjk,huns,prof,glos,pii,coref,num,deppa,rel,geo,hier,rvote,emb cut;
