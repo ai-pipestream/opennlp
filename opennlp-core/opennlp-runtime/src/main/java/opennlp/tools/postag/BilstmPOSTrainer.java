@@ -95,12 +95,16 @@ public final class BilstmPOSTrainer {
    *                       stacked layers and on the states feeding the tag scorer.
    * @param auxLossWeight Weight of the auxiliary tagging losses when training
    *                      multi-task; zero disables the auxiliary heads.
+   * @param pretrainedTuning Learning-rate multiplier for the frozen pretrained
+   *                         vector table; zero keeps it frozen, a positive value
+   *                         fine-tunes it at that fraction of the base rate.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
       double wordDropout, int learningRateHalfLife, boolean crf, int encoderLayers,
-      double pretrainedDropout, double encoderDropout, double auxLossWeight) {
+      double pretrainedDropout, double encoderDropout, double auxLossWeight,
+      double pretrainedTuning) {
 
     /**
      * Validates the hyperparameters.
@@ -145,6 +149,9 @@ public final class BilstmPOSTrainer {
       if (auxLossWeight < 0.0d) {
         throw new IllegalArgumentException("auxLossWeight must not be negative");
       }
+      if (pretrainedTuning < 0.0d) {
+        throw new IllegalArgumentException("pretrainedTuning must not be negative");
+      }
     }
 
     /**
@@ -154,7 +161,7 @@ public final class BilstmPOSTrainer {
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
           Runtime.getRuntime().availableProcessors(), 0.0d, 0, false, 1, 0.0d, 0.0d,
-          1.0d);
+          1.0d, 0.0d);
     }
   }
 
@@ -453,6 +460,7 @@ public final class BilstmPOSTrainer {
     private final CrfScorer crfScorer;
     private final LinkedHashMap<String, Integer> pretrainedIds;
     private final float[][] pretrainedVectors;
+    private final double[][] pretrainedTrainable;
     private final int pretrainedSize;
     private final int inputSize;
     final AdamOptimizer adam;
@@ -474,10 +482,10 @@ public final class BilstmPOSTrainer {
         LstmLayer wordBackward2, double[][] outputWeights,
         double[] outputBias, double[][] transitionWeights, double[] startWeights,
         double[] endWeights, LinkedHashMap<String, Integer> pretrainedIds,
-        float[][] pretrainedVectors, int inputSize, AdamOptimizer adam,
-        String[] xposTags, Map<String, Integer> xposIds, double[][] xposWeights,
-        double[] xposBias, String[] featsTags, Map<String, Integer> featsIds,
-        double[][] featsWeights, double[] featsBias) {
+        float[][] pretrainedVectors, double[][] pretrainedTrainable, int inputSize,
+        AdamOptimizer adam, String[] xposTags, Map<String, Integer> xposIds,
+        double[][] xposWeights, double[] xposBias, String[] featsTags,
+        Map<String, Integer> featsIds, double[][] featsWeights, double[] featsBias) {
       this.xposTags = xposTags;
       this.xposIds = xposIds;
       this.xposWeights = xposWeights;
@@ -507,6 +515,7 @@ public final class BilstmPOSTrainer {
       this.crfScorer = settings.crf() ? new CrfScorer(tags.length) : null;
       this.pretrainedIds = pretrainedIds;
       this.pretrainedVectors = pretrainedVectors;
+      this.pretrainedTrainable = pretrainedTrainable;
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
       this.inputSize = inputSize;
       this.adam = adam;
@@ -524,12 +533,17 @@ public final class BilstmPOSTrainer {
         index += 2;
       }
       featsIndex = featsWeights != null ? index : -1;
+      if (featsWeights != null) {
+        index += 2;
+      }
+      tuningIndex = pretrainedTrainable != null ? index : -1;
     }
 
     private final int crfIndex;
     private final int layer2Index;
     private final int xposIndex;
     private final int featsIndex;
+    private final int tuningIndex;
 
     /**
      * Allocates a worker with its own gradient buffers, for sentence-parallel batch
@@ -539,7 +553,7 @@ public final class BilstmPOSTrainer {
      */
     Worker newWorker() {
       return new Worker(adam.newGradientBuffers(), crfIndex, layer2Index, xposIndex,
-          featsIndex);
+          featsIndex, tuningIndex);
     }
 
     /**
@@ -568,9 +582,10 @@ public final class BilstmPOSTrainer {
       private final double[] xposBiasGrads;
       private final double[][] featsWeightGrads;
       private final double[] featsBiasGrads;
+      private final double[][] pretrainedGrads;
 
       private Worker(List<double[][]> buffers, int crfIndex, int layer2Index,
-          int xposIndex, int featsIndex) {
+          int xposIndex, int featsIndex, int tuningIndex) {
         this.buffers = buffers;
         wordEmbeddingGrads = buffers.get(0);
         charEmbeddingGrads = buffers.get(1);
@@ -597,6 +612,7 @@ public final class BilstmPOSTrainer {
         xposBiasGrads = xposIndex >= 0 ? buffers.get(xposIndex + 1)[0] : null;
         featsWeightGrads = featsIndex >= 0 ? buffers.get(featsIndex) : null;
         featsBiasGrads = featsIndex >= 0 ? buffers.get(featsIndex + 1)[0] : null;
+        pretrainedGrads = tuningIndex >= 0 ? buffers.get(tuningIndex) : null;
       }
 
       /**
@@ -640,6 +656,11 @@ public final class BilstmPOSTrainer {
     /** @return The live CRF end scores, exposed for white-box gradient checks. */
     double[] testingEndWeights() {
       return endWeights;
+    }
+
+    /** @return The live fine-tuning vector table, exposed for white-box checks. */
+    double[][] testingPretrainedTrainable() {
+      return pretrainedTrainable;
     }
 
     /** @return The live forward sentence layer, exposed for white-box checks. */
@@ -779,6 +800,20 @@ public final class BilstmPOSTrainer {
         pretrainedIds = null;
         pretrainedVectors = null;
       }
+      final double[][] pretrainedTrainable;
+      if (pretrainedVectors != null && settings.pretrainedTuning() > 0.0d) {
+        pretrainedTrainable = new double[pretrainedVectors.length][];
+        for (int r = 0; r < pretrainedVectors.length; r++) {
+          final float[] row = pretrainedVectors[r];
+          pretrainedTrainable[r] = new double[row.length];
+          for (int i = 0; i < row.length; i++) {
+            pretrainedTrainable[r][i] = row[i];
+          }
+        }
+      }
+      else {
+        pretrainedTrainable = null;
+      }
       final int pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
 
       final int inputSize = settings.wordEmbeddingSize() + 2 * settings.charHiddenSize()
@@ -889,13 +924,16 @@ public final class BilstmPOSTrainer {
         adam.register(featsWeights);
         adam.register(featsBias);
       }
+      if (pretrainedTrainable != null) {
+        adam.register(pretrainedTrainable, settings.pretrainedTuning());
+      }
 
       return new TrainingContext(settings, words, chars, tags, tagIds, wordEmbeddings,
           charEmbeddings, charForward, charBackward, wordForward, wordBackward,
           wordForward2, wordBackward2, outputWeights, outputBias, transitionWeights,
-          startWeights, endWeights, pretrainedIds, pretrainedVectors, inputSize, adam,
-          xposTags, xposIds, xposWeights, xposBias, featsTags, featsIds, featsWeights,
-          featsBias);
+          startWeights, endWeights, pretrainedIds, pretrainedVectors,
+          pretrainedTrainable, inputSize, adam, xposTags, xposIds, xposWeights,
+          xposBias, featsTags, featsIds, featsWeights, featsBias);
     }
 
     private static void collectVectors(Iterable<String> candidates,
@@ -986,8 +1024,11 @@ public final class BilstmPOSTrainer {
       final double[][] xs = new double[steps][inputSize];
       final double[][] masks = new double[steps][inputSize];
       final int[] wordRows = new int[steps];
+      final int[] pretrainedRows = new int[steps];
+      final boolean[] blockDropped = new boolean[steps];
 
       for (int t = 0; t < steps; t++) {
+        pretrainedRows[t] = -1;
         final String token = sentence[t];
         final int[] ids = charIds(token);
         charIdsPerToken[t] = ids;
@@ -1021,17 +1062,28 @@ public final class BilstmPOSTrainer {
           charBackwardCaches[t] = bwdCache;
           System.arraycopy(hBwd[ids.length - 1], 0, x, wordSize + charHidden, charHidden);
         }
-        final float[] pretrained = pretrainedVector(token);
-        if (pretrained != null) {
-          // whole-block dropout trains the character path for the tokens that
-          // resolve no vector at tagging time; drawn only when enabled, so runs
-          // without it keep their exact mask stream
-          final boolean dropBlock = settings.pretrainedDropout() > 0.0d
-              && random.nextDouble() < settings.pretrainedDropout();
-          if (!dropBlock) {
-            final int offset = wordSize + 2 * charHidden;
-            for (int i = 0; i < pretrainedSize; i++) {
-              x[offset + i] = pretrained[i];
+        if (pretrainedIds != null) {
+          final Integer row = pretrainedIds.get(BilstmPOSModel.normalize(token));
+          if (row != null) {
+            pretrainedRows[t] = row;
+            // whole-block dropout trains the character path for the tokens that
+            // resolve no vector at tagging time; drawn only when enabled, so runs
+            // without it keep their exact mask stream
+            if (settings.pretrainedDropout() > 0.0d
+                && random.nextDouble() < settings.pretrainedDropout()) {
+              blockDropped[t] = true;
+            }
+            else {
+              final int offset = wordSize + 2 * charHidden;
+              if (pretrainedTrainable != null) {
+                System.arraycopy(pretrainedTrainable[row], 0, x, offset, pretrainedSize);
+              }
+              else {
+                final float[] pretrained = pretrainedVectors[row];
+                for (int i = 0; i < pretrainedSize; i++) {
+                  x[offset + i] = pretrained[i];
+                }
+              }
             }
           }
         }
@@ -1219,6 +1271,13 @@ public final class BilstmPOSTrainer {
         for (int i = 0; i < wordSize; i++) {
           wordEmbeddingGrads[wordRow][i] += dx[i];
         }
+        if (pretrainedRows[t] >= 0 && !blockDropped[t] && worker.pretrainedGrads != null) {
+          final int offset = wordSize + 2 * charHidden;
+          final double[] rowGrads = worker.pretrainedGrads[pretrainedRows[t]];
+          for (int i = 0; i < pretrainedSize; i++) {
+            rowGrads[i] += dx[offset + i];
+          }
+        }
         final int[] ids = charIdsPerToken[t];
         if (ids.length > 0) {
           final double[][] dHChar = new double[ids.length][charHidden];
@@ -1360,19 +1419,25 @@ public final class BilstmPOSTrainer {
       return ids;
     }
 
-    private float[] pretrainedVector(String token) {
-      if (pretrainedIds == null) {
-        return null;
-      }
-      final Integer row = pretrainedIds.get(BilstmPOSModel.normalize(token));
-      return row != null ? pretrainedVectors[row] : null;
-    }
-
     private BilstmPOSModel toModel() {
+      final float[][] vectors;
+      if (pretrainedTrainable != null) {
+        vectors = new float[pretrainedTrainable.length][];
+        for (int r = 0; r < pretrainedTrainable.length; r++) {
+          final double[] row = pretrainedTrainable[r];
+          vectors[r] = new float[row.length];
+          for (int i = 0; i < row.length; i++) {
+            vectors[r][i] = (float) row[i];
+          }
+        }
+      }
+      else {
+        vectors = pretrainedVectors;
+      }
       return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
           charForward, charBackward, wordForward, wordBackward, wordForward2,
           wordBackward2, outputWeights, outputBias, settings.maxWordLength(),
-          pretrainedIds, pretrainedVectors, transitionWeights, startWeights,
+          pretrainedIds, vectors, transitionWeights, startWeights,
           endWeights);
     }
   }
