@@ -86,11 +86,12 @@ public final class BilstmPOSTrainer {
    *                             decay.
    * @param crf Whether to score tag sequences with a linear-chain CRF (Viterbi
    *            decoding) instead of independent per-position softmax.
+   * @param encoderLayers Stacked BiLSTM layers in the sentence encoder, 1 or 2.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
-      double wordDropout, int learningRateHalfLife, boolean crf) {
+      double wordDropout, int learningRateHalfLife, boolean crf, int encoderLayers) {
 
     /**
      * Validates the hyperparameters.
@@ -123,6 +124,9 @@ public final class BilstmPOSTrainer {
       if (learningRateHalfLife < 0) {
         throw new IllegalArgumentException("learningRateHalfLife must not be negative");
       }
+      if (encoderLayers < 1 || encoderLayers > 2) {
+        throw new IllegalArgumentException("encoderLayers must be 1 or 2");
+      }
     }
 
     /**
@@ -131,7 +135,7 @@ public final class BilstmPOSTrainer {
      */
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
-          Runtime.getRuntime().availableProcessors(), 0.0d, 0, false);
+          Runtime.getRuntime().availableProcessors(), 0.0d, 0, false, 1);
     }
   }
 
@@ -345,6 +349,8 @@ public final class BilstmPOSTrainer {
     private final LstmLayer charBackward;
     private final LstmLayer wordForward;
     private final LstmLayer wordBackward;
+    private final LstmLayer wordForward2;
+    private final LstmLayer wordBackward2;
     private final double[][] outputWeights;
     private final double[] outputBias;
     private final double[][] transitionWeights;
@@ -361,7 +367,8 @@ public final class BilstmPOSTrainer {
         LinkedHashMap<String, Integer> chars, String[] tags,
         Map<String, Integer> tagIds, double[][] wordEmbeddings,
         double[][] charEmbeddings, LstmLayer charForward, LstmLayer charBackward,
-        LstmLayer wordForward, LstmLayer wordBackward, double[][] outputWeights,
+        LstmLayer wordForward, LstmLayer wordBackward, LstmLayer wordForward2,
+        LstmLayer wordBackward2, double[][] outputWeights,
         double[] outputBias, double[][] transitionWeights, double[] startWeights,
         double[] endWeights, LinkedHashMap<String, Integer> pretrainedIds,
         float[][] pretrainedVectors, int inputSize, AdamOptimizer adam) {
@@ -376,6 +383,8 @@ public final class BilstmPOSTrainer {
       this.charBackward = charBackward;
       this.wordForward = wordForward;
       this.wordBackward = wordBackward;
+      this.wordForward2 = wordForward2;
+      this.wordBackward2 = wordBackward2;
       this.outputWeights = outputWeights;
       this.outputBias = outputBias;
       this.transitionWeights = transitionWeights;
@@ -387,7 +396,16 @@ public final class BilstmPOSTrainer {
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
       this.inputSize = inputSize;
       this.adam = adam;
+      int index = 16;
+      crfIndex = settings.crf() ? index : -1;
+      if (settings.crf()) {
+        index += 3;
+      }
+      layer2Index = settings.encoderLayers() == 2 ? index : -1;
     }
+
+    private final int crfIndex;
+    private final int layer2Index;
 
     /**
      * Allocates a worker with its own gradient buffers, for sentence-parallel batch
@@ -396,7 +414,7 @@ public final class BilstmPOSTrainer {
      * @return A fresh worker. Never {@code null}.
      */
     Worker newWorker() {
-      return new Worker(adam.newGradientBuffers(), settings.crf());
+      return new Worker(adam.newGradientBuffers(), crfIndex, layer2Index);
     }
 
     /**
@@ -419,8 +437,10 @@ public final class BilstmPOSTrainer {
       private final double[][] transitionGrads;
       private final double[] startGrads;
       private final double[] endGrads;
+      private final LstmLayer.Gradients wordForward2Grads;
+      private final LstmLayer.Gradients wordBackward2Grads;
 
-      private Worker(List<double[][]> buffers, boolean crf) {
+      private Worker(List<double[][]> buffers, int crfIndex, int layer2Index) {
         this.buffers = buffers;
         wordEmbeddingGrads = buffers.get(0);
         charEmbeddingGrads = buffers.get(1);
@@ -434,9 +454,15 @@ public final class BilstmPOSTrainer {
             buffers.get(13)[0]);
         outputWeightGrads = buffers.get(14);
         outputBiasGrads = buffers.get(15)[0];
-        transitionGrads = crf ? buffers.get(16) : null;
-        startGrads = crf ? buffers.get(17)[0] : null;
-        endGrads = crf ? buffers.get(18)[0] : null;
+        transitionGrads = crfIndex >= 0 ? buffers.get(crfIndex) : null;
+        startGrads = crfIndex >= 0 ? buffers.get(crfIndex + 1)[0] : null;
+        endGrads = crfIndex >= 0 ? buffers.get(crfIndex + 2)[0] : null;
+        wordForward2Grads = layer2Index >= 0 ? LstmLayer.Gradients.wrap(
+            buffers.get(layer2Index), buffers.get(layer2Index + 1),
+            buffers.get(layer2Index + 2)[0]) : null;
+        wordBackward2Grads = layer2Index >= 0 ? LstmLayer.Gradients.wrap(
+            buffers.get(layer2Index + 3), buffers.get(layer2Index + 4),
+            buffers.get(layer2Index + 5)[0]) : null;
       }
 
       /**
@@ -485,6 +511,11 @@ public final class BilstmPOSTrainer {
     /** @return The live forward sentence layer, exposed for white-box checks. */
     LstmLayer testingWordForward() {
       return wordForward;
+    }
+
+    /** @return The live second forward sentence layer, exposed for white-box checks. */
+    LstmLayer testingWordForward2() {
+      return wordForward2;
     }
 
     /** @return The live backward sentence layer, exposed for white-box checks. */
@@ -606,12 +637,25 @@ public final class BilstmPOSTrainer {
         startWeights = null;
         endWeights = null;
       }
+      final LstmLayer wordForward2;
+      final LstmLayer wordBackward2;
+      if (settings.encoderLayers() == 2) {
+        wordForward2 = new LstmLayer(2 * settings.hiddenSize(), settings.hiddenSize(),
+            initRandom);
+        wordBackward2 = new LstmLayer(2 * settings.hiddenSize(), settings.hiddenSize(),
+            initRandom);
+      }
+      else {
+        wordForward2 = null;
+        wordBackward2 = null;
+      }
 
       final AdamOptimizer adam = new AdamOptimizer();
       // registration order, relied on by white-box tests: 0 word embeddings,
       // 1 char embeddings, 2-4 char forward w/u/b, 5-7 char backward w/u/b,
       // 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights,
-      // 15 output bias, 16-18 CRF transitions/start/end (crf only)
+      // 15 output bias, then 16-18 CRF transitions/start/end (crf only),
+      // then 19-24 second-layer forward/backward w/u/b (encoderLayers 2 only)
       adam.register(wordEmbeddings);
       adam.register(charEmbeddings);
       adam.register(charForward.w());
@@ -633,11 +677,19 @@ public final class BilstmPOSTrainer {
         adam.register(startWeights);
         adam.register(endWeights);
       }
+      if (settings.encoderLayers() == 2) {
+        adam.register(wordForward2.w());
+        adam.register(wordForward2.u());
+        adam.register(wordForward2.b());
+        adam.register(wordBackward2.w());
+        adam.register(wordBackward2.u());
+        adam.register(wordBackward2.b());
+      }
 
       return new TrainingContext(settings, words, chars, tags, tagIds, wordEmbeddings,
           charEmbeddings, charForward, charBackward, wordForward, wordBackward,
-          outputWeights, outputBias, transitionWeights, startWeights, endWeights,
-          pretrainedIds, pretrainedVectors, inputSize, adam);
+          wordForward2, wordBackward2, outputWeights, outputBias, transitionWeights,
+          startWeights, endWeights, pretrainedIds, pretrainedVectors, inputSize, adam);
     }
 
     private static void collectVectors(Iterable<String> candidates,
@@ -768,14 +820,40 @@ public final class BilstmPOSTrainer {
           LstmLayer.ForwardCache.of(steps, hidden);
       final double[][] hBackwardReversed = wordBackward.run(reversedXs, wordBackwardCache);
 
+      final double[][] states = new double[steps][2 * hidden];
+      for (int t = 0; t < steps; t++) {
+        System.arraycopy(hFwd[t], 0, states[t], 0, hidden);
+        System.arraycopy(hBackwardReversed[steps - 1 - t], 0, states[t], hidden, hidden);
+      }
+      double[][] topStates = states;
+      LstmLayer.ForwardCache layer2ForwardCache = null;
+      LstmLayer.ForwardCache layer2BackwardCache = null;
+      double[][] reversedStates = null;
+      if (wordForward2 != null) {
+        layer2ForwardCache = LstmLayer.ForwardCache.of(steps, hidden);
+        final double[][] hFwd2 = wordForward2.run(states, layer2ForwardCache);
+        reversedStates = new double[steps][];
+        for (int t = 0; t < steps; t++) {
+          reversedStates[t] = states[steps - 1 - t];
+        }
+        layer2BackwardCache = LstmLayer.ForwardCache.of(steps, hidden);
+        final double[][] hBwd2Reversed = wordBackward2.run(reversedStates,
+            layer2BackwardCache);
+        topStates = new double[steps][2 * hidden];
+        for (int t = 0; t < steps; t++) {
+          System.arraycopy(hFwd2[t], 0, topStates[t], 0, hidden);
+          System.arraycopy(hBwd2Reversed[steps - 1 - t], 0, topStates[t], hidden,
+              hidden);
+        }
+      }
+
       final double[][] emissions = new double[steps][tags.length];
       for (int t = 0; t < steps; t++) {
-        final double[] hB = hBackwardReversed[steps - 1 - t];
         for (int o = 0; o < tags.length; o++) {
           final double[] row = outputWeights[o];
           double sum = outputBias[o];
-          for (int j = 0; j < hidden; j++) {
-            sum += row[j] * hFwd[t][j] + row[hidden + j] * hB[j];
+          for (int j = 0; j < 2 * hidden; j++) {
+            sum += row[j] * topStates[t][j];
           }
           emissions[t][o] = sum;
         }
@@ -810,22 +888,51 @@ public final class BilstmPOSTrainer {
           }
         }
       }
-      final double[][] dHFwd = new double[steps][hidden];
-      final double[][] dHBwd = new double[steps][hidden];
+      final double[][] dTop = new double[steps][2 * hidden];
       for (int t = 0; t < steps; t++) {
-        final double[] hB = hBackwardReversed[steps - 1 - t];
         for (int o = 0; o < tags.length; o++) {
           final double gradient = emissionGrads[t][o];
           outputBiasGrads[o] += gradient;
           final double[] gradRow = outputWeightGrads[o];
           final double[] weightRow = outputWeights[o];
-          for (int j = 0; j < hidden; j++) {
-            gradRow[j] += gradient * hFwd[t][j];
-            gradRow[hidden + j] += gradient * hB[j];
-            dHFwd[t][j] += weightRow[j] * gradient;
-            dHBwd[t][j] += weightRow[hidden + j] * gradient;
+          for (int j = 0; j < 2 * hidden; j++) {
+            gradRow[j] += gradient * topStates[t][j];
+            dTop[t][j] += weightRow[j] * gradient;
           }
         }
+      }
+
+      double[][] dStates = dTop;
+      if (wordForward2 != null) {
+        final double[][] dTopFwd = new double[steps][hidden];
+        final double[][] dTopBwd = new double[steps][hidden];
+        for (int t = 0; t < steps; t++) {
+          System.arraycopy(dTop[t], 0, dTopFwd[t], 0, hidden);
+          System.arraycopy(dTop[t], hidden, dTopBwd[t], 0, hidden);
+        }
+        final double[][] dXs2Fwd = new double[steps][2 * hidden];
+        wordForward2.backward(states, layer2ForwardCache, dTopFwd, dXs2Fwd,
+            worker.wordForward2Grads);
+        final double[][] dTopBwdReversed = new double[steps][hidden];
+        for (int t = 0; t < steps; t++) {
+          dTopBwdReversed[t] = dTopBwd[steps - 1 - t];
+        }
+        final double[][] dXs2BwdReversed = new double[steps][2 * hidden];
+        wordBackward2.backward(reversedStates, layer2BackwardCache, dTopBwdReversed,
+            dXs2BwdReversed, worker.wordBackward2Grads);
+        dStates = new double[steps][2 * hidden];
+        for (int t = 0; t < steps; t++) {
+          final double[] dBwd = dXs2BwdReversed[steps - 1 - t];
+          for (int i = 0; i < 2 * hidden; i++) {
+            dStates[t][i] = dXs2Fwd[t][i] + dBwd[i];
+          }
+        }
+      }
+      final double[][] dHFwd = new double[steps][hidden];
+      final double[][] dHBwd = new double[steps][hidden];
+      for (int t = 0; t < steps; t++) {
+        System.arraycopy(dStates[t], 0, dHFwd[t], 0, hidden);
+        System.arraycopy(dStates[t], hidden, dHBwd[t], 0, hidden);
       }
 
       final double[][] dXsFwd = new double[steps][inputSize];
@@ -905,9 +1012,10 @@ public final class BilstmPOSTrainer {
 
     private BilstmPOSModel toModel() {
       return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
-          charForward, charBackward, wordForward, wordBackward, outputWeights,
-          outputBias, settings.maxWordLength(), pretrainedIds, pretrainedVectors,
-          transitionWeights, startWeights, endWeights);
+          charForward, charBackward, wordForward, wordBackward, wordForward2,
+          wordBackward2, outputWeights, outputBias, settings.maxWordLength(),
+          pretrainedIds, pretrainedVectors, transitionWeights, startWeights,
+          endWeights);
     }
   }
 }

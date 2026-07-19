@@ -43,6 +43,8 @@ class BilstmModelGradientTest {
   private BilstmPOSTrainer.TrainingContext.Worker worker;
   private BilstmPOSTrainer.TrainingContext crfContext;
   private BilstmPOSTrainer.TrainingContext.Worker crfWorker;
+  private BilstmPOSTrainer.TrainingContext twoLayerContext;
+  private BilstmPOSTrainer.TrainingContext.Worker twoLayerWorker;
   private POSSample sample;
 
   @BeforeEach
@@ -55,13 +57,18 @@ class BilstmModelGradientTest {
         new POSSample(new String[] {"Cats", "sleep"},
             new String[] {"NOUN", "VERB"}));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
     final BilstmPOSTrainer.Settings crfSettings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true, 1);
     crfContext = BilstmPOSTrainer.TrainingContext.build(corpus, crfSettings, null, null);
     crfWorker = crfContext.newWorker();
+    final BilstmPOSTrainer.Settings twoLayerSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2);
+    twoLayerContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, twoLayerSettings, null, null);
+    twoLayerWorker = twoLayerContext.newWorker();
     sample = corpus.get(0);
   }
 
@@ -176,6 +183,43 @@ class BilstmModelGradientTest {
           "charForward.b[" + r + "]");
       assertClose(analyticBwdB[0][r], numerical(backward.b(), r),
           "charBackward.b[" + r + "]");
+    }
+  }
+
+  @Test
+  void testSecondLayerGradients() {
+    // the stacked encoder's own parameters must agree with finite differences
+    final double[][] analyticW = analyticGradients(twoLayerContext, twoLayerWorker, 16);
+    final double[][] analyticU = analyticGradients(twoLayerContext, twoLayerWorker, 17);
+    final double[][] analyticB = analyticGradients(twoLayerContext, twoLayerWorker, 18);
+    final LstmLayer layer = twoLayerContext.testingWordForward2();
+    for (int r = 0; r < 4 * layer.hiddenSize(); r++) {
+      for (int k = 0; k < layer.inputSize(); k++) {
+        assertClose(analyticW[r][k],
+            numerical(twoLayerContext, twoLayerWorker, layer.w()[r], k),
+            "wordForward2.w[" + r + "][" + k + "]");
+      }
+      for (int k = 0; k < layer.hiddenSize(); k++) {
+        assertClose(analyticU[r][k],
+            numerical(twoLayerContext, twoLayerWorker, layer.u()[r], k),
+            "wordForward2.u[" + r + "][" + k + "]");
+      }
+      assertClose(analyticB[0][r], numerical(twoLayerContext, twoLayerWorker,
+          layer.b(), r), "wordForward2.b[" + r + "]");
+    }
+  }
+
+  @Test
+  void testFirstLayerGradientsThroughSecondLayer() {
+    // gradients flowing back through the stacked encoder into the first layer
+    final double[][] analytic = analyticGradients(twoLayerContext, twoLayerWorker, 8);
+    final LstmLayer layer = twoLayerContext.testingWordForward();
+    for (int r = 0; r < 4 * layer.hiddenSize(); r++) {
+      for (int k = 0; k < layer.inputSize(); k++) {
+        assertClose(analytic[r][k],
+            numerical(twoLayerContext, twoLayerWorker, layer.w()[r], k),
+            "stacked wordForward.w[" + r + "][" + k + "]");
+      }
     }
   }
 

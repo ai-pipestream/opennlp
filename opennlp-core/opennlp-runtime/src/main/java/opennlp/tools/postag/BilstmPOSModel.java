@@ -54,6 +54,8 @@ public class BilstmPOSModel {
 
   static final String MAGIC = "ONLP-BLPT-1";
   static final String MAGIC_CRF = "ONLP-BLPT-2";
+  static final String MAGIC_TWO_LAYER = "ONLP-BLPT-3";
+  static final String MAGIC_TWO_LAYER_CRF = "ONLP-BLPT-4";
   static final String UNKNOWN = "*UNK*";
 
   private final LinkedHashMap<String, Integer> words;
@@ -65,6 +67,8 @@ public class BilstmPOSModel {
   private final LstmLayer charBackward;
   private final LstmLayer wordForward;
   private final LstmLayer wordBackward;
+  private final LstmLayer wordForward2;
+  private final LstmLayer wordBackward2;
   private final double[][] outputWeights;
   private final double[] outputBias;
   private final int maxWordLength;
@@ -95,6 +99,19 @@ public class BilstmPOSModel {
       int maxWordLength, LinkedHashMap<String, Integer> pretrainedIds,
       float[][] pretrainedVectors, double[][] transitionWeights, double[] startWeights,
       double[] endWeights) {
+    this(words, chars, tags, wordEmbeddings, charEmbeddings, charForward, charBackward,
+        wordForward, wordBackward, null, null, outputWeights, outputBias,
+        maxWordLength, pretrainedIds, pretrainedVectors, transitionWeights,
+        startWeights, endWeights);
+  }
+
+  BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
+      String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
+      LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
+      LstmLayer wordBackward, LstmLayer wordForward2, LstmLayer wordBackward2,
+      double[][] outputWeights, double[] outputBias, int maxWordLength,
+      LinkedHashMap<String, Integer> pretrainedIds, float[][] pretrainedVectors,
+      double[][] transitionWeights, double[] startWeights, double[] endWeights) {
     this.words = words;
     this.chars = chars;
     this.tags = tags;
@@ -104,6 +121,8 @@ public class BilstmPOSModel {
     this.charBackward = charBackward;
     this.wordForward = wordForward;
     this.wordBackward = wordBackward;
+    this.wordForward2 = wordForward2;
+    this.wordBackward2 = wordBackward2;
     this.outputWeights = outputWeights;
     this.outputBias = outputBias;
     this.maxWordLength = maxWordLength;
@@ -300,8 +319,8 @@ public class BilstmPOSModel {
 
   /**
    * Scores every tag at every position of a sentence: encodes each token, runs the
-   * sentence BiLSTM in both directions, and applies the linear tagger to the
-   * concatenated states.
+   * sentence BiLSTM (both layers when stacked), and applies the linear tagger to the
+   * final states.
    *
    * @param tokens The sentence. Must not be {@code null} or empty.
    * @return The unnormalized tag scores, {@code [tokens.length][tags.length]}.
@@ -316,29 +335,51 @@ public class BilstmPOSModel {
     for (int t = 0; t < steps; t++) {
       xs[t] = wordRepresentation(tokens[t]);
     }
-    final int hidden = wordForward.hiddenSize();
-    final LstmLayer.ForwardCache fwdCache = LstmLayer.ForwardCache.of(steps, hidden);
-    final double[][] hFwd = wordForward.run(xs, fwdCache);
-    final double[][] reversed = new double[steps][];
-    for (int t = 0; t < steps; t++) {
-      reversed[t] = xs[steps - 1 - t];
+    double[][] states = bilstmEncode(xs, wordForward, wordBackward);
+    if (wordForward2 != null) {
+      states = bilstmEncode(states, wordForward2, wordBackward2);
     }
-    final LstmLayer.ForwardCache bwdCache = LstmLayer.ForwardCache.of(steps, hidden);
-    final double[][] hBwdRev = wordBackward.run(reversed, bwdCache);
     final double[][] scores = new double[steps][tags.length];
     for (int t = 0; t < steps; t++) {
-      final double[] hF = hFwd[t];
-      final double[] hB = hBwdRev[steps - 1 - t];
       for (int o = 0; o < tags.length; o++) {
         final double[] row = outputWeights[o];
         double sum = outputBias[o];
-        for (int j = 0; j < hidden; j++) {
-          sum += row[j] * hF[j] + row[hidden + j] * hB[j];
+        for (int j = 0; j < states[t].length; j++) {
+          sum += row[j] * states[t][j];
         }
         scores[t][o] = sum;
       }
     }
     return scores;
+  }
+
+  /**
+   * Runs one bidirectional LSTM layer over a sequence and returns the per-position
+   * concatenation of both directions' states.
+   *
+   * @param xs The input sequence. Must not be {@code null} or empty.
+   * @param forward The forward layer. Must not be {@code null}.
+   * @param backward The backward layer. Must not be {@code null}.
+   * @return The concatenated states, {@code [T][2 * hidden]}. Never {@code null}.
+   */
+  private static double[][] bilstmEncode(double[][] xs, LstmLayer forward,
+      LstmLayer backward) {
+    final int steps = xs.length;
+    final int hidden = forward.hiddenSize();
+    final LstmLayer.ForwardCache fwdCache = LstmLayer.ForwardCache.of(steps, hidden);
+    final double[][] hFwd = forward.run(xs, fwdCache);
+    final double[][] reversed = new double[steps][];
+    for (int t = 0; t < steps; t++) {
+      reversed[t] = xs[steps - 1 - t];
+    }
+    final LstmLayer.ForwardCache bwdCache = LstmLayer.ForwardCache.of(steps, hidden);
+    final double[][] hBwdRev = backward.run(reversed, bwdCache);
+    final double[][] concat = new double[steps][2 * hidden];
+    for (int t = 0; t < steps; t++) {
+      System.arraycopy(hFwd[t], 0, concat[t], 0, hidden);
+      System.arraycopy(hBwdRev[steps - 1 - t], 0, concat[t], hidden, hidden);
+    }
+    return concat;
   }
 
   /**
@@ -350,7 +391,12 @@ public class BilstmPOSModel {
   public void serialize(OutputStream out) throws IOException {
     final DataOutputStream data =
         new DataOutputStream(new BufferedOutputStream(out));
-    data.writeUTF(isCrf() ? MAGIC_CRF : MAGIC);
+    if (wordForward2 != null) {
+      data.writeUTF(isCrf() ? MAGIC_TWO_LAYER_CRF : MAGIC_TWO_LAYER);
+    }
+    else {
+      data.writeUTF(isCrf() ? MAGIC_CRF : MAGIC);
+    }
     writeVocabulary(data, words);
     writeVocabulary(data, chars);
     data.writeInt(tags.length);
@@ -363,6 +409,10 @@ public class BilstmPOSModel {
     writeLstm(data, charBackward);
     writeLstm(data, wordForward);
     writeLstm(data, wordBackward);
+    if (wordForward2 != null) {
+      writeLstm(data, wordForward2);
+      writeLstm(data, wordBackward2);
+    }
     writeMatrix(data, outputWeights);
     writeVector(data, outputBias);
     if (isCrf()) {
@@ -408,9 +458,12 @@ public class BilstmPOSModel {
   public static BilstmPOSModel load(InputStream in) throws IOException {
     final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
     final String magic = data.readUTF();
-    if (!MAGIC.equals(magic) && !MAGIC_CRF.equals(magic)) {
+    if (!MAGIC.equals(magic) && !MAGIC_CRF.equals(magic)
+        && !MAGIC_TWO_LAYER.equals(magic) && !MAGIC_TWO_LAYER_CRF.equals(magic)) {
       throw new IOException("not an ONLP-BLPT model: " + magic);
     }
+    final boolean twoLayer = MAGIC_TWO_LAYER.equals(magic)
+        || MAGIC_TWO_LAYER_CRF.equals(magic);
     final LinkedHashMap<String, Integer> words = readVocabulary(data);
     final LinkedHashMap<String, Integer> chars = readVocabulary(data);
     final int tagCount = data.readInt();
@@ -424,6 +477,12 @@ public class BilstmPOSModel {
     final LstmLayer charBackward = readLstm(data);
     final LstmLayer wordForward = readLstm(data);
     final LstmLayer wordBackward = readLstm(data);
+    LstmLayer wordForward2 = null;
+    LstmLayer wordBackward2 = null;
+    if (twoLayer) {
+      wordForward2 = readLstm(data);
+      wordBackward2 = readLstm(data);
+    }
     final double[][] outputWeights = readMatrix(data);
     final double[] outputBias = readVector(data);
     double[][] transitionWeights = null;
@@ -450,9 +509,9 @@ public class BilstmPOSModel {
       }
     }
     return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
-        charForward, charBackward, wordForward, wordBackward, outputWeights,
-        outputBias, maxWordLength, pretrainedIds, pretrainedVectors, transitionWeights,
-        startWeights, endWeights);
+        charForward, charBackward, wordForward, wordBackward, wordForward2,
+        wordBackward2, outputWeights, outputBias, maxWordLength, pretrainedIds,
+        pretrainedVectors, transitionWeights, startWeights, endWeights);
   }
 
   /**
