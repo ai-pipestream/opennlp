@@ -45,8 +45,6 @@ import opennlp.tools.postag.FeedforwardPOSTrainer;
 import opennlp.tools.postag.POSEvaluator;
 import opennlp.tools.postag.POSSample;
 import opennlp.tools.postag.POSTagger;
-import opennlp.tools.util.InputStreamFactory;
-import opennlp.tools.util.MarkableFileInputStreamFactory;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.wordvector.Glove;
 import opennlp.tools.util.wordvector.WordVector;
@@ -283,8 +281,76 @@ public class ConlluPOSTaggerEvalTest {
   }
 
   private static ObjectStream<POSSample> samples(Path conllu) throws IOException {
-    final InputStreamFactory in = new MarkableFileInputStreamFactory(conllu.toFile());
-    return new ConlluPOSSampleStream(new ConlluStream(in), ConlluTagset.U);
+    return new WordBasedPOSSampleStream(conllu);
+  }
+
+  /**
+   * Reads a CoNLL-U file as POS samples over syntactic words: multiword-token range
+   * lines (ids containing {@code -}) and empty nodes (ids containing {@code .}) are
+   * dropped and their parts kept as individual tokens, the Universal Dependencies
+   * convention for word-based tagging evaluation. {@link ConlluStream} is not used
+   * because it merges multiword tokens into surface forms with composite tags, which
+   * no tagger can be expected to reproduce.
+   */
+  private static final class WordBasedPOSSampleStream implements ObjectStream<POSSample> {
+
+    private final java.io.BufferedReader reader;
+    private final List<POSSample> pending = new ArrayList<>();
+    private boolean loaded;
+
+    private WordBasedPOSSampleStream(Path conllu) throws IOException {
+      reader = Files.newBufferedReader(conllu, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public POSSample read() throws IOException {
+      if (!loaded) {
+        load();
+        loaded = true;
+      }
+      return pending.isEmpty() ? null : pending.remove(0);
+    }
+
+    private void load() throws IOException {
+      List<String> tokens = new ArrayList<>();
+      List<String> tags = new ArrayList<>();
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.startsWith("#")) {
+          continue;
+        }
+        if (line.isBlank()) {
+          emit(tokens, tags);
+          continue;
+        }
+        final String[] fields = line.split("\t");
+        if (fields.length < 4 || fields[0].contains("-") || fields[0].contains(".")) {
+          continue;
+        }
+        tokens.add(fields[1]);
+        tags.add(fields[3]);
+      }
+      emit(tokens, tags);
+    }
+
+    private void emit(List<String> tokens, List<String> tags) {
+      if (!tokens.isEmpty()) {
+        pending.add(new POSSample(tokens.toArray(new String[0]),
+            tags.toArray(new String[0])));
+        tokens.clear();
+        tags.clear();
+      }
+    }
+
+    @Override
+    public void reset() throws IOException, UnsupportedOperationException {
+      throw new UnsupportedOperationException("reset is not supported");
+    }
+
+    @Override
+    public void close() throws IOException {
+      reader.close();
+    }
   }
 
   private static double evaluate(FeedforwardPOSModel model, Path testConllu)
