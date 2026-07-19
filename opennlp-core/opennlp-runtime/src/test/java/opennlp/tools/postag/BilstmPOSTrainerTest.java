@@ -43,7 +43,8 @@ class BilstmPOSTrainerTest {
       new POSSample(new String[] {"A", "fish", "swam"}, new String[] {"D", "N", "V"}));
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
-      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0, false, 1);
+      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0, false, 1,
+      0.0d, 0.0d, 1.0d);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -93,10 +94,43 @@ class BilstmPOSTrainerTest {
   }
 
   @Test
+  void testLearnsSeparablePatternMultiTask() throws IOException {
+    // the auxiliary taggings regularize training but never change the model's shape:
+    // the trained tagger still answers UPOS only
+    final List<BilstmPOSTrainer.MultiTaskSample> corpus = new java.util.ArrayList<>();
+    for (final POSSample sample : CORPUS) {
+      final String[] xpos = new String[sample.getTags().length];
+      final String[] feats = new String[sample.getTags().length];
+      for (int i = 0; i < xpos.length; i++) {
+        xpos[i] = sample.getTags()[i] + "X";
+        feats[i] = i == 0 ? "_" : "Number=Sing";
+      }
+      corpus.add(new BilstmPOSTrainer.MultiTaskSample(sample.getSentence(),
+          sample.getTags(), xpos, feats));
+    }
+    final BilstmPOSModel model = BilstmPOSTrainer.trainMultiTask(
+        new CollectionObjectStream<>(corpus), TINY, null, null);
+    final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
+    for (final POSSample sample : CORPUS) {
+      assertArrayEquals(sample.getTags(), tagger.tag(sample.getSentence()));
+    }
+  }
+
+  @Test
+  void testMultiTaskSampleRejectsMisalignedTaggings() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new BilstmPOSTrainer.MultiTaskSample(new String[] {"a", "b"},
+            new String[] {"D"}, null, null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new BilstmPOSTrainer.MultiTaskSample(new String[] {"a"},
+            new String[] {"D"}, new String[] {"DT", "NN"}, null));
+  }
+
+  @Test
   void testLearnsSeparablePatternWithCrf() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            1, 0.0d, 0, true, 1));
+            1, 0.0d, 0, true, 1, 0.0d, 0.0d, 1.0d));
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
     for (final POSSample sample : CORPUS) {
       assertArrayEquals(sample.getTags(), tagger.tag(sample.getSentence()));
@@ -124,7 +158,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            3, 0.0d, 0, false, 1));
+            3, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d));
     final String[] sentence = {"The", "cat", "ran"};
     final double[][] expected = sequential.score(sentence);
     final double[][] actual = parallel.score(sentence);
