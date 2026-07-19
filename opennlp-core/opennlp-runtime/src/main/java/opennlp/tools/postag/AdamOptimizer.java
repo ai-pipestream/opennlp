@@ -20,6 +20,8 @@ package opennlp.tools.postag;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.SortedMap;
 
 /**
  * The Adam optimizer over a registered set of weight arrays, with global-norm
@@ -175,8 +177,26 @@ final class AdamOptimizer {
    * @return The buffers, in registration order. Never {@code null}.
    */
   List<double[][]> newGradientBuffers() {
+    return newGradientBuffers(-1);
+  }
+
+  /**
+   * Allocates an independent, zeroed set of gradient buffers shaped like the
+   * registered gradients, leaving a {@code null} hole at {@code skipIndex}, for one
+   * parallel worker to accumulate into. The skipped registration is expected to be
+   * fed sparsely through {@link #absorbSparse}.
+   *
+   * @param skipIndex The registration to skip, or a negative value for none.
+   * @return The buffers, in registration order; may contain one {@code null} hole.
+   */
+  List<double[][]> newGradientBuffers(int skipIndex) {
     final List<double[][]> buffers = new ArrayList<>(gradients.size());
-    for (final double[][] gradient : gradients) {
+    for (int p = 0; p < gradients.size(); p++) {
+      if (p == skipIndex) {
+        buffers.add(null);
+        continue;
+      }
+      final double[][] gradient = gradients.get(p);
       final double[][] copy = new double[gradient.length][];
       for (int r = 0; r < gradient.length; r++) {
         copy[r] = new double[gradient[r].length];
@@ -197,10 +217,34 @@ final class AdamOptimizer {
     for (int p = 0; p < gradients.size(); p++) {
       final double[][] gradient = gradients.get(p);
       final double[][] buffer = buffers.get(p);
+      if (buffer == null) {
+        continue;
+      }
       for (int r = 0; r < gradient.length; r++) {
         for (int i = 0; i < gradient[r].length; i++) {
           gradient[r][i] += buffer[r][i];
         }
+      }
+    }
+  }
+
+  /**
+   * Adds sparse row gradients into the registered gradient mirror, in row order.
+   * Used for large, sparsely-touched tables so parallel workers need no dense
+   * per-worker copy; called in a fixed worker order so parallel training stays
+   * deterministic.
+   *
+   * @param registration The registration index whose mirror receives the rows.
+   * @param rowGradients The per-row gradients, keyed by row index. Must not be
+   *        {@code null}.
+   */
+  void absorbSparse(int registration, SortedMap<Integer, double[]> rowGradients) {
+    final double[][] gradient = gradients.get(registration);
+    for (final Map.Entry<Integer, double[]> entry : rowGradients.entrySet()) {
+      final double[] row = gradient[entry.getKey()];
+      final double[] add = entry.getValue();
+      for (int i = 0; i < row.length; i++) {
+        row[i] += add[i];
       }
     }
   }
@@ -212,6 +256,9 @@ final class AdamOptimizer {
    */
   static void zero(List<double[][]> buffers) {
     for (final double[][] buffer : buffers) {
+      if (buffer == null) {
+        continue;
+      }
       for (final double[] row : buffer) {
         Arrays.fill(row, 0.0d);
       }
