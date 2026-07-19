@@ -1,6 +1,6 @@
 # Research branch map
 
-This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-18.
+This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-19.
 
 ## Merge strategy
 
@@ -8,13 +8,12 @@ Solid arrows are the verified git base of each branch. Dashed arrows are commits
 
 ```mermaid
 flowchart LR
-  main([apache main 2ae4146b9])
+  main([apache main 6038bf503])
 
-  merged["MERGED upstream 2026-07: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers · OPENNLP-1890 allowlist model loading"]
+  merged["MERGED upstream 2026-07: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers · OPENNLP-1878 hot-path performance<br/>OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile"]
   main --- merged
 
   %% ---- open pull requests against apache/opennlp ----
-  main --> p1161["#1161 · OPENNLP-1878 · hot-path performance ✓ approved, eval run pending"]
   main --> p1177["#1177 · OPENNLP-1870 · emoji annotations"]
   main --> p1182["#1182 · OPENNLP-1888 · document container · FOUNDATION"]
   main --> d1154["#1154 · OPENNLP-1879 · gazetteer + geocoder + user overlay"]
