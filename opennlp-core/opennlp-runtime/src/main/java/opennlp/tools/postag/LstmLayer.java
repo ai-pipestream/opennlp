@@ -41,6 +41,12 @@ final class LstmLayer {
   private final double[][] u;
   private final double[] b;
 
+  // Transposed views of w and u that let backpropagation read weights row-wise
+  // instead of column-wise. Built lazily on the first backward pass and rebuilt
+  // via refreshTransposed() each time training mutates the weights.
+  private double[][] wT;
+  private double[][] uT;
+
   /**
    * Initializes a layer with Xavier-uniform input and recurrence weights, zero biases,
    * and a forget-gate bias of one.
@@ -225,6 +231,29 @@ final class LstmLayer {
   }
 
   /**
+   * Rebuilds the transposed weight views used by backpropagation. Training must
+   * call this after every optimizer step that mutates the weights; the views are
+   * otherwise built lazily on the first backward pass. Never called at inference,
+   * where no backward pass runs.
+   */
+  void refreshTransposed() {
+    if (wT == null) {
+      wT = new double[inputSize][4 * hiddenSize];
+      uT = new double[hiddenSize][4 * hiddenSize];
+    }
+    for (int r = 0; r < 4 * hiddenSize; r++) {
+      final double[] wRow = w[r];
+      final double[] uRow = u[r];
+      for (int k = 0; k < inputSize; k++) {
+        wT[k][r] = wRow[k];
+      }
+      for (int k = 0; k < hiddenSize; k++) {
+        uT[k][r] = uRow[k];
+      }
+    }
+  }
+
+  /**
    * Backpropagates hidden-state gradients through the sequence, accumulating parameter
    * gradients into {@code gradients} and input gradients into {@code dXs}. The caller
    * owns zeroing or reuse of both outputs.
@@ -240,6 +269,9 @@ final class LstmLayer {
    */
   void backward(double[][] xs, ForwardCache cache, double[][] dH, double[][] dXs,
       Gradients gradients) {
+    if (wT == null) {
+      refreshTransposed();
+    }
     final int steps = xs.length;
     final double[] dCell = new double[hiddenSize];
     final double[] dHNext = new double[hiddenSize];
@@ -279,16 +311,18 @@ final class LstmLayer {
         }
       }
       for (int k = 0; k < hiddenSize; k++) {
+        final double[] uTk = uT[k];
         double sum = 0.0d;
         for (int r = 0; r < 4 * hiddenSize; r++) {
-          sum += u[r][k] * da[r];
+          sum += uTk[r] * da[r];
         }
         dHNext[k] = sum;
       }
       for (int k = 0; k < inputSize; k++) {
+        final double[] wTk = wT[k];
         double sum = 0.0d;
         for (int r = 0; r < 4 * hiddenSize; r++) {
-          sum += w[r][k] * da[r];
+          sum += wTk[r] * da[r];
         }
         dXs[t][k] += sum;
       }
