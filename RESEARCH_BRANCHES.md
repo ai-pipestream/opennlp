@@ -27,6 +27,7 @@ flowchart LR
   %% ---- staged engines (this fork only) ----
   main --> depp["depparse · dependency parser + neural tier"]
   main --> fftag["ff-postagger · neural tagger"]
+  main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> inst["resource-installer"]
   main --> cjk["lattice-cjk · CJK segmentation"]
   d1163 --> huns["hunspell"]
@@ -87,6 +88,7 @@ All staged branches are rebased onto current apache main, tested at their tips, 
 |---|---|---|---|
 | `depparse` | Transition-based dependency parsing: classical perceptron tiers plus a feedforward neural tier with beam decoding | Staged | UD English EWT test, gold UPOS: 86.78 UAS / 84.61 LAS at beam 4; all-neural pipeline 84.30 / 80.79 at 452 tok/s with the vector-augmented tagger. The published Stanza end-to-end reference on the same treebank is 88.90 / 86.77, so this is not yet at parity; the tagger is the dominant gap |
 | `ff-postagger` | Feedforward neural POS tagger on the same trainer recipe, with opt-in pretrained word-vector input features and a coverage lexicon | Staged | 94.68% on UD English EWT vs 93.75% for the best classical configuration in-tree; 95.51% with the opt-in vector block (potion-base-8M vectors plus a dictionary lexicon), defaults unchanged |
+| `bilstm-tagger` | Bidirectional LSTM tagger tier: character BiLSTM word representations, learned plus frozen pretrained embeddings, optional stacked encoder, CRF decoding, and multi-task auxiliary training; every layer gradient-checked against finite differences | Experimental, accuracy gate pending | 96.00% on UD English EWT so far vs the 97.0% gate (feedforward tier reaches 95.51%); sweep in progress over multi-task, per-source dropout, and encoder dropout levers |
 | `lattice-cjk` | Viterbi lattice segmentation over MeCab-format dictionaries (Japanese IPADIC, Korean mecab-ko-dic) plus a Chinese unigram segmenter | Staged | About 5M chars/s on real IPADIC; 392k dictionary entries load in under a second; dictionaries are always user-supplied, never bundled |
 | `resource-installer` | User-supplied-URL model and data installer, SHA-256 verified before unpacking | Staged | Enabled a UD lemmatizer run at 87.76% lemma accuracy on EWT with the stock `LemmatizerME` |
 | `hunspell` | Hunspell `.dic`/`.aff` affix stemmer, regex-free, fail-closed on unsupported features | Staged, stacked on #1163 | Validated against LibreOffice en/es/hu/de dictionaries; `AF` alias flags are a known gap (hu_HU loads but stems to identity) |
