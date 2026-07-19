@@ -45,30 +45,64 @@ class BilstmModelGradientTest {
   private BilstmPOSTrainer.TrainingContext.Worker crfWorker;
   private BilstmPOSTrainer.TrainingContext twoLayerContext;
   private BilstmPOSTrainer.TrainingContext.Worker twoLayerWorker;
-  private POSSample sample;
+  private BilstmPOSTrainer.TrainingContext auxContext;
+  private BilstmPOSTrainer.TrainingContext.Worker auxWorker;
+  private BilstmPOSTrainer.TrainingContext dropoutContext;
+  private BilstmPOSTrainer.TrainingContext.Worker dropoutWorker;
+  private BilstmPOSTrainer.MultiTaskSample sample;
+  private BilstmPOSTrainer.MultiTaskSample auxSample;
 
   @BeforeEach
   void setUp() {
-    final List<POSSample> corpus = List.of(
-        new POSSample(new String[] {"The", "cat", "sat"},
-            new String[] {"DET", "NOUN", "VERB"}),
-        new POSSample(new String[] {"A", "dog", "ran"},
-            new String[] {"DET", "NOUN", "VERB"}),
-        new POSSample(new String[] {"Cats", "sleep"},
-            new String[] {"NOUN", "VERB"}));
+    final List<BilstmPOSTrainer.MultiTaskSample> corpus = List.of(
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"The", "cat", "sat"},
+            new String[] {"DET", "NOUN", "VERB"}, null, null),
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"A", "dog", "ran"},
+            new String[] {"DET", "NOUN", "VERB"}, null, null),
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"Cats", "sleep"},
+            new String[] {"NOUN", "VERB"}, null, null));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 1.0d);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
     final BilstmPOSTrainer.Settings crfSettings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true, 1);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true, 1,
+        0.0d, 0.0d, 1.0d);
     crfContext = BilstmPOSTrainer.TrainingContext.build(corpus, crfSettings, null, null);
     crfWorker = crfContext.newWorker();
     final BilstmPOSTrainer.Settings twoLayerSettings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
+        0.0d, 0.0d, 1.0d);
     twoLayerContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, twoLayerSettings, null, null);
     twoLayerWorker = twoLayerContext.newWorker();
+
+    final List<BilstmPOSTrainer.MultiTaskSample> auxCorpus = List.of(
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"The", "cat", "sat"},
+            new String[] {"DET", "NOUN", "VERB"}, new String[] {"DT", "NN", "VBD"},
+            new String[] {"_", "Number=Sing", "Tense=Past"}),
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"A", "dog", "ran"},
+            new String[] {"DET", "NOUN", "VERB"}, new String[] {"DT", "NN", "VBD"},
+            new String[] {"_", "Number=Sing", "Tense=Past"}),
+        new BilstmPOSTrainer.MultiTaskSample(new String[] {"Cats", "sleep"},
+            new String[] {"NOUN", "VERB"}, new String[] {"NNS", "VBP"},
+            new String[] {"Number=Plur", "Tense=Pres"}));
+    final BilstmPOSTrainer.Settings auxSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 0.7d);
+    auxContext = BilstmPOSTrainer.TrainingContext.build(auxCorpus, auxSettings, null,
+        null);
+    auxWorker = auxContext.newWorker();
+    auxSample = auxCorpus.get(0);
+
+    final BilstmPOSTrainer.Settings dropoutSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
+        0.0d, 0.5d, 1.0d);
+    dropoutContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, dropoutSettings, null, null);
+    dropoutWorker = dropoutContext.newWorker();
+
     sample = corpus.get(0);
   }
 
@@ -224,6 +258,85 @@ class BilstmModelGradientTest {
   }
 
   @Test
+  void testAuxiliaryHeadGradients() {
+    // both auxiliary heads' own parameters must agree with finite differences under
+    // the weighted multi-task loss (no crf, one layer: xpos at 16/17, feats at 18/19)
+    final double[][] analyticXposW = analyticGradients(auxContext, auxWorker,
+        auxSample, 16);
+    final double[][] analyticXposB = analyticGradients(auxContext, auxWorker,
+        auxSample, 17);
+    final double[][] analyticFeatsW = analyticGradients(auxContext, auxWorker,
+        auxSample, 18);
+    final double[][] xposWeights = auxContext.testingXposWeights();
+    final double[] xposBias = auxContext.testingXposBias();
+    final double[][] featsWeights = auxContext.testingFeatsWeights();
+    for (int o = 0; o < xposWeights.length; o++) {
+      for (int j = 0; j < xposWeights[o].length; j++) {
+        assertClose(analyticXposW[o][j],
+            numerical(auxContext, auxWorker, auxSample, xposWeights[o], j),
+            "xposWeights[" + o + "][" + j + "]");
+      }
+      assertClose(analyticXposB[0][o],
+          numerical(auxContext, auxWorker, auxSample, xposBias, o),
+          "xposBias[" + o + "]");
+    }
+    for (int o = 0; o < featsWeights.length; o++) {
+      for (int j = 0; j < featsWeights[o].length; j++) {
+        assertClose(analyticFeatsW[o][j],
+            numerical(auxContext, auxWorker, auxSample, featsWeights[o], j),
+            "featsWeights[" + o + "][" + j + "]");
+      }
+    }
+  }
+
+  @Test
+  void testEncoderGradientsUnderAuxiliaryLoss() {
+    // the shared encoder must receive the summed gradient of all three losses
+    final double[][] analytic = analyticGradients(auxContext, auxWorker, auxSample, 8);
+    final LstmLayer layer = auxContext.testingWordForward();
+    for (int r = 0; r < 4 * layer.hiddenSize(); r++) {
+      for (int k = 0; k < layer.inputSize(); k++) {
+        assertClose(analytic[r][k],
+            numerical(auxContext, auxWorker, auxSample, layer.w()[r], k),
+            "aux wordForward.w[" + r + "][" + k + "]");
+      }
+    }
+  }
+
+  @Test
+  void testGradientsUnderEncoderDropout() {
+    // with encoder dropout active (masks reproduced by the seeded stream), the whole
+    // path through both masked boundaries must still agree with finite differences
+    final double[][] analyticOut = analyticGradients(dropoutContext, dropoutWorker, 14);
+    final double[][] outputWeights = dropoutContext.testingOutputWeights();
+    for (int o = 0; o < outputWeights.length; o++) {
+      for (int j = 0; j < outputWeights[o].length; j++) {
+        assertClose(analyticOut[o][j],
+            numerical(dropoutContext, dropoutWorker, outputWeights[o], j),
+            "dropout outputWeights[" + o + "][" + j + "]");
+      }
+    }
+    final double[][] analyticL2 = analyticGradients(dropoutContext, dropoutWorker, 16);
+    final LstmLayer layer2 = dropoutContext.testingWordForward2();
+    for (int r = 0; r < 4 * layer2.hiddenSize(); r++) {
+      for (int k = 0; k < layer2.inputSize(); k++) {
+        assertClose(analyticL2[r][k],
+            numerical(dropoutContext, dropoutWorker, layer2.w()[r], k),
+            "dropout wordForward2.w[" + r + "][" + k + "]");
+      }
+    }
+    final double[][] analyticL1 = analyticGradients(dropoutContext, dropoutWorker, 8);
+    final LstmLayer layer1 = dropoutContext.testingWordForward();
+    for (int r = 0; r < 4 * layer1.hiddenSize(); r++) {
+      for (int k = 0; k < layer1.inputSize(); k++) {
+        assertClose(analyticL1[r][k],
+            numerical(dropoutContext, dropoutWorker, layer1.w()[r], k),
+            "dropout wordForward.w[" + r + "][" + k + "]");
+      }
+    }
+  }
+
+  @Test
   void testCrfLossGradients() {
     // every parameter group must agree with finite differences under the CRF loss
     final double[][] analyticTransitions = analyticGradients(crfContext, crfWorker, 16);
@@ -273,8 +386,14 @@ class BilstmModelGradientTest {
 
   private double[][] analyticGradients(BilstmPOSTrainer.TrainingContext ctx,
       BilstmPOSTrainer.TrainingContext.Worker wk, int index) {
+    return analyticGradients(ctx, wk, sample, index);
+  }
+
+  private double[][] analyticGradients(BilstmPOSTrainer.TrainingContext ctx,
+      BilstmPOSTrainer.TrainingContext.Worker wk,
+      BilstmPOSTrainer.MultiTaskSample of, int index) {
     AdamOptimizer.zero(wk.buffers());
-    ctx.sentenceGradients(sample, new Random(0L), wk);
+    ctx.sentenceGradients(of, new Random(0L), wk);
     final double[][] source = wk.buffers().get(index);
     final double[][] copy = new double[source.length][];
     for (int r = 0; r < source.length; r++) {
@@ -289,11 +408,17 @@ class BilstmModelGradientTest {
 
   private double numerical(BilstmPOSTrainer.TrainingContext ctx,
       BilstmPOSTrainer.TrainingContext.Worker wk, double[] row, int i) {
+    return numerical(ctx, wk, sample, row, i);
+  }
+
+  private double numerical(BilstmPOSTrainer.TrainingContext ctx,
+      BilstmPOSTrainer.TrainingContext.Worker wk,
+      BilstmPOSTrainer.MultiTaskSample of, double[] row, int i) {
     final double original = row[i];
     row[i] = original + EPSILON;
-    final double plus = ctx.sentenceGradients(sample, new Random(0L), wk);
+    final double plus = ctx.sentenceGradients(of, new Random(0L), wk);
     row[i] = original - EPSILON;
-    final double minus = ctx.sentenceGradients(sample, new Random(0L), wk);
+    final double minus = ctx.sentenceGradients(of, new Random(0L), wk);
     row[i] = original;
     return (plus - minus) / (2.0d * EPSILON);
   }
