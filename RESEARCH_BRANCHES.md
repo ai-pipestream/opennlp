@@ -39,6 +39,12 @@ flowchart LR
   p1182 --> coref["coref"]
   p1182 --> num["numeric · money/quantities/temporals"]
 
+  %% ---- text-hygiene pack over the document container ----
+  p1182 --> tart["text-artifacts · mojibake + zero-width detection"]
+  p1182 --> asset["embedded-assets · base64 binary detection"]
+  asset --> noiz["noise · severity-tiered noise scoring"]
+  p1182 --> pred["predicate-annotators · conditional pipelines"]
+
   depp --> deppa["depparse-annotator"]
   p1182 -. foundation copied .-> deppa
   deppa --> rel["relation"]
@@ -62,7 +68,7 @@ flowchart LR
   class d1163 approved;
   class p1177,d1152,d1154,d1155,d1165,d1166,d1167 draft;
   class p1182 foundation;
-  class depp,fftag,inst,cjk,huns,prof,glos,pii,coref,num,deppa,rel,geo,hier,rvote,emb cut;
+  class depp,fftag,bilstm,inst,cjk,huns,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
 ```
 
 ## Open pull requests against apache/opennlp
@@ -70,9 +76,8 @@ flowchart LR
 | PR | JIRA | What it offers | Status | Notes |
 |---|---|---|---|---|
 | [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Draft, reviewer-endorsed, spec points landed | The foundation every staged annotator below builds on |
-| [#1161](https://github.com/apache/opennlp/pull/1161) | OPENNLP-1878 | Hot-path performance rewrites | Approved, eval build pending | Roughly 2x on the touched paths, measured per-path on the PR |
 | [#1177](https://github.com/apache/opennlp/pull/1177) | OPENNLP-1870 | Offset-aware emoji annotations, including ISO region decoding of flag emoji | Open | |
-| [#1163](https://github.com/apache/opennlp/pull/1163) | OPENNLP-1883 | Thread-safe `SnowballStemmer`, `StemmerFactory` seam, caching stemmer | Approved | |
+| [#1163](https://github.com/apache/opennlp/pull/1163) | OPENNLP-1883 | Thread-safe `SnowballStemmer`, `StemmerFactory` seam, caching stemmer | Approved, upstream eval run pending | |
 | [#1166](https://github.com/apache/opennlp/pull/1166) | OPENNLP-1886 | Sixteen UniNE light/minimal stemmer tiers | Draft, stacked on #1163 | Parity fixtures regenerated from the original implementations |
 | [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft | |
 | [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, stacked on #1155 | |
@@ -82,7 +87,7 @@ flowchart LR
 
 ## Staged feature branches (this fork only, not yet proposed upstream)
 
-All staged branches are rebased onto current apache main, tested at their tips, and carry `OPENNLP-XXXX-` names until their JIRA tickets are filed. The annotator branches require the #1182 document container and carry it as dropped-on-merge copies where noted in the diagram.
+All staged branches are based on a recent apache main (each rebases fully before any promotion), tested at their tips, and carry `OPENNLP-XXXX-` names until their JIRA tickets are filed. The annotator branches require the #1182 document container and carry it as dropped-on-merge copies where noted in the diagram.
 
 | Branch | What it offers | Status | Notes |
 |---|---|---|---|
@@ -97,6 +102,10 @@ All staged branches are rebased onto current apache main, tested at their tips, 
 | `pii` | PII detection and masking layers | Staged, needs #1182 | |
 | `coref` | Coreference chains as a document layer | Staged, needs #1182 | |
 | `numeric` | Money, quantities, temporals, and document-date layers with region-aware currency resolution | Staged, needs #1182 | |
+| `text-artifacts` | Mojibake, replacement-character, and zero-width artifact spans as a document layer | Staged, needs #1182 | |
+| `embedded-assets` | Embedded binary payloads (data URIs, bare base64 runs) as exact spans with format identification from file magic, plus asset folding that keeps every offset mapped to the source | Staged, needs #1182 | Magic table covers 220 formats, derived from published format signatures and the Apache Tika mime-type catalog |
+| `noise` | Severity-tiered structural noise scoring as a document layer, excluding spans already explained as embedded assets | Staged, on `embedded-assets` | |
+| `predicate-annotators` | Conditional and filtering annotator combinators for predicate-gated pipelines | Staged, needs #1182 | |
 | `region-vote` | Document-scoped region ballot: location mentions, country names, and flag emoji vote on where a document speaks from | Staged, on `numeric` | |
 | `geocode-annotator` | Gazetteer-backed geocoding of location entities into a document layer | Staged, on `region-vote` | |
 | `hierarchy-annotator` | Administrative containment chains for resolved locations | Staged, on `geocode-annotator` | |
