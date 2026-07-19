@@ -407,6 +407,7 @@ public final class BilstmPOSTrainer {
           }
           context.adam.step(learningRate, timestep);
           context.adam.zero();
+          context.refreshLayerTransposes();
         }
         logger.info("epoch {}/{} loss {} over {} tokens (lr {})", epoch, settings.epochs(),
             loss / tokens, tokens, learningRate);
@@ -545,6 +546,21 @@ public final class BilstmPOSTrainer {
     private final int xposIndex;
     private final int featsIndex;
     private final int tuningIndex;
+
+    /**
+     * Rebuilds the transposed weight views of every encoder layer after an
+     * optimizer step mutated the weights.
+     */
+    void refreshLayerTransposes() {
+      charForward.refreshTransposed();
+      charBackward.refreshTransposed();
+      wordForward.refreshTransposed();
+      wordBackward.refreshTransposed();
+      if (wordForward2 != null) {
+        wordForward2.refreshTransposed();
+        wordBackward2.refreshTransposed();
+      }
+    }
 
     /**
      * Allocates a worker with its own gradient buffers, for sentence-parallel batch
