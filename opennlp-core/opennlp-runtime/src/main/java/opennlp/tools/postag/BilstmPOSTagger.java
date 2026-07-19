@@ -133,6 +133,22 @@ public class BilstmPOSTagger implements POSTagger {
       return assigned;
     }
     final double[][] scores = model.score(sentence);
+    if (model.isCrf()) {
+      final CrfScorer scorer = new CrfScorer(tags.length);
+      final int[] path = scorer.viterbi(scores, model.transitionWeights(),
+          model.startWeights(), model.endWeights());
+      final double[][] marginals = collected != null
+          ? scorer.marginals(scores, model.transitionWeights(), model.startWeights(),
+              model.endWeights())
+          : null;
+      for (int i = 0; i < sentence.length; i++) {
+        assigned[i] = tags[path[i]];
+        if (collected != null) {
+          collected.add(assigned[i], marginals[i][path[i]]);
+        }
+      }
+      return assigned;
+    }
     for (int i = 0; i < sentence.length; i++) {
       int best = 0;
       for (int o = 1; o < tags.length; o++) {
