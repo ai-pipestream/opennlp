@@ -41,6 +41,8 @@ class BilstmModelGradientTest {
 
   private BilstmPOSTrainer.TrainingContext context;
   private BilstmPOSTrainer.TrainingContext.Worker worker;
+  private BilstmPOSTrainer.TrainingContext crfContext;
+  private BilstmPOSTrainer.TrainingContext.Worker crfWorker;
   private POSSample sample;
 
   @BeforeEach
@@ -53,9 +55,13 @@ class BilstmModelGradientTest {
         new POSSample(new String[] {"Cats", "sleep"},
             new String[] {"NOUN", "VERB"}));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
-        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0);
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
+    final BilstmPOSTrainer.Settings crfSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true);
+    crfContext = BilstmPOSTrainer.TrainingContext.build(corpus, crfSettings, null, null);
+    crfWorker = crfContext.newWorker();
     sample = corpus.get(0);
   }
 
@@ -173,10 +179,59 @@ class BilstmModelGradientTest {
     }
   }
 
+  @Test
+  void testCrfLossGradients() {
+    // every parameter group must agree with finite differences under the CRF loss
+    final double[][] analyticTransitions = analyticGradients(crfContext, crfWorker, 16);
+    final double[][] analyticStart = analyticGradients(crfContext, crfWorker, 17);
+    final double[][] analyticEnd = analyticGradients(crfContext, crfWorker, 18);
+    final double[][] transitions = crfContext.testingTransitionWeights();
+    final double[] start = crfContext.testingStartWeights();
+    final double[] end = crfContext.testingEndWeights();
+    for (int j = 0; j < transitions.length; j++) {
+      for (int k = 0; k < transitions[j].length; k++) {
+        assertClose(analyticTransitions[j][k],
+            numerical(crfContext, crfWorker, transitions[j], k),
+            "transitions[" + j + "][" + k + "]");
+      }
+      assertClose(analyticStart[0][j], numerical(crfContext, crfWorker, start, j),
+          "start[" + j + "]");
+      assertClose(analyticEnd[0][j], numerical(crfContext, crfWorker, end, j),
+          "end[" + j + "]");
+    }
+  }
+
+  @Test
+  void testCrfLossThroughEncoder() {
+    // the emission path must also agree under the CRF loss: spot-check the output
+    // weights and one sentence-LSTM row
+    final double[][] analytic = analyticGradients(crfContext, crfWorker, 14);
+    final double[][] outputWeights = crfContext.testingOutputWeights();
+    for (int o = 0; o < outputWeights.length; o++) {
+      for (int j = 0; j < outputWeights[o].length; j++) {
+        assertClose(analytic[o][j], numerical(crfContext, crfWorker, outputWeights[o], j),
+            "crf outputWeights[" + o + "][" + j + "]");
+      }
+    }
+    final LstmLayer layer = crfContext.testingWordForward();
+    final double[][] analyticW = analyticGradients(crfContext, crfWorker, 8);
+    for (int r = 0; r < 4 * layer.hiddenSize(); r++) {
+      for (int k = 0; k < layer.inputSize(); k++) {
+        assertClose(analyticW[r][k], numerical(crfContext, crfWorker, layer.w()[r], k),
+            "crf wordForward.w[" + r + "][" + k + "]");
+      }
+    }
+  }
+
   private double[][] analyticGradients(int index) {
-    AdamOptimizer.zero(worker.buffers());
-    context.sentenceGradients(sample, new Random(0L), worker);
-    final double[][] source = worker.buffers().get(index);
+    return analyticGradients(context, worker, index);
+  }
+
+  private double[][] analyticGradients(BilstmPOSTrainer.TrainingContext ctx,
+      BilstmPOSTrainer.TrainingContext.Worker wk, int index) {
+    AdamOptimizer.zero(wk.buffers());
+    ctx.sentenceGradients(sample, new Random(0L), wk);
+    final double[][] source = wk.buffers().get(index);
     final double[][] copy = new double[source.length][];
     for (int r = 0; r < source.length; r++) {
       copy[r] = source[r].clone();
@@ -185,11 +240,16 @@ class BilstmModelGradientTest {
   }
 
   private double numerical(double[] row, int i) {
+    return numerical(context, worker, row, i);
+  }
+
+  private double numerical(BilstmPOSTrainer.TrainingContext ctx,
+      BilstmPOSTrainer.TrainingContext.Worker wk, double[] row, int i) {
     final double original = row[i];
     row[i] = original + EPSILON;
-    final double plus = context.sentenceGradients(sample, new Random(0L), worker);
+    final double plus = ctx.sentenceGradients(sample, new Random(0L), wk);
     row[i] = original - EPSILON;
-    final double minus = context.sentenceGradients(sample, new Random(0L), worker);
+    final double minus = ctx.sentenceGradients(sample, new Random(0L), wk);
     row[i] = original;
     return (plus - minus) / (2.0d * EPSILON);
   }

@@ -43,7 +43,7 @@ class BilstmPOSTrainerTest {
       new POSSample(new String[] {"A", "fish", "swam"}, new String[] {"D", "N", "V"}));
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
-      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0);
+      8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0, false);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -93,6 +93,17 @@ class BilstmPOSTrainerTest {
   }
 
   @Test
+  void testLearnsSeparablePatternWithCrf() throws IOException {
+    final BilstmPOSModel model = BilstmPOSTrainer.train(stream(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
+            1, 0.0d, 0, true));
+    final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
+    for (final POSSample sample : CORPUS) {
+      assertArrayEquals(sample.getTags(), tagger.tag(sample.getSentence()));
+    }
+  }
+
+  @Test
   void testSameSeedTrainsIdenticalModel() throws IOException {
     final BilstmPOSModel first = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel second = BilstmPOSTrainer.train(stream(CORPUS), TINY);
@@ -113,7 +124,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            3, 0.0d, 0));
+            3, 0.0d, 0, false));
     final String[] sentence = {"The", "cat", "ran"};
     final double[][] expected = sequential.score(sentence);
     final double[][] actual = parallel.score(sentence);

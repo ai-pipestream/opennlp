@@ -84,11 +84,13 @@ public final class BilstmPOSTrainer {
    *                    tagging-time condition they face.
    * @param learningRateHalfLife Epochs between learning-rate halvings; zero disables
    *                             decay.
+   * @param crf Whether to score tag sequences with a linear-chain CRF (Viterbi
+   *            decoding) instead of independent per-position softmax.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
-      double wordDropout, int learningRateHalfLife) {
+      double wordDropout, int learningRateHalfLife, boolean crf) {
 
     /**
      * Validates the hyperparameters.
@@ -129,7 +131,7 @@ public final class BilstmPOSTrainer {
      */
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
-          Runtime.getRuntime().availableProcessors(), 0.0d, 0);
+          Runtime.getRuntime().availableProcessors(), 0.0d, 0, false);
     }
   }
 
@@ -345,6 +347,10 @@ public final class BilstmPOSTrainer {
     private final LstmLayer wordBackward;
     private final double[][] outputWeights;
     private final double[] outputBias;
+    private final double[][] transitionWeights;
+    private final double[] startWeights;
+    private final double[] endWeights;
+    private final CrfScorer crfScorer;
     private final LinkedHashMap<String, Integer> pretrainedIds;
     private final float[][] pretrainedVectors;
     private final int pretrainedSize;
@@ -356,7 +362,8 @@ public final class BilstmPOSTrainer {
         Map<String, Integer> tagIds, double[][] wordEmbeddings,
         double[][] charEmbeddings, LstmLayer charForward, LstmLayer charBackward,
         LstmLayer wordForward, LstmLayer wordBackward, double[][] outputWeights,
-        double[] outputBias, LinkedHashMap<String, Integer> pretrainedIds,
+        double[] outputBias, double[][] transitionWeights, double[] startWeights,
+        double[] endWeights, LinkedHashMap<String, Integer> pretrainedIds,
         float[][] pretrainedVectors, int inputSize, AdamOptimizer adam) {
       this.settings = settings;
       this.words = words;
@@ -371,6 +378,10 @@ public final class BilstmPOSTrainer {
       this.wordBackward = wordBackward;
       this.outputWeights = outputWeights;
       this.outputBias = outputBias;
+      this.transitionWeights = transitionWeights;
+      this.startWeights = startWeights;
+      this.endWeights = endWeights;
+      this.crfScorer = settings.crf() ? new CrfScorer(tags.length) : null;
       this.pretrainedIds = pretrainedIds;
       this.pretrainedVectors = pretrainedVectors;
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
@@ -385,7 +396,7 @@ public final class BilstmPOSTrainer {
      * @return A fresh worker. Never {@code null}.
      */
     Worker newWorker() {
-      return new Worker(adam.newGradientBuffers());
+      return new Worker(adam.newGradientBuffers(), settings.crf());
     }
 
     /**
@@ -405,8 +416,11 @@ public final class BilstmPOSTrainer {
       private final double[][] charEmbeddingGrads;
       private final double[][] outputWeightGrads;
       private final double[] outputBiasGrads;
+      private final double[][] transitionGrads;
+      private final double[] startGrads;
+      private final double[] endGrads;
 
-      private Worker(List<double[][]> buffers) {
+      private Worker(List<double[][]> buffers, boolean crf) {
         this.buffers = buffers;
         wordEmbeddingGrads = buffers.get(0);
         charEmbeddingGrads = buffers.get(1);
@@ -420,6 +434,9 @@ public final class BilstmPOSTrainer {
             buffers.get(13)[0]);
         outputWeightGrads = buffers.get(14);
         outputBiasGrads = buffers.get(15)[0];
+        transitionGrads = crf ? buffers.get(16) : null;
+        startGrads = crf ? buffers.get(17)[0] : null;
+        endGrads = crf ? buffers.get(18)[0] : null;
       }
 
       /**
@@ -448,6 +465,21 @@ public final class BilstmPOSTrainer {
     /** @return The live output bias, exposed for white-box gradient checks. */
     double[] testingOutputBias() {
       return outputBias;
+    }
+
+    /** @return The live CRF transitions, exposed for white-box gradient checks. */
+    double[][] testingTransitionWeights() {
+      return transitionWeights;
+    }
+
+    /** @return The live CRF start scores, exposed for white-box gradient checks. */
+    double[] testingStartWeights() {
+      return startWeights;
+    }
+
+    /** @return The live CRF end scores, exposed for white-box gradient checks. */
+    double[] testingEndWeights() {
+      return endWeights;
     }
 
     /** @return The live forward sentence layer, exposed for white-box checks. */
@@ -561,11 +593,25 @@ public final class BilstmPOSTrainer {
       }
       final double[] outputBias = new double[tags.length];
 
+      final double[][] transitionWeights;
+      final double[] startWeights;
+      final double[] endWeights;
+      if (settings.crf()) {
+        transitionWeights = randomMatrix(tags.length, tags.length, 0.1d, initRandom);
+        startWeights = new double[tags.length];
+        endWeights = new double[tags.length];
+      }
+      else {
+        transitionWeights = null;
+        startWeights = null;
+        endWeights = null;
+      }
+
       final AdamOptimizer adam = new AdamOptimizer();
       // registration order, relied on by white-box tests: 0 word embeddings,
       // 1 char embeddings, 2-4 char forward w/u/b, 5-7 char backward w/u/b,
       // 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights,
-      // 15 output bias
+      // 15 output bias, 16-18 CRF transitions/start/end (crf only)
       adam.register(wordEmbeddings);
       adam.register(charEmbeddings);
       adam.register(charForward.w());
@@ -582,10 +628,16 @@ public final class BilstmPOSTrainer {
       adam.register(wordBackward.b());
       adam.register(outputWeights);
       adam.register(outputBias);
+      if (settings.crf()) {
+        adam.register(transitionWeights);
+        adam.register(startWeights);
+        adam.register(endWeights);
+      }
 
       return new TrainingContext(settings, words, chars, tags, tagIds, wordEmbeddings,
           charEmbeddings, charForward, charBackward, wordForward, wordBackward,
-          outputWeights, outputBias, pretrainedIds, pretrainedVectors, inputSize, adam);
+          outputWeights, outputBias, transitionWeights, startWeights, endWeights,
+          pretrainedIds, pretrainedVectors, inputSize, adam);
     }
 
     private static void collectVectors(Iterable<String> candidates,
@@ -716,35 +768,54 @@ public final class BilstmPOSTrainer {
           LstmLayer.ForwardCache.of(steps, hidden);
       final double[][] hBackwardReversed = wordBackward.run(reversedXs, wordBackwardCache);
 
-      final double[][] dHFwd = new double[steps][hidden];
-      final double[][] dHBwd = new double[steps][hidden];
-      double loss = 0.0d;
+      final double[][] emissions = new double[steps][tags.length];
       for (int t = 0; t < steps; t++) {
         final double[] hB = hBackwardReversed[steps - 1 - t];
-        final double[] logits = new double[tags.length];
-        double max = Double.NEGATIVE_INFINITY;
         for (int o = 0; o < tags.length; o++) {
           final double[] row = outputWeights[o];
           double sum = outputBias[o];
           for (int j = 0; j < hidden; j++) {
             sum += row[j] * hFwd[t][j] + row[hidden + j] * hB[j];
           }
-          logits[o] = sum;
-          max = Math.max(max, sum);
+          emissions[t][o] = sum;
         }
-        double total = 0.0d;
-        for (int o = 0; o < tags.length; o++) {
-          logits[o] = Math.exp(logits[o] - max);
-          total += logits[o];
+      }
+      final int[] goldIds = new int[steps];
+      for (int t = 0; t < steps; t++) {
+        goldIds[t] = tagIds.get(goldTags[t]);
+      }
+      final double[][] emissionGrads = new double[steps][tags.length];
+      double loss;
+      if (crfScorer != null) {
+        loss = crfScorer.lossAndGradients(emissions, goldIds, transitionWeights,
+            startWeights, endWeights, emissionGrads, worker.transitionGrads,
+            worker.startGrads, worker.endGrads);
+      }
+      else {
+        loss = 0.0d;
+        for (int t = 0; t < steps; t++) {
+          double max = Double.NEGATIVE_INFINITY;
+          for (int o = 0; o < tags.length; o++) {
+            max = Math.max(max, emissions[t][o]);
+          }
+          double total = 0.0d;
+          for (int o = 0; o < tags.length; o++) {
+            emissionGrads[t][o] = Math.exp(emissions[t][o] - max);
+            total += emissionGrads[t][o];
+          }
+          loss += Math.log(total) - Math.log(emissionGrads[t][goldIds[t]]);
+          for (int o = 0; o < tags.length; o++) {
+            emissionGrads[t][o] = emissionGrads[t][o] / total
+                - (o == goldIds[t] ? 1.0d : 0.0d);
+          }
         }
-        final int gold = tagIds.get(goldTags[t]);
-        // per-token cross-entropy: at this point logits[gold] holds exp(score - max)
-        loss += Math.log(total) - Math.log(logits[gold]);
+      }
+      final double[][] dHFwd = new double[steps][hidden];
+      final double[][] dHBwd = new double[steps][hidden];
+      for (int t = 0; t < steps; t++) {
+        final double[] hB = hBackwardReversed[steps - 1 - t];
         for (int o = 0; o < tags.length; o++) {
-          logits[o] /= total;
-        }
-        for (int o = 0; o < tags.length; o++) {
-          final double gradient = logits[o] - (o == gold ? 1.0d : 0.0d);
+          final double gradient = emissionGrads[t][o];
           outputBiasGrads[o] += gradient;
           final double[] gradRow = outputWeightGrads[o];
           final double[] weightRow = outputWeights[o];
@@ -835,7 +906,8 @@ public final class BilstmPOSTrainer {
     private BilstmPOSModel toModel() {
       return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
           charForward, charBackward, wordForward, wordBackward, outputWeights,
-          outputBias, settings.maxWordLength(), pretrainedIds, pretrainedVectors);
+          outputBias, settings.maxWordLength(), pretrainedIds, pretrainedVectors,
+          transitionWeights, startWeights, endWeights);
     }
   }
 }

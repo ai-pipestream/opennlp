@@ -173,14 +173,15 @@ public class ConlluPOSTaggerEvalTest {
         longProperty("seed", base.seed()),
         intProperty("threads", base.threads()),
         doubleProperty("wordDropout", base.wordDropout()),
-        intProperty("learningRateHalfLife", base.learningRateHalfLife()));
+        intProperty("learningRateHalfLife", base.learningRateHalfLife()),
+        booleanProperty("crf", base.crf()));
   }
 
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
     return "h" + s.hiddenSize() + ";e" + s.epochs() + ";b" + s.batchSize() + ";lr"
         + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
         + ";we" + s.wordEmbeddingSize() + ";ch" + s.charHiddenSize() + ";wd"
-        + s.wordDropout() + ";hl" + s.learningRateHalfLife();
+        + s.wordDropout() + ";hl" + s.learningRateHalfLife() + ";crf" + s.crf();
   }
 
   private static int intProperty(String name, int fallback) {
@@ -196,6 +197,11 @@ public class ConlluPOSTaggerEvalTest {
   private static double doubleProperty(String name, double fallback) {
     final String value = System.getProperty("opennlp.postag.bilstm." + name);
     return value != null ? Double.parseDouble(value) : fallback;
+  }
+
+  private static boolean booleanProperty(String name, boolean fallback) {
+    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    return value != null ? Boolean.parseBoolean(value) : fallback;
   }
 
   @Test
