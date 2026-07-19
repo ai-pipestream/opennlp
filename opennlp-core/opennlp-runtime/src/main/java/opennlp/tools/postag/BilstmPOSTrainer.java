@@ -87,11 +87,20 @@ public final class BilstmPOSTrainer {
    * @param crf Whether to score tag sequences with a linear-chain CRF (Viterbi
    *            decoding) instead of independent per-position softmax.
    * @param encoderLayers Stacked BiLSTM layers in the sentence encoder, 1 or 2.
+   * @param pretrainedDropout Probability of zeroing a training token's whole
+   *                          pretrained-vector block, training the character path for
+   *                          the tokens that resolve no vector at tagging time; word
+   *                          dropout alone keeps the pretrained block visible.
+   * @param encoderDropout Drop probability on the encoder outputs: between the
+   *                       stacked layers and on the states feeding the tag scorer.
+   * @param auxLossWeight Weight of the auxiliary tagging losses when training
+   *                      multi-task; zero disables the auxiliary heads.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
-      double wordDropout, int learningRateHalfLife, boolean crf, int encoderLayers) {
+      double wordDropout, int learningRateHalfLife, boolean crf, int encoderLayers,
+      double pretrainedDropout, double encoderDropout, double auxLossWeight) {
 
     /**
      * Validates the hyperparameters.
@@ -127,6 +136,15 @@ public final class BilstmPOSTrainer {
       if (encoderLayers < 1 || encoderLayers > 2) {
         throw new IllegalArgumentException("encoderLayers must be 1 or 2");
       }
+      if (pretrainedDropout < 0.0d || pretrainedDropout >= 1.0d) {
+        throw new IllegalArgumentException("pretrainedDropout must be in [0, 1)");
+      }
+      if (encoderDropout < 0.0d || encoderDropout >= 1.0d) {
+        throw new IllegalArgumentException("encoderDropout must be in [0, 1)");
+      }
+      if (auxLossWeight < 0.0d) {
+        throw new IllegalArgumentException("auxLossWeight must not be negative");
+      }
     }
 
     /**
@@ -135,7 +153,43 @@ public final class BilstmPOSTrainer {
      */
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
-          Runtime.getRuntime().availableProcessors(), 0.0d, 0, false, 1);
+          Runtime.getRuntime().availableProcessors(), 0.0d, 0, false, 1, 0.0d, 0.0d,
+          1.0d);
+    }
+  }
+
+  /**
+   * One multi-task training sentence: tokens with their UPOS tags and optional
+   * auxiliary taggings, each auxiliary label the composite string of its column.
+   * Auxiliary heads exist only at training time as regularizers of the shared
+   * encoder; the built model tags UPOS exactly as a single-task model does.
+   *
+   * @param tokens The tokens. Must not be {@code null} or empty.
+   * @param upos The universal POS tags, aligned with {@code tokens}. Must not be
+   *             {@code null}.
+   * @param xpos The treebank-specific tags, aligned with {@code tokens}, or
+   *             {@code null} when the sentence carries none.
+   * @param feats The morphological feature strings, aligned with {@code tokens}, or
+   *              {@code null} when the sentence carries none.
+   */
+  public record MultiTaskSample(String[] tokens, String[] upos, String[] xpos,
+      String[] feats) {
+
+    /**
+     * Validates the alignment of the taggings.
+     *
+     * @throws IllegalArgumentException Thrown if {@code tokens} or {@code upos} is
+     *         {@code null} or empty, or a tagging's length differs from the tokens.
+     */
+    public MultiTaskSample {
+      if (tokens == null || tokens.length == 0 || upos == null) {
+        throw new IllegalArgumentException("tokens and upos must not be null or empty");
+      }
+      if (upos.length != tokens.length
+          || (xpos != null && xpos.length != tokens.length)
+          || (feats != null && feats.length != tokens.length)) {
+        throw new IllegalArgumentException("taggings must align with the tokens");
+      }
     }
   }
 
@@ -212,19 +266,59 @@ public final class BilstmPOSTrainer {
     return trainWith(samples, settings, wordVectors, lexicon);
   }
 
+  /**
+   * Trains a model multi-task: the shared encoder is additionally fit to predict the
+   * auxiliary taggings the samples carry, weighted by
+   * {@link Settings#auxLossWeight()}. The auxiliary heads are dropped after training;
+   * the returned model is a plain UPOS tagger.
+   *
+   * @param samples The multi-task training samples. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source consulted at training time, or
+   *                    {@code null} to train without pretrained vectors; the same
+   *                    contract as {@link #train(ObjectStream, Settings, Function)}.
+   * @param lexicon Additional words to store vectors for, or {@code null} for none;
+   *                ignored when {@code wordVectors} is {@code null}.
+   * @return A trained {@link BilstmPOSModel}. Never {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if samples or settings are {@code null},
+   *         the samples contain no token, or {@code wordVectors} violates its
+   *         contract.
+   */
+  public static BilstmPOSModel trainMultiTask(ObjectStream<MultiTaskSample> samples,
+      Settings settings, Function<CharSequence, float[]> wordVectors,
+      Iterable<? extends CharSequence> lexicon) throws IOException {
+    if (samples == null || settings == null) {
+      throw new IllegalArgumentException("samples and settings must not be null");
+    }
+    final List<MultiTaskSample> corpus = new ArrayList<>();
+    MultiTaskSample sample;
+    while ((sample = samples.read()) != null) {
+      corpus.add(sample);
+    }
+    return trainCorpus(corpus, settings, wordVectors, lexicon);
+  }
+
   private static BilstmPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
       Iterable<? extends CharSequence> lexicon) throws IOException {
     if (samples == null || settings == null) {
       throw new IllegalArgumentException("samples and settings must not be null");
     }
-    final List<POSSample> corpus = new ArrayList<>();
+    final List<MultiTaskSample> corpus = new ArrayList<>();
     POSSample sample;
     while ((sample = samples.read()) != null) {
       if (sample.getSentence().length > 0) {
-        corpus.add(sample);
+        corpus.add(new MultiTaskSample(sample.getSentence(), sample.getTags(), null,
+            null));
       }
     }
+    return trainCorpus(corpus, settings, wordVectors, lexicon);
+  }
+
+  private static BilstmPOSModel trainCorpus(List<MultiTaskSample> corpus,
+      Settings settings, Function<CharSequence, float[]> wordVectors,
+      Iterable<? extends CharSequence> lexicon) {
     if (corpus.isEmpty()) {
       throw new IllegalArgumentException("samples contain no token");
     }
@@ -257,7 +351,7 @@ public final class BilstmPOSTrainer {
         for (int start = 0; start < order.length; start += settings.batchSize()) {
           final int end = Math.min(order.length, start + settings.batchSize());
           for (int i = start; i < end; i++) {
-            tokens += corpus.get(order[i]).getSentence().length;
+            tokens += corpus.get(order[i]).tokens().length;
           }
           if (pool == null) {
             final TrainingContext.Worker worker = workers.get(0);
@@ -363,6 +457,15 @@ public final class BilstmPOSTrainer {
     private final int inputSize;
     final AdamOptimizer adam;
 
+    private final String[] xposTags;
+    private final Map<String, Integer> xposIds;
+    private final double[][] xposWeights;
+    private final double[] xposBias;
+    private final String[] featsTags;
+    private final Map<String, Integer> featsIds;
+    private final double[][] featsWeights;
+    private final double[] featsBias;
+
     private TrainingContext(Settings settings, LinkedHashMap<String, Integer> words,
         LinkedHashMap<String, Integer> chars, String[] tags,
         Map<String, Integer> tagIds, double[][] wordEmbeddings,
@@ -371,7 +474,18 @@ public final class BilstmPOSTrainer {
         LstmLayer wordBackward2, double[][] outputWeights,
         double[] outputBias, double[][] transitionWeights, double[] startWeights,
         double[] endWeights, LinkedHashMap<String, Integer> pretrainedIds,
-        float[][] pretrainedVectors, int inputSize, AdamOptimizer adam) {
+        float[][] pretrainedVectors, int inputSize, AdamOptimizer adam,
+        String[] xposTags, Map<String, Integer> xposIds, double[][] xposWeights,
+        double[] xposBias, String[] featsTags, Map<String, Integer> featsIds,
+        double[][] featsWeights, double[] featsBias) {
+      this.xposTags = xposTags;
+      this.xposIds = xposIds;
+      this.xposWeights = xposWeights;
+      this.xposBias = xposBias;
+      this.featsTags = featsTags;
+      this.featsIds = featsIds;
+      this.featsWeights = featsWeights;
+      this.featsBias = featsBias;
       this.settings = settings;
       this.words = words;
       this.chars = chars;
@@ -402,10 +516,20 @@ public final class BilstmPOSTrainer {
         index += 3;
       }
       layer2Index = settings.encoderLayers() == 2 ? index : -1;
+      if (settings.encoderLayers() == 2) {
+        index += 6;
+      }
+      xposIndex = xposWeights != null ? index : -1;
+      if (xposWeights != null) {
+        index += 2;
+      }
+      featsIndex = featsWeights != null ? index : -1;
     }
 
     private final int crfIndex;
     private final int layer2Index;
+    private final int xposIndex;
+    private final int featsIndex;
 
     /**
      * Allocates a worker with its own gradient buffers, for sentence-parallel batch
@@ -414,7 +538,8 @@ public final class BilstmPOSTrainer {
      * @return A fresh worker. Never {@code null}.
      */
     Worker newWorker() {
-      return new Worker(adam.newGradientBuffers(), crfIndex, layer2Index);
+      return new Worker(adam.newGradientBuffers(), crfIndex, layer2Index, xposIndex,
+          featsIndex);
     }
 
     /**
@@ -439,8 +564,13 @@ public final class BilstmPOSTrainer {
       private final double[] endGrads;
       private final LstmLayer.Gradients wordForward2Grads;
       private final LstmLayer.Gradients wordBackward2Grads;
+      private final double[][] xposWeightGrads;
+      private final double[] xposBiasGrads;
+      private final double[][] featsWeightGrads;
+      private final double[] featsBiasGrads;
 
-      private Worker(List<double[][]> buffers, int crfIndex, int layer2Index) {
+      private Worker(List<double[][]> buffers, int crfIndex, int layer2Index,
+          int xposIndex, int featsIndex) {
         this.buffers = buffers;
         wordEmbeddingGrads = buffers.get(0);
         charEmbeddingGrads = buffers.get(1);
@@ -463,6 +593,10 @@ public final class BilstmPOSTrainer {
         wordBackward2Grads = layer2Index >= 0 ? LstmLayer.Gradients.wrap(
             buffers.get(layer2Index + 3), buffers.get(layer2Index + 4),
             buffers.get(layer2Index + 5)[0]) : null;
+        xposWeightGrads = xposIndex >= 0 ? buffers.get(xposIndex) : null;
+        xposBiasGrads = xposIndex >= 0 ? buffers.get(xposIndex + 1)[0] : null;
+        featsWeightGrads = featsIndex >= 0 ? buffers.get(featsIndex) : null;
+        featsBiasGrads = featsIndex >= 0 ? buffers.get(featsIndex + 1)[0] : null;
       }
 
       /**
@@ -523,6 +657,21 @@ public final class BilstmPOSTrainer {
       return wordBackward;
     }
 
+    /** @return The live xpos head weights, exposed for white-box gradient checks. */
+    double[][] testingXposWeights() {
+      return xposWeights;
+    }
+
+    /** @return The live xpos head bias, exposed for white-box gradient checks. */
+    double[] testingXposBias() {
+      return xposBias;
+    }
+
+    /** @return The live feats head weights, exposed for white-box gradient checks. */
+    double[][] testingFeatsWeights() {
+      return featsWeights;
+    }
+
     /** @return The live forward char layer, exposed for white-box checks. */
     LstmLayer testingCharForward() {
       return charForward;
@@ -533,22 +682,36 @@ public final class BilstmPOSTrainer {
       return charBackward;
     }
 
-    static TrainingContext build(List<POSSample> corpus, Settings settings,
+    static TrainingContext build(List<MultiTaskSample> corpus, Settings settings,
         Function<CharSequence, float[]> wordVectors,
         Iterable<? extends CharSequence> lexicon) {
       final Map<String, Integer> wordCounts = new LinkedHashMap<>();
       final Map<String, Integer> charCounts = new LinkedHashMap<>();
       final TreeSet<String> tagSet = new TreeSet<>();
-      for (final POSSample sample : corpus) {
-        final String[] sentence = sample.getSentence();
+      final TreeSet<String> xposSet = new TreeSet<>();
+      final TreeSet<String> featsSet = new TreeSet<>();
+      for (final MultiTaskSample sample : corpus) {
+        final String[] sentence = sample.tokens();
         for (final String token : sentence) {
           wordCounts.merge(BilstmPOSModel.normalize(token), 1, Integer::sum);
           for (int i = 0; i < token.length(); i++) {
             charCounts.merge(String.valueOf(token.charAt(i)), 1, Integer::sum);
           }
         }
-        for (final String tag : sample.getTags()) {
+        for (final String tag : sample.upos()) {
           tagSet.add(tag);
+        }
+        if (settings.auxLossWeight() > 0.0d) {
+          if (sample.xpos() != null) {
+            for (final String tag : sample.xpos()) {
+              xposSet.add(tag);
+            }
+          }
+          if (sample.feats() != null) {
+            for (final String tag : sample.feats()) {
+              featsSet.add(tag);
+            }
+          }
         }
       }
 
@@ -568,6 +731,16 @@ public final class BilstmPOSTrainer {
       final Map<String, Integer> tagIds = new LinkedHashMap<>();
       for (int i = 0; i < tags.length; i++) {
         tagIds.put(tags[i], i);
+      }
+      final String[] xposTags = xposSet.toArray(new String[0]);
+      final Map<String, Integer> xposIds = new LinkedHashMap<>();
+      for (int i = 0; i < xposTags.length; i++) {
+        xposIds.put(xposTags[i], i);
+      }
+      final String[] featsTags = featsSet.toArray(new String[0]);
+      final Map<String, Integer> featsIds = new LinkedHashMap<>();
+      for (int i = 0; i < featsTags.length; i++) {
+        featsIds.put(featsTags[i], i);
       }
 
       final Random initRandom = new Random(settings.seed());
@@ -637,6 +810,28 @@ public final class BilstmPOSTrainer {
         startWeights = null;
         endWeights = null;
       }
+      final double[][] xposWeights;
+      final double[] xposBias;
+      if (xposTags.length > 0) {
+        xposWeights = xavierOutput(xposTags.length, 2 * settings.hiddenSize(),
+            initRandom);
+        xposBias = new double[xposTags.length];
+      }
+      else {
+        xposWeights = null;
+        xposBias = null;
+      }
+      final double[][] featsWeights;
+      final double[] featsBias;
+      if (featsTags.length > 0) {
+        featsWeights = xavierOutput(featsTags.length, 2 * settings.hiddenSize(),
+            initRandom);
+        featsBias = new double[featsTags.length];
+      }
+      else {
+        featsWeights = null;
+        featsBias = null;
+      }
       final LstmLayer wordForward2;
       final LstmLayer wordBackward2;
       if (settings.encoderLayers() == 2) {
@@ -654,8 +849,9 @@ public final class BilstmPOSTrainer {
       // registration order, relied on by white-box tests: 0 word embeddings,
       // 1 char embeddings, 2-4 char forward w/u/b, 5-7 char backward w/u/b,
       // 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights,
-      // 15 output bias, then 16-18 CRF transitions/start/end (crf only),
-      // then 19-24 second-layer forward/backward w/u/b (encoderLayers 2 only)
+      // 15 output bias, then CRF transitions/start/end (crf only), then
+      // second-layer forward/backward w/u/b (encoderLayers 2 only), then the
+      // auxiliary xpos weights/bias and feats weights/bias (multi-task only)
       adam.register(wordEmbeddings);
       adam.register(charEmbeddings);
       adam.register(charForward.w());
@@ -685,11 +881,21 @@ public final class BilstmPOSTrainer {
         adam.register(wordBackward2.u());
         adam.register(wordBackward2.b());
       }
+      if (xposWeights != null) {
+        adam.register(xposWeights);
+        adam.register(xposBias);
+      }
+      if (featsWeights != null) {
+        adam.register(featsWeights);
+        adam.register(featsBias);
+      }
 
       return new TrainingContext(settings, words, chars, tags, tagIds, wordEmbeddings,
           charEmbeddings, charForward, charBackward, wordForward, wordBackward,
           wordForward2, wordBackward2, outputWeights, outputBias, transitionWeights,
-          startWeights, endWeights, pretrainedIds, pretrainedVectors, inputSize, adam);
+          startWeights, endWeights, pretrainedIds, pretrainedVectors, inputSize, adam,
+          xposTags, xposIds, xposWeights, xposBias, featsTags, featsIds, featsWeights,
+          featsBias);
     }
 
     private static void collectVectors(Iterable<String> candidates,
@@ -715,6 +921,26 @@ public final class BilstmPOSTrainer {
       }
     }
 
+    /**
+     * Initializes an output-layer weight matrix with the same Xavier bound the UPOS
+     * scorer uses.
+     *
+     * @param rows The label count.
+     * @param cols The encoder state width.
+     * @param random The initialization stream.
+     * @return The initialized matrix. Never {@code null}.
+     */
+    private static double[][] xavierOutput(int rows, int cols, Random random) {
+      final double limit = Math.sqrt(6.0d / (rows + (double) cols));
+      final double[][] matrix = new double[rows][cols];
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          matrix[r][c] = (random.nextDouble() * 2.0d - 1.0d) * limit;
+        }
+      }
+      return matrix;
+    }
+
     private static double[][] randomMatrix(int rows, int cols, double limit,
         Random random) {
       final double[][] matrix = new double[rows][cols];
@@ -736,7 +962,7 @@ public final class BilstmPOSTrainer {
      * @param worker The gradient-storage owner. Must not be {@code null}.
      * @return The summed cross-entropy loss of the sentence.
      */
-    double sentenceGradients(POSSample sample, Random random, Worker worker) {
+    double sentenceGradients(MultiTaskSample sample, Random random, Worker worker) {
       final double[][] wordEmbeddingGrads = worker.wordEmbeddingGrads;
       final double[][] charEmbeddingGrads = worker.charEmbeddingGrads;
       final double[][] outputWeightGrads = worker.outputWeightGrads;
@@ -745,8 +971,8 @@ public final class BilstmPOSTrainer {
       final LstmLayer.Gradients charBackwardGrads = worker.charBackwardGrads;
       final LstmLayer.Gradients wordForwardGrads = worker.wordForwardGrads;
       final LstmLayer.Gradients wordBackwardGrads = worker.wordBackwardGrads;
-      final String[] sentence = sample.getSentence();
-      final String[] goldTags = sample.getTags();
+      final String[] sentence = sample.tokens();
+      final String[] goldTags = sample.upos();
       final int steps = sentence.length;
       final int hidden = settings.hiddenSize();
       final int charHidden = settings.charHiddenSize();
@@ -797,9 +1023,16 @@ public final class BilstmPOSTrainer {
         }
         final float[] pretrained = pretrainedVector(token);
         if (pretrained != null) {
-          final int offset = wordSize + 2 * charHidden;
-          for (int i = 0; i < pretrainedSize; i++) {
-            x[offset + i] = pretrained[i];
+          // whole-block dropout trains the character path for the tokens that
+          // resolve no vector at tagging time; drawn only when enabled, so runs
+          // without it keep their exact mask stream
+          final boolean dropBlock = settings.pretrainedDropout() > 0.0d
+              && random.nextDouble() < settings.pretrainedDropout();
+          if (!dropBlock) {
+            final int offset = wordSize + 2 * charHidden;
+            for (int i = 0; i < pretrainedSize; i++) {
+              x[offset + i] = pretrained[i];
+            }
           }
         }
         final double[] mask = masks[t];
@@ -825,11 +1058,20 @@ public final class BilstmPOSTrainer {
         System.arraycopy(hFwd[t], 0, states[t], 0, hidden);
         System.arraycopy(hBackwardReversed[steps - 1 - t], 0, states[t], hidden, hidden);
       }
+      // inverted dropout on the encoder outputs: between stacked layers and on the
+      // states feeding the scorers; masks drawn only when enabled, so runs without
+      // it keep their exact mask stream
+      final double encoderKeep = 1.0d - settings.encoderDropout();
       double[][] topStates = states;
       LstmLayer.ForwardCache layer2ForwardCache = null;
       LstmLayer.ForwardCache layer2BackwardCache = null;
       double[][] reversedStates = null;
+      double[][] stateMasks = null;
       if (wordForward2 != null) {
+        if (settings.encoderDropout() > 0.0d) {
+          stateMasks = encoderMasks(steps, 2 * hidden, encoderKeep, random);
+          applyMasks(states, stateMasks);
+        }
         layer2ForwardCache = LstmLayer.ForwardCache.of(steps, hidden);
         final double[][] hFwd2 = wordForward2.run(states, layer2ForwardCache);
         reversedStates = new double[steps][];
@@ -845,6 +1087,11 @@ public final class BilstmPOSTrainer {
           System.arraycopy(hBwd2Reversed[steps - 1 - t], 0, topStates[t], hidden,
               hidden);
         }
+      }
+      double[][] topMasks = null;
+      if (settings.encoderDropout() > 0.0d) {
+        topMasks = encoderMasks(steps, 2 * hidden, encoderKeep, random);
+        applyMasks(topStates, topMasks);
       }
 
       final double[][] emissions = new double[steps][tags.length];
@@ -902,6 +1149,19 @@ public final class BilstmPOSTrainer {
         }
       }
 
+      if (xposWeights != null && sample.xpos() != null) {
+        loss += auxiliaryLoss(sample.xpos(), xposIds, xposWeights, xposBias,
+            worker.xposWeightGrads, worker.xposBiasGrads, topStates, dTop, hidden);
+      }
+      if (featsWeights != null && sample.feats() != null) {
+        loss += auxiliaryLoss(sample.feats(), featsIds, featsWeights, featsBias,
+            worker.featsWeightGrads, worker.featsBiasGrads, topStates, dTop, hidden);
+      }
+
+      if (topMasks != null) {
+        applyMasks(dTop, topMasks);
+      }
+
       double[][] dStates = dTop;
       if (wordForward2 != null) {
         final double[][] dTopFwd = new double[steps][hidden];
@@ -926,6 +1186,9 @@ public final class BilstmPOSTrainer {
           for (int i = 0; i < 2 * hidden; i++) {
             dStates[t][i] = dXs2Fwd[t][i] + dBwd[i];
           }
+        }
+        if (stateMasks != null) {
+          applyMasks(dStates, stateMasks);
         }
       }
       final double[][] dHFwd = new double[steps][hidden];
@@ -983,6 +1246,101 @@ public final class BilstmPOSTrainer {
             for (int c = 0; c < settings.charEmbeddingSize(); c++) {
               charEmbeddingGrads[ids[i]][c] += dOriginal[c];
             }
+          }
+        }
+      }
+      return loss;
+    }
+
+    /**
+     * Draws one inverted-dropout mask per timestep over an encoder state.
+     *
+     * @param steps The sentence length.
+     * @param width The state width.
+     * @param keep The keep probability.
+     * @param random The mask stream.
+     * @return The masks, entries {@code 0} or {@code 1/keep}. Never {@code null}.
+     */
+    private static double[][] encoderMasks(int steps, int width, double keep,
+        Random random) {
+      final double[][] masks = new double[steps][width];
+      for (int t = 0; t < steps; t++) {
+        for (int i = 0; i < width; i++) {
+          masks[t][i] = random.nextDouble() < keep ? 1.0d / keep : 0.0d;
+        }
+      }
+      return masks;
+    }
+
+    /**
+     * Multiplies values elementwise by masks, in place; used identically on the
+     * forward states and on their incoming gradients.
+     *
+     * @param values The values, mutated in place.
+     * @param masks The masks, same shape.
+     */
+    private static void applyMasks(double[][] values, double[][] masks) {
+      for (int t = 0; t < values.length; t++) {
+        for (int i = 0; i < values[t].length; i++) {
+          values[t][i] *= masks[t][i];
+        }
+      }
+    }
+
+    /**
+     * Scores one auxiliary tagging over the shared encoder states with a softmax
+     * cross-entropy head, accumulating the head's own gradients and adding the
+     * encoder's share into {@code dTop}, both scaled by the auxiliary loss weight.
+     *
+     * @param gold The gold auxiliary labels.
+     * @param ids The label vocabulary.
+     * @param weights The head weights.
+     * @param bias The head bias.
+     * @param weightGrads The head weight gradient buffer.
+     * @param biasGrads The head bias gradient buffer.
+     * @param topStates The shared encoder states.
+     * @param dTop The encoder-state gradient accumulator.
+     * @param hidden The encoder hidden size per direction.
+     * @return The weighted auxiliary loss of the sentence.
+     */
+    private double auxiliaryLoss(String[] gold, Map<String, Integer> ids,
+        double[][] weights, double[] bias, double[][] weightGrads, double[] biasGrads,
+        double[][] topStates, double[][] dTop, int hidden) {
+      final double weight = settings.auxLossWeight();
+      final int labels = weights.length;
+      final double[] scores = new double[labels];
+      double loss = 0.0d;
+      for (int t = 0; t < gold.length; t++) {
+        final Integer goldId = ids.get(gold[t]);
+        if (goldId == null) {
+          // a label outside the training vocabulary carries no signal
+          continue;
+        }
+        double max = Double.NEGATIVE_INFINITY;
+        for (int o = 0; o < labels; o++) {
+          final double[] row = weights[o];
+          double sum = bias[o];
+          for (int j = 0; j < 2 * hidden; j++) {
+            sum += row[j] * topStates[t][j];
+          }
+          scores[o] = sum;
+          max = Math.max(max, sum);
+        }
+        double total = 0.0d;
+        for (int o = 0; o < labels; o++) {
+          scores[o] = Math.exp(scores[o] - max);
+          total += scores[o];
+        }
+        loss += weight * (Math.log(total) - Math.log(scores[goldId]));
+        for (int o = 0; o < labels; o++) {
+          final double gradient =
+              weight * (scores[o] / total - (o == goldId ? 1.0d : 0.0d));
+          biasGrads[o] += gradient;
+          final double[] gradRow = weightGrads[o];
+          final double[] weightRow = weights[o];
+          for (int j = 0; j < 2 * hidden; j++) {
+            gradRow[j] += gradient * topStates[t][j];
+            dTop[t][j] += weightRow[j] * gradient;
           }
         }
       }

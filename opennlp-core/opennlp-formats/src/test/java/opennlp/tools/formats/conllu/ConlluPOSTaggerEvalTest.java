@@ -175,7 +175,10 @@ public class ConlluPOSTaggerEvalTest {
         doubleProperty("wordDropout", base.wordDropout()),
         intProperty("learningRateHalfLife", base.learningRateHalfLife()),
         booleanProperty("crf", base.crf()),
-        intProperty("encoderLayers", base.encoderLayers()));
+        intProperty("encoderLayers", base.encoderLayers()),
+        doubleProperty("pretrainedDropout", base.pretrainedDropout()),
+        doubleProperty("encoderDropout", base.encoderDropout()),
+        doubleProperty("auxLossWeight", base.auxLossWeight()));
   }
 
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
@@ -183,7 +186,14 @@ public class ConlluPOSTaggerEvalTest {
         + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
         + ";we" + s.wordEmbeddingSize() + ";ch" + s.charHiddenSize() + ";wd"
         + s.wordDropout() + ";hl" + s.learningRateHalfLife() + ";crf" + s.crf()
-        + ";el" + s.encoderLayers();
+        + ";el" + s.encoderLayers() + ";pd" + s.pretrainedDropout() + ";ed"
+        + s.encoderDropout() + ";aux" + s.auxLossWeight()
+        + (multiTask() ? ";mt" : "");
+  }
+
+  private static boolean multiTask() {
+    return Boolean.parseBoolean(
+        System.getProperty("opennlp.postag.bilstm.multiTask", "false"));
   }
 
   private static int intProperty(String name, int fallback) {
@@ -250,12 +260,20 @@ public class ConlluPOSTaggerEvalTest {
     final long trainStart = System.currentTimeMillis();
     final BilstmPOSModel model;
     final BilstmPOSTrainer.Settings settings = bilstmSettings();
-    try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
-      if (lexicon == null) {
-        model = BilstmPOSTrainer.train(train, settings, vectors);
+    if (multiTask()) {
+      try (ObjectStream<BilstmPOSTrainer.MultiTaskSample> train =
+          new MultiTaskSampleStream(dir.resolve("train.conllu"))) {
+        model = BilstmPOSTrainer.trainMultiTask(train, settings, vectors, lexicon);
       }
-      else {
-        model = BilstmPOSTrainer.train(train, settings, vectors, lexicon);
+    }
+    else {
+      try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
+        if (lexicon == null) {
+          model = BilstmPOSTrainer.train(train, settings, vectors);
+        }
+        else {
+          model = BilstmPOSTrainer.train(train, settings, vectors, lexicon);
+        }
       }
     }
     logger.info("bilstm pretrained trained in {} ms", System.currentTimeMillis() - trainStart);
@@ -347,6 +365,81 @@ public class ConlluPOSTaggerEvalTest {
             tags.toArray(new String[0])));
         tokens.clear();
         tags.clear();
+      }
+    }
+
+    @Override
+    public void reset() throws IOException, UnsupportedOperationException {
+      throw new UnsupportedOperationException("reset is not supported");
+    }
+
+    @Override
+    public void close() throws IOException {
+      reader.close();
+    }
+  }
+
+  /**
+   * Reads a CoNLL-U file as multi-task samples over syntactic words: the same
+   * word-based convention as {@link WordBasedPOSSampleStream}, additionally carrying
+   * the XPOS column and the FEATS column as composite auxiliary labels.
+   */
+  private static final class MultiTaskSampleStream
+      implements ObjectStream<BilstmPOSTrainer.MultiTaskSample> {
+
+    private final java.io.BufferedReader reader;
+    private final List<BilstmPOSTrainer.MultiTaskSample> pending = new ArrayList<>();
+    private boolean loaded;
+
+    private MultiTaskSampleStream(Path conllu) throws IOException {
+      reader = Files.newBufferedReader(conllu, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public BilstmPOSTrainer.MultiTaskSample read() throws IOException {
+      if (!loaded) {
+        load();
+        loaded = true;
+      }
+      return pending.isEmpty() ? null : pending.remove(0);
+    }
+
+    private void load() throws IOException {
+      List<String> tokens = new ArrayList<>();
+      List<String> tags = new ArrayList<>();
+      List<String> xpos = new ArrayList<>();
+      List<String> feats = new ArrayList<>();
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.startsWith("#")) {
+          continue;
+        }
+        if (line.isBlank()) {
+          emit(tokens, tags, xpos, feats);
+          continue;
+        }
+        final String[] fields = line.split("\t");
+        if (fields.length < 6 || fields[0].contains("-") || fields[0].contains(".")) {
+          continue;
+        }
+        tokens.add(fields[1]);
+        tags.add(fields[3]);
+        xpos.add(fields[4]);
+        feats.add(fields[5]);
+      }
+      emit(tokens, tags, xpos, feats);
+    }
+
+    private void emit(List<String> tokens, List<String> tags, List<String> xpos,
+        List<String> feats) {
+      if (!tokens.isEmpty()) {
+        pending.add(new BilstmPOSTrainer.MultiTaskSample(
+            tokens.toArray(new String[0]), tags.toArray(new String[0]),
+            xpos.toArray(new String[0]), feats.toArray(new String[0])));
+        tokens.clear();
+        tags.clear();
+        xpos.clear();
+        feats.clear();
       }
     }
 
