@@ -29,6 +29,7 @@ import opennlp.tools.util.ObjectStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the {@link BilstmPOSTrainer} contract: fail-loud validation, deterministic
@@ -44,7 +45,7 @@ class BilstmPOSTrainerTest {
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
       8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0, false, 1,
-      0.0d, 0.0d, 1.0d);
+      0.0d, 0.0d, 1.0d, 0.0d);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -130,11 +131,31 @@ class BilstmPOSTrainerTest {
   void testLearnsSeparablePatternWithCrf() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            1, 0.0d, 0, true, 1, 0.0d, 0.0d, 1.0d));
+            1, 0.0d, 0, true, 1, 0.0d, 0.0d, 1.0d, 0.0d));
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
     for (final POSSample sample : CORPUS) {
       assertArrayEquals(sample.getTags(), tagger.tag(sample.getSentence()));
     }
+  }
+
+  @Test
+  void testPretrainedTuningChangesStoredTable() throws IOException {
+    final java.util.function.Function<CharSequence, float[]> vectors =
+        w -> new float[] {1.0f, 0.0f};
+    final BilstmPOSModel frozen = BilstmPOSTrainer.train(stream(CORPUS), TINY, vectors);
+    final BilstmPOSModel tuned = BilstmPOSTrainer.train(stream(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
+            1, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.5d),
+        vectors);
+    final float[] frozenRow = frozen.pretrainedVector("cat");
+    final float[] tunedRow = tuned.pretrainedVector("cat");
+    boolean changed = false;
+    for (int i = 0; i < frozenRow.length; i++) {
+      if (frozenRow[i] != tunedRow[i]) {
+        changed = true;
+      }
+    }
+    assertTrue(changed, "fine-tuning must change the stored vector table");
   }
 
   @Test
@@ -158,7 +179,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            3, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d));
+            3, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.0d));
     final String[] sentence = {"The", "cat", "ran"};
     final double[][] expected = sequential.score(sentence);
     final double[][] actual = parallel.score(sentence);
