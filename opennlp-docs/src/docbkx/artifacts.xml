@@ -64,6 +64,7 @@ replacement [12..13)]]>
 			Ordinary accented words are not mojibake: their single-byte images are not
 			valid UTF-8 sequences, so a text like <code>déjà vu</code> yields no
 			finding at all.
+			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 
