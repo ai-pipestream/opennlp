@@ -100,13 +100,20 @@ public final class BilstmPOSTrainer {
    * @param pretrainedTuning Learning-rate multiplier for the frozen pretrained
    *                         vector table; zero keeps it frozen, a positive value
    *                         fine-tunes it at that fraction of the base rate.
+   * @param pretrainedAdapter Whether the frozen pretrained block enters the token
+   *                          input through a learned linear projection (square
+   *                          matrix plus bias, identity-initialized) instead of a
+   *                          plain copy, letting training rotate the frozen space
+   *                          toward what the encoder uses; starts as the exact
+   *                          pass-through and cannot be combined with
+   *                          {@code pretrainedTuning}.
    */
   public record Settings(int wordEmbeddingSize, int charEmbeddingSize, int charHiddenSize,
       int hiddenSize, int epochs, int batchSize, double learningRate, double clipNorm,
       double dropout, int wordCutoff, int maxWordLength, long seed, int threads,
       double wordDropout, int learningRateHalfLife, boolean crf, int encoderLayers,
       double pretrainedDropout, double encoderDropout, double auxLossWeight,
-      double pretrainedTuning) {
+      double pretrainedTuning, boolean pretrainedAdapter) {
 
     /**
      * Validates the hyperparameters.
@@ -154,6 +161,10 @@ public final class BilstmPOSTrainer {
       if (pretrainedTuning < 0.0d) {
         throw new IllegalArgumentException("pretrainedTuning must not be negative");
       }
+      if (pretrainedAdapter && pretrainedTuning > 0.0d) {
+        throw new IllegalArgumentException(
+            "pretrainedAdapter and pretrainedTuning must not be combined");
+      }
     }
 
     /**
@@ -163,7 +174,7 @@ public final class BilstmPOSTrainer {
     public static Settings defaults() {
       return new Settings(100, 25, 50, 128, 20, 16, 1e-3d, 5.0d, 0.33d, 2, 40, 17L,
           Runtime.getRuntime().availableProcessors(), 0.0d, 0, false, 1, 0.0d, 0.0d,
-          1.0d, 0.0d);
+          1.0d, 0.0d, false);
     }
   }
 
@@ -463,6 +474,8 @@ public final class BilstmPOSTrainer {
     private final LinkedHashMap<String, Integer> pretrainedIds;
     private final float[][] pretrainedVectors;
     private final double[][] pretrainedTrainable;
+    private final double[][] adapterWeights;
+    private final double[] adapterBias;
     private final int pretrainedSize;
     private final int inputSize;
     final AdamOptimizer adam;
@@ -484,7 +497,8 @@ public final class BilstmPOSTrainer {
         LstmLayer wordBackward2, double[][] outputWeights,
         double[] outputBias, double[][] transitionWeights, double[] startWeights,
         double[] endWeights, LinkedHashMap<String, Integer> pretrainedIds,
-        float[][] pretrainedVectors, double[][] pretrainedTrainable, int inputSize,
+        float[][] pretrainedVectors, double[][] pretrainedTrainable,
+        double[][] adapterWeights, double[] adapterBias, int inputSize,
         AdamOptimizer adam, String[] xposTags, Map<String, Integer> xposIds,
         double[][] xposWeights, double[] xposBias, String[] featsTags,
         Map<String, Integer> featsIds, double[][] featsWeights, double[] featsBias) {
@@ -518,6 +532,8 @@ public final class BilstmPOSTrainer {
       this.pretrainedIds = pretrainedIds;
       this.pretrainedVectors = pretrainedVectors;
       this.pretrainedTrainable = pretrainedTrainable;
+      this.adapterWeights = adapterWeights;
+      this.adapterBias = adapterBias;
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
       this.inputSize = inputSize;
       this.adam = adam;
@@ -539,6 +555,10 @@ public final class BilstmPOSTrainer {
         index += 2;
       }
       tuningIndex = pretrainedTrainable != null ? index : -1;
+      if (pretrainedTrainable != null) {
+        index += 1;
+      }
+      adapterIndex = adapterWeights != null ? index : -1;
     }
 
     private final int crfIndex;
@@ -546,6 +566,7 @@ public final class BilstmPOSTrainer {
     private final int xposIndex;
     private final int featsIndex;
     private final int tuningIndex;
+    private final int adapterIndex;
 
     /**
      * Rebuilds the transposed weight views of every encoder layer after an
@@ -570,7 +591,7 @@ public final class BilstmPOSTrainer {
      */
     Worker newWorker() {
       return new Worker(adam.newGradientBuffers(tuningIndex), crfIndex, layer2Index,
-          xposIndex, featsIndex, tuningIndex);
+          xposIndex, featsIndex, tuningIndex, adapterIndex);
     }
 
     /**
@@ -643,9 +664,11 @@ public final class BilstmPOSTrainer {
       private final double[][] featsWeightGrads;
       private final double[] featsBiasGrads;
       private final SortedMap<Integer, double[]> pretrainedGrads;
+      private final double[][] adapterWeightGrads;
+      private final double[] adapterBiasGrads;
 
       private Worker(List<double[][]> buffers, int crfIndex, int layer2Index,
-          int xposIndex, int featsIndex, int tuningIndex) {
+          int xposIndex, int featsIndex, int tuningIndex, int adapterIndex) {
         this.buffers = buffers;
         wordEmbeddingGrads = buffers.get(0);
         charEmbeddingGrads = buffers.get(1);
@@ -673,6 +696,8 @@ public final class BilstmPOSTrainer {
         featsWeightGrads = featsIndex >= 0 ? buffers.get(featsIndex) : null;
         featsBiasGrads = featsIndex >= 0 ? buffers.get(featsIndex + 1)[0] : null;
         pretrainedGrads = tuningIndex >= 0 ? new TreeMap<>() : null;
+        adapterWeightGrads = adapterIndex >= 0 ? buffers.get(adapterIndex) : null;
+        adapterBiasGrads = adapterIndex >= 0 ? buffers.get(adapterIndex + 1)[0] : null;
       }
 
       /**
@@ -721,6 +746,16 @@ public final class BilstmPOSTrainer {
     /** @return The live fine-tuning vector table, exposed for white-box checks. */
     double[][] testingPretrainedTrainable() {
       return pretrainedTrainable;
+    }
+
+    /** @return The live adapter weights, exposed for white-box gradient checks. */
+    double[][] testingAdapterWeights() {
+      return adapterWeights;
+    }
+
+    /** @return The live adapter bias, exposed for white-box gradient checks. */
+    double[] testingAdapterBias() {
+      return adapterBias;
     }
 
     /** @return The live forward sentence layer, exposed for white-box checks. */
@@ -876,6 +911,24 @@ public final class BilstmPOSTrainer {
       }
       final int pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
 
+      // identity-initialized projection over the frozen block: exactly the
+      // pass-through at start, trained away from it only where the loss benefits;
+      // consumes no init-stream randomness, so enabling it changes no other
+      // parameter's initialization
+      final double[][] adapterWeights;
+      final double[] adapterBias;
+      if (pretrainedVectors != null && settings.pretrainedAdapter()) {
+        adapterWeights = new double[pretrainedSize][pretrainedSize];
+        for (int i = 0; i < pretrainedSize; i++) {
+          adapterWeights[i][i] = 1.0d;
+        }
+        adapterBias = new double[pretrainedSize];
+      }
+      else {
+        adapterWeights = null;
+        adapterBias = null;
+      }
+
       final int inputSize = settings.wordEmbeddingSize() + 2 * settings.charHiddenSize()
           + pretrainedSize;
       final LstmLayer wordForward =
@@ -946,7 +999,9 @@ public final class BilstmPOSTrainer {
       // 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights,
       // 15 output bias, then CRF transitions/start/end (crf only), then
       // second-layer forward/backward w/u/b (encoderLayers 2 only), then the
-      // auxiliary xpos weights/bias and feats weights/bias (multi-task only)
+      // auxiliary xpos weights/bias and feats weights/bias (multi-task only),
+      // then the fine-tuning table (pretrainedTuning only), then the adapter
+      // weights/bias (pretrainedAdapter only)
       adam.register(wordEmbeddings);
       adam.register(charEmbeddings);
       adam.register(charForward.w());
@@ -987,13 +1042,17 @@ public final class BilstmPOSTrainer {
       if (pretrainedTrainable != null) {
         adam.register(pretrainedTrainable, settings.pretrainedTuning());
       }
+      if (adapterWeights != null) {
+        adam.register(adapterWeights);
+        adam.register(adapterBias);
+      }
 
       return new TrainingContext(settings, words, chars, tags, tagIds, wordEmbeddings,
           charEmbeddings, charForward, charBackward, wordForward, wordBackward,
           wordForward2, wordBackward2, outputWeights, outputBias, transitionWeights,
           startWeights, endWeights, pretrainedIds, pretrainedVectors,
-          pretrainedTrainable, inputSize, adam, xposTags, xposIds, xposWeights,
-          xposBias, featsTags, featsIds, featsWeights, featsBias);
+          pretrainedTrainable, adapterWeights, adapterBias, inputSize, adam, xposTags,
+          xposIds, xposWeights, xposBias, featsTags, featsIds, featsWeights, featsBias);
     }
 
     private static void collectVectors(Iterable<String> candidates,
@@ -1135,7 +1194,18 @@ public final class BilstmPOSTrainer {
             }
             else {
               final int offset = wordSize + 2 * charHidden;
-              if (pretrainedTrainable != null) {
+              if (adapterWeights != null) {
+                // x[offset+i] = sum_r adapterWeights[r][i] * pretrained[r] + bias[i]
+                final float[] pretrained = pretrainedVectors[row];
+                for (int i = 0; i < pretrainedSize; i++) {
+                  double sum = adapterBias[i];
+                  for (int r = 0; r < pretrainedSize; r++) {
+                    sum += adapterWeights[r][i] * pretrained[r];
+                  }
+                  x[offset + i] = sum;
+                }
+              }
+              else if (pretrainedTrainable != null) {
                 System.arraycopy(pretrainedTrainable[row], 0, x, offset, pretrainedSize);
               }
               else {
@@ -1339,6 +1409,22 @@ public final class BilstmPOSTrainer {
             rowGrads[i] += dx[offset + i];
           }
         }
+        if (pretrainedRows[t] >= 0 && !blockDropped[t] && worker.adapterWeightGrads != null) {
+          // dAdapterWeights[r][i] += dx[offset+i] * pretrained[r]; no gradient
+          // flows into the frozen table itself through the projection
+          final int offset = wordSize + 2 * charHidden;
+          final float[] pretrained = pretrainedVectors[pretrainedRows[t]];
+          for (int r = 0; r < pretrainedSize; r++) {
+            final double[] gradRow = worker.adapterWeightGrads[r];
+            final double value = pretrained[r];
+            for (int i = 0; i < pretrainedSize; i++) {
+              gradRow[i] += dx[offset + i] * value;
+            }
+          }
+          for (int i = 0; i < pretrainedSize; i++) {
+            worker.adapterBiasGrads[i] += dx[offset + i];
+          }
+        }
         final int[] ids = charIdsPerToken[t];
         if (ids.length > 0) {
           final double[][] dHChar = new double[ids.length][charHidden];
@@ -1499,7 +1585,7 @@ public final class BilstmPOSTrainer {
           charForward, charBackward, wordForward, wordBackward, wordForward2,
           wordBackward2, outputWeights, outputBias, settings.maxWordLength(),
           pretrainedIds, vectors, transitionWeights, startWeights,
-          endWeights);
+          endWeights, adapterWeights, adapterBias);
     }
   }
 }
