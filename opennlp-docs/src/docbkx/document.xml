@@ -231,6 +231,7 @@ DocumentAnnotator filter =
 // for the text above, LONG_ONES holds the values 6 and 5;
 // TOKEN_LENGTHS still holds all five]]>
 			</programlisting>
+			<code>PredicateManualExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 </chapter>
