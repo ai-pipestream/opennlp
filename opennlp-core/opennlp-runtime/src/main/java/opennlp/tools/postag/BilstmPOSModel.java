@@ -519,7 +519,7 @@ public class BilstmPOSModel {
     }
     else {
       twoLayer = MAGIC_TWO_LAYER.equals(magic) || MAGIC_TWO_LAYER_CRF.equals(magic);
-      crf = MAGIC_CRF.equals(magic);
+      crf = MAGIC_CRF.equals(magic) || MAGIC_TWO_LAYER_CRF.equals(magic);
     }
     final LinkedHashMap<String, Integer> words = readVocabulary(data);
     final LinkedHashMap<String, Integer> chars = readVocabulary(data);
