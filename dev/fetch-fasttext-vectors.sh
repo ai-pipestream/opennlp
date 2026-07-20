@@ -38,11 +38,11 @@ if [ ! -f "$vocab" ]; then
   awk '!/^#/ && NF >= 2 { print $2 }' \
       "$UD_DIR"/en_ewt-ud-train.conllu \
       "$UD_DIR"/en_ewt-ud-dev.conllu \
-      "$UD_DIR"/en_ewt-ud-test.conllu > "$vocab.raw"
-  cat "$LEXICON" >> "$vocab.raw"
-  tr 'A-Z' 'a-z' < "$vocab.raw" >> "$vocab.raw"
-  sort -u "$vocab.raw" > "$vocab"
-  rm -f "$vocab.raw"
+      "$UD_DIR"/en_ewt-ud-test.conllu > "$vocab.forms"
+  cat "$LEXICON" >> "$vocab.forms"
+  tr 'A-Z' 'a-z' < "$vocab.forms" > "$vocab.lower"
+  sort -u "$vocab.forms" "$vocab.lower" > "$vocab"
+  rm -f "$vocab.forms" "$vocab.lower"
 fi
 
 echo "vocab: $(wc -l < "$vocab") forms; trimming (streams ~7 GB) ..."
