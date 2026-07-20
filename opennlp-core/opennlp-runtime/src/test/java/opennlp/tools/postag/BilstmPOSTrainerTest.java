@@ -45,7 +45,7 @@ class BilstmPOSTrainerTest {
 
   private static final BilstmPOSTrainer.Settings TINY = new BilstmPOSTrainer.Settings(
       8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 1, 0.0d, 0, false, 1,
-      0.0d, 0.0d, 1.0d, 0.0d);
+      0.0d, 0.0d, 1.0d, 0.0d, false);
 
   private static ObjectStream<POSSample> stream(List<POSSample> samples) {
     return new CollectionObjectStream<>(samples);
@@ -83,6 +83,15 @@ class BilstmPOSTrainerTest {
     withNull.add(null);
     assertThrows(IllegalArgumentException.class,
         () -> BilstmPOSTrainer.train(stream(CORPUS), TINY, w -> new float[2], withNull));
+  }
+
+  @Test
+  void testRejectsAdapterCombinedWithTuning() {
+    // the adapter and the fine-tuning path are two different owners of the
+    // pretrained block's gradients; combining them is unsupported
+    assertThrows(IllegalArgumentException.class,
+        () -> new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12,
+            7L, 1, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.5d, true));
   }
 
   @Test
@@ -131,7 +140,7 @@ class BilstmPOSTrainerTest {
   void testLearnsSeparablePatternWithCrf() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            1, 0.0d, 0, true, 1, 0.0d, 0.0d, 1.0d, 0.0d));
+            1, 0.0d, 0, true, 1, 0.0d, 0.0d, 1.0d, 0.0d, false));
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
     for (final POSSample sample : CORPUS) {
       assertArrayEquals(sample.getTags(), tagger.tag(sample.getSentence()));
@@ -145,7 +154,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel frozen = BilstmPOSTrainer.train(stream(CORPUS), TINY, vectors);
     final BilstmPOSModel tuned = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            1, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.5d),
+            1, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.5d, false),
         vectors);
     final float[] frozenRow = frozen.pretrainedVector("cat");
     final float[] tunedRow = tuned.pretrainedVector("cat");
@@ -179,7 +188,7 @@ class BilstmPOSTrainerTest {
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,
-            3, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.0d));
+            3, 0.0d, 0, false, 1, 0.0d, 0.0d, 1.0d, 0.0d, false));
     final String[] sentence = {"The", "cat", "ran"};
     final double[][] expected = sequential.score(sentence);
     final double[][] actual = parallel.score(sentence);

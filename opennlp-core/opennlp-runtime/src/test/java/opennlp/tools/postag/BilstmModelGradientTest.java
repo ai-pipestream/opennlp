@@ -23,6 +23,8 @@ import java.util.Random;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -64,17 +66,17 @@ class BilstmModelGradientTest {
             new String[] {"NOUN", "VERB"}, null, null));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
-        0.0d, 0.0d, 1.0d, 0.0d);
+        0.0d, 0.0d, 1.0d, 0.0d, false);
     context = BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     worker = context.newWorker();
     final BilstmPOSTrainer.Settings crfSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, true, 1,
-        0.0d, 0.0d, 1.0d, 0.0d);
+        0.0d, 0.0d, 1.0d, 0.0d, false);
     crfContext = BilstmPOSTrainer.TrainingContext.build(corpus, crfSettings, null, null);
     crfWorker = crfContext.newWorker();
     final BilstmPOSTrainer.Settings twoLayerSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
-        0.0d, 0.0d, 1.0d, 0.0d);
+        0.0d, 0.0d, 1.0d, 0.0d, false);
     twoLayerContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, twoLayerSettings, null, null);
     twoLayerWorker = twoLayerContext.newWorker();
@@ -91,7 +93,7 @@ class BilstmModelGradientTest {
             new String[] {"Number=Plur", "Tense=Pres"}));
     final BilstmPOSTrainer.Settings auxSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
-        0.0d, 0.0d, 0.7d, 0.0d);
+        0.0d, 0.0d, 0.7d, 0.0d, false);
     auxContext = BilstmPOSTrainer.TrainingContext.build(auxCorpus, auxSettings, null,
         null);
     auxWorker = auxContext.newWorker();
@@ -99,7 +101,7 @@ class BilstmModelGradientTest {
 
     final BilstmPOSTrainer.Settings dropoutSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 2,
-        0.0d, 0.5d, 1.0d, 0.0d);
+        0.0d, 0.5d, 1.0d, 0.0d, false);
     dropoutContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, dropoutSettings, null, null);
     dropoutWorker = dropoutContext.newWorker();
@@ -345,7 +347,7 @@ class BilstmModelGradientTest {
         w -> new float[] {0.5f, -0.25f};
     final BilstmPOSTrainer.Settings tuningSettings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
-        0.0d, 0.0d, 1.0d, 0.1d);
+        0.0d, 0.0d, 1.0d, 0.1d, false);
     final BilstmPOSTrainer.TrainingContext tuningContext =
         BilstmPOSTrainer.TrainingContext.build(corpus, tuningSettings, vectors, null);
     final BilstmPOSTrainer.TrainingContext.Worker tuningWorker = tuningContext.newWorker();
@@ -357,6 +359,70 @@ class BilstmModelGradientTest {
       for (int i = 0; i < table[r].length; i++) {
         assertClose(analytic[r][i], numerical(tuningContext, tuningWorker, table[r], i),
             "pretrainedTrainable[" + r + "][" + i + "]");
+      }
+    }
+  }
+
+  @Test
+  void testAdapterGradients() {
+    // the adapter's own parameters must agree with finite differences through the
+    // same sentence; with no other optional block registered, adapterWeights sits
+    // at registration 16 and adapterBias at 17
+    final java.util.function.Function<CharSequence, float[]> vectors =
+        w -> new float[] {0.5f, -0.25f};
+    final BilstmPOSTrainer.Settings adapterSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 1.0d, 0.0d, true);
+    final BilstmPOSTrainer.TrainingContext adapterContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, adapterSettings, vectors, null);
+    final BilstmPOSTrainer.TrainingContext.Worker adapterWorker =
+        adapterContext.newWorker();
+    final double[][] analyticW = analyticGradients(adapterContext, adapterWorker, 16);
+    final double[][] analyticB = analyticGradients(adapterContext, adapterWorker, 17);
+    final double[][] weights = adapterContext.testingAdapterWeights();
+    final double[] bias = adapterContext.testingAdapterBias();
+    for (int r = 0; r < weights.length; r++) {
+      for (int i = 0; i < weights[r].length; i++) {
+        assertClose(analyticW[r][i], numerical(adapterContext, adapterWorker,
+            weights[r], i), "adapterWeights[" + r + "][" + i + "]");
+      }
+    }
+    for (int i = 0; i < bias.length; i++) {
+      assertClose(analyticB[0][i], numerical(adapterContext, adapterWorker, bias, i),
+          "adapterBias[" + i + "]");
+    }
+  }
+
+  @Test
+  void testIdentityAdapterMatchesFrozenPassThrough() {
+    // an identity-initialized adapter must reproduce the frozen-copy path bit for
+    // bit: identical loss and identical gradients in every shared buffer, which
+    // also pins that creating the adapter consumes no initialization randomness
+    final java.util.function.Function<CharSequence, float[]> vectors =
+        w -> new float[] {0.5f, -0.25f};
+    final BilstmPOSTrainer.Settings offSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 1.0d, 0.0d, false);
+    final BilstmPOSTrainer.Settings onSettings = new BilstmPOSTrainer.Settings(
+        4, 3, 3, 4, 1, 2, 1e-3d, 5.0d, 0.0d, 1, 10, 7L, 1, 0.0d, 0, false, 1,
+        0.0d, 0.0d, 1.0d, 0.0d, true);
+    final BilstmPOSTrainer.TrainingContext offContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, offSettings, vectors, null);
+    final BilstmPOSTrainer.TrainingContext onContext =
+        BilstmPOSTrainer.TrainingContext.build(corpus, onSettings, vectors, null);
+    final BilstmPOSTrainer.TrainingContext.Worker offWorker = offContext.newWorker();
+    final BilstmPOSTrainer.TrainingContext.Worker onWorker = onContext.newWorker();
+    final double offLoss =
+        offContext.sentenceGradients(sample, new Random(0L), offWorker);
+    final double onLoss = onContext.sentenceGradients(sample, new Random(0L), onWorker);
+    assertEquals(offLoss, onLoss, 0.0d);
+    // the adapter context registers two extra buffers (16, 17); the shared ones
+    // must match exactly
+    for (int b = 0; b < 16; b++) {
+      final double[][] off = offWorker.buffers().get(b);
+      final double[][] on = onWorker.buffers().get(b);
+      for (int r = 0; r < off.length; r++) {
+        assertArrayEquals(off[r], on[r], 0.0d, "buffer " + b + " row " + r);
       }
     }
   }
