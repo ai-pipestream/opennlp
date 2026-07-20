@@ -201,6 +201,25 @@ class BilstmPOSModelTest {
   }
 
   @Test
+  void testSerializationRoundTripPreservesTwoLayerCrf() throws IOException {
+    // regression: the reader used to skip transitions unless the magic was
+    // exactly ONLP-BLPT-2, corrupting two-layer CRF (ONLP-BLPT-4) loads
+    final BilstmPOSModel model = BilstmPOSTrainer.train(
+        new CollectionObjectStream<>(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, true, 2,
+            0.0d, 0.0d, 1.0d, 0.0d, false));
+    final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    model.serialize(buffer);
+    assertEquals("ONLP-BLPT-4", magicOf(buffer.toByteArray()));
+    final BilstmPOSModel loaded =
+        BilstmPOSModel.load(new ByteArrayInputStream(buffer.toByteArray()));
+    assertEquals(model.isCrf(), loaded.isCrf());
+    final String[] sentence = {"The", "dog", "sat"};
+    assertArrayEquals(new BilstmPOSTagger(model).tag(sentence),
+        new BilstmPOSTagger(loaded).tag(sentence));
+  }
+
+  @Test
   void testRejectsForeignMagic() {
     final byte[] junk = "ONLP-FFPT-2\0\0\0\0".getBytes();
     assertThrows(IOException.class,
