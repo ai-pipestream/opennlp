@@ -70,6 +70,7 @@ byte[] bytes = asset.decode(text);  // the original 45 bytes]]>
 			The asset's span covers the whole URI; its payload span covers just the
 			base64 characters, and <code>decode</code> reads them straight from the
 			original text.
+			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 
