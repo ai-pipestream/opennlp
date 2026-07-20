@@ -222,4 +222,23 @@ gazetteer.lookup("Tokyo");   // the base still answers everything else]]>
 			</programlisting>
 		</para>
 	</section>
+
+	<section xml:id="tools.geo.place-profiles">
+		<title>Place profiles</title>
+		<para>
+			<code>PlaceProfiles</code> loads a tab-separated metric table and answers
+			pairwise cosine similarities after standardizing each column. The first
+			column is the place id; further columns are numeric metrics. Neighbor
+			queries return other places in descending score order and never include
+			the query place itself. <code>PlaceProfilesUsageTest</code> asserts the
+			behavior shown here.
+			<programlisting language="java"><![CDATA[
+PlaceProfiles profiles = PlaceProfiles.load(Path.of("profiles.tsv"));
+// columns: id, density, income, transit
+
+double score = profiles.similarity("metroville", "harborview");
+List<PlaceProfiles.Neighbor> neighbors = profiles.mostSimilar("metroville", 4);]]>
+			</programlisting>
+		</para>
+	</section>
 </chapter>
