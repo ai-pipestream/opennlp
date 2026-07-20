@@ -1,58 +1,58 @@
 name: publish-preview
 
-# Publishes the preview uber jar from the kristian-3.x-features research branch to the
-# org's GitHub Packages Maven registry. The reactor modules keep their org.apache.opennlp
-# coordinates; only the shaded uber jar is renamed, to ai.pipestream:opennlp-experiment,
-# by the publish-only publish/opennlp-experiment module (not part of the reactor). The
-# version is read from the provenance manifest, so a publish always matches what the regen
-# actually built. Manual dispatch only: a regen is pushed first, then this is triggered
-# against it.
+# Publishes the kristian-3.x-features research branch to the ai.pipestream snapshot
+# registry as ai.pipestream:opennlp-* snapshots. The reactor modules are renamed at
+# publish time (versions:set for the version, sed for the group; the branch itself
+# keeps org.apache.opennlp coordinates so regeneration stays clean). The version is
+# read from the provenance manifest, so a publish always matches what the regen built.
+# Runs on every push of the research branch; manual dispatch republishes the current tip.
 
 on:
+  push:
+    branches:
+      - kristian-3.x-features
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: kristian-3.x-features
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-          server-id: github
+          server-id: forgejo
+          server-username: FORGEJO_ACTOR
+          server-password: FORGEJO_TOKEN
 
       - name: Read preview version from the provenance manifest
         run: |
           VERSION=$(awk '/^version:/{print $2}' PIPESTREAM-PROVENANCE.txt)
           test -n "$VERSION"
-          # The uber jar pom pins this same literal; fail loudly if the channel version drifts.
-          if [ "$VERSION" != "3.x-preview-SNAPSHOT" ]; then
-            echo "Provenance version '$VERSION' does not match the pinned uber jar version 3.x-preview-SNAPSHOT" >&2
-            exit 1
-          fi
           echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Publishing $VERSION"
 
-      - name: Set the preview version on the reactor
-        run: ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DgenerateBackupPoms=false
+      - name: Rename the reactor to ai.pipestream
+        run: |
+          ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DprocessAllModules=true -DgenerateBackupPoms=false
+          grep -rl '<groupId>org.apache.opennlp</groupId>' --include=pom.xml . \
+            | xargs sed -i 's|<groupId>org.apache.opennlp</groupId>|<groupId>ai.pipestream</groupId>|g'
+          # The pre-trained model artifacts are external Apache releases, not reactor modules.
+          perl -0777 -pi -e 's|<groupId>ai\.pipestream</groupId>(\s*)<artifactId>(opennlp-models-)|<groupId>org.apache.opennlp</groupId>$1<artifactId>$2|g' \
+            opennlp-core/opennlp-model-resolver/pom.xml
 
-      - name: Install the modules the uber jar bundles
-        run: >
-          ./mvnw -q -B install -DskipTests -Denforcer.skip=true -Drat.skip=true
-          -pl opennlp-tools,opennlp-extensions/opennlp-embeddings,opennlp-extensions/opennlp-subword,opennlp-extensions/opennlp-wordnet,opennlp-extensions/opennlp-geo
-          -am
-
-      - name: Build and deploy the ai.pipestream:opennlp-experiment uber jar
+      - name: Deploy ai.pipestream:opennlp-* snapshots
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORGEJO_ACTOR: ${{ github.actor }}
+          FORGEJO_TOKEN: ${{ secrets.CICD_TOKEN }}
         run: >
-          ./mvnw -B -f publish/opennlp-experiment/pom.xml deploy
-          -DaltDeploymentRepository=github::https://maven.pkg.github.com/ai-pipestream/opennlp
+          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+          -DaltDeploymentRepository=forgejo::https://git.rokkon.com/api/packages/ai-pipestream/maven
