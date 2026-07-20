@@ -264,6 +264,7 @@ document = new RegionAwareMoneyAnnotator().annotate(document);]]>
 			same <code>$8</code> is a peso amount. One user-supplied file flips how
 			the document's money is read, and no component in the chain knows the
 			overlay exists.
+			<code>LocationPipelineExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 </chapter>
