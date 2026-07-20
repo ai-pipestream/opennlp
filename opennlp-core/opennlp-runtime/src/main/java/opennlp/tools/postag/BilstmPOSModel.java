@@ -34,7 +34,8 @@ import java.util.Map;
  * The trained parameters of the bidirectional LSTM POS tagger: word and character
  * embeddings, a character-level BiLSTM that builds word representations, a word-level
  * BiLSTM that encodes the sentence, a linear tag scorer, and an optional frozen
- * pretrained-vector table concatenated into the word representation.
+ * pretrained-vector table concatenated into the word representation, through an
+ * optional learned adapter projection when the model was trained with one.
  *
  * <p>Row zero of the word and character vocabularies is the unknown entry, so any
  * token can be encoded. A model is immutable once built and carries no per-call state,
@@ -56,6 +57,7 @@ public class BilstmPOSModel {
   static final String MAGIC_CRF = "ONLP-BLPT-2";
   static final String MAGIC_TWO_LAYER = "ONLP-BLPT-3";
   static final String MAGIC_TWO_LAYER_CRF = "ONLP-BLPT-4";
+  static final String MAGIC_ADAPTER = "ONLP-BLPT-5";
   static final String UNKNOWN = "*UNK*";
 
   private final LinkedHashMap<String, Integer> words;
@@ -75,6 +77,8 @@ public class BilstmPOSModel {
   private final int pretrainedSize;
   private final LinkedHashMap<String, Integer> pretrainedIds;
   private final float[][] pretrainedVectors;
+  private final double[][] adapterWeights;
+  private final double[] adapterBias;
   private final double[][] transitionWeights;
   private final double[] startWeights;
   private final double[] endWeights;
@@ -112,6 +116,20 @@ public class BilstmPOSModel {
       double[][] outputWeights, double[] outputBias, int maxWordLength,
       LinkedHashMap<String, Integer> pretrainedIds, float[][] pretrainedVectors,
       double[][] transitionWeights, double[] startWeights, double[] endWeights) {
+    this(words, chars, tags, wordEmbeddings, charEmbeddings, charForward, charBackward,
+        wordForward, wordBackward, wordForward2, wordBackward2, outputWeights,
+        outputBias, maxWordLength, pretrainedIds, pretrainedVectors, transitionWeights,
+        startWeights, endWeights, null, null);
+  }
+
+  BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
+      String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
+      LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
+      LstmLayer wordBackward, LstmLayer wordForward2, LstmLayer wordBackward2,
+      double[][] outputWeights, double[] outputBias, int maxWordLength,
+      LinkedHashMap<String, Integer> pretrainedIds, float[][] pretrainedVectors,
+      double[][] transitionWeights, double[] startWeights, double[] endWeights,
+      double[][] adapterWeights, double[] adapterBias) {
     this.words = words;
     this.chars = chars;
     this.tags = tags;
@@ -129,6 +147,8 @@ public class BilstmPOSModel {
     this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
     this.pretrainedIds = pretrainedIds;
     this.pretrainedVectors = pretrainedVectors;
+    this.adapterWeights = adapterWeights;
+    this.adapterBias = adapterBias;
     this.transitionWeights = transitionWeights;
     this.startWeights = startWeights;
     this.endWeights = endWeights;
@@ -310,8 +330,21 @@ public class BilstmPOSModel {
     final float[] pretrained = pretrainedVector(token);
     if (pretrained != null) {
       final int offset = wordEmbedding.length + 2 * charHidden;
-      for (int i = 0; i < pretrainedSize; i++) {
-        representation[offset + i] = pretrained[i];
+      if (adapterWeights != null) {
+        // the same projection training applied: out[i] = bias[i] plus the
+        // pretrained row mapped through adapterWeights[r][i]
+        for (int i = 0; i < pretrainedSize; i++) {
+          double sum = adapterBias[i];
+          for (int r = 0; r < pretrainedSize; r++) {
+            sum += adapterWeights[r][i] * pretrained[r];
+          }
+          representation[offset + i] = sum;
+        }
+      }
+      else {
+        for (int i = 0; i < pretrainedSize; i++) {
+          representation[offset + i] = pretrained[i];
+        }
       }
     }
     return representation;
@@ -383,7 +416,11 @@ public class BilstmPOSModel {
   }
 
   /**
-   * Serializes this model in the versioned {@code ONLP-BLPT-1} binary format.
+   * Serializes this model in the versioned {@code ONLP-BLPT} binary format. A model
+   * carrying a pretrained adapter is written as {@code ONLP-BLPT-5}, whose body opens
+   * with the two shape flags (stacked encoder, CRF output layer) that the earlier
+   * magics encode in the version number itself; anything older keeps its exact
+   * historical layout.
    *
    * @param out The stream to write to; not closed. Must not be {@code null}.
    * @throws IOException Thrown if writing fails.
@@ -391,7 +428,12 @@ public class BilstmPOSModel {
   public void serialize(OutputStream out) throws IOException {
     final DataOutputStream data =
         new DataOutputStream(new BufferedOutputStream(out));
-    if (wordForward2 != null) {
+    if (adapterWeights != null) {
+      data.writeUTF(MAGIC_ADAPTER);
+      data.writeBoolean(wordForward2 != null);
+      data.writeBoolean(isCrf());
+    }
+    else if (wordForward2 != null) {
       data.writeUTF(isCrf() ? MAGIC_TWO_LAYER_CRF : MAGIC_TWO_LAYER);
     }
     else {
@@ -432,6 +474,10 @@ public class BilstmPOSModel {
         }
       }
     }
+    if (adapterWeights != null) {
+      writeMatrix(data, adapterWeights);
+      writeVector(data, adapterBias);
+    }
     data.flush();
   }
 
@@ -448,22 +494,33 @@ public class BilstmPOSModel {
   }
 
   /**
-   * Loads a model from the versioned binary format.
+   * Loads a model from the versioned binary format, accepting {@code ONLP-BLPT-1}
+   * through {@code ONLP-BLPT-5}; versions before 5 carry no adapter block.
    *
    * @param in The stream to read from; not closed. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
    * @throws IOException Thrown if reading fails or the content is not an
-   *         {@code ONLP-BLPT-1} model.
+   *         {@code ONLP-BLPT} model.
    */
   public static BilstmPOSModel load(InputStream in) throws IOException {
     final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
     final String magic = data.readUTF();
     if (!MAGIC.equals(magic) && !MAGIC_CRF.equals(magic)
-        && !MAGIC_TWO_LAYER.equals(magic) && !MAGIC_TWO_LAYER_CRF.equals(magic)) {
+        && !MAGIC_TWO_LAYER.equals(magic) && !MAGIC_TWO_LAYER_CRF.equals(magic)
+        && !MAGIC_ADAPTER.equals(magic)) {
       throw new IOException("not an ONLP-BLPT model: " + magic);
     }
-    final boolean twoLayer = MAGIC_TWO_LAYER.equals(magic)
-        || MAGIC_TWO_LAYER_CRF.equals(magic);
+    final boolean adapterModel = MAGIC_ADAPTER.equals(magic);
+    final boolean twoLayer;
+    final boolean crf;
+    if (adapterModel) {
+      twoLayer = data.readBoolean();
+      crf = data.readBoolean();
+    }
+    else {
+      twoLayer = MAGIC_TWO_LAYER.equals(magic) || MAGIC_TWO_LAYER_CRF.equals(magic);
+      crf = MAGIC_CRF.equals(magic);
+    }
     final LinkedHashMap<String, Integer> words = readVocabulary(data);
     final LinkedHashMap<String, Integer> chars = readVocabulary(data);
     final int tagCount = data.readInt();
@@ -488,7 +545,7 @@ public class BilstmPOSModel {
     double[][] transitionWeights = null;
     double[] startWeights = null;
     double[] endWeights = null;
-    if (MAGIC_CRF.equals(magic)) {
+    if (crf) {
       transitionWeights = readMatrix(data);
       startWeights = readVector(data);
       endWeights = readVector(data);
@@ -508,10 +565,17 @@ public class BilstmPOSModel {
         }
       }
     }
+    double[][] adapterWeights = null;
+    double[] adapterBias = null;
+    if (adapterModel) {
+      adapterWeights = readMatrix(data);
+      adapterBias = readVector(data);
+    }
     return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
         charForward, charBackward, wordForward, wordBackward, wordForward2,
         wordBackward2, outputWeights, outputBias, maxWordLength, pretrainedIds,
-        pretrainedVectors, transitionWeights, startWeights, endWeights);
+        pretrainedVectors, transitionWeights, startWeights, endWeights, adapterWeights,
+        adapterBias);
   }
 
   /**
@@ -520,7 +584,7 @@ public class BilstmPOSModel {
    * @param file The model file. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
    * @throws IOException Thrown if reading fails or the content is not an
-   *         {@code ONLP-BLPT-1} model.
+   *         {@code ONLP-BLPT} model.
    */
   public static BilstmPOSModel load(Path file) throws IOException {
     try (InputStream in = Files.newInputStream(file)) {

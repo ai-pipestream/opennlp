@@ -179,7 +179,8 @@ public class ConlluPOSTaggerEvalTest {
         doubleProperty("pretrainedDropout", base.pretrainedDropout()),
         doubleProperty("encoderDropout", base.encoderDropout()),
         doubleProperty("auxLossWeight", base.auxLossWeight()),
-        doubleProperty("pretrainedTuning", base.pretrainedTuning()));
+        doubleProperty("pretrainedTuning", base.pretrainedTuning()),
+        booleanProperty("pretrainedAdapter", base.pretrainedAdapter()));
   }
 
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
@@ -189,7 +190,8 @@ public class ConlluPOSTaggerEvalTest {
         + s.wordDropout() + ";hl" + s.learningRateHalfLife() + ";crf" + s.crf()
         + ";el" + s.encoderLayers() + ";pd" + s.pretrainedDropout() + ";ed"
         + s.encoderDropout() + ";aux" + s.auxLossWeight() + ";pt"
-        + s.pretrainedTuning() + (multiTask() ? ";mt" : "");
+        + s.pretrainedTuning() + (s.pretrainedAdapter() ? ";pa" : "")
+        + (multiTask() ? ";mt" : "");
   }
 
   private static boolean multiTask() {

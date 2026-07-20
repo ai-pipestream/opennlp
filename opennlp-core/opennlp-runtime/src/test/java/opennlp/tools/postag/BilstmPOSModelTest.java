@@ -20,8 +20,11 @@ package opennlp.tools.postag;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +38,7 @@ import opennlp.tools.util.CollectionObjectStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins {@link BilstmPOSModel} serialization and the thread-safety of tagging.
@@ -48,7 +52,7 @@ class BilstmPOSModelTest {
   private static BilstmPOSModel tinyModel() throws IOException {
     return BilstmPOSTrainer.train(new CollectionObjectStream<>(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, false, 1,
-            0.0d, 0.0d, 1.0d, 0.0d));
+            0.0d, 0.0d, 1.0d, 0.0d, false));
   }
 
   @Test
@@ -73,7 +77,7 @@ class BilstmPOSModelTest {
     final BilstmPOSModel model = BilstmPOSTrainer.train(
         new CollectionObjectStream<>(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, false, 1,
-            0.0d, 0.0d, 1.0d, 0.0d),
+            0.0d, 0.0d, 1.0d, 0.0d, false),
         w -> new float[] {w.length(), 1.0f}, List.of("unseen"));
     final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     model.serialize(buffer);
@@ -84,11 +88,108 @@ class BilstmPOSModelTest {
   }
 
   @Test
+  void testSerializationRoundTripPreservesAdapter() throws IOException {
+    final BilstmPOSModel model = BilstmPOSTrainer.train(
+        new CollectionObjectStream<>(CORPUS),
+        new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, false, 1,
+            0.0d, 0.0d, 1.0d, 0.0d, true),
+        w -> new float[] {w.length(), 1.0f}, List.of("unseen"));
+    final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    model.serialize(buffer);
+    // an adapter model is written under the new magic; adapter-less models keep 1-4
+    assertEquals("ONLP-BLPT-5", magicOf(buffer.toByteArray()));
+    final BilstmPOSModel loaded =
+        BilstmPOSModel.load(new ByteArrayInputStream(buffer.toByteArray()));
+    final String[] sentence = {"The", "dog", "sat", "unseen"};
+    final double[][] expected = model.score(sentence);
+    final double[][] actual = loaded.score(sentence);
+    assertEquals(expected.length, actual.length);
+    for (int t = 0; t < expected.length; t++) {
+      assertArrayEquals(expected[t], actual[t], 0.0d);
+    }
+  }
+
+  @Test
+  void testIdentityAdapterMatchesFrozenPassThrough() {
+    // twin models over shared components: the identity adapter must compute
+    // byte-identical representations and scores to the frozen copy, and a
+    // perturbed adapter must actually change the representation (so the
+    // transform cannot be silently dropped)
+    final LinkedHashMap<String, Integer> words = new LinkedHashMap<>();
+    words.put(BilstmPOSModel.UNKNOWN, 0);
+    words.put("cat", 1);
+    final LinkedHashMap<String, Integer> chars = new LinkedHashMap<>();
+    chars.put(BilstmPOSModel.UNKNOWN, 0);
+    chars.put("c", 1);
+    chars.put("a", 2);
+    chars.put("t", 3);
+    final String[] tags = {"D", "N", "V"};
+    final Random random = new Random(7L);
+    final double[][] wordEmbeddings = randomMatrix(words.size(), 4, random);
+    final double[][] charEmbeddings = randomMatrix(chars.size(), 3, random);
+    final LstmLayer charForward = new LstmLayer(3, 2, random);
+    final LstmLayer charBackward = new LstmLayer(3, 2, random);
+    final LstmLayer wordForward = new LstmLayer(4 + 2 * 2 + 2, 3, random);
+    final LstmLayer wordBackward = new LstmLayer(4 + 2 * 2 + 2, 3, random);
+    final double[][] outputWeights = randomMatrix(tags.length, 2 * 3, random);
+    final double[] outputBias = new double[tags.length];
+    final LinkedHashMap<String, Integer> pretrainedIds = new LinkedHashMap<>();
+    pretrainedIds.put("cat", 0);
+    final float[][] pretrainedVectors = {{0.5f, -0.25f}};
+    final BilstmPOSModel frozen = new BilstmPOSModel(words, chars, tags,
+        wordEmbeddings, charEmbeddings, charForward, charBackward, wordForward,
+        wordBackward, null, null, outputWeights, outputBias, 10, pretrainedIds,
+        pretrainedVectors, null, null, null);
+    final double[][] identity = new double[2][2];
+    identity[0][0] = 1.0d;
+    identity[1][1] = 1.0d;
+    final BilstmPOSModel adapted = new BilstmPOSModel(words, chars, tags,
+        wordEmbeddings, charEmbeddings, charForward, charBackward, wordForward,
+        wordBackward, null, null, outputWeights, outputBias, 10, pretrainedIds,
+        pretrainedVectors, null, null, null, identity, new double[2]);
+    assertArrayEquals(frozen.wordRepresentation("cat"),
+        adapted.wordRepresentation("cat"), 0.0d);
+    assertArrayEquals(frozen.wordRepresentation("dog"),
+        adapted.wordRepresentation("dog"), 0.0d);
+    final String[] sentence = {"cat", "dog"};
+    final double[][] frozenScores = frozen.score(sentence);
+    final double[][] adaptedScores = adapted.score(sentence);
+    for (int t = 0; t < sentence.length; t++) {
+      assertArrayEquals(frozenScores[t], adaptedScores[t], 0.0d);
+    }
+    identity[0][1] = 0.5d;
+    final double[] moved = adapted.wordRepresentation("cat");
+    final double[] plain = frozen.wordRepresentation("cat");
+    boolean differs = false;
+    for (int i = 0; i < moved.length; i++) {
+      if (moved[i] != plain[i]) {
+        differs = true;
+      }
+    }
+    assertTrue(differs, "a non-identity adapter must change the representation");
+  }
+
+  private static String magicOf(byte[] serialized) {
+    // DataOutputStream.writeUTF: two length bytes, then modified (ASCII-clean) UTF-8
+    return new String(serialized, 2, serialized[1], StandardCharsets.UTF_8);
+  }
+
+  private static double[][] randomMatrix(int rows, int cols, Random random) {
+    final double[][] matrix = new double[rows][cols];
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        matrix[r][c] = random.nextDouble() * 2.0d - 1.0d;
+      }
+    }
+    return matrix;
+  }
+
+  @Test
   void testSerializationRoundTripPreservesCrfLayer() throws IOException {
     final BilstmPOSModel model = BilstmPOSTrainer.train(
         new CollectionObjectStream<>(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 3, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L, 2, 0.0d, 0, true, 1,
-            0.0d, 0.0d, 1.0d, 0.0d));
+            0.0d, 0.0d, 1.0d, 0.0d, false));
     final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     model.serialize(buffer);
     final BilstmPOSModel loaded =
