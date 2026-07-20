@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to You under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!--
+  Publish-only module. NOT part of the reactor (the root pom does not list it), so
+  it never builds on a feature branch and the ai.pipestream rename does not cascade:
+  the reactor modules keep their org.apache.opennlp coordinates everywhere. This pom
+  is built standalone by the publish-preview workflow after the reactor is installed,
+  and shades the installed opennlp artifacts into a single preview jar published as
+  ai.pipestream:opennlp-experiment. Not an Apache Software Foundation release.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>ai.pipestream</groupId>
+  <artifactId>opennlp-experiment</artifactId>
+  <!-- Literal by design: the preview channel is always a snapshot, never a release. The
+       publish workflow asserts the provenance manifest carries this same version. -->
+  <version>3.x-preview-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>OpenNLP Experiment (preview uber jar)</name>
+  <description>
+    Shaded preview build of the ai-pipestream OpenNLP research arm: the core toolkit plus
+    the pure-JVM embeddings, subword, WordNet, and geo extensions in one slf4j-only jar.
+    Built from unmerged development branches of Apache OpenNLP. Not an Apache Software
+    Foundation release; Apache OpenNLP is a trademark of the ASF.
+  </description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- The version the reactor is set to before install; matches this jar's version and
+         is dropped from the deployed pom by the dependency-reduced-pom rewrite. -->
+    <opennlp.version>3.x-preview-SNAPSHOT</opennlp.version>
+    <maven.shade.plugin.version>3.6.0</maven.shade.plugin.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-tools</artifactId>
+      <version>${opennlp.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-embeddings</artifactId>
+      <version>${opennlp.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-subword</artifactId>
+      <version>${opennlp.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-wordnet</artifactId>
+      <version>${opennlp.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-geo</artifactId>
+      <version>${opennlp.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>opennlp-experiment-${project.version}</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>${maven.shade.plugin.version}</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <!-- Rewrite the deployed pom so it lists none of the bundled deps. -->
+              <createDependencyReducedPom>true</createDependencyReducedPom>
+              <shadedArtifactAttached>false</shadedArtifactAttached>
+              <transformers>
+                <!-- Merge ServiceLoader registrations from every bundled module. -->
+                <transformer
+                    implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                <!-- Make the jar runnable as the OpenNLP CLI. -->
+                <transformer
+                    implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>opennlp.tools.cmdline.CLI</mainClass>
+                </transformer>
+                <transformer
+                    implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
+                <transformer
+                    implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer"/>
+              </transformers>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                    <exclude>module-info.class</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
