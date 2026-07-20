@@ -66,6 +66,7 @@ gibberish [19..31)]]>
 			</programlisting>
 			Without a dictionary the same call reports only the gibberish: the misspelled
 			tier demands evidence, not guesses.
+			<code>NoiseManualExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 
