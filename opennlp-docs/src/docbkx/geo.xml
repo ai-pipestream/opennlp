@@ -266,4 +266,32 @@ document = new RegionAwareMoneyAnnotator().annotate(document);]]>
 			overlay exists.
 		</para>
 	</section>
+
+	<section xml:id="tools.geo.hierarchy">
+		<title>Containment hierarchy</title>
+		<para>
+			<code>HierarchyAnnotator</code> expands each geocoded mention into the
+			chain of places that contain it. It requires the locations layer from
+			<code>GeocodeAnnotator</code> and a <code>ContainmentSpine</code> of
+			parent links. Ancestors are nearest first; the mentioned place itself is
+			excluded from its own chain. Unresolved mentions receive no containment
+			annotation. <code>HierarchyPipelineExampleTest</code> asserts the
+			behavior shown here.
+			<programlisting language="java"><![CDATA[
+ContainmentSpine spine = ContainmentSpine.builder()
+    .add("101", "102", "Le Marais", "neighbourhood")
+    .add("102", "103", "Paris", "locality")
+    .add("103", "104", "Ile-de-France", "region")
+    .add("104", null, "France", "country")
+    .build();
+
+Document annotated = new HierarchyAnnotator(spine)
+    .annotate(new GeocodeAnnotator(geocoder).annotate(documentWithLocationEntities));
+
+List<Annotation<ContainmentChain>> chains =
+    annotated.get(HierarchyAnnotator.CONTAINMENT);
+// Le Marais -> Paris, Ile-de-France, France]]>
+			</programlisting>
+		</para>
+	</section>
 </chapter>
