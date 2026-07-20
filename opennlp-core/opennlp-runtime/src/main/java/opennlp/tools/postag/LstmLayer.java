@@ -35,6 +35,9 @@ import java.util.Random;
  */
 final class LstmLayer {
 
+  /** Gate-row block size for the cache-tiled gradient accumulation in backward. */
+  private static final int ACCUMULATE_BLOCK = 32;
+
   private final int inputSize;
   private final int hiddenSize;
   private final double[][] w;
@@ -42,8 +45,9 @@ final class LstmLayer {
   private final double[] b;
 
   // Transposed views of w and u that let backpropagation read weights row-wise
-  // instead of column-wise. Built lazily on the first backward pass and rebuilt
-  // via refreshTransposed() each time training mutates the weights.
+  // instead of column-wise. Built eagerly in the constructors — lazy creation
+  // would race between concurrent training workers — and rebuilt via
+  // refreshTransposed() each time training mutates the weights.
   private double[][] wT;
   private double[][] uT;
 
@@ -80,6 +84,7 @@ final class LstmLayer {
     for (int j = 0; j < hiddenSize; j++) {
       b[hiddenSize + j] = 1.0d;
     }
+    refreshTransposed();
   }
 
   private LstmLayer(int inputSize, int hiddenSize, double[][] w, double[][] u,
@@ -89,6 +94,7 @@ final class LstmLayer {
     this.w = w;
     this.u = u;
     this.b = b;
+    refreshTransposed();
   }
 
   /**
@@ -231,10 +237,10 @@ final class LstmLayer {
   }
 
   /**
-   * Rebuilds the transposed weight views used by backpropagation. Training must
-   * call this after every optimizer step that mutates the weights; the views are
-   * otherwise built lazily on the first backward pass. Never called at inference,
-   * where no backward pass runs.
+   * Rebuilds the transposed weight views used by backpropagation, allocating them
+   * on first call. Training must call this after every optimizer step that mutates
+   * the weights; only ever invoked single-threaded (construction, optimizer-step
+   * wiring), never concurrently with a backward pass.
    */
   void refreshTransposed() {
     if (wT == null) {
@@ -269,16 +275,15 @@ final class LstmLayer {
    */
   void backward(double[][] xs, ForwardCache cache, double[][] dH, double[][] dXs,
       Gradients gradients) {
-    if (wT == null) {
-      refreshTransposed();
-    }
     final int steps = xs.length;
     final double[] dCell = new double[hiddenSize];
     final double[] dHNext = new double[hiddenSize];
-    final double[] da = new double[4 * hiddenSize];
+    final double[][] daAll = new double[steps][4 * hiddenSize];
+    // Phase 1: the t-sequential recurrence. Pointwise gate gradients are stashed
+    // per timestep so the parameter accumulation below can be restructured.
     for (int t = steps - 1; t >= 0; t--) {
       final double[] cPrev = t > 0 ? cache.c[t - 1] : null;
-      final double[] hPrev = t > 0 ? cache.h(t - 1) : null;
+      final double[] da = daAll[t];
       for (int j = 0; j < hiddenSize; j++) {
         final double dh = dH[t][j] + dHNext[j];
         final double tanhC = Math.tanh(cache.c[t][j]);
@@ -297,19 +302,6 @@ final class LstmLayer {
         da[2 * hiddenSize + j] = dG * (1.0d - gv * gv);
         da[3 * hiddenSize + j] = dO * ov * (1.0d - ov);
       }
-      final double[] x = xs[t];
-      for (int r = 0; r < 4 * hiddenSize; r++) {
-        final double daR = da[r];
-        gradients.db[r] += daR;
-        for (int k = 0; k < inputSize; k++) {
-          gradients.dw[r][k] += daR * x[k];
-        }
-        if (hPrev != null) {
-          for (int k = 0; k < hiddenSize; k++) {
-            gradients.du[r][k] += daR * hPrev[k];
-          }
-        }
-      }
       for (int k = 0; k < hiddenSize; k++) {
         final double[] uTk = uT[k];
         double sum = 0.0d;
@@ -325,6 +317,35 @@ final class LstmLayer {
           sum += wTk[r] * da[r];
         }
         dXs[t][k] += sum;
+      }
+    }
+    // Phase 2: parameter gradients, blocked over gate rows so each dw/du tile stays
+    // cache resident across all timesteps instead of being re-streamed per step.
+    // Every element still accumulates its per-timestep contributions in the same
+    // (time-descending) order as before, so results are bit-identical.
+    final double[][] dw = gradients.dw;
+    final double[][] du = gradients.du;
+    final double[] db = gradients.db;
+    for (int r0 = 0; r0 < 4 * hiddenSize; r0 += ACCUMULATE_BLOCK) {
+      final int rEnd = Math.min(r0 + ACCUMULATE_BLOCK, 4 * hiddenSize);
+      for (int t = steps - 1; t >= 0; t--) {
+        final double[] da = daAll[t];
+        final double[] x = xs[t];
+        final double[] hPrev = t > 0 ? cache.h(t - 1) : null;
+        for (int r = r0; r < rEnd; r++) {
+          final double daR = da[r];
+          db[r] += daR;
+          final double[] dwRow = dw[r];
+          for (int k = 0; k < inputSize; k++) {
+            dwRow[k] += daR * x[k];
+          }
+          if (hPrev != null) {
+            final double[] duRow = du[r];
+            for (int k = 0; k < hiddenSize; k++) {
+              duRow[k] += daR * hPrev[k];
+            }
+          }
+        }
       }
     }
   }
