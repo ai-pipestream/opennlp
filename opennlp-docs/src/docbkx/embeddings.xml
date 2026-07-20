@@ -124,4 +124,27 @@ StaticEmbeddingModel multilingual = StaticEmbeddingModel.loadSentencePiece(
 			(about 2.1 billion float elements), checked explicitly.
 		</para>
 	</section>
+
+	<section xml:id="tools.embeddings.annotator">
+		<title>EmbeddingAnnotator</title>
+		<para>
+			<code>EmbeddingAnnotator</code> embeds every annotation of a chosen source
+			layer with a <code>TextEmbedder</code> and writes a parallel layer whose id
+			is derived as <code>embeddings:</code> plus the source layer id. Each vector
+			keeps the source annotation's span. Token and sentence embedders coexist on
+			the same document under distinct derived keys.
+			<code>EmbeddingAnnotatorUsageTest</code> asserts the behavior shown here.
+			<programlisting language="java"><![CDATA[
+Document tokenized = tokenizerAnnotator.annotate(Document.of("Dogs bark loudly"));
+
+EmbeddingAnnotator annotator =
+    new EmbeddingAnnotator(embedder, Layers.TOKENS);
+Document embedded = annotator.annotate(tokenized);
+
+// annotator.layer().id() = "embeddings:opennlp:tokens"
+List<Annotation<float[]>> vectors = embedded.get(annotator.layer());
+// one vector per token, each on that token's span]]>
+			</programlisting>
+		</para>
+	</section>
 </chapter>
