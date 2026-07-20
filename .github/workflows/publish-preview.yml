@@ -1,9 +1,12 @@
 name: publish-preview
 
-# Publishes the preview artifacts from the kristian-3.x-features research branch to the
-# org's GitHub Packages Maven registry. The version is read from the provenance
-# manifest, so a publish always matches what the regen actually built. Manual
-# dispatch only: a regen is pushed first, then this is triggered against it.
+# Publishes the preview uber jar from the kristian-3.x-features research branch to the
+# org's GitHub Packages Maven registry. The reactor modules keep their org.apache.opennlp
+# coordinates; only the shaded uber jar is renamed, to ai.pipestream:opennlp-experiment,
+# by the publish-only publish/opennlp-experiment module (not part of the reactor). The
+# version is read from the provenance manifest, so a publish always matches what the regen
+# actually built. Manual dispatch only: a regen is pushed first, then this is triggered
+# against it.
 
 on:
   workflow_dispatch:
@@ -29,16 +32,27 @@ jobs:
         run: |
           VERSION=$(awk '/^version:/{print $2}' PIPESTREAM-PROVENANCE.txt)
           test -n "$VERSION"
+          # The uber jar pom pins this same literal; fail loudly if the channel version drifts.
+          if [ "$VERSION" != "3.x-preview-SNAPSHOT" ]; then
+            echo "Provenance version '$VERSION' does not match the pinned uber jar version 3.x-preview-SNAPSHOT" >&2
+            exit 1
+          fi
           echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Publishing $VERSION"
 
-      - name: Set the preview version
+      - name: Set the preview version on the reactor
         run: ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DgenerateBackupPoms=false
 
-      - name: Deploy to GitHub Packages
+      - name: Install the modules the uber jar bundles
+        run: >
+          ./mvnw -q -B install -DskipTests -Denforcer.skip=true -Drat.skip=true
+          -pl opennlp-tools,opennlp-extensions/opennlp-embeddings,opennlp-extensions/opennlp-subword,opennlp-extensions/opennlp-wordnet,opennlp-extensions/opennlp-geo
+          -am
+
+      - name: Build and deploy the ai.pipestream:opennlp-experiment uber jar
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
-          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+          ./mvnw -B -f publish/opennlp-experiment/pom.xml deploy
           -DaltDeploymentRepository=github::https://maven.pkg.github.com/ai-pipestream/opennlp
