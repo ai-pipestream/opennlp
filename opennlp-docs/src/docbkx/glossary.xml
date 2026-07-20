@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.glossary" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Glossary Matching</title>
+
+	<section xml:id="tools.glossary.introduction">
+		<title>Introduction</title>
+		<para>
+			A glossary maps surface forms, including multiword terms, to stable
+			identifiers. The package <code>opennlp.tools.glossary</code> compiles a
+			list of <code>GlossaryEntry</code> values into an
+			<code>AhoCorasickGlossaryMatcher</code> and mounts that matcher on the
+			document pipeline through <code>GlossaryAnnotator</code>. Every hit is a
+			span over the original text, so consumers read identifiers and covered
+			text without re-tokenizing.
+		</para>
+	</section>
+
+	<section xml:id="tools.glossary.pipeline">
+		<title>Matching through a pipeline</title>
+		<para>
+			The annotator requires no other layer, so it can sit anywhere in a
+			<code>DocumentAnalyzer</code>. The example below builds a three-entry
+			glossary, runs it after a model-free tokenizer, and reads
+			<code>GlossaryAnnotator.GLOSSARY</code> back with exact spans. Case
+			folding is on, so a registered lowercase term still covers a mixed-case
+			mention while the span points at the original characters.
+			<code>GlossaryUsageExampleTest</code> asserts the behavior shown here.
+			<programlisting language="java"><![CDATA[
+List<GlossaryEntry> glossary = List.of(
+    new GlossaryEntry("LIB-1", "Apache OpenNLP"),
+    new GlossaryEntry("ALG-42", "maximum entropy model"),
+    new GlossaryEntry("ALG-7", "perceptron model"));
+
+DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+    .add(new TokenizerAnnotator(WhitespaceTokenizer.INSTANCE))
+    .add(new GlossaryAnnotator(new AhoCorasickGlossaryMatcher(glossary, true)))
+    .build();
+
+Document document = analyzer.analyze(
+    "Apache OpenNLP ships a Maximum Entropy model and a perceptron model.");
+
+List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
+// three hits: "Apache OpenNLP", "Maximum Entropy model", "perceptron model"]]>
+			</programlisting>
+			A document that never saw a glossary annotator reads an empty glossary
+			layer, and the key is absent from <code>layers()</code>.
+		</para>
+	</section>
+</chapter>
