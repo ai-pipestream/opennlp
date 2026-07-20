@@ -205,4 +205,31 @@ int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 			missing pipeline stage is an assembly error, not an empty document.
 		</para>
 	</section>
+
+	<section xml:id="tools.document.coref">
+		<title>Document-layer coreference</title>
+		<para>
+			<code>CorefAnnotator</code> clusters entity and pronoun mentions on the
+			document container. It requires sentence, token, POS-tag, and entity layers
+			and provides <code>CorefAnnotator.CHAINS</code>: each annotation carries a
+			<code>CorefMention</code> with a chain id, a kind (entity or pronoun), and
+			an optional entity index. Name containment links a bare surname to a full
+			name; the pronoun sieve attaches gendered and neutral pronouns to the
+			nearest compatible chain. <code>CorefPipelineExampleTest</code> asserts the
+			behavior shown here.
+			<programlisting language="java"><![CDATA[
+Document document = DocumentAnalyzer.builder()
+    .add(sentenceAnnotator)
+    .add(tokenAndPosAnnotator)
+    .add(entityAnnotator)
+    .add(new CorefAnnotator())
+    .build()
+    .analyze("Ada Lovelace advised Orion Labs. Lovelace saw its potential. She was right.");
+
+List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+// chain 0: Ada Lovelace, Lovelace, She
+// chain 1: Orion Labs, its]]>
+			</programlisting>
+		</para>
+	</section>
 </chapter>
