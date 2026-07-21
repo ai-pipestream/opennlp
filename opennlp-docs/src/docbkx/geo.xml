@@ -242,4 +242,76 @@ List<GeoResolution> resolutions = geocoder.resolve(text, List.of(mention));
 			</programlisting>
 		</para>
 	</section>
+
+	<section xml:id="tools.geo.pipeline">
+		<title>Wiring the location pipeline</title>
+		<para>
+			The pieces above compose into one document pipeline: entities found in the
+			text are geocoded through a gazetteer, the resolved locations vote on the
+			region a document speaks from, and the winning region resolves ambiguous
+			currency signs. The example below uses only real, model-free components,
+			so it runs without downloading anything: newline sentence detection, the
+			simple tokenizer, a dictionary name finder over two place names, the
+			population-prior geocoder over the bundled gazetteer with the customer
+			file from the previous sections overlaid, the document region ballot, and
+			region-aware money resolution.
+			<programlisting language="java"><![CDATA[
+String text = "Acme Plant 3 outsells Guadalajara this quarter, and lunch there costs $8.";
+
+Dictionary places = new Dictionary();
+places.put(new StringList("Acme", "Plant", "3"));
+places.put(new StringList("Guadalajara"));
+
+Gazetteer gazetteer = new OverlayGazetteer(BundledGazetteer.getInstance(),
+    UserGazetteer.load(Path.of("customer_places.txt"), "customer"), List.of());
+
+Document document = Document.of(text);
+document = new SentenceDetectorAnnotator(new NewlineSentenceDetector()).annotate(document);
+document = new TokenizerAnnotator(SimpleTokenizer.INSTANCE).annotate(document);
+document = new NameFinderAnnotator(new DictionaryNameFinder(places, "location")).annotate(document);
+document = new GeocodeAnnotator(new PopulationPriorGeocoder(gazetteer)).annotate(document);
+document = new DocumentRegionAnnotator().annotate(document);
+document = new RegionAwareMoneyAnnotator().annotate(document);]]>
+			</programlisting>
+		</para>
+		<para>
+			The outcome shows why the overlay matters. The customer site resolves from
+			the overlay as a single candidate at confidence <code>0.9</code>; Guadalajara
+			resolves to the Mexican city from the bundled table. The United States
+			wins the region ballot by a hair, and the ambiguous <code>$8</code> is
+			read as USD. Run the identical pipeline without the overlay and the
+			customer site resolves to nothing, Mexico takes the whole ballot, and the
+			same <code>$8</code> is a peso amount. One user-supplied file flips how
+			the document's money is read, and no component in the chain knows the
+			overlay exists.
+		</para>
+	</section>
+
+	<section xml:id="tools.geo.hierarchy">
+		<title>Containment hierarchy</title>
+		<para>
+			<code>HierarchyAnnotator</code> expands each geocoded mention into the
+			chain of places that contain it. It requires the locations layer from
+			<code>GeocodeAnnotator</code> and a <code>ContainmentSpine</code> of
+			parent links. Ancestors are nearest first; the mentioned place itself is
+			excluded from its own chain. Unresolved mentions receive no containment
+			annotation. <code>HierarchyPipelineExampleTest</code> asserts the
+			behavior shown here.
+			<programlisting language="java"><![CDATA[
+ContainmentSpine spine = ContainmentSpine.builder()
+    .add("101", "102", "Le Marais", "neighbourhood")
+    .add("102", "103", "Paris", "locality")
+    .add("103", "104", "Ile-de-France", "region")
+    .add("104", null, "France", "country")
+    .build();
+
+Document annotated = new HierarchyAnnotator(spine)
+    .annotate(new GeocodeAnnotator(geocoder).annotate(documentWithLocationEntities));
+
+List<Annotation<ContainmentChain>> chains =
+    annotated.get(HierarchyAnnotator.CONTAINMENT);
+// Le Marais -> Paris, Ile-de-France, France]]>
+			</programlisting>
+		</para>
+	</section>
 </chapter>
