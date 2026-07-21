@@ -32,10 +32,10 @@ import opennlp.tools.wordnet.Synset;
 import opennlp.tools.wordnet.WordNetPOS;
 
 /**
- * Runs the manual's WordNet examples (docbkx {@code wordnet.xml}) verbatim: every value
- * the chapter states is asserted here, so a change breaking this test breaks the manual.
- * The lexicon is the classpath fixture {@code mini-wn-lmf.xml}; exception lists come from
- * the sibling {@code mini-wndb} directory.
+ * Runs the manual's WordNet load and lookup examples (docbkx {@code wordnet.xml})
+ * verbatim: every value the chapter states is asserted here, so a change breaking this
+ * test breaks the manual. The lexicon is the classpath fixture {@code mini-wn-lmf.xml};
+ * exception lists come from the sibling {@code mini-wndb} directory.
  */
 public class WordNetUsageExampleTest {
 
