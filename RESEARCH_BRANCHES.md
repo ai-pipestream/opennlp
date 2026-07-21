@@ -1,6 +1,6 @@
 # Research branch map
 
-This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-20.
+This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-07-21.
 
 ## Merge strategy
 
@@ -8,7 +8,7 @@ Solid arrows are the verified git base of each branch. Dashed arrows are commits
 
 ```mermaid
 flowchart LR
-  main([apache main ef0a354cf])
+  main([apache main 55eaaaaf6])
 
   merged["MERGED upstream 2026-07: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers · OPENNLP-1878 hot-path performance<br/>OPENNLP-1883 stemmer factory · OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile"]
   main --- merged
@@ -58,12 +58,14 @@ flowchart LR
   geo --> hier["hierarchy-annotator"]
 
   classDef mergedC fill:#c8e6c9,stroke:#1b5e20,color:#000;
+  classDef ready fill:#d4edda,stroke:#1b5e20,color:#000,stroke-width:2px;
   classDef draft fill:#fff2cc,stroke:#b8860b,color:#000;
   classDef foundation fill:#cfe2ff,stroke:#1c4fb3,color:#000,stroke-width:3px;
   classDef cut fill:#e8f0e8,stroke:#555,color:#000;
 
   class merged mergedC;
-  class p1177,d1152,d1154,d1155,d1165,d1166,d1167 draft;
+  class p1177,d1165 ready;
+  class d1152,d1154,d1155,d1166,d1167 draft;
   class p1182 foundation;
   class depp,fftag,bilstm,inst,cjk,huns,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
 ```
@@ -72,8 +74,8 @@ flowchart LR
 
 | PR | JIRA | What it offers | Status | Notes |
 |---|---|---|---|---|
-| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Draft, reviewer-endorsed, spec points landed | The foundation every staged annotator below builds on |
-| [#1177](https://github.com/apache/opennlp/pull/1177) | OPENNLP-1870 | Offset-aware emoji annotations, including ISO region decoding of flag emoji | Open | |
+| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Ready for review; rebased clean onto current main 2026-07-21 | The foundation every staged annotator below builds on |
+| [#1177](https://github.com/apache/opennlp/pull/1177) | OPENNLP-1870 | Offset-aware emoji annotations, including ISO region decoding of flag emoji | Ready for review; first review round addressed, feature emission unified behind a single collector | |
 | [#1166](https://github.com/apache/opennlp/pull/1166) | OPENNLP-1886 | Sixteen UniNE light/minimal stemmer tiers | Draft; was stacked on #1163, now merged to main; rebase onto main to promote | Parity fixtures regenerated from the original implementations. Manual cites `LightStemmerUsageExampleTest` |
 | [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft | Manual: `wordnet.xml`, pinned by `WordNetUsageExampleTest` |
 | [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, stacked on #1155 | Manual expansion section cites `LexicalExpansionUsageExampleTest` |
