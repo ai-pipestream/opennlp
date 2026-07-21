@@ -28,8 +28,8 @@ flowchart LR
   main --> fftag["ff-postagger · neural tagger"]
   main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> inst["resource-installer"]
-  main --> cjk["lattice-cjk · CJK segmentation"]
-  main --> huns["hunspell"]
+  main --> cjk["OPENNLP-1894 · lattice-cjk · CJK segmentation"]
+  main --> huns["OPENNLP-1893 · hunspell"]
   d1154 --> prof["place-profiles"]
 
   %% ---- staged annotators over the document container ----
@@ -92,9 +92,9 @@ All staged branches are based on a recent apache main (each rebases fully before
 | `depparse` | Transition-based dependency parsing: classical perceptron tiers plus a feedforward neural tier with beam decoding | Staged | UD English EWT test, gold UPOS: 86.78 UAS / 84.61 LAS at beam 4; all-neural pipeline 84.30 / 80.79 at 452 tok/s with the vector-augmented tagger. The published Stanza end-to-end reference on the same treebank is 88.90 / 86.77, so this is not yet at parity; the tagger is the dominant gap. Manual: `dependency.xml`, pinned by `ConlluDependencyParserUsageTest` |
 | `ff-postagger` | Feedforward neural POS tagger on the same trainer recipe, with opt-in pretrained word-vector input features and a coverage lexicon | Staged | 94.68% on UD English EWT vs 93.75% for the best classical configuration in-tree; 95.51% with the opt-in vector block (potion-base-8M vectors plus a dictionary lexicon), defaults unchanged. Manual section cites `FeedforwardPOSTaggerUsageTest` |
 | `bilstm-tagger` | Bidirectional LSTM tagger tier: character BiLSTM word representations, learned plus frozen pretrained embeddings, optional stacked encoder, CRF decoding, and multi-task auxiliary training; every layer gradient-checked against finite differences | Experimental, accuracy gate pending | 96.00% on UD English EWT so far vs the 97.0% gate; active lever is pretrained-table fine-tuning. Manual section cites `BilstmPOSTaggerUsageTest` |
-| `lattice-cjk` | Viterbi lattice segmentation over MeCab-format dictionaries (Japanese IPADIC, Korean mecab-ko-dic) plus a Chinese unigram segmenter | Staged | About 5M chars/s on real IPADIC; 392k dictionary entries load in under a second; dictionaries are always user-supplied, never bundled. Tokenizer manual cites `LatticeUsageExampleTest` |
+| `lattice-cjk` | Viterbi lattice segmentation over MeCab-format dictionaries (Japanese IPADIC, Korean mecab-ko-dic) plus a Chinese unigram segmenter | Staged; JIRA filed: [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | About 5M chars/s on real IPADIC; 392k dictionary entries load in under a second; dictionaries are always user-supplied, never bundled. Tokenizer manual cites `LatticeUsageExampleTest` |
 | `resource-installer` | User-supplied-URL model and data installer, SHA-256 verified before unpacking | Staged | Enabled a UD lemmatizer run at 87.76% lemma accuracy on EWT with the stock `LemmatizerME`. Model-loading manual cites `ResourceInstallerTest#testInstallEndToEndUsageExample` |
-| `hunspell` | Hunspell `.dic`/`.aff` affix stemmer, regex-free, fail-closed on unsupported features | Staged; built on the OPENNLP-1883 stemmer seam now merged to main | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, and compound positioning (including German linking forms) are supported. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest` |
+| `hunspell` | Hunspell `.dic`/`.aff` affix stemmer, regex-free, fail-closed on unsupported features | Staged; JIRA filed: [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893); built on the OPENNLP-1883 stemmer seam now merged to main | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, and compound positioning (including German linking forms) are supported. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest` |
 | `place-profiles` | Metadata-grounded place similarity over user-supplied profiles | Staged, stacked on #1154 | `geo.xml` cites `PlaceProfilesUsageTest` |
 | `glossary` | Dictionary/glossary matching as a document layer | Staged, needs #1182 | `glossary.xml` cites `GlossaryUsageExampleTest` |
 | `pii` | PII detection and masking layers | Staged, needs #1182 | `pii.xml` cites `PiiUsageExampleTest` |
