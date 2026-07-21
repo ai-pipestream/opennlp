@@ -209,4 +209,33 @@ int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 			missing pipeline stage is an assembly error, not an empty document.
 		</para>
 	</section>
+
+	<section xml:id="tools.document.predicates">
+		<title>Predicate-driven annotators</title>
+		<para>
+			Two wrappers turn plain predicates into pipeline structure, so any expression
+			engine can compile into a pipeline guard without this toolkit depending on
+			one. <code>ConditionalAnnotator</code> runs its delegate only when a condition
+			over the document holds; when it does not, the delegate's provided layers are
+			still added, empty, so every downstream requirement stays satisfied exactly as
+			if the delegate had run and found nothing:
+			<programlisting language="java"><![CDATA[
+DocumentAnnotator guarded =
+    new ConditionalAnnotator(d -> d.text().length() >= 20, annotator);
+// a short document passes through with the layer present and empty]]>
+			</programlisting>
+			<code>FilterAnnotator</code> writes the annotations of one layer that pass a
+			predicate to a second layer, keeping the raw view intact; the target must
+			differ from the source, because a document rejects a duplicate layer:
+			<programlisting language="java"><![CDATA[
+LayerKey<Integer> LONG_ONES = LayerKey.of("token-lengths-long", Integer.class);
+
+DocumentAnnotator filter =
+    new FilterAnnotator<>(TOKEN_LENGTHS, LONG_ONES, a -> a.value() >= 5);
+// for the text above, LONG_ONES holds the values 6 and 5;
+// TOKEN_LENGTHS still holds all five]]>
+			</programlisting>
+			<code>PredicateManualExampleTest</code> asserts the behavior shown here.
+		</para>
+	</section>
 </chapter>
