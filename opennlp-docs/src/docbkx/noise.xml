@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.noise" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Noise Scoring</title>
+
+	<section xml:id="tools.noise.introduction">
+		<title>Introduction</title>
+		<para>
+			Between clean text and outright garbage sits a spectrum: words mangled by
+			optical recognition, stretches of keyboard mash, runs shaped like encoded
+			binary. The package <code>opennlp.tools.noise</code> scores such stretches on
+			the <code>opennlp:noise</code> layer in four severity tiers, mildest to worst:
+			<code>misspelled</code>, <code>damaged</code>, <code>gibberish</code>, and
+			<code>binaryish</code>. Each finding carries a score within its tier, so
+			consumers set their own thresholds, and a masking or filtering step downstream
+			decides what to do about each tier.
+		</para>
+		<para>
+			The built-in scorer uses structural signals only and ships no data. The
+			signals are calibrated so the most consonant-heavy legitimate English words
+			stay below every threshold, and they apply to ASCII-letter tokens only, so
+			text in other scripts is never flagged. Two tiers take evidence the caller
+			supplies: <code>misspelled</code> only fires with a dictionary, and in the
+			annotator's default mode spans the embedded-asset detector already explained
+			are excluded, so a payload is never reported twice.
+		</para>
+	</section>
+
+	<section xml:id="tools.noise.scoring">
+		<title>Scoring text</title>
+		<para>
+			The scorer takes the text and the spans to leave out. With a dictionary, a
+			token one known confusion repair away from a word is reported as misspelled,
+			the shape optical recognition damage takes; adjacent findings merge into one
+			span:
+			<programlisting language="java"><![CDATA[
+Set<String> words = Set.of("modern", "times");
+NoiseScorer scorer = new StructuralNoiseScorer(words::contains);
+
+String text = "rnodern tirnes and zxkcvbnmsdfg";
+for (NoiseSpan noise : scorer.score(text, List.of())) {
+    System.out.println(noise.severity() + " " + noise.span());
+}]]>
+			</programlisting>
+			This prints one line per finding; <code>rnodern tirnes</code> repairs to the
+			two dictionary words through the <code>rn</code> to <code>m</code> confusion
+			and merges into one span, and the mash carries two agreeing structural
+			signals:
+			<programlisting><![CDATA[
+misspelled [0..14)
+gibberish [19..31)]]>
+			</programlisting>
+			Without a dictionary the same call reports only the gibberish: the misspelled
+			tier demands evidence, not guesses.
+			<code>NoiseManualExampleTest</code> asserts the behavior shown here.
+		</para>
+	</section>
+
+	<section xml:id="tools.noise.pipeline">
+		<title>The noise layer and the asset hand-off</title>
+		<para>
+			<code>NoiseAnnotator</code> provides <code>opennlp:noise</code>. In its
+			default mode it requires <code>opennlp:assets</code> and excludes those spans
+			from scoring, so an embedded binary is explained once, by the asset layer, and
+			never again as noise. The standalone mode scores the whole text and requires
+			nothing:
+			<programlisting language="java"><![CDATA[
+Document document = new AssetAnnotator().annotate(Document.of(text));
+document = new NoiseAnnotator().annotate(document);
+
+List<Annotation<NoiseSpan>> noise = document.get(NoiseAnnotator.NOISE);]]>
+			</programlisting>
+			Because findings are spans on a layer, masking composes directly: replacing
+			the covered characters of every noise annotation with a fixed character
+			renders an unreadable stretch as, for example, a run of stars, with every
+			offset unchanged.
+		</para>
+	</section>
+</chapter>
