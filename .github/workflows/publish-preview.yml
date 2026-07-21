@@ -1,0 +1,61 @@
+name: publish-preview
+
+# Publishes the kristian-3.x-features research branch to the ai.pipestream snapshot
+# registry as ai.pipestream:opennlp-* snapshots. The reactor modules are renamed at
+# publish time (versions:set for the version, sed for the group; the branch itself
+# keeps org.apache.opennlp coordinates so regeneration stays clean). The version is
+# read from the provenance manifest, so a publish always matches what the regen built.
+# Runs on every push of the research branch; manual dispatch republishes the current tip.
+
+on:
+  push:
+    branches:
+      - kristian-3.x-features
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # The registry is on the private network: this runs only on the Forgejo instance's
+    # self-hosted runners, and skips cleanly on github.com.
+    if: ${{ github.server_url != 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: kristian-3.x-features
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: forgejo
+          server-username: FORGEJO_ACTOR
+          server-password: FORGEJO_TOKEN
+
+      - name: Read preview version from the provenance manifest
+        run: |
+          VERSION=$(awk '/^version:/{print $2}' PIPESTREAM-PROVENANCE.txt)
+          test -n "$VERSION"
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Publishing $VERSION"
+
+      - name: Rename the reactor to ai.pipestream
+        run: |
+          ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DprocessAllModules=true -DgenerateBackupPoms=false
+          grep -rl '<groupId>org.apache.opennlp</groupId>' --include=pom.xml . \
+            | xargs sed -i 's|<groupId>org.apache.opennlp</groupId>|<groupId>ai.pipestream</groupId>|g'
+          # The pre-trained model artifacts are external Apache releases, not reactor modules.
+          perl -0777 -pi -e 's|<groupId>ai\.pipestream</groupId>(\s*)<artifactId>(opennlp-models-)|<groupId>org.apache.opennlp</groupId>$1<artifactId>$2|g' \
+            opennlp-core/opennlp-model-resolver/pom.xml
+
+      - name: Deploy ai.pipestream:opennlp-* snapshots
+        env:
+          FORGEJO_ACTOR: ${{ github.actor }}
+          FORGEJO_TOKEN: ${{ secrets.CICD_TOKEN }}
+        run: >
+          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+          -DaltDeploymentRepository=forgejo::https://git.rokkon.com/api/packages/ai-pipestream/maven
