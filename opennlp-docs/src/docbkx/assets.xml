@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.assets" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Embedded Asset Detection</title>
+
+	<section xml:id="tools.assets.introduction">
+		<title>Introduction</title>
+		<para>
+			Text dumps carry binaries: web pages inline images as <code>data:</code> URIs,
+			documents paste base64 payloads, and hostile bodies smuggle encoded content.
+			The package <code>opennlp.tools.assets</code> finds such assets as exact spans
+			over the original text, identifies their format, and can replace them with text
+			while keeping every offset mapped to the source.
+		</para>
+		<para>
+			Identification needs no decoding pass: when a payload starts at a file's first
+			byte, the file magic has a fixed base64 image, so detection is literal matching
+			inside base64 runs. A PNG payload always starts <code>iVBORw0KGgo</code>, a
+			JPEG <code>/9j/</code>, a GIF <code>R0lGOD</code>, a RIFF container
+			<code>UklGR</code>, a PDF <code>JVBERi0</code>, and a zip archive
+			<code>UEsDB</code>. The built-in table ranges across image, document, archive,
+			audio, video, font, database, certificate, and executable formats, PNG to
+			Parquet to PEM-armored keys; the magic values are derived from the leading
+			bytes each format's specification publishes and from the mime-type catalog
+			of Apache Tika. Only a magic anchored at the first byte can be scanned for
+			this way, so a container whose signature sits at a later offset, such as the
+			ISO base media format of MP4, is out of scope for bare runs. Signatures that
+			classify loose prose rather than a file, such as mail header lines or
+			source-code conventions, are deliberately absent. A bare run is only
+			reported when it is long enough to be a real payload, carries such a prefix,
+			and its decoded leading bytes verify the magic; a <code>data:</code> URI
+			declares its media type and is reported at any payload length. Decoding the
+			leading bytes also yields image dimensions where the format's header carries
+			them.
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.detection">
+		<title>Detecting and decoding</title>
+		<para>
+			The example below embeds a minimal 5x7 PNG as a data URI:
+			<programlisting language="java"><![CDATA[
+String text = "An image data:image/png;base64,"
+    + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
+    + " follows.";
+
+AssetDetector detector = new CursorAssetDetector();
+EmbeddedAsset asset = detector.detect(text).get(0);
+// asset.format()        = "png"
+// asset.mediaType()     = "image/png"
+// asset.width()         = 5
+// asset.height()        = 7
+// asset.decodedLength() = 45
+byte[] bytes = asset.decode(text);  // the original 45 bytes]]>
+			</programlisting>
+			The asset's span covers the whole URI; its payload span covers just the
+			base64 characters, and <code>decode</code> reads them straight from the
+			original text.
+			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.fold">
+		<title>Folding assets into text</title>
+		<para>
+			<code>AssetAnnotator</code> provides the <code>opennlp:assets</code> layer, and
+			<code>AssetFolder</code> replaces every asset with text. The result is an
+			<code>AlignedText</code>: spans over the folded text map back to exact original
+			offsets, so downstream findings over the cleaned text still locate in the raw
+			input. The default replacement renders a caption from the asset's own
+			metadata:
+			<programlisting language="java"><![CDATA[
+Document document = new AssetAnnotator().annotate(Document.of(text));
+AlignedText folded = AssetFolder.fold(document, AssetFolder.caption());
+// folded.normalizedString() = "An image [png 5x7, 45 bytes] follows."]]>
+			</programlisting>
+			Mapping the caption back recovers the asset's exact span in the original:
+			<code>folded.toOriginalSpan(9, 28)</code>, the caption's offsets in the folded
+			text, returns the span of the whole data URI.
+		</para>
+		<para>
+			What replaces an asset is the caller's choice through the replacement
+			function. A <code>BinaryContentDescriber</code>, the seam for external binary
+			understanding such as document text extraction or image description, composes
+			in directly:
+			<programlisting language="java"><![CDATA[
+BinaryContentDescriber describer = ...;  // supplied by the caller
+
+AlignedText described = AssetFolder.fold(document, annotation ->
+    describer.describe(annotation.value().decode(text),
+        annotation.value().mediaType()));]]>
+			</programlisting>
+			The interface takes bytes and a media type and returns text. Implementations
+			are constructor-injected, so integrating one adds no dependency to this
+			toolkit; any dependency injection container can register an implementation as
+			a bean unchanged.
+		</para>
+	</section>
+</chapter>
