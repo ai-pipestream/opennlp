@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.artifacts" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Text Artifact Detection</title>
+
+	<section xml:id="tools.artifacts.introduction">
+		<title>Introduction</title>
+		<para>
+			Real-world text carries damage: characters a broken decode left behind, control
+			bytes from binary spillage, invisible characters hiding or reordering content,
+			and words mangled by reading UTF-8 bytes through a legacy single-byte decoding.
+			The package <code>opennlp.tools.artifacts</code> classifies such stretches as
+			spans over the original, unmodified text. Detection never rewrites anything: a
+			finding states where the problem is and what kind it is, and the caller decides
+			whether to mask, drop, or repair, with the original offsets intact.
+		</para>
+		<para>
+			The built-in detector reports these types, each a constant on
+			<code>TextArtifact</code>: <code>replacement</code> (U+FFFD runs),
+			<code>control</code> (control characters that are not whitespace),
+			<code>noncharacter</code>, <code>unpaired-surrogate</code>,
+			<code>private-use</code>, <code>bidi-control</code> (explicit directional
+			overrides and isolates), <code>zero-width</code> (zero-width characters outside
+			their orthographic uses; joiners in emoji sequences and single occurrences
+			between letters are kept), and <code>mojibake</code> (a stretch whose
+			single-byte image is valid multi-byte UTF-8, the signature of a double decode).
+		</para>
+	</section>
+
+	<section xml:id="tools.artifacts.detection">
+		<title>Detecting artifacts</title>
+		<para>
+			The detector works on any character sequence. In the text below, the word
+			<code>cafÃ©</code> is the UTF-8 form of a word read through a
+			single-byte decoding, and <code>�</code> is a replacement character left
+			by a failed decode:
+			<programlisting language="java"><![CDATA[
+ArtifactDetector detector = new CursorArtifactDetector();
+String text = "cafÃ© costs �8";
+
+for (TextArtifact artifact : detector.detect(text)) {
+    System.out.println(artifact.type() + " " + artifact.span());
+}]]>
+			</programlisting>
+			This prints one line per finding, with exact offsets into the original text:
+			<programlisting><![CDATA[
+mojibake [3..5)
+replacement [12..13)]]>
+			</programlisting>
+			Ordinary accented words are not mojibake: their single-byte images are not
+			valid UTF-8 sequences, so a text like <code>déjà vu</code> yields no
+			finding at all.
+			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
+		</para>
+	</section>
+
+	<section xml:id="tools.artifacts.pipeline">
+		<title>The artifacts layer</title>
+		<para>
+			<code>ArtifactAnnotator</code> adapts the detector to the document pipeline. It
+			requires no other layer and provides <code>opennlp:artifacts</code>, one
+			annotation per finding carrying its <code>TextArtifact</code>:
+			<programlisting language="java"><![CDATA[
+Document document = new ArtifactAnnotator()
+    .annotate(Document.of("cafÃ© costs �8"));
+
+List<Annotation<TextArtifact>> artifacts = document.get(ArtifactAnnotator.ARTIFACTS);
+// two annotations; the first covers "Ã©" and carries type "mojibake"]]>
+			</programlisting>
+			Because findings are exact spans on a layer, any layer consumer composes with
+			them: masking replaces the covered characters, filtering drops annotations by
+			type, and a cleanup step can rewrite the flagged stretches while recording its
+			edits.
+		</para>
+	</section>
+</chapter>
