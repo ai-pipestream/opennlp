@@ -209,9 +209,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     while (i < text.length()) {
       final int first = Character.codePointAt(text, i);
       final int width = Character.charCount(first);
-      if (EmojiFlags.isRegionalIndicator(first) && i + width < text.length()) {
+      if (isRegionalIndicator(first) && i + width < text.length()) {
         final int second = Character.codePointAt(text, i + width);
-        if (EmojiFlags.isRegionalIndicator(second)) {
+        if (isRegionalIndicator(second)) {
           final int end = i + width + Character.charCount(second);
           final String code = EmojiFlags.isoRegion(text.subSequence(i, end)).orElse(null);
           if (code != null && ISO_COUNTRIES.contains(code)) {
@@ -223,6 +223,14 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       }
       i += width;
     }
+  }
+
+  /**
+   * {@return whether {@code codePoint} is a REGIONAL INDICATOR SYMBOL LETTER (A..Z)} The pair
+   * segmentation above needs the raw block check, which {@link EmojiFlags} does not expose.
+   */
+  private static boolean isRegionalIndicator(int codePoint) {
+    return codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF;
   }
 
   /**
