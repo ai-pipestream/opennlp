@@ -116,6 +116,8 @@ under the License.
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./noise.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./pii.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./document.xml" />
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./document.xml" />
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./relation.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./spellcheck.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./chunker.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./parser.xml" />
