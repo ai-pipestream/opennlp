@@ -340,6 +340,49 @@ Arrays.stream(tags).forEach(k -> System.out.print(k + " "));]]>
 		</para>
 		</section>
 		</section>
+
+		<section xml:id="tools.postagger.feedforward">
+		<title>Feedforward POS Tagger</title>
+		<para>
+			The feedforward tagger is a small neural network over word and character features.
+			Train a <code>FeedforwardPOSModel</code> with <code>FeedforwardPOSTrainer</code>,
+			wrap it in a <code>FeedforwardPOSTagger</code>, and call <code>tag</code>. The seed
+			and dropout settings control reproducibility.
+			<code>FeedforwardPOSTaggerUsageTest</code> asserts the train-then-tag workflow
+			shown here.
+			<programlisting language="java">
+<![CDATA[FeedforwardPOSTrainer.Settings settings = new FeedforwardPOSTrainer.Settings(
+    16, 32, 80, 32, 0.05, 0.0, 0.0, 1, 1, 17L);
+
+FeedforwardPOSModel model = FeedforwardPOSTrainer.train(sampleStream, settings);
+FeedforwardPOSTagger tagger = new FeedforwardPOSTagger(model);
+
+String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
+			</programlisting>
+		</para>
+		</section>
+
+		<section xml:id="tools.postagger.bilstm">
+		<title>BiLSTM POS Tagger</title>
+		<para>
+			The BiLSTM tagger scores each token from whole-sentence context through a
+			character-level BiLSTM, a word-level BiLSTM sentence encoder, and a linear tag
+			scorer. Train a <code>BilstmPOSModel</code> with <code>BilstmPOSTrainer</code>,
+			wrap it in a <code>BilstmPOSTagger</code>, and call <code>tag</code>.
+			<code>BilstmPOSTaggerUsageTest</code> asserts the train-then-tag workflow shown
+			here.
+			<programlisting language="java">
+<![CDATA[BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
+    16, 8, 8, 16, 60, 8, 0.05, 5.0, 0.0, 1, 16, 17L, 1, 0.0, 0, false, 1,
+    0.0, 0.0, 1.0, 0.0, false);
+
+BilstmPOSModel model = BilstmPOSTrainer.train(sampleStream, settings);
+BilstmPOSTagger tagger = new BilstmPOSTagger(model);
+
+String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
+			</programlisting>
+		</para>
+		</section>
 		
 		<section xml:id="tools.postagger.eval">
 		<title>Evaluation</title>
