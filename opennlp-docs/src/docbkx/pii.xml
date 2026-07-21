@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.pii" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>PII Detection</title>
+
+	<section xml:id="tools.pii.introduction">
+		<title>Introduction</title>
+		<para>
+			The package <code>opennlp.tools.pii</code> finds personally identifiable
+			mentions as exact spans over the original text. A
+			<code>PiiAnnotator</code> writes the <code>opennlp:pii</code> layer from a
+			<code>PiiExtractor</code>; the built-in <code>CursorPiiExtractor</code>
+			recognizes email addresses, phone numbers, and payment card numbers, each
+			with a type constant and a normalized form.
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.pipeline">
+		<title>Annotating and masking</title>
+		<para>
+			Annotate a document, read the layer, then produce a redacted copy in which
+			only detected spans are replaced. Length is preserved: every character
+			inside a mention becomes the mask character, and everything outside stays
+			unchanged. <code>PiiUsageExampleTest</code> asserts the behavior shown
+			here.
+			<programlisting language="java"><![CDATA[
+String text =
+    "Contact jane@example.com, call (555) 123-4567, or charge card 4111 1111 1111 1111.";
+
+Document document = new PiiAnnotator(new CursorPiiExtractor())
+    .annotate(Document.of(text));
+
+List<Annotation<PiiMention>> mentions = document.get(PiiAnnotator.PII);
+// email, phone, card: exact spans, types, and normalized forms
+
+String masked = Masker.mask(document, PiiAnnotator.PII, '*');
+// "Contact ****************, call **************, or charge card *******************."]]>
+			</programlisting>
+		</para>
+	</section>
+</chapter>
