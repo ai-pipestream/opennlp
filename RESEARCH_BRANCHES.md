@@ -28,8 +28,8 @@ flowchart LR
   main --> fftag["ff-postagger · neural tagger"]
   main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> inst["resource-installer"]
-  main --> cjk["OPENNLP-1894 · lattice-cjk · CJK segmentation"]
-  main --> huns["OPENNLP-1893 · hunspell"]
+  main --> cjk["#1191 · OPENNLP-1894 · CJK lattice tokenization"]
+  main --> huns["#1190 · OPENNLP-1893 · hunspell stemmer"]
   d1154 --> prof["place-profiles"]
 
   %% ---- staged annotators over the document container ----
@@ -65,9 +65,9 @@ flowchart LR
 
   class merged mergedC;
   class p1177,d1165 ready;
-  class d1152,d1154,d1155,d1166,d1167 draft;
+  class d1152,d1154,d1155,d1166,d1167,huns,cjk draft;
   class p1182 foundation;
-  class depp,fftag,bilstm,inst,cjk,huns,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
+  class depp,fftag,bilstm,inst,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
 ```
 
 ## Open pull requests against apache/opennlp
@@ -82,6 +82,8 @@ flowchart LR
 | [#1165](https://github.com/apache/opennlp/pull/1165) | OPENNLP-1885 | Pure-Java SentencePiece inference with exact original-text spans, plus a WordPiece encoder | Ready for review | 6.47M pieces/s single-thread on the T5-small vocabulary, 1.42x the C++ reference measured through its Python binding. Tokenizer manual cites `SentencePieceUsageExampleTest` |
 | [#1152](https://github.com/apache/opennlp/pull/1152) | OPENNLP-1877 | Static text embeddings, pure JVM | Draft, stacked on #1165 | 12.9x single-thread and about 7x peak throughput of the Python reference at 0.22x the memory (potion-base-8M, output parity asserted first). Manual cites `StaticEmbeddingUsageExampleTest` |
 | [#1154](https://github.com/apache/opennlp/pull/1154) | OPENNLP-1879 | Gazetteer and geocoder seam, bundled Natural Earth table, GeoNames and Overture loaders, place hierarchy, user-supplied overlay (additions, suppressions, bounding boxes) | Draft | Bring-your-own-gazetteer reference in test sources. Geocoder section cites `GeocoderUsageExampleTest` |
+| [#1190](https://github.com/apache/opennlp/pull/1190) | [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893) | Hunspell `.dic`/`.aff` affix stemmer over user-supplied dictionaries, regex-free, fail-closed | Draft, opened 2026-07-21 | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, compound positioning incl. German linking forms. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest` |
+| [#1191](https://github.com/apache/opennlp/pull/1191) | [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | Viterbi lattice tokenization over user-supplied MeCab-format dictionaries (Japanese, Korean) plus a Chinese unigram segmenter | Draft, opened 2026-07-21 | About 5M chars/s on real IPADIC; 392k entries load in under a second; segmentation matches the reference implementation on the cost-sensitive test sentences. Manual pinned by `LatticeUsageExampleTest` |
 
 ## Staged feature branches (this fork only, not yet proposed upstream)
 
@@ -92,9 +94,7 @@ All staged branches are based on a recent apache main (each rebases fully before
 | `depparse` | Transition-based dependency parsing: classical perceptron tiers plus a feedforward neural tier with beam decoding | Staged | UD English EWT test, gold UPOS: 86.78 UAS / 84.61 LAS at beam 4; all-neural pipeline 84.30 / 80.79 at 452 tok/s with the vector-augmented tagger. The published Stanza end-to-end reference on the same treebank is 88.90 / 86.77, so this is not yet at parity; the tagger is the dominant gap. Manual: `dependency.xml`, pinned by `ConlluDependencyParserUsageTest` |
 | `ff-postagger` | Feedforward neural POS tagger on the same trainer recipe, with opt-in pretrained word-vector input features and a coverage lexicon | Staged | 94.68% on UD English EWT vs 93.75% for the best classical configuration in-tree; 95.51% with the opt-in vector block (potion-base-8M vectors plus a dictionary lexicon), defaults unchanged. Manual section cites `FeedforwardPOSTaggerUsageTest` |
 | `bilstm-tagger` | Bidirectional LSTM tagger tier: character BiLSTM word representations, learned plus frozen pretrained embeddings, optional stacked encoder, CRF decoding, and multi-task auxiliary training; every layer gradient-checked against finite differences | Experimental, accuracy gate pending | 96.00% on UD English EWT so far vs the 97.0% gate; active lever is pretrained-table fine-tuning. Manual section cites `BilstmPOSTaggerUsageTest` |
-| `lattice-cjk` | Viterbi lattice segmentation over MeCab-format dictionaries (Japanese IPADIC, Korean mecab-ko-dic) plus a Chinese unigram segmenter | Staged; JIRA filed: [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | About 5M chars/s on real IPADIC; 392k dictionary entries load in under a second; dictionaries are always user-supplied, never bundled. Tokenizer manual cites `LatticeUsageExampleTest` |
 | `resource-installer` | User-supplied-URL model and data installer, SHA-256 verified before unpacking | Staged | Enabled a UD lemmatizer run at 87.76% lemma accuracy on EWT with the stock `LemmatizerME`. Model-loading manual cites `ResourceInstallerTest#testInstallEndToEndUsageExample` |
-| `hunspell` | Hunspell `.dic`/`.aff` affix stemmer, regex-free, fail-closed on unsupported features | Staged; JIRA filed: [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893); built on the OPENNLP-1883 stemmer seam now merged to main | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, and compound positioning (including German linking forms) are supported. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest` |
 | `place-profiles` | Metadata-grounded place similarity over user-supplied profiles | Staged, stacked on #1154 | `geo.xml` cites `PlaceProfilesUsageTest` |
 | `glossary` | Dictionary/glossary matching as a document layer | Staged, needs #1182 | `glossary.xml` cites `GlossaryUsageExampleTest` |
 | `pii` | PII detection and masking layers | Staged, needs #1182 | `pii.xml` cites `PiiUsageExampleTest` |
