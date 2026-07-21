@@ -1,0 +1,283 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package opennlp.tools.glossary;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import opennlp.tools.util.Span;
+
+/**
+ * A deterministic {@link GlossaryMatcher} backed by an Aho-Corasick automaton: one
+ * forward pass over the text finds every registered term regardless of how many terms
+ * the glossary holds.
+ *
+ * <p>Terms match literally, character for character, so a multiword term matches only
+ * with the exact separator characters it was registered with. Hits are constrained to
+ * word boundaries: a hit whose edge character is a letter or digit is dropped when the
+ * neighboring text character is also a letter or digit, so {@code cat} never matches
+ * inside {@code concatenate}. Overlapping hits are resolved leftmost first, then longest,
+ * then by registration order, and the reported hits never overlap.</p>
+ *
+ * <p>When the matcher ignores case, terms and text are compared through the
+ * per-code-point UnicodeData lowercase mapping, the same mapping
+ * {@link opennlp.tools.util.StringUtil#toLowerCase(CharSequence)} applies, which keeps
+ * spans exact but does not apply locale or multi-character case folding. Word
+ * boundaries and case comparison both work in code points, so supplementary letters
+ * neighbor and fold like any others.</p>
+ *
+ * <p>The automaton is built once in the constructor; matching holds no per-call state
+ * and is safe to share between threads.</p>
+ *
+ * @since 3.0.0
+ */
+public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
+
+  /** The index of the automaton's root state, from which every scan starts. */
+  private static final int ROOT = 0;
+
+  /** The registered entries in registration order; raw hits index into this list. */
+  private final List<GlossaryEntry> entries;
+
+  /** The term length of each entry, aligned with {@link #entries} by index. */
+  private final int[] termLengths;
+
+  /** Whether terms and text are compared through per-code-point lowercasing. */
+  private final boolean ignoreCase;
+
+  /**
+   * The goto function, frozen per state into a sorted code point array with a parallel
+   * target array, so a step on the per-character scan path is one binary search and
+   * never boxes the code point the way a map keyed by {@link Character} would.
+   */
+  private final int[][] edgeCodePoints;
+
+  /** The goto targets, aligned with {@link #edgeCodePoints} per state. */
+  private final int[][] edgeTargets;
+
+  /** The failure function: per state, the state to fall back to on a code point miss. */
+  private final int[] fail;
+
+  /** Per state, the indexes into {@link #entries} of the terms that end at that state. */
+  private final int[][] outputs;
+
+  /**
+   * Builds the automaton for a glossary.
+   *
+   * @param glossary The entries to match. Must not be {@code null} or empty, and no
+   *                 entry may be {@code null}. When two entries share the same term, the
+   *                 one registered first wins.
+   * @param ignoreCase Whether to match terms regardless of character case.
+   * @throws IllegalArgumentException Thrown if {@code glossary} is {@code null}, empty,
+   *         or contains {@code null}.
+   */
+  public AhoCorasickGlossaryMatcher(Collection<GlossaryEntry> glossary, boolean ignoreCase) {
+    if (glossary == null || glossary.isEmpty()) {
+      throw new IllegalArgumentException("glossary must not be null or empty");
+    }
+    for (final GlossaryEntry entry : glossary) {
+      if (entry == null) {
+        throw new IllegalArgumentException("glossary must not contain null entries");
+      }
+    }
+    this.entries = List.copyOf(glossary);
+    this.ignoreCase = ignoreCase;
+    this.termLengths = new int[entries.size()];
+
+    final List<Map<Integer, Integer>> transitions = new ArrayList<>();
+    final List<List<Integer>> nodeOutputs = new ArrayList<>();
+    transitions.add(new HashMap<>());
+    nodeOutputs.add(new ArrayList<>());
+
+    for (int pattern = 0; pattern < entries.size(); pattern++) {
+      final String term = entries.get(pattern).term();
+      termLengths[pattern] = term.length();
+      int state = ROOT;
+      for (int i = 0; i < term.length(); ) {
+        final int c = normalize(term.codePointAt(i));
+        i += Character.charCount(term.codePointAt(i));
+        Integer next = transitions.get(state).get(c);
+        if (next == null) {
+          next = transitions.size();
+          transitions.add(new HashMap<>());
+          nodeOutputs.add(new ArrayList<>());
+          transitions.get(state).put(c, next);
+        }
+        state = next;
+      }
+      nodeOutputs.get(state).add(pattern);
+    }
+
+    this.edgeCodePoints = new int[transitions.size()][];
+    this.edgeTargets = new int[transitions.size()][];
+    for (int state = 0; state < transitions.size(); state++) {
+      final Map<Integer, Integer> edges = transitions.get(state);
+      final int[] codePoints = new int[edges.size()];
+      int e = 0;
+      for (final int codePoint : edges.keySet()) {
+        codePoints[e++] = codePoint;
+      }
+      Arrays.sort(codePoints);
+      final int[] targets = new int[codePoints.length];
+      for (int k = 0; k < codePoints.length; k++) {
+        targets[k] = edges.get(codePoints[k]);
+      }
+      edgeCodePoints[state] = codePoints;
+      edgeTargets[state] = targets;
+    }
+
+    this.fail = new int[transitions.size()];
+    final Deque<Integer> queue = new ArrayDeque<>();
+    for (final int child : edgeTargets[ROOT]) {
+      fail[child] = ROOT;
+      queue.add(child);
+    }
+    while (!queue.isEmpty()) {
+      final int state = queue.remove();
+      nodeOutputs.get(state).addAll(nodeOutputs.get(fail[state]));
+      for (int e = 0; e < edgeCodePoints[state].length; e++) {
+        final int child = edgeTargets[state][e];
+        fail[child] = step(fail[state], edgeCodePoints[state][e]);
+        queue.add(child);
+      }
+    }
+
+    this.outputs = new int[transitions.size()][];
+    for (int state = 0; state < transitions.size(); state++) {
+      final List<Integer> patterns = nodeOutputs.get(state);
+      outputs[state] = new int[patterns.size()];
+      for (int i = 0; i < patterns.size(); i++) {
+        outputs[state][i] = patterns.get(i);
+      }
+    }
+  }
+
+  @Override
+  public List<GlossaryMatch> match(CharSequence text) {
+    if (text == null) {
+      throw new IllegalArgumentException("text must not be null");
+    }
+    final List<int[]> hits = new ArrayList<>();
+    int state = ROOT;
+    for (int i = 0; i < text.length(); ) {
+      final int codePoint = Character.codePointAt(text, i);
+      i += Character.charCount(codePoint);
+      state = step(state, normalize(codePoint));
+      for (final int pattern : outputs[state]) {
+        final int start = i - termLengths[pattern];
+        if (onWordBoundary(text, start, i)) {
+          hits.add(new int[] {start, i, pattern});
+        }
+      }
+    }
+    return resolveOverlaps(hits);
+  }
+
+  /**
+   * Advances the automaton by one code point, following failure links on a miss.
+   *
+   * @param state The current state.
+   * @param codePoint The normalized input code point.
+   * @return The next state.
+   */
+  private int step(int state, int codePoint) {
+    int next = target(state, codePoint);
+    while (next < 0 && state != ROOT) {
+      state = fail[state];
+      next = target(state, codePoint);
+    }
+    return next < 0 ? ROOT : next;
+  }
+
+  /**
+   * Looks up one goto edge.
+   *
+   * @param state The state to leave.
+   * @param codePoint The normalized code point to follow.
+   * @return The target state, or {@code -1} when the state has no such edge.
+   */
+  private int target(int state, int codePoint) {
+    final int index = Arrays.binarySearch(edgeCodePoints[state], codePoint);
+    return index >= 0 ? edgeTargets[state][index] : -1;
+  }
+
+  /**
+   * Normalizes one code point for comparison, with the per-code-point UnicodeData
+   * lowercase mapping the project's case seam defines.
+   *
+   * @param codePoint The code point.
+   * @return The lowercased code point when case is ignored, otherwise the code point.
+   */
+  private int normalize(int codePoint) {
+    return ignoreCase ? Character.toLowerCase(codePoint) : codePoint;
+  }
+
+  /**
+   * Checks that a candidate hit does not continue a word on either side. Neighbors are
+   * read as whole code points, so a supplementary letter or digit next to a hit blocks
+   * it exactly like a basic-plane one.
+   *
+   * @param text The text being scanned.
+   * @param start The hit start, inclusive.
+   * @param end The hit end, exclusive.
+   * @return {@code true} if the hit sits on word boundaries.
+   */
+  private static boolean onWordBoundary(CharSequence text, int start, int end) {
+    if (start > 0 && Character.isLetterOrDigit(Character.codePointAt(text, start))
+        && Character.isLetterOrDigit(Character.codePointBefore(text, start))) {
+      return false;
+    }
+    return end >= text.length()
+        || !Character.isLetterOrDigit(Character.codePointBefore(text, end))
+        || !Character.isLetterOrDigit(Character.codePointAt(text, end));
+  }
+
+  /**
+   * Resolves overlapping hits leftmost first, then longest, then by registration order.
+   *
+   * @param hits The raw hits as {@code {start, end, pattern}} triples.
+   * @return The surviving hits in text order. Never {@code null}.
+   */
+  private List<GlossaryMatch> resolveOverlaps(List<int[]> hits) {
+    hits.sort((a, b) -> {
+      if (a[0] != b[0]) {
+        return Integer.compare(a[0], b[0]);
+      }
+      if (a[1] != b[1]) {
+        return Integer.compare(b[1], a[1]);
+      }
+      return Integer.compare(a[2], b[2]);
+    });
+    final List<GlossaryMatch> matches = new ArrayList<>();
+    int lastEnd = 0;
+    for (final int[] hit : hits) {
+      if (hit[0] >= lastEnd) {
+        final GlossaryEntry entry = entries.get(hit[2]);
+        matches.add(new GlossaryMatch(new Span(hit[0], hit[1]), entry.id(), entry.term()));
+        lastEnd = hit[1];
+      }
+    }
+    return matches;
+  }
+}
