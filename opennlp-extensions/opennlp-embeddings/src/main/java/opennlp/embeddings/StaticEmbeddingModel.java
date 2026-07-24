@@ -54,12 +54,14 @@ import opennlp.tools.tokenize.WordpieceTokenizer;
  * count of pooled pieces, not the sum of weights. A text with no in-vocabulary pieces yields a
  * zero vector.</p>
  *
- * <p>Either layout may carry its matrix quantized: a directory holding a {@code model.quantized}
- * file (written by the {@code QuantizeModel} tool from the directory's safetensors) is loaded
- * from that file instead of the safetensors, including any per-token pooling weights it carries,
- * and the safetensors is then not required and not read. Embedding and similarity behave
- * identically up to the quantization error of the chosen bit width; the memory saving is the
- * point (see {@link QuantizedEmbeddingMatrix}).</p>
+ * <p>Either layout may carry its matrix quantized in a {@code model.quantized} file (written by
+ * the {@code QuantizeModel} tool), which holds the matrix and any per-token pooling weights
+ * itself. A directory presents exactly one matrix file: the quantized file or the safetensors,
+ * not both. A directory carrying both is rejected, because the quantizer writes the quantized
+ * file next to the safetensors it read and so a directory holding both has not declared which
+ * is authoritative; delete one to choose. Embedding and similarity over a quantized matrix
+ * behave identically up to the quantization error of the chosen bit width; see
+ * {@link QuantizedEmbeddingMatrix} for the storage and its cost.</p>
  *
  * <p>Instances are immutable and safe for concurrent use after construction.</p>
  */
@@ -87,7 +89,8 @@ public final class StaticEmbeddingModel implements TextEmbedder {
   }
 
   private static final float NORMALIZE_EPSILON = 1e-12f;
-  private static final String WEIGHTS_TENSOR_NAME = "weights";
+  // Shared with ModelQuantizer, which carries this tensor into the quantized file.
+  static final String WEIGHTS_TENSOR_NAME = "weights";
   private static final int[] NO_EXCLUDED_ROWS = new int[0];
   // Excluded from neighbor results, including [PAD] and [MASK] that a distilled table keeps.
   private static final Set<String> WORDPIECE_SPECIAL_TOKENS =
@@ -167,11 +170,10 @@ public final class StaticEmbeddingModel implements TextEmbedder {
    * is a SentencePiece model; the {@code .model} file carries its own text normalizer, so there
    * is no casing switch to read.</p>
    *
-   * <p>In either layout, a {@code model.quantized} file wins over a {@code model.safetensors}:
-   * the quantized file is the deliberately produced deployment artifact, so when both are
-   * present the matrix (and any pooling weights) come from it and the safetensors is not read.
-   * Re-run the {@code QuantizeModel} tool after replacing the safetensors, or delete the
-   * quantized file to fall back.</p>
+   * <p>In either layout, the matrix comes from a {@code model.quantized} file when the directory
+   * has one and no {@code model.safetensors}; a directory holding both is rejected (see the
+   * class comment). After quantizing, delete the safetensors to deploy the quantized matrix, or
+   * delete the quantized file to fall back to the float matrix.</p>
    *
    * @param modelDirectory The model directory. Must not be {@code null} and must be a
    *                       directory.
@@ -200,8 +202,8 @@ public final class StaticEmbeddingModel implements TextEmbedder {
     if (sentencePieceModelFile != null && Files.isRegularFile(tokenizerJsonFile)) {
       final Normalization normalization =
           requiredNormalize(requiredFile(modelDirectory, ModelFileNames.CONFIG));
-      final Path quantizedFile = modelDirectory.resolve(ModelFileNames.QUANTIZED);
-      if (Files.isRegularFile(quantizedFile)) {
+      final Path quantizedFile = quantizedMatrixFileOrNull(modelDirectory);
+      if (quantizedFile != null) {
         return loadSentencePieceQuantized(sentencePieceModelFile, tokenizerJsonFile,
             quantizedFile, normalization);
       }
@@ -253,8 +255,8 @@ public final class StaticEmbeddingModel implements TextEmbedder {
           + "deliberately");
     }
     final Casing casing = lowerCase ? Casing.UNCASED : Casing.CASED;
-    final Path quantizedFile = modelDirectory.resolve(ModelFileNames.QUANTIZED);
-    if (Files.isRegularFile(quantizedFile)) {
+    final Path quantizedFile = quantizedMatrixFileOrNull(modelDirectory);
+    if (quantizedFile != null) {
       final EmbeddingVocabulary vocabulary = EmbeddingVocabulary.fromVocabTxt(vocabularyFile);
       return createWordpiece(vocabulary,
           readQuantizedTable(quantizedFile, vocabulary, vocabularyFile.toString()),
@@ -262,6 +264,31 @@ public final class StaticEmbeddingModel implements TextEmbedder {
     }
     return load(vocabularyFile, requiredFile(modelDirectory, ModelFileNames.SAFETENSORS),
         casing, normalization);
+  }
+
+  /**
+   * Resolves which matrix file a model directory presents, failing loud when the choice is
+   * ambiguous. The quantizer writes {@code model.quantized} next to the {@code model.safetensors}
+   * it read, so a directory holding both has not declared which is authoritative; deleting one
+   * makes the deployment's choice explicit rather than letting the loader guess.
+   *
+   * @param modelDirectory The model directory.
+   * @return the {@code model.quantized} file when it is the directory's only matrix file, or
+   *     {@code null} when the directory presents only a {@code model.safetensors}.
+   * @throws IllegalArgumentException Thrown if the directory holds both matrix files.
+   */
+  private static Path quantizedMatrixFileOrNull(Path modelDirectory) {
+    final Path quantizedFile = modelDirectory.resolve(ModelFileNames.QUANTIZED);
+    if (!Files.isRegularFile(quantizedFile)) {
+      return null;
+    }
+    if (Files.isRegularFile(modelDirectory.resolve(ModelFileNames.SAFETENSORS))) {
+      throw new IllegalArgumentException("Model directory " + modelDirectory + " has both "
+          + ModelFileNames.QUANTIZED + " and " + ModelFileNames.SAFETENSORS + "; delete one so "
+          + "the matrix source is unambiguous (keep " + ModelFileNames.QUANTIZED + " for a "
+          + "quantized deployment, or " + ModelFileNames.SAFETENSORS + " for the float matrix)");
+    }
+    return quantizedFile;
   }
 
   /**
