@@ -59,3 +59,48 @@ jobs:
         run: >
           ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
           -DaltDeploymentRepository=forgejo::https://git.rokkon.com/api/packages/ai-pipestream/maven
+
+  publish-central:
+    # The github.com twin: same rename-and-deploy, targeting Central Snapshots so
+    # downstream consumers (distributed-search, the BM25 grpc service) can resolve
+    # ai.pipestream:opennlp-* without a private registry. Mirrors the lucene fork's
+    # publish-central job (ai.pipestream:lucene-*), secrets included.
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: kristian-3.x-features
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+
+      - name: Read preview version from the provenance manifest
+        run: |
+          VERSION=$(awk '/^version:/{print $2}' PIPESTREAM-PROVENANCE.txt)
+          test -n "$VERSION"
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Publishing $VERSION"
+
+      - name: Rename the reactor to ai.pipestream
+        run: |
+          ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DprocessAllModules=true -DgenerateBackupPoms=false
+          grep -rl '<groupId>org.apache.opennlp</groupId>' --include=pom.xml . \
+            | xargs sed -i 's|<groupId>org.apache.opennlp</groupId>|<groupId>ai.pipestream</groupId>|g'
+          # The pre-trained model artifacts are external Apache releases, not reactor modules.
+          perl -0777 -pi -e 's|<groupId>ai\.pipestream</groupId>(\s*)<artifactId>(opennlp-models-)|<groupId>org.apache.opennlp</groupId>$1<artifactId>$2|g' \
+            opennlp-core/opennlp-model-resolver/pom.xml
+
+      - name: Deploy ai.pipestream:opennlp-* snapshots to Central Snapshots
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: >
+          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+          -DaltDeploymentRepository=central::https://central.sonatype.com/repository/maven-snapshots/
