@@ -39,11 +39,9 @@ import opennlp.tools.geo.RegionVote;
  * winning country at annotation time, and provides {@link MoneyAnnotator#MONEY}, so in
  * a document that speaks from Australia {@code $} is identified as {@code AUD}.
  *
- * <p>This exists because a pipeline is assembled before any document is seen, while
- * the right symbol table is per-document evidence. Extractors are built through
- * {@link CursorMoneyExtractor#forRegion(Locale)} and cached per country. A document
- * with an empty ballot, or a winning country without a suitable locale or single
- * currency-sign symbol, falls back to the default table.</p>
+ * <p>Extractors are built through {@link CursorMoneyExtractor#forRegion(Locale)} and
+ * cached per country. A document with an empty ballot, or a winning country without a
+ * suitable locale or single currency-sign symbol, falls back to the default table.</p>
  *
  * <p>The annotator is safe to share between threads: the per-country cache is a
  * concurrent map and the extractors themselves hold no per-call state.</p>
@@ -60,7 +58,6 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
    * each document is derived from that document's region ballot at annotation time.
    */
   public RegionAwareMoneyAnnotator() {
-    // extractors are derived per document from the region ballot
   }
 
   @Override
@@ -85,6 +82,11 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
    * cached too: a country with no locale whose currency symbol is a single currency
    * sign maps to the default extractor, so the locale scan runs at most once per
    * country.
+   *
+   * @param countryCode The winning ISO 3166-1 alpha-2 country code. Must not be
+   *                    {@code null}.
+   * @return The extractor for the country, or the default one if the country has no
+   *         resolvable currency symbol. Never {@code null}.
    */
   private CursorMoneyExtractor extractorFor(String countryCode) {
     return byCountry.computeIfAbsent(countryCode, code -> {
@@ -101,16 +103,14 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Picks a locale through which a country's currency symbol can be resolved, that is
-   * one whose currency is written with a single currency-sign code point in that locale.
-   * English is tried first, as {@code en} plus the country, because a country's
-   * minority-language locales often write the currency with a disambiguating prefix, for
-   * example the Canadian dollar as {@code CA$} rather than {@code $}. If English does not
-   * yield a usable symbol, the installed locales for the country are scanned and the
-   * usable candidate with the lexicographically smallest language tag wins, so the choice
-   * never depends on the order in which the runtime lists its locales. If no candidate is
-   * usable, as for a country whose currency is conventionally spelled with letters, the
-   * result is empty and the caller keeps the default symbol table.
+   * Picks a locale through which a country's currency symbol can be resolved, that is one
+   * whose currency is written with a single currency-sign code point there. {@code en}
+   * plus the country is tried first, because a country's minority-language locales often
+   * write the currency with a disambiguating prefix, for example the Canadian dollar as
+   * {@code CA$} rather than {@code $}. Otherwise the installed locales for the country
+   * are scanned and the usable candidate with the lexicographically smallest language tag
+   * wins, so the choice never depends on the order in which the runtime lists its
+   * locales.
    *
    * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
    * @return A locale for the country whose currency symbol is a single currency sign, or

@@ -211,12 +211,13 @@ int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 		<title>Region ballot and currency signs</title>
 		<para>
 			<code>DocumentRegionAnnotator</code> turns geocoded location entities into a
-			document-scoped region ballot: countries ranked by confidence-weighted
-			share. <code>RegionAwareMoneyAnnotator</code> then resolves ambiguous
-			currency signs such as <code>$</code> from the winning country.
-			<code>RegionCurrencyResolutionExampleTest</code> asserts the behavior shown
-			here.
-			<programlisting language="java"><![CDATA[
+			document-scoped region ballot: countries ranked by confidence-weighted share.
+			<code>RegionAwareMoneyAnnotator</code> then reads that ballot and resolves
+			ambiguous currency signs such as <code>$</code> from the winning country, so a
+			document that speaks from Mexico reads <code>$</code> as the Mexican peso:
+		</para>
+		<programlisting language="java">
+				<![CDATA[
 Document withEntities = Document.of(
     "Guadalajara outsells Boston this quarter, and lunch there costs $8.")
     .with(Layers.ENTITIES, locationEntities);
@@ -230,7 +231,6 @@ List<Annotation<RegionVote>> ballot =
 
 List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
 // "$8" -> 8 MXN because Mexico wins the ballot]]>
-			</programlisting>
-		</para>
+		</programlisting>
 	</section>
 </chapter>

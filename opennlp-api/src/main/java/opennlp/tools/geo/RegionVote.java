@@ -17,32 +17,35 @@
 
 package opennlp.tools.geo;
 
+import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.StringUtil;
+
 /**
  * One row of a document's region ballot: a country and the share of the document's
- * location evidence that points at it.
+ * location evidence that points at it. The shares of one ballot sum to one, so a
+ * share is also the confidence in that country.
  *
- * <p>Shares over a ballot sum to one, so the winner's share doubles as a confidence
- * and the margin to the runner-up says how decisive the document is: a report
- * mentioning three Australian cities is a landslide, one mentioning Paris and London
- * is a coin flip.</p>
+ * <p>Instances are immutable and thread-safe.</p>
  *
- * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null} or
- *                    blank.
+ * @param countryCode The
+ *                    <a href="https://www.iso.org/iso-3166-country-codes.html">ISO
+ *                    3166-1</a> alpha-2 country code. Must not be {@code null} or blank.
  * @param share The fraction of the document's location evidence pointing at the
  *              country. Must be in {@code (0, 1]}.
  *
  * @since 3.0.0
  */
+@ThreadSafe
 public record RegionVote(String countryCode, double share) {
 
   /**
-   * Validates the vote against the documented constraints.
+   * Creates a vote.
    *
    * @throws IllegalArgumentException Thrown if {@code countryCode} is {@code null} or
-   *         blank, or {@code share} is not in {@code (0, 1]}.
+   *         blank, or {@code share} is not in {@code (0, 1]}, including {@code NaN}.
    */
   public RegionVote {
-    if (countryCode == null || countryCode.isBlank()) {
+    if (countryCode == null || StringUtil.isBlank(countryCode)) {
       throw new IllegalArgumentException("countryCode must not be null or blank");
     }
     if (!(share > 0.0 && share <= 1.0)) {
