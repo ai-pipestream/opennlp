@@ -162,6 +162,7 @@ public class Parser extends AbstractBottomUpParser {
    *                          must represent. Only outcomes which contribute to the top
    *                          {@code advancePercentage} will be explored.
    * @throws IllegalArgumentException Thrown if {@code tagger} is {@code null}.
+   * @see ParserModel
    * @see POSTagger
    * @see ChunkerME
    */
@@ -169,20 +170,6 @@ public class Parser extends AbstractBottomUpParser {
     this(model.getBuildModel(), model.getAttachModel(), model.getCheckModel(),
         requireTagger(tagger), new ChunkerME(model.getParserChunkerModel()),
         model.getHeadRules(), beamSize, advancePercentage);
-  }
-
-  /**
-   * Validates the caller-supplied tagger ahead of the constructor delegation.
-   *
-   * @param tagger The tagger to validate.
-   * @return {@code tagger}, never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code tagger} is {@code null}.
-   */
-  private static POSTagger requireTagger(POSTagger tagger) {
-    if (tagger == null) {
-      throw new IllegalArgumentException("tagger must not be null");
-    }
-    return tagger;
   }
 
   /**
@@ -222,6 +209,20 @@ public class Parser extends AbstractBottomUpParser {
     this.nonAttachIndex = attachModel.getIndex(NON_ATTACH);
     attachments = new int[] {daughterAttachIndex,sisterAttachIndex};
     this.completeIndex = checkModel.getIndex(Parser.COMPLETE);
+  }
+
+  /**
+   * Validates the caller-supplied tagger ahead of the constructor delegation.
+   *
+   * @param tagger The tagger to validate.
+   * @return {@code tagger}, never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code tagger} is {@code null}.
+   */
+  private static POSTagger requireTagger(POSTagger tagger) {
+    if (tagger == null) {
+      throw new IllegalArgumentException("tagger must not be null");
+    }
+    return tagger;
   }
 
   /**

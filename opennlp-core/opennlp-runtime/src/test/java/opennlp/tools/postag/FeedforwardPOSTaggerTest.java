@@ -26,6 +26,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.parser.AbstractBottomUpParser;
 import opennlp.tools.parser.HeadRules;
@@ -86,7 +88,7 @@ public class FeedforwardPOSTaggerTest {
     assertEquals(3, assigned.length);
     final List<String> inventory = List.of(model.tags());
     for (final String tag : assigned) {
-      assertEquals(true, inventory.contains(tag));
+      assertTrue(inventory.contains(tag), "tag outside the inventory: " + tag);
     }
   }
 
@@ -106,17 +108,25 @@ public class FeedforwardPOSTaggerTest {
         new ByteArrayInputStream("not a model".getBytes())));
   }
 
-  @Test
-  void testShapesAndSuffixes() {
-    assertEquals("*cap*", FeedforwardPOSContext.shape("Paris"));
-    assertEquals("*allcaps*", FeedforwardPOSContext.shape("USA"));
-    assertEquals("*digit*", FeedforwardPOSContext.shape("2020"));
-    assertEquals("*alnum*", FeedforwardPOSContext.shape("B2B"));
-    assertEquals("*other*", FeedforwardPOSContext.shape("--"));
-    assertEquals("*lower*", FeedforwardPOSContext.shape("dog"));
-    assertEquals("og", FeedforwardPOSContext.suffix("dog", 2));
-    assertEquals("dog", FeedforwardPOSContext.suffix("dog", 3));
-    assertEquals("ing", FeedforwardPOSContext.suffix("running", 3));
+  @ParameterizedTest
+  @CsvSource({
+      "Paris, *cap*",
+      "USA, *allcaps*",
+      "2020, *digit*",
+      "B2B, *alnum*",
+      "--, *other*",
+      "dog, *lower*"})
+  void testShapes(String word, String expected) {
+    assertEquals(expected, FeedforwardPOSContext.shape(word));
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+      "dog, 2, og",
+      "dog, 3, dog",
+      "running, 3, ing"})
+  void testSuffixes(String word, int length, String expected) {
+    assertEquals(expected, FeedforwardPOSContext.suffix(word, length));
   }
 
   @Test
@@ -277,15 +287,16 @@ public class FeedforwardPOSTaggerTest {
     }
   }
 
+  /**
+   * The nonsense hyperparameters are covered exhaustively by
+   * {@link FeedforwardPOSTaggerEdgeCaseTest#testSettingsRejectNonsenseValues} and the
+   * null sentence by {@link #testNullSentenceIsRejectedByEveryOverload()}, so only the
+   * two entry points neither of them reaches are asserted here.
+   */
   @Test
   void testArgumentValidation() {
     assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTagger(null));
-    assertThrows(IllegalArgumentException.class, () -> tagger.tag(null));
     assertThrows(IllegalArgumentException.class,
         () -> FeedforwardPOSTrainer.train(null, FeedforwardPOSTrainer.Settings.defaults()));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        0, 32, 10, 32, 0.05, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, 0.0, 1.0, 1, 1, 17L));
   }
 }

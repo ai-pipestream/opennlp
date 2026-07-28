@@ -27,6 +27,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.util.ObjectStreamUtils;
 
@@ -179,30 +181,28 @@ public class FeedforwardPOSTaggerEdgeCaseTest {
   /**
    * Every nonsensical hyperparameter must be rejected by the settings record itself:
    * non-positive sizes and counts, a non-positive learning rate, a negative L2
-   * penalty, a dropout outside {@code [0, 1)}, and negative frequency cutoffs.
+   * penalty, a dropout outside {@code [0, 1)}, and negative frequency cutoffs. One
+   * case per row, so a regression names the offending parameter.
    */
-  @Test
-  void testSettingsRejectNonsenseValues() {
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        -1, 32, 10, 32, 0.05, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 0, 10, 32, 0.05, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 0, 32, 0.05, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 0, 0.05, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.0, 0.0, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, -0.1, 0.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, 0.0, -0.1, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, 0.0, 1.0, 1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, 0.0, 0.0, -1, 1, 17L));
-    assertThrows(IllegalArgumentException.class, () -> new FeedforwardPOSTrainer.Settings(
-        16, 32, 10, 32, 0.05, 0.0, 0.0, 1, -1, 17L));
+  @ParameterizedTest
+  @CsvSource({
+      "-1, 32, 10, 32, 0.05,  0.0,  0.0,  1,  1",
+      " 0, 32, 10, 32, 0.05,  0.0,  0.0,  1,  1",
+      "16,  0, 10, 32, 0.05,  0.0,  0.0,  1,  1",
+      "16, 32,  0, 32, 0.05,  0.0,  0.0,  1,  1",
+      "16, 32, 10,  0, 0.05,  0.0,  0.0,  1,  1",
+      "16, 32, 10, 32, 0.0,   0.0,  0.0,  1,  1",
+      "16, 32, 10, 32, 0.05, -0.1,  0.0,  1,  1",
+      "16, 32, 10, 32, 0.05,  0.0, -0.1,  1,  1",
+      "16, 32, 10, 32, 0.05,  0.0,  1.0,  1,  1",
+      "16, 32, 10, 32, 0.05,  0.0,  0.0, -1,  1",
+      "16, 32, 10, 32, 0.05,  0.0,  0.0,  1, -1"})
+  void testSettingsRejectNonsenseValues(int embeddingSize, int hiddenSize, int epochs,
+      int batchSize, double learningRate, double l2, double dropout, int wordCutoff,
+      int suffixCutoff) {
+    assertThrows(IllegalArgumentException.class,
+        () -> new FeedforwardPOSTrainer.Settings(embeddingSize, hiddenSize, epochs,
+            batchSize, learningRate, l2, dropout, wordCutoff, suffixCutoff, 17L));
   }
 
   /**
