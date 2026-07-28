@@ -22,6 +22,9 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
@@ -72,7 +75,7 @@ public class HierarchyAnnotatorTest {
     Assertions.assertEquals(1, chains.size());
     Assertions.assertEquals(mention, chains.get(0).span());
     Assertions.assertEquals(List.of("Brooklyn", "New York"),
-        chains.get(0).value().ancestors().stream().map(a -> a.name()).toList());
+        chains.get(0).value().ancestors().stream().map(PlaceAncestor::name).toList());
   }
 
   @Test
@@ -198,17 +201,55 @@ public class HierarchyAnnotatorTest {
   }
 
   @Test
-  void testInvalidArguments() {
+  void testNullHierarchyAndNullDocumentAreRejected() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new HierarchyAnnotator(null));
     Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new HierarchyAnnotator(spine(), " "));
-    // U+00A0, the no-break space: blank under the project whitespace definition even
-    // though the JDK's own blank check does not cover it
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new HierarchyAnnotator(spine(), "\u00A0"));
-    Assertions.assertThrows(IllegalArgumentException.class,
         () -> new HierarchyAnnotator(spine()).annotate(null));
+  }
+
+  /**
+   * Asserts the reject side of the join key check. U+00A0, the no-break space, is blank
+   * under the project whitespace definition even though the JDK's own blank check does
+   * not cover it.
+   */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {" ", "\t", "\u00A0"})
+  void testBlankAttributeKeyIsRejected(String attributeKey) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new HierarchyAnnotator(spine(), attributeKey));
+  }
+
+  /**
+   * Asserts the accept side of the join key check: a hierarchy keyed by a non-default
+   * gazetteer attribute expands the mention through that attribute, and the default
+   * Who's On First attribute is then not consulted even when the entry also carries it.
+   */
+  @Test
+  void testCustomAttributeKeyJoinsOnThatAttribute() {
+    final String text = "A stroll through Park Slope.";
+    final Span mention = new Span(17, 27);
+    final Map<String, AttributeValue> attributes = Map.of(
+        GazetteerEntry.ATTRIBUTE_KEY_WHOSONFIRST, new AttributeValue("77", "test", "fixture"),
+        GazetteerEntry.ATTRIBUTE_KEY_GEONAMES, new AttributeValue("85865587", "test", "fixture"));
+    final GazetteerEntry entry = new GazetteerEntry("test", "Park Slope", "Park Slope",
+        List.of(), new GeoPoint(0.0, 0.0), "US", List.of(), 1000,
+        GazetteerEntry.FEATURE_CLASS_CITY, attributes);
+    final Document document = Document.of(text)
+        .with(GeocodeAnnotator.LOCATIONS, List.of(new Annotation<>(mention,
+            new GeoResolution(mention, entry, 0.9))));
+
+    final Document annotated =
+        new HierarchyAnnotator(spine(), GazetteerEntry.ATTRIBUTE_KEY_GEONAMES).annotate(document);
+
+    final List<Annotation<ContainmentChain>> chains =
+        annotated.get(HierarchyAnnotator.CONTAINMENT);
+    Assertions.assertEquals(1, chains.size());
+    Assertions.assertEquals(List.of("Brooklyn", "New York"),
+        chains.get(0).value().ancestors().stream().map(PlaceAncestor::name).toList());
+    Assertions.assertTrue(new HierarchyAnnotator(spine())
+        .annotate(document).get(HierarchyAnnotator.CONTAINMENT).isEmpty());
   }
 
   /**
@@ -249,6 +290,6 @@ public class HierarchyAnnotatorTest {
         annotated.get(HierarchyAnnotator.CONTAINMENT);
     Assertions.assertEquals(1, chains.size());
     Assertions.assertEquals(List.of("Brooklyn", "New York"),
-        chains.get(0).value().ancestors().stream().map(a -> a.name()).toList());
+        chains.get(0).value().ancestors().stream().map(PlaceAncestor::name).toList());
   }
 }
