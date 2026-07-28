@@ -68,6 +68,18 @@ public class AssetAnnotator implements DocumentAnnotator {
     this.detector = detector;
   }
 
+  /**
+   * Detects the embedded assets of the document text and adds the {@link #ASSETS}
+   * layer.
+   *
+   * <p>The layer is always added; a text without an embedded asset yields a
+   * present-but-empty layer.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #ASSETS} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
