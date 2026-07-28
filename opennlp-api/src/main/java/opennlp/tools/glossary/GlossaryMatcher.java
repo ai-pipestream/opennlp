@@ -24,6 +24,8 @@ import java.util.List;
  * terms, in a text and report each hit as a {@link GlossaryMatch} with its span in the
  * original text.
  *
+ * <p>Thread safety is implementation specific.</p>
+ *
  * @see GlossaryEntry
  * @see GlossaryMatch
  * @since 3.0.0

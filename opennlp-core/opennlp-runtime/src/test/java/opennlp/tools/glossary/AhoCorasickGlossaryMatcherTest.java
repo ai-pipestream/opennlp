@@ -17,14 +17,21 @@
 
 package opennlp.tools.glossary;
 
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.util.Span;
 
 public class AhoCorasickGlossaryMatcherTest {
+
+  /** A case-sensitive one-term glossary, shared by the word boundary tests. */
+  private static final AhoCorasickGlossaryMatcher CAT_MATCHER =
+      new AhoCorasickGlossaryMatcher(List.of(new GlossaryEntry("CAT", "cat")), false);
 
   @Test
   void testFindsSingleAndMultiwordTerms() {
@@ -90,15 +97,15 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertTrue(matcher.match("Machine Learning is popular.").isEmpty());
   }
 
-  @Test
-  void testRespectsWordBoundaries() {
-    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
-        List.of(new GlossaryEntry("CAT", "cat")), false);
-
-    Assertions.assertTrue(matcher.match("concatenate the files").isEmpty());
-    Assertions.assertEquals(1, matcher.match("the cat sleeps").size());
-    Assertions.assertEquals(1, matcher.match("cat").size());
-    Assertions.assertEquals(1, matcher.match("a cat.").size());
+  @ParameterizedTest
+  @CsvSource({
+      "concatenate the files, 0",
+      "the cat sleeps, 1",
+      "cat, 1",
+      "a cat., 1"
+  })
+  void testRespectsWordBoundaries(String text, int expectedHits) {
+    Assertions.assertEquals(expectedHits, CAT_MATCHER.match(text).size());
   }
 
   @Test
@@ -305,12 +312,10 @@ public class AhoCorasickGlossaryMatcherTest {
    */
   @Test
   void testSupplementaryLetterNeighborBlocksTheBoundary() {
-    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
-        List.of(new GlossaryEntry("CAT", "cat")), false);
     // U+10428, DESERET SMALL LETTER LONG I, a supplementary-plane letter
-    Assertions.assertTrue(matcher.match("\uD801\uDC28cat").isEmpty());
-    Assertions.assertTrue(matcher.match("cat\uD801\uDC28").isEmpty());
-    Assertions.assertEquals(1, matcher.match("a \uD801\uDC28 cat").size());
+    Assertions.assertTrue(CAT_MATCHER.match("\uD801\uDC28cat").isEmpty());
+    Assertions.assertTrue(CAT_MATCHER.match("cat\uD801\uDC28").isEmpty());
+    Assertions.assertEquals(1, CAT_MATCHER.match("a \uD801\uDC28 cat").size());
   }
 
   /**
@@ -367,17 +372,43 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   @Test
-  void testInvalidArguments() {
+  void testInvalidMatcherArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new AhoCorasickGlossaryMatcher(null, false));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new AhoCorasickGlossaryMatcher(List.of(), false));
     Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new GlossaryEntry("id", " "));
+        () -> new AhoCorasickGlossaryMatcher(Collections.singletonList(null), false));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> CAT_MATCHER.match(null));
+  }
+
+  @Test
+  void testInvalidGlossaryEntryArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new GlossaryEntry(null, "term"));
-    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
-        List.of(new GlossaryEntry("T", "term")), false);
-    Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.match(null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryEntry("", "term"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryEntry(" ", "term"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryEntry("id", null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryEntry("id", ""));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryEntry("id", " "));
+  }
+
+  @Test
+  void testInvalidGlossaryMatchArguments() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryMatch(null, "id", "term"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryMatch(new Span(0, 4), null, "term"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryMatch(new Span(0, 4), " ", "term"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryMatch(new Span(0, 4), "id", null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new GlossaryMatch(new Span(0, 4), "id", " "));
   }
 }
