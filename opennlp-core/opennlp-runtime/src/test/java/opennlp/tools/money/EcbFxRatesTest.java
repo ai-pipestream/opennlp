@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Optional;
 
@@ -47,7 +48,11 @@ public class EcbFxRatesTest {
       "") + "\n";
 
   private static EcbFxRates rates() throws IOException {
-    return EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
+    return load(FIXTURE);
+  }
+
+  private static EcbFxRates load(String csv) throws IOException {
+    return EcbFxRates.load(new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
   }
 
   private static void assertRate(String expected, Optional<BigDecimal> actual) {
@@ -119,13 +124,9 @@ public class EcbFxRatesTest {
 
   @Test
   void testMalformedContentFailsLoud() {
-    assertThrows(IllegalArgumentException.class,
-        () -> EcbFxRates.load(new ByteArrayInputStream("no header here".getBytes())));
-    assertThrows(IllegalArgumentException.class,
-        () -> EcbFxRates.load(new ByteArrayInputStream(
-            "Date,USD,\nyesterday,1.1,\n".getBytes())));
-    assertThrows(IllegalArgumentException.class,
-        () -> EcbFxRates.load(new ByteArrayInputStream("Date,USD,\n".getBytes())));
+    assertThrows(IllegalArgumentException.class, () -> load("no header here"));
+    assertThrows(IllegalArgumentException.class, () -> load("Date,USD,\nyesterday,1.1,\n"));
+    assertThrows(IllegalArgumentException.class, () -> load("Date,USD,\n"));
     assertThrows(IllegalArgumentException.class, () -> EcbFxRates.load((InputStream) null));
   }
 
@@ -136,8 +137,8 @@ public class EcbFxRatesTest {
   @Test
   void testMalformedRateCellFailsLoudWithRowContext() {
     final String csv = "Date,USD,JPY,\n2026-07-10,1.08x,160.00,\n";
-    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-        () -> EcbFxRates.load(new ByteArrayInputStream(csv.getBytes())));
+    final IllegalArgumentException e =
+        assertThrows(IllegalArgumentException.class, () -> load(csv));
     assertEquals("not a reference history rate for USD: 1.08x in row: "
         + "2026-07-10,1.08x,160.00,", e.getMessage());
   }

@@ -61,6 +61,8 @@ public class EcbFxRates implements FxRates {
 
   private static final String BASE_CURRENCY = "EUR";
   private static final String NOT_AVAILABLE = "N/A";
+  private static final String FIELD_SEPARATOR = ",";
+  private static final String HEADER_PREFIX = "Date,";
 
   private final TreeMap<LocalDate, Map<String, BigDecimal>> table;
 
@@ -103,17 +105,17 @@ public class EcbFxRates implements FxRates {
     final BufferedReader reader =
         new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
     final String header = reader.readLine();
-    if (header == null || !header.startsWith("Date,")) {
+    if (header == null || !header.startsWith(HEADER_PREFIX)) {
       throw new IllegalArgumentException("not a reference history CSV: header is " + header);
     }
-    final String[] currencies = header.split(",", -1);
+    final String[] currencies = header.split(FIELD_SEPARATOR, -1);
     final TreeMap<LocalDate, Map<String, BigDecimal>> table = new TreeMap<>();
     String line;
     while ((line = reader.readLine()) != null) {
       if (line.isBlank()) {
         continue;
       }
-      final String[] fields = line.split(",", -1);
+      final String[] fields = line.split(FIELD_SEPARATOR, -1);
       final LocalDate date;
       try {
         date = LocalDate.parse(fields[0].trim());
@@ -142,9 +144,16 @@ public class EcbFxRates implements FxRates {
     return new EcbFxRates(table);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>A cross rate is derived through the euro base, so it inherits the rounding of one
+   * division at {@link MathContext#DECIMAL64}.</p>
+   */
   @Override
   public Optional<BigDecimal> rate(String from, String to, LocalDate asOf) {
-    final Map<String, BigDecimal> row = usableRow(from, to, asOf);
+    checkLookup(from, to, asOf);
+    final Map<String, BigDecimal> row = usableRow(asOf);
     if (row == null) {
       return Optional.empty();
     }
@@ -157,16 +166,18 @@ public class EcbFxRates implements FxRates {
   }
 
   /**
-   * Converts with the division last, so a conversion whose result is exactly
-   * representable stays exact instead of inheriting the rounding of a pre-divided
-   * cross rate.
+   * {@inheritDoc}
+   *
+   * <p>The division comes last, so a conversion whose result is exactly representable
+   * stays exact instead of inheriting the rounding of a pre-divided cross rate.</p>
    */
   @Override
   public Optional<MoneyAmount> convert(MoneyAmount money, String to, LocalDate asOf) {
     if (money == null) {
       throw new IllegalArgumentException("money must not be null");
     }
-    final Map<String, BigDecimal> row = usableRow(money.currency(), to, asOf);
+    checkLookup(money.currency(), to, asOf);
+    final Map<String, BigDecimal> row = usableRow(asOf);
     if (row == null) {
       return Optional.empty();
     }
@@ -181,16 +192,34 @@ public class EcbFxRates implements FxRates {
   }
 
   /**
-   * Validates the lookup arguments and resolves the reference row for a date, or
-   * {@code null} when no row is within the staleness limit.
+   * Validates the arguments every lookup shares.
+   *
+   * @param from The ISO 4217 code of the source currency.
+   * @param to The ISO 4217 code of the target currency.
+   * @param asOf The date the rate should hold for.
+   * @throws IllegalArgumentException Thrown if a code is {@code null} or blank, or
+   *         {@code asOf} is {@code null}.
    */
-  private Map<String, BigDecimal> usableRow(String from, String to, LocalDate asOf) {
-    if (from == null || from.isBlank() || to == null || to.isBlank()) {
-      throw new IllegalArgumentException("from and to must not be null or blank");
+  private void checkLookup(String from, String to, LocalDate asOf) {
+    if (from == null || from.isBlank()) {
+      throw new IllegalArgumentException("from must not be null or blank");
+    }
+    if (to == null || to.isBlank()) {
+      throw new IllegalArgumentException("to must not be null or blank");
     }
     if (asOf == null) {
       throw new IllegalArgumentException("asOf must not be null");
     }
+  }
+
+  /**
+   * Resolves the reference row that governs a date.
+   *
+   * @param asOf The date to look up. Must not be {@code null}.
+   * @return The rates of the latest row on or before {@code asOf}, or {@code null} when
+   *         no row is within {@link #MAX_STALENESS_DAYS} of it.
+   */
+  private Map<String, BigDecimal> usableRow(LocalDate asOf) {
     final Map.Entry<LocalDate, Map<String, BigDecimal>> row = table.floorEntry(asOf);
     if (row == null || row.getKey().plusDays(MAX_STALENESS_DAYS).isBefore(asOf)) {
       return null;
@@ -198,8 +227,15 @@ public class EcbFxRates implements FxRates {
     return row.getValue();
   }
 
-  /** The value of one euro in a currency, with the base currency itself worth one. */
-  private static BigDecimal perEuro(Map<String, BigDecimal> rates, String currency) {
+  /**
+   * The value of one euro in a currency, with the base currency itself worth one.
+   *
+   * @param rates The rates of one reference row. Must not be {@code null}.
+   * @param currency The ISO 4217 code to look up. Must not be {@code null}.
+   * @return The units of {@code currency} per euro, or {@code null} when the row does
+   *         not quote it.
+   */
+  private BigDecimal perEuro(Map<String, BigDecimal> rates, String currency) {
     return BASE_CURRENCY.equals(currency) ? BigDecimal.ONE : rates.get(currency);
   }
 }

@@ -17,6 +17,7 @@
 
 package opennlp.tools.temporal;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
 
@@ -41,6 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * English.
  */
 public class CursorTemporalExtractorTest {
+
+  /** The reference date every relative test resolves against; it falls in ISO week 29. */
+  private static final LocalDate REFERENCE = LocalDate.of(2026, 7, 17);
 
   private final CursorTemporalExtractor extractor = new CursorTemporalExtractor();
 
@@ -182,9 +186,8 @@ public class CursorTemporalExtractorTest {
    */
   @Test
   void testRelativeDayWordsResolveAgainstTheReference() {
-    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
     final List<TemporalExpression> mentions =
-        extractor.extract("filed Yesterday, due tomorrow, signed today", reference);
+        extractor.extract("filed Yesterday, due tomorrow, signed today", REFERENCE);
     assertEquals(3, mentions.size());
     assertEquals("2026-07-16", mentions.get(0).value());
     assertEquals(Granularity.DAY, mentions.get(0).granularity());
@@ -196,14 +199,13 @@ public class CursorTemporalExtractorTest {
   /**
    * Verifies the shifted-unit forms at each unit's own granularity: last week is an
    * ISO week, next month a month, last year a year, and next quarter a quarter, all
-   * against the reference of 2026-07-17, which falls in ISO week 29.
+   * against {@link #REFERENCE}.
    */
   @Test
   void testShiftedUnitsResolveAtTheirOwnGranularity() {
-    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
     final List<TemporalExpression> mentions = extractor.extract(
         "last week we planned; next month it ships; last year it began; next quarter it scales",
-        reference);
+        REFERENCE);
     assertEquals(4, mentions.size());
     assertEquals("2026-W28", mentions.get(0).value());
     assertEquals(Granularity.WEEK, mentions.get(0).granularity());
@@ -222,10 +224,9 @@ public class CursorTemporalExtractorTest {
    */
   @Test
   void testCountedShiftsResolveInBothDirections() {
-    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
     final List<TemporalExpression> mentions = extractor.extract(
         "3 days ago it rained; in 2 weeks it ships; 14 months ago it started",
-        reference);
+        REFERENCE);
     assertEquals(3, mentions.size());
     assertEquals("2026-07-14", mentions.get(0).value());
     assertEquals("2026-W31", mentions.get(1).value());
@@ -240,12 +241,11 @@ public class CursorTemporalExtractorTest {
    */
   @Test
   void testRelativeGuardRails() {
-    final java.time.LocalDate reference = java.time.LocalDate.of(2026, 7, 17);
     assertTrue(extractor.extract("due yesterday and next month").isEmpty());
     assertTrue(extractor
-        .extract("in cold water; last stand; 3 days late", reference).isEmpty());
+        .extract("in cold water; last stand; 3 days late", REFERENCE).isEmpty());
     final List<TemporalExpression> mixed =
-        extractor.extract("signed 2026-07-14, due tomorrow", reference);
+        extractor.extract("signed 2026-07-14, due tomorrow", REFERENCE);
     assertEquals(2, mixed.size());
     assertEquals("2026-07-14", mixed.get(0).value());
     assertEquals("2026-07-18", mixed.get(1).value());

@@ -60,6 +60,17 @@ public class MoneyAnnotator implements DocumentAnnotator {
     this.extractor = extractor;
   }
 
+  /**
+   * Scans the document text and adds the {@link #MONEY} layer.
+   *
+   * <p>No other layer is read, so a document without any layer yields the money layer
+   * present and, if the text holds no monetary mention, empty.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #MONEY} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

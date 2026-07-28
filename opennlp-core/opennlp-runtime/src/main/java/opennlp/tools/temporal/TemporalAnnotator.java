@@ -61,6 +61,19 @@ public class TemporalAnnotator implements DocumentAnnotator {
     this.extractor = extractor;
   }
 
+  /**
+   * Scans the document text and adds the {@link #TEMPORALS} layer.
+   *
+   * <p>No other layer is read, so a document without any layer yields the temporal layer
+   * present and, if the text holds no calendar mention, empty. The single-argument
+   * {@link TemporalExtractor#extract(CharSequence)} is used, so relative expressions are
+   * not resolved here.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #TEMPORALS} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

@@ -51,20 +51,29 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
   public static final LayerKey<LocalDate> DOCUMENT_DATE =
       Layers.key("document.date", LocalDate.class);
 
+  private static final String MISSING_LAYER = "document lacks the required layer ";
+
   /**
    * Elects the document date from the first day-granularity temporal mention.
    *
-   * @param document The document to annotate. Must not be {@code null}.
+   * <p>The temporal layer must be present, but it may be empty: a document without
+   * temporal mentions yields a present-but-empty date layer.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link TemporalAnnotator#TEMPORALS} layer.
    * @return The document with the {@link #DOCUMENT_DATE} layer added. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, or if
-   *         the electing day-granularity mention carries a value that is not an ISO 8601
-   *         calendar date in the {@code yyyy-MM-dd} form, as a third-party
-   *         {@link TemporalExtractor} may supply.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the
+   *         temporal layer is absent, or the electing day-granularity mention carries a
+   *         value that is not an ISO 8601 calendar date in the {@code yyyy-MM-dd} form,
+   *         as a third-party {@link TemporalExtractor} may supply.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    if (!document.layers().contains(TemporalAnnotator.TEMPORALS)) {
+      throw new IllegalArgumentException(MISSING_LAYER + TemporalAnnotator.TEMPORALS);
     }
     for (final Annotation<TemporalExpression> mention
         : document.get(TemporalAnnotator.TEMPORALS)) {

@@ -59,8 +59,15 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       "mph", "kph");
 
   private static final String PERCENT = "%";
+  private static final String PERCENT_WORD = "percent";
 
   private static final int MAX_UNIT_LENGTH = 6;
+
+  /**
+   * How many letters a candidate unit token may have before the scan gives up: one more
+   * than {@link #PERCENT_WORD}, the longest token that is not a unit from the set.
+   */
+  private static final int MAX_TOKEN_LENGTH = 8;
 
   private final Set<String> units;
 
@@ -92,6 +99,11 @@ public class CursorQuantityExtractor implements QuantityExtractor {
     this.units = Set.copyOf(units);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The scan resumes behind each reported mention, so mentions never overlap.</p>
+   */
   @Override
   public List<Quantity> extract(CharSequence text) {
     if (text == null) {
@@ -112,8 +124,11 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   }
 
   /**
-   * Matches a number followed by a percent marker or unit token at one position, or
-   * returns {@code null}.
+   * Matches a number followed by a percent marker or unit token at one position.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the candidate mention would start at.
+   * @return The mention starting at {@code start}, or {@code null} when none matches.
    */
   private Quantity matchAt(CharSequence text, int start) {
     int i = start;
@@ -142,6 +157,10 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   /**
    * Parses the percent marker or unit token after a number: immediately attached, or
    * separated by exactly one space.
+   *
+   * @param text The text being scanned.
+   * @param numberEnd The exclusive offset behind the number.
+   * @return The unit, or {@code null} when no percent marker or known unit follows.
    */
   private Unit parseUnit(CharSequence text, int numberEnd) {
     final Unit immediate = unitAt(text, numberEnd);
@@ -155,8 +174,12 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   }
 
   /**
-   * Reads a percent sign, the word {@code percent}, or a known unit token at the
-   * position.
+   * Reads a percent sign, the word {@code percent}, or a known unit token at a position.
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the first character of the candidate unit.
+   * @return The unit, or {@code null} when {@code start} holds no percent marker and no
+   *         known unit token.
    */
   private Unit unitAt(CharSequence text, int start) {
     if (NumberScan.charAt(text, start) == '%') {
@@ -164,7 +187,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
     }
     int i = start;
     final StringBuilder token = new StringBuilder();
-    while (Character.isLetter(NumberScan.charAt(text, i)) && token.length() < 8) {
+    while (Character.isLetter(NumberScan.charAt(text, i)) && token.length() < MAX_TOKEN_LENGTH) {
       token.append(text.charAt(i));
       i++;
     }
@@ -172,7 +195,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       return null;
     }
     final String word = token.toString();
-    if ("percent".equalsIgnoreCase(word)) {
+    if (PERCENT_WORD.equalsIgnoreCase(word)) {
       return new Unit(PERCENT, i);
     }
     return units.contains(word) ? new Unit(word, i) : null;

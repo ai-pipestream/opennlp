@@ -39,6 +39,9 @@ public final class NumberScan {
   /** The sentinel returned by {@link #codePointAt(CharSequence, int)} out of bounds. */
   public static final int NO_CODE_POINT = -1;
 
+  /** The length of the longest recognized scale word, {@code thousand} and {@code trillion}. */
+  private static final int MAX_SCALE_WORD_LENGTH = 8;
+
   private NumberScan() {
     // This class offers static scanning methods only and is never instantiated.
   }
@@ -95,6 +98,12 @@ public final class NumberScan {
 
   /**
    * Applies an immediate suffix scale or a following scale word.
+   *
+   * @param text The text being scanned.
+   * @param end The exclusive offset behind the digits scanned so far.
+   * @param value The value scanned so far.
+   * @return The scaled {@link Result}, the unscaled one when no scale marker follows, or
+   *         {@code null} when an immediate letter suffix is not a scale marker.
    */
   private static Result parseScale(CharSequence text, int end, BigDecimal value) {
     final char suffix = Character.toLowerCase(charAt(text, end));
@@ -123,11 +132,17 @@ public final class NumberScan {
 
   /**
    * Parses a scale word after the number; absence is not an error.
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the first letter of the candidate scale word.
+   * @param value The value scanned so far.
+   * @return The scaled {@link Result}, or {@code null} when no scale word starts at
+   *         {@code start}.
    */
   private static Result parseScaleWord(CharSequence text, int start, BigDecimal value) {
     int i = start;
     final StringBuilder word = new StringBuilder();
-    while (Character.isLetter(charAt(text, i)) && word.length() <= 8) {
+    while (Character.isLetter(charAt(text, i)) && word.length() <= MAX_SCALE_WORD_LENGTH) {
       word.append(Character.toLowerCase(text.charAt(i)));
       i++;
     }
@@ -144,6 +159,13 @@ public final class NumberScan {
     return new Result(value.multiply(BigDecimal.valueOf(scale)), i);
   }
 
+  /**
+   * Checks whether exactly three digits, not followed by a fourth, start at a position.
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the first digit of the candidate group.
+   * @return {@code true} if a complete group of three digits starts at {@code start}.
+   */
   private static boolean groupOfThree(CharSequence text, int start) {
     return isAsciiDigit(charAt(text, start)) && isAsciiDigit(charAt(text, start + 1))
         && isAsciiDigit(charAt(text, start + 2)) && !isAsciiDigit(charAt(text, start + 3));
