@@ -106,7 +106,7 @@ public class DocumentRegionWinnerTest {
   void testAnnotatorProducedBallotRespectsTheMargin() {
     final Document document = new DocumentRegionAnnotator().annotate(
         new GeocodeAnnotator(GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), 0.8))
-            .annotate(GeoTestUtil.withLocations(
+            .annotate(GeoTestUtil.withLocationEntities(
                 "the Sydney office reports to New Zealand headquarters",
                 "Sydney", "New Zealand")));
     final List<Annotation<RegionVote>> ballot =

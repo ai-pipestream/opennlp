@@ -50,9 +50,9 @@ import opennlp.tools.util.normalizer.EmojiFlags;
  * country entries. Name matching folds the spellings real text uses: NFKC
  * normalization, the CLDR apostrophe (U+2019) folded to the ASCII apostrophe, and a
  * diacritic-stripped fallback; aliases such as {@code USA} are out of scope. A
- * resolved mention never consults the name table, which is what makes {@code Georgia}
- * next to {@code Atlanta} count for the United States rather than the Caucasus
- * republic. A country flag emoji anywhere in the text, a regional indicator
+ * mention resolved to a country never consults the name table, which is what makes
+ * {@code Georgia} next to {@code Atlanta} count for the United States rather than the
+ * Caucasus republic. A country flag emoji anywhere in the text, a regional indicator
  * pair naming an assigned ISO 3166-1 code, votes for its country and needs no entity
  * layer support at all; subdivision tag-sequence flags name no country and cast no
  * vote. Mentions with no kind of evidence do not vote; a document without usable
@@ -90,7 +90,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * {@link #COUNTRY_NAME_WEIGHT} because writing a flag is as explicit a signal as
    * writing the country's name.
    */
-  private static final double FLAG_WEIGHT = 0.95;
+  private static final double FLAG_WEIGHT = COUNTRY_NAME_WEIGHT;
 
   /** The entity type label treated as a location unless the caller names others. */
   private static final String DEFAULT_LOCATION_TYPE = "location";
@@ -141,10 +141,10 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    *
    * <p>Every location entity casts at most one vote. A mention is matched to the
    * locations layer by exact span and votes for its best candidate's country with that
-   * candidate's confidence; a mention with no candidates votes as a country name when
-   * its text is one. A mention that is neither, or whose best candidate carries no
-   * country code, casts no vote. Country flag emoji vote directly from the text,
-   * independently of any entity.</p>
+   * candidate's confidence; a mention with no candidates, or whose best candidate
+   * carries no country code, falls back to the name table and votes as a country name
+   * when its text is one. A mention with neither kind of evidence casts no vote.
+   * Country flag emoji vote directly from the text, independently of any entity.</p>
    *
    * <p>The required layers must be present, but they may be empty: a document with a
    * present but empty locations layer is a document nothing geocoded, and its country-name
@@ -171,7 +171,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     // the first entry for a span is the one that votes.
     final Map<Long, GeoResolution> resolutionsBySpan = new HashMap<>();
     for (final Annotation<GeoResolution> location : document.get(GeocodeAnnotator.LOCATIONS)) {
-      resolutionsBySpan.putIfAbsent(spanKey(location.span()), location.value());
+      resolutionsBySpan.putIfAbsent(GeocodeAnnotator.spanKey(location.span()), location.value());
     }
     final Map<String, Double> weights = new HashMap<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
@@ -179,14 +179,13 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
         continue;
       }
       final Span span = entity.span();
-      final GeoResolution resolution = resolutionsBySpan.get(spanKey(span));
-      if (resolution != null) {
-        final String countryCode = resolution.entry().countryCode();
-        if (countryCode != null) {
-          weights.merge(countryCode, resolution.confidence(), Double::sum);
-        }
+      final GeoResolution resolution = resolutionsBySpan.get(GeocodeAnnotator.spanKey(span));
+      if (resolution != null && resolution.entry().countryCode() != null) {
+        weights.merge(resolution.entry().countryCode(), resolution.confidence(), Double::sum);
         continue;
       }
+      // A countryless entry casts no vote of its own and cannot silence its mention,
+      // so the name table still gets its say.
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
       final String countryCode = countryCodeOf(mention);
       if (countryCode != null) {
@@ -292,11 +291,6 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     final RegionVote top = ballot.get(0).value();
     final double runnerUp = ballot.size() > 1 ? ballot.get(1).value().share() : 0.0;
     return top.share() - runnerUp >= minMargin ? Optional.of(top) : Optional.empty();
-  }
-
-  /** Collapses a span to its offsets, so entity and resolution spans match by position. */
-  private static long spanKey(Span span) {
-    return ((long) span.getStart() << 32) | span.getEnd();
   }
 
   @Override

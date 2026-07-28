@@ -152,10 +152,10 @@ public class GeocodeAnnotator implements DocumentAnnotator {
       // same stretch of text, which is all the downstream offset-keyed alignment uses.
       final Set<Long> given = new HashSet<>(mentions.size());
       for (final Span mention : mentions) {
-        given.add(offsets(mention));
+        given.add(spanKey(mention));
       }
       for (final GeoResolution resolution : resolutions) {
-        if (!given.contains(offsets(resolution.mention()))) {
+        if (!given.contains(spanKey(resolution.mention()))) {
           throw new IllegalArgumentException("geocoder resolved the mention span "
               + resolution.mention() + ", which is not one of the given mentions");
         }
@@ -165,8 +165,15 @@ public class GeocodeAnnotator implements DocumentAnnotator {
     return document.with(LOCATIONS, resolved);
   }
 
-  /** Collapses a span to its offsets, so typed and untyped spans match by position. */
-  private static long offsets(Span span) {
+  /**
+   * Collapses a span to its offsets, so typed and untyped spans match by position. It is
+   * the key under which a consumer of {@link #LOCATIONS} aligns an annotation of the
+   * layer with the entity it was resolved from.
+   *
+   * @param span The span to key. Must not be {@code null}.
+   * @return The start and end offsets packed into one value.
+   */
+  static long spanKey(Span span) {
     return ((long) span.getStart() << 32) | span.getEnd();
   }
 

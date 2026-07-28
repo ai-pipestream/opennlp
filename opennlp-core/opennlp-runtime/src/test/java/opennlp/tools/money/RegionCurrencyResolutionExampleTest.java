@@ -20,7 +20,6 @@ package opennlp.tools.money;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -28,9 +27,8 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
 import opennlp.tools.geo.DocumentRegionAnnotator;
-import opennlp.tools.geo.GazetteerEntry;
-import opennlp.tools.geo.GeoPoint;
 import opennlp.tools.geo.GeoResolution;
+import opennlp.tools.geo.GeoTestUtil;
 import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
@@ -72,27 +70,14 @@ public class RegionCurrencyResolutionExampleTest {
             text.subSequence(mention.getStart(), mention.getEnd()).toString();
         switch (name) {
           case "Guadalajara" -> resolutions.add(
-              new GeoResolution(mention, entry(name, "MX"), GUADALAJARA_CONFIDENCE));
+              new GeoResolution(mention, GeoTestUtil.entry(name, "MX"), GUADALAJARA_CONFIDENCE));
           case "Boston" -> resolutions.add(
-              new GeoResolution(mention, entry(name, "US"), BOSTON_CONFIDENCE));
+              new GeoResolution(mention, GeoTestUtil.entry(name, "US"), BOSTON_CONFIDENCE));
           default -> throw new IllegalStateException("unexpected mention: " + name);
         }
       }
       return resolutions;
     };
-  }
-
-  /**
-   * Builds a minimal city entry for a country; the coordinates and population are
-   * placeholders because only the country code matters for the region ballot.
-   *
-   * @param name The city name. Must not be {@code null}.
-   * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
-   * @return A {@link GazetteerEntry} for the city. Never {@code null}.
-   */
-  private static GazetteerEntry entry(String name, String countryCode) {
-    return new GazetteerEntry("test", name, name, List.of(), new GeoPoint(0.0, 0.0),
-        countryCode, List.of(), 1_000_000, GazetteerEntry.FEATURE_CLASS_CITY, Map.of());
   }
 
   /**
