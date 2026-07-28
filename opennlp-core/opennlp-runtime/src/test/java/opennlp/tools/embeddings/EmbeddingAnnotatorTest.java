@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
 
@@ -103,16 +104,30 @@ public class EmbeddingAnnotatorTest {
   }
 
   /**
-   * Asserts that a document without the source layer is treated like one with an empty
-   * source layer: annotation succeeds and the provided layer is present and empty,
-   * because the document container reads an absent layer as an empty list.
+   * Asserts that a document without the source layer is rejected, the way every other
+   * annotator rejects an absent required layer, instead of being treated as an empty
+   * source layer.
    */
   @Test
-  void testAbsentSourceLayerYieldsEmptyProvidedLayer() {
+  void testAbsentSourceLayerIsRejected() {
     final EmbeddingAnnotator annotator = new EmbeddingAnnotator(FIXTURE, Layers.TOKENS);
-    final Document document = annotator.annotate(Document.of("never tokenized"));
-    Assertions.assertTrue(document.layers().contains(annotator.layer()));
-    Assertions.assertTrue(document.get(annotator.layer()).isEmpty());
+    final IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(Document.of("never tokenized")));
+    Assertions.assertEquals("document lacks the required layer opennlp:tokens<String>",
+        e.getMessage());
+  }
+
+  /**
+   * Asserts that a document-scoped source layer is rejected at construction: its
+   * annotations carry no span, so there would be no text to embed.
+   */
+  @Test
+  void testDocumentScopedSourceLayerIsRejected() {
+    final LayerKey<String> language = Layers.documentKey("language", String.class);
+    final IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new EmbeddingAnnotator(FIXTURE, language));
+    Assertions.assertEquals("source must be a positional layer: opennlp:language<String>",
+        e.getMessage());
   }
 
   /**
