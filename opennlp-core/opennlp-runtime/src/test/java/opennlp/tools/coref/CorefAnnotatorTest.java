@@ -20,17 +20,26 @@ package opennlp.tools.coref;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.document.NameFinderAnnotator;
 import opennlp.tools.util.Span;
 
 public class CorefAnnotatorTest {
+
+  /** The layers {@link CorefAnnotator#requires()} names, in pipeline order. */
+  private static final List<LayerKey<String>> REQUIRED_LAYERS =
+      List.of(Layers.SENTENCES, Layers.TOKENS, Layers.POS_TAGS, Layers.ENTITIES);
 
   /** Builds token annotations by locating each token left to right in the text. */
   private static List<Annotation<String>> tokens(String text, String... forms) {
@@ -44,6 +53,7 @@ public class CorefAnnotatorTest {
     return annotations;
   }
 
+  /** Builds a token-aligned layer that carries one value on each token's span. */
   private static List<Annotation<String>> values(List<Annotation<String>> tokens,
       String... tags) {
     final List<Annotation<String>> annotations = new ArrayList<>(tags.length);
@@ -53,6 +63,7 @@ public class CorefAnnotatorTest {
     return annotations;
   }
 
+  /** A three-sentence document with two entity types, a repeated name, and two pronouns. */
   private static Document storyDocument() {
     final String text = "Mary Jones leads Acme Corp. She joined Acme in 2020. It thrived.";
     final List<Annotation<String>> toks = tokens(text,
@@ -161,20 +172,14 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(2).value().kind());
   }
 
+  /**
+   * A {@code null} document and a tag layer that does not have one tag per token are
+   * both rejected.
+   */
   @Test
-  void testInvalidArguments() {
+  void testNullDocumentAndMisalignedLayersAreRejected() {
     final CorefAnnotator annotator = new CorefAnnotator();
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new CorefAnnotator(Set.of(), Set.of("organization")));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new CorefAnnotator(null, Set.of("organization")));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new CorefMention(-1, CorefMention.KIND_ENTITY, 0));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new CorefMention(0, " ", 0));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> new CorefMention(0, CorefMention.KIND_ENTITY, -2));
 
     final String text = "a b";
     final List<Annotation<String>> toks = tokens(text, "a", "b");
@@ -185,6 +190,68 @@ public class CorefAnnotatorTest {
         .with(Layers.ENTITIES, List.of());
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(misaligned));
+  }
+
+  private static Stream<Arguments> invalidTypeSets() {
+    return Stream.of(
+        Arguments.of(null, Set.of("organization")),
+        Arguments.of(Set.of(), Set.of("organization")),
+        Arguments.of(Set.of(" "), Set.of("organization")),
+        Arguments.of(Set.of("person"), null),
+        Arguments.of(Set.of("person"), Set.of()),
+        Arguments.of(Set.of("person"), Set.of(" ")));
+  }
+
+  /**
+   * Neither type set may be absent, empty, or carry a blank entry, since a pronoun class
+   * without a type to resolve to could never link anything.
+   */
+  @ParameterizedTest
+  @MethodSource("invalidTypeSets")
+  void testInvalidTypeSetsAreRejected(Set<String> personTypes, Set<String> neutralTypes) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(personTypes, neutralTypes));
+  }
+
+  private static Stream<Arguments> invalidMentions() {
+    return Stream.of(
+        Arguments.of(-1, CorefMention.KIND_ENTITY, 0),
+        Arguments.of(0, null, 0),
+        Arguments.of(0, "", 0),
+        Arguments.of(0, " ", 0),
+        Arguments.of(0, CorefMention.KIND_ENTITY, -2));
+  }
+
+  /** A mention rejects a negative chain, an absent kind, and an entity below the marker. */
+  @ParameterizedTest
+  @MethodSource("invalidMentions")
+  void testInvalidMentionComponentsAreRejected(int chain, String kind, int entity) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefMention(chain, kind, entity));
+  }
+
+  private static Stream<LayerKey<String>> requiredLayers() {
+    return REQUIRED_LAYERS.stream();
+  }
+
+  /**
+   * An absent required layer is an assembly error, not an empty document: the annotator
+   * rejects the document and names the layer it misses.
+   */
+  @ParameterizedTest
+  @MethodSource("requiredLayers")
+  void testAbsentRequiredLayerIsRejected(LayerKey<String> missing) {
+    Document document = Document.of("");
+    for (final LayerKey<String> layer : REQUIRED_LAYERS) {
+      if (!layer.equals(missing)) {
+        document = document.with(layer, List.of());
+      }
+    }
+    final Document incomplete = document;
+    final IllegalArgumentException thrown = Assertions.assertThrows(
+        IllegalArgumentException.class, () -> new CorefAnnotator().annotate(incomplete));
+    Assertions.assertTrue(thrown.getMessage().contains(missing.toString()),
+        thrown.getMessage());
   }
 
   /**
@@ -735,7 +802,8 @@ public class CorefAnnotatorTest {
 
   /**
    * A document without entities or third-person pronouns gets an empty chains layer
-   * rather than an exception, and so does a document with no tokens at all.
+   * rather than an exception, and so does a document whose required layers are all
+   * present but empty.
    */
   @Test
   void testNoMentionsYieldsEmptyChainsLayer() {
@@ -748,7 +816,11 @@ public class CorefAnnotatorTest {
         .with(Layers.ENTITIES, List.of()));
     Assertions.assertTrue(document.get(CorefAnnotator.CHAINS).isEmpty());
 
-    final Document empty = new CorefAnnotator().annotate(Document.of(""));
+    Document blank = Document.of("");
+    for (final LayerKey<String> layer : REQUIRED_LAYERS) {
+      blank = blank.with(layer, List.of());
+    }
+    final Document empty = new CorefAnnotator().annotate(blank);
     Assertions.assertTrue(empty.get(CorefAnnotator.CHAINS).isEmpty());
   }
 }
