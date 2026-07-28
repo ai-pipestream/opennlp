@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -60,6 +61,7 @@ public class CursorArtifactDetectorTest {
     final String noncharacterArabicRange = cp(0xFDD0);
     final String noncharacterPlaneEnd = cp(0xFFFE);
     final String privateUseRun = cp(0xE000, 0xF8FF);
+    final String privateUseSupplementary = cp(0x100000);
     final String rightToLeftOverride = cp(0x202E);
     final String firstStrongIsolate = cp(0x2068);
     final String zeroWidthSpaceRun = cp(0x200B, 0x200B, 0x200B);
@@ -79,6 +81,8 @@ public class CursorArtifactDetectorTest {
             TextArtifact.TYPE_NONCHARACTER, noncharacterPlaneEnd),
         Arguments.of("icon font " + privateUseRun + " glyphs",
             TextArtifact.TYPE_PRIVATE_USE, privateUseRun),
+        Arguments.of("plane 16 " + privateUseSupplementary + " glyph",
+            TextArtifact.TYPE_PRIVATE_USE, privateUseSupplementary),
         Arguments.of("override " + rightToLeftOverride + "txet here",
             TextArtifact.TYPE_BIDI_CONTROL, rightToLeftOverride),
         Arguments.of("isolate " + firstStrongIsolate + "x",
@@ -137,20 +141,15 @@ public class CursorArtifactDetectorTest {
         () -> "false positive in " + label + ": <" + text + ">");
   }
 
-  /** An unpaired surrogate is reported, high and low alike. */
-  @Test
-  void testUnpairedSurrogates() {
-    final String lonelyHigh = "x" + (char) 0xD83D + "y";
-    List<TextArtifact> artifacts = detector.detect(lonelyHigh);
+  /** An unpaired surrogate is reported on its own char, high and low alike. */
+  @ParameterizedTest
+  @ValueSource(chars = {0xD83D, 0xDC69})
+  void testUnpairedSurrogates(char surrogate) {
+    final List<TextArtifact> artifacts = detector.detect("x" + surrogate + "y");
     assertEquals(1, artifacts.size());
     assertEquals(TextArtifact.TYPE_UNPAIRED_SURROGATE, artifacts.get(0).type());
     assertEquals(1, artifacts.get(0).span().getStart());
     assertEquals(2, artifacts.get(0).span().getEnd());
-
-    final String lonelyLow = "x" + (char) 0xDC69 + "y";
-    artifacts = detector.detect(lonelyLow);
-    assertEquals(1, artifacts.size());
-    assertEquals(TextArtifact.TYPE_UNPAIRED_SURROGATE, artifacts.get(0).type());
   }
 
   /** A single zero-width space between Thai letters is a line-break hint, kept. */
@@ -208,19 +207,24 @@ public class CursorArtifactDetectorTest {
   }
 
   /**
-   * An overlong encoding, a bare continuation, and an encoded surrogate all fail the
-   * strict UTF-8 test, so their carriers stay unflagged by the mojibake class.
+   * @return Texts whose single-byte image fails the strict UTF-8 test, with the reason.
    */
-  @Test
-  void testInvalidUtf8ImagesAreNotMojibake() {
-    // C0 80 is the classic overlong NUL; C0 maps from U+00C0.
-    assertEquals(List.of(),
-        detector.detect("x " + cp(0x00C0, 0x20AC) + " y"));
-    // A bare continuation byte image: U+00A9 -> A9 with no lead.
-    assertEquals(List.of(), detector.detect("copyright " + cp(0x00A9) + " sign"));
-    // ED A0 80 encodes a surrogate; ED maps from U+00ED.
-    assertEquals(List.of(),
-        detector.detect(cp(0x00ED, 0x00A0, 0x20AC)));
+  static Stream<Arguments> invalidUtf8Images() {
+    return Stream.of(
+        // C0 80 is the classic overlong NUL; C0 maps from U+00C0.
+        Arguments.of("overlong", "x " + cp(0x00C0, 0x20AC) + " y"),
+        // A bare continuation byte image: U+00A9 -> A9 with no lead.
+        Arguments.of("bare continuation", "copyright " + cp(0x00A9) + " sign"),
+        // ED A0 80 encodes a surrogate; ED maps from U+00ED.
+        Arguments.of("encoded surrogate", cp(0x00ED, 0x00A0, 0x20AC)));
+  }
+
+  /** An image that is not strictly well-formed UTF-8 leaves its carrier unflagged. */
+  @ParameterizedTest
+  @MethodSource("invalidUtf8Images")
+  void testInvalidUtf8ImagesAreNotMojibake(String label, String text) {
+    assertEquals(List.of(), detector.detect(text),
+        () -> "false positive for " + label + ": <" + text + ">");
   }
 
   @Test
