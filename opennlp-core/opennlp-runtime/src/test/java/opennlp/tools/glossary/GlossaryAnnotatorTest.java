@@ -27,11 +27,23 @@ import opennlp.tools.document.Document;
 
 public class GlossaryAnnotatorTest {
 
+  /** The single glossary entry every test in this class matches against. */
+  private static final GlossaryEntry NEW_YORK_CITY = new GlossaryEntry("Q60", "New York City");
+
+  /**
+   * Builds an annotator over a glossary holding {@link #NEW_YORK_CITY} alone.
+   *
+   * @param ignoreCase Whether the matcher matches regardless of character case.
+   * @return The annotator to exercise. Never {@code null}.
+   */
+  private GlossaryAnnotator annotator(boolean ignoreCase) {
+    return new GlossaryAnnotator(
+        new AhoCorasickGlossaryMatcher(List.of(NEW_YORK_CITY), ignoreCase));
+  }
+
   @Test
   void testProvidesGlossaryLayer() {
-    final GlossaryAnnotator annotator = new GlossaryAnnotator(
-        new AhoCorasickGlossaryMatcher(
-            List.of(new GlossaryEntry("Q60", "New York City")), true));
+    final GlossaryAnnotator annotator = annotator(true);
 
     final Document document =
         annotator.annotate(Document.of("Prices in new york city keep climbing."));
@@ -52,9 +64,7 @@ public class GlossaryAnnotatorTest {
    */
   @Test
   void testNoHitsStillProvidesEmptyGlossaryLayer() {
-    final GlossaryAnnotator annotator = new GlossaryAnnotator(
-        new AhoCorasickGlossaryMatcher(
-            List.of(new GlossaryEntry("Q60", "New York City")), false));
+    final GlossaryAnnotator annotator = annotator(false);
 
     final Document noHits = annotator.annotate(Document.of("Nothing to see here."));
     Assertions.assertTrue(noHits.layers().contains(GlossaryAnnotator.GLOSSARY));
@@ -72,9 +82,7 @@ public class GlossaryAnnotatorTest {
    */
   @Test
   void testAnnotateTwiceRejectsDuplicateGlossaryLayer() {
-    final GlossaryAnnotator annotator = new GlossaryAnnotator(
-        new AhoCorasickGlossaryMatcher(
-            List.of(new GlossaryEntry("Q60", "New York City")), false));
+    final GlossaryAnnotator annotator = annotator(false);
 
     final Document once = annotator.annotate(Document.of("New York City"));
     Assertions.assertEquals(1, once.get(GlossaryAnnotator.GLOSSARY).size());
@@ -84,8 +92,7 @@ public class GlossaryAnnotatorTest {
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new GlossaryAnnotator(null));
-    final GlossaryAnnotator annotator = new GlossaryAnnotator(
-        new AhoCorasickGlossaryMatcher(List.of(new GlossaryEntry("T", "term")), false));
+    final GlossaryAnnotator annotator = annotator(false);
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 }

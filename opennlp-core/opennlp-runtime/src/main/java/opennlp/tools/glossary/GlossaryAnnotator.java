@@ -60,6 +60,19 @@ public class GlossaryAnnotator implements DocumentAnnotator {
     this.matcher = matcher;
   }
 
+  /**
+   * Scans the document text for glossary terms and adds the {@link #GLOSSARY} layer, one
+   * annotation per hit on the hit's span.
+   *
+   * <p>No other layer is read, so a document without content yields a present-but-empty
+   * glossary layer.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #GLOSSARY} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
+   *         already carries the {@link #GLOSSARY} layer.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

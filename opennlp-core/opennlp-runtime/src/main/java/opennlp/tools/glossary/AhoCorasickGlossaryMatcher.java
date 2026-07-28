@@ -60,16 +60,19 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /** The registered entries in registration order; raw hits index into this list. */
   private final List<GlossaryEntry> entries;
 
-  /** The term length of each entry, aligned with {@link #entries} by index. */
+  /**
+   * The term length in chars of each entry, aligned with {@link #entries} by index. A hit
+   * start is the hit end minus this length, which holds only while {@link #normalize(int)}
+   * maps a code point to one of the same char count.
+   */
   private final int[] termLengths;
 
   /** Whether terms and text are compared through per-code-point lowercasing. */
   private final boolean ignoreCase;
 
   /**
-   * The goto function, frozen per state into a sorted code point array with a parallel
-   * target array, so a step on the per-character scan path is one binary search and
-   * never boxes the code point the way a map keyed by {@link Character} would.
+   * The goto function: per state, the sorted code points with an outgoing edge; the
+   * target of each edge sits in {@link #edgeTargets} at the same index.
    */
   private final int[][] edgeCodePoints;
 
@@ -115,14 +118,15 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
       termLengths[pattern] = term.length();
       int state = ROOT;
       for (int i = 0; i < term.length(); ) {
-        final int c = normalize(term.codePointAt(i));
-        i += Character.charCount(term.codePointAt(i));
-        Integer next = transitions.get(state).get(c);
+        final int codePoint = term.codePointAt(i);
+        i += Character.charCount(codePoint);
+        final int normalized = normalize(codePoint);
+        Integer next = transitions.get(state).get(normalized);
         if (next == null) {
           next = transitions.size();
           transitions.add(new HashMap<>());
           nodeOutputs.add(new ArrayList<>());
-          transitions.get(state).put(c, next);
+          transitions.get(state).put(normalized, next);
         }
         state = next;
       }
@@ -173,6 +177,13 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
     }
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>One forward pass collects every candidate, then hits that sit inside a word are
+   * dropped and the remaining overlaps are resolved leftmost first, then longest, then
+   * by registration order.</p>
+   */
   @Override
   public List<GlossaryMatch> match(CharSequence text) {
     if (text == null) {
@@ -224,7 +235,7 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
 
   /**
    * Normalizes one code point for comparison, with the per-code-point UnicodeData
-   * lowercase mapping the project's case seam defines.
+   * lowercase mapping of {@link Character#toLowerCase(int)}.
    *
    * @param codePoint The code point.
    * @return The lowercased code point when case is ignored, otherwise the code point.
@@ -243,7 +254,7 @@ public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
    * @param end The hit end, exclusive.
    * @return {@code true} if the hit sits on word boundaries.
    */
-  private static boolean onWordBoundary(CharSequence text, int start, int end) {
+  private boolean onWordBoundary(CharSequence text, int start, int end) {
     if (start > 0 && Character.isLetterOrDigit(Character.codePointAt(text, start))
         && Character.isLetterOrDigit(Character.codePointBefore(text, start))) {
       return false;

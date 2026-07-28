@@ -107,15 +107,10 @@ public class GlossaryUsageExampleTest {
    * @param expectedTerm The expected registered term of the matched entry.
    * @param expectedCovered The expected text between the span offsets.
    * @param text The original document text the span refers to. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code hit} or {@code text} is
-   *         {@code null}.
    */
-  private static void assertHit(Annotation<GlossaryMatch> hit, int expectedStart,
+  private void assertHit(Annotation<GlossaryMatch> hit, int expectedStart,
       int expectedEnd, String expectedId, String expectedTerm, String expectedCovered,
       String text) {
-    if (hit == null || text == null) {
-      throw new IllegalArgumentException("hit and text must not be null");
-    }
     Assertions.assertEquals(expectedStart, hit.span().getStart());
     Assertions.assertEquals(expectedEnd, hit.span().getEnd());
     Assertions.assertEquals(hit.span().getStart(), hit.value().span().getStart());
