@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Finite-difference gradient checks for {@link CrfScorer} forward-backward, plus a
@@ -34,7 +33,7 @@ class CrfScorerTest {
 
   private static final int TAGS = 3;
   private static final int STEPS = 4;
-  private static final double EPSILON = 1e-5d;
+  private static final double EPSILON = GradientChecks.EPSILON;
   private static final double TOLERANCE = 1e-5d;
 
   private CrfScorer scorer;
@@ -172,8 +171,6 @@ class CrfScorerTest {
   }
 
   private static void assertClose(double analytic, double numerical, String what) {
-    final double scale = Math.max(1e-3d, Math.abs(analytic) + Math.abs(numerical));
-    assertTrue(Math.abs(analytic - numerical) / scale < TOLERANCE,
-        () -> what + " analytic " + analytic + " vs numerical " + numerical);
+    GradientChecks.assertClose(analytic, numerical, TOLERANCE, what);
   }
 }

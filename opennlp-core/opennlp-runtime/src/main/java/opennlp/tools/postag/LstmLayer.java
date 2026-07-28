@@ -44,10 +44,9 @@ final class LstmLayer {
   private final double[][] u;
   private final double[] b;
 
-  // Transposed views of w and u that let backpropagation read weights row-wise
-  // instead of column-wise. Built eagerly in the constructors — lazy creation
-  // would race between concurrent training workers — and rebuilt via
-  // refreshTransposed() each time training mutates the weights.
+  // Transposed views of w and u, read by backpropagation. Built eagerly so concurrent
+  // workers never race to create them, and only valid until training mutates the
+  // weights: every mutation must be followed by refreshTransposed().
   private double[][] wT;
   private double[][] uT;
 
@@ -58,6 +57,8 @@ final class LstmLayer {
    * @param inputSize The number of input features per timestep. Must be positive.
    * @param hiddenSize The number of hidden units. Must be positive.
    * @param random The seeded source of init randomness. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if a size is not positive or
+   *         {@code random} is {@code null}.
    */
   LstmLayer(int inputSize, int hiddenSize, Random random) {
     if (inputSize <= 0 || hiddenSize <= 0) {
@@ -87,6 +88,16 @@ final class LstmLayer {
     refreshTransposed();
   }
 
+  /**
+   * Takes over already initialized weight arrays; the validating entry point is
+   * {@link #ofWeights(int, int, double[][], double[][], double[])}.
+   *
+   * @param inputSize The number of input features per timestep.
+   * @param hiddenSize The number of hidden units.
+   * @param w The input weights, shape {@code [4 * hiddenSize][inputSize]}.
+   * @param u The recurrence weights, shape {@code [4 * hiddenSize][hiddenSize]}.
+   * @param b The biases, length {@code 4 * hiddenSize}.
+   */
   private LstmLayer(int inputSize, int hiddenSize, double[][] w, double[][] u,
       double[] b) {
     this.inputSize = inputSize;
@@ -111,6 +122,8 @@ final class LstmLayer {
    *          not be {@code null}.
    * @param b The biases, length {@code 4 * hiddenSize}. Must not be {@code null}.
    * @return A layer over the given arrays. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if an array is {@code null} or its outer
+   *         length is not {@code 4 * hiddenSize}.
    */
   static LstmLayer ofWeights(int inputSize, int hiddenSize, double[][] w, double[][] u,
       double[] b) {
@@ -179,6 +192,8 @@ final class LstmLayer {
    * @param cache Receives the per-timestep gate activations for backpropagation.
    *              Must not be {@code null}; match the sequence length.
    * @return The hidden states, {@code [T][hiddenSize]}. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code xs} is {@code null} or empty, or
+   *         a row does not have {@link #inputSize()} entries.
    */
   double[][] run(double[][] xs, ForwardCache cache) {
     if (xs == null || xs.length == 0) {
@@ -279,8 +294,8 @@ final class LstmLayer {
     final double[] dCell = new double[hiddenSize];
     final double[] dHNext = new double[hiddenSize];
     final double[][] daAll = new double[steps][4 * hiddenSize];
-    // Phase 1: the t-sequential recurrence. Pointwise gate gradients are stashed
-    // per timestep so the parameter accumulation below can be restructured.
+    // Phase 1: the t-sequential recurrence. Pointwise gate gradients are kept per
+    // timestep because phase 2 walks them in a different order.
     for (int t = steps - 1; t >= 0; t--) {
       final double[] cPrev = t > 0 ? cache.c[t - 1] : null;
       final double[] da = daAll[t];
@@ -320,9 +335,8 @@ final class LstmLayer {
       }
     }
     // Phase 2: parameter gradients, blocked over gate rows so each dw/du tile stays
-    // cache resident across all timesteps instead of being re-streamed per step.
-    // Every element still accumulates its per-timestep contributions in the same
-    // (time-descending) order as before, so results are bit-identical.
+    // cache resident across all timesteps. Every element accumulates its per-timestep
+    // contributions time-descending, which is what keeps parallel training bit-exact.
     final double[][] dw = gradients.dw;
     final double[][] du = gradients.du;
     final double[] db = gradients.db;
@@ -350,6 +364,13 @@ final class LstmLayer {
     }
   }
 
+  /**
+   * The logistic sigmoid, evaluated on the side of zero that keeps
+   * {@link Math#exp(double)} from overflowing.
+   *
+   * @param x The gate pre-activation.
+   * @return The sigmoid of {@code x}, in the range {@code (0, 1)}.
+   */
   private static double sigmoid(double x) {
     if (x >= 0.0d) {
       return 1.0d / (1.0d + Math.exp(-x));
@@ -387,6 +408,7 @@ final class LstmLayer {
      * @param steps The sequence length. Must be positive.
      * @param hiddenSize The layer's hidden size. Must be positive.
      * @return A zeroed cache. Never {@code null}.
+     * @throws IllegalArgumentException Thrown if a size is not positive.
      */
     static ForwardCache of(int steps, int hiddenSize) {
       if (steps <= 0 || hiddenSize <= 0) {
@@ -444,6 +466,7 @@ final class LstmLayer {
      * @param du The recurrence-weight gradient target. Must not be {@code null}.
      * @param db The bias gradient target. Must not be {@code null}.
      * @return A holder over the given arrays. Never {@code null}.
+     * @throws IllegalArgumentException Thrown if an array is {@code null}.
      */
     static Gradients wrap(double[][] dw, double[][] du, double[] db) {
       if (dw == null || du == null || db == null) {

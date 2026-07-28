@@ -17,6 +17,7 @@
 
 package opennlp.tools.formats.conllu;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -59,47 +60,83 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Runs only when {@code opennlp.postag.ud.dir} names a directory containing
  * {@code train.conllu} and {@code test.conllu} (a UD treebank's splits, renamed or
  * linked). The data is downloaded by the runner and never enters the repository; check
- * the treebank's own license before training models for distribution. Two optional
- * properties widen the feedforward control: {@code opennlp.postag.vectors} names a
- * GloVe-format text file consulted as the pretrained vector source, and
- * {@code opennlp.postag.lexicon} names a one-word-per-line file whose words get stored
- * vectors for tagging-time coverage. Assertions are low regression floors; the logged
- * scores are the measurement.</p>
+ * the treebank's own license before training models for distribution. Assertions are
+ * low regression floors; the logged scores are the measurement.</p>
+ *
+ * <p>Optional properties: {@code opennlp.postag.vectors} names a GloVe-format text file
+ * consulted as the pretrained vector source, {@code opennlp.postag.lexicon} names a
+ * one-word-per-line file whose words get stored vectors for tagging-time coverage,
+ * {@code opennlp.postag.saveModel} names a file the trained BiLSTM model is written to,
+ * {@code opennlp.postag.bilstm.multiTask} trains the BiLSTM with auxiliary heads, and
+ * {@code opennlp.postag.bilstm.<field>} overrides any single
+ * {@link BilstmPOSTrainer.Settings} field for a sweep run.</p>
  */
 public class ConlluPOSTaggerEvalTest {
 
   private static final Logger logger =
       LoggerFactory.getLogger(ConlluPOSTaggerEvalTest.class);
 
+  private static final String UD_DIR_PROPERTY = "opennlp.postag.ud.dir";
+  private static final String VECTORS_PROPERTY = "opennlp.postag.vectors";
+  private static final String LEXICON_PROPERTY = "opennlp.postag.lexicon";
+  private static final String SAVE_MODEL_PROPERTY = "opennlp.postag.saveModel";
+
+  /** Prefix of the per-field {@link BilstmPOSTrainer.Settings} sweep overrides. */
+  private static final String BILSTM_PROPERTY_PREFIX = "opennlp.postag.bilstm.";
+
+  private static final String TRAIN_FILE = "train.conllu";
+  private static final String TEST_FILE = "test.conllu";
+
+  private static final Path RESULTS_FILE = Path.of("target", "postag-eval-results.csv");
+  private static final Path CONFUSION_FILE =
+      Path.of("target", "postag-oov-confusion.csv");
+
+  /**
+   * The UPOS accuracy every run has to clear. It sits far below any plausible result:
+   * it catches a broken tagger, and the logged score is the actual measurement.
+   */
+  private static final double ACCURACY_FLOOR = 0.85d;
+
+  /**
+   * The training count from which {@link #errorProfile} treats a word as in-vocabulary,
+   * matching {@link BilstmPOSTrainer.Settings#wordCutoff()} of the default settings.
+   */
+  private static final int IN_VOCABULARY_CUTOFF = 2;
+
+  /** The longest subword piece {@link #subwordPool} will try to match. */
+  private static final int MAX_SUBWORD_LENGTH = 60;
+
+  /** The prefix marking a non-initial subword piece in the vector table. */
+  private static final String CONTINUATION_PREFIX = "##";
+
   @Test
-  @EnabledIfSystemProperty(named = "opennlp.postag.ud.dir", matches = ".+")
+  @EnabledIfSystemProperty(named = UD_DIR_PROPERTY, matches = ".+")
   void testFeedforwardBaseline() throws IOException {
-    final Path dir = Path.of(System.getProperty("opennlp.postag.ud.dir"));
+    final Path dir = Path.of(System.getProperty(UD_DIR_PROPERTY));
 
     final long trainStart = System.currentTimeMillis();
     final FeedforwardPOSModel model;
-    try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
+    try (ObjectStream<POSSample> train = samples(dir.resolve(TRAIN_FILE))) {
       model = FeedforwardPOSTrainer.train(train, FeedforwardPOSTrainer.Settings.defaults());
     }
     logger.info("feedforward baseline trained in {} ms", System.currentTimeMillis() - trainStart);
 
-    final double accuracy = evaluate(model, dir.resolve("test.conllu"));
+    final double accuracy = evaluate(model, dir.resolve(TEST_FILE));
     logger.info("feedforward baseline UPOS accuracy {}", accuracy);
     record("ff-baseline", accuracy, "");
 
-    // a regression floor, far below any plausible result; the log line is the measurement
-    assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
+    assertTrue(accuracy > ACCURACY_FLOOR, "UPOS accuracy regressed below the floor");
   }
 
   @Test
-  @EnabledIfSystemProperty(named = "opennlp.postag.vectors", matches = ".+")
+  @EnabledIfSystemProperty(named = VECTORS_PROPERTY, matches = ".+")
   void testFeedforwardWithPretrainedVectors() throws IOException {
-    final Path dir = Path.of(System.getProperty("opennlp.postag.ud.dir"));
+    final Path dir = Path.of(System.getProperty(UD_DIR_PROPERTY));
     final Function<CharSequence, float[]> vectors = vectors(
-        Path.of(System.getProperty("opennlp.postag.vectors")));
+        Path.of(System.getProperty(VECTORS_PROPERTY)));
 
     final List<String> lexicon;
-    final String lexiconPath = System.getProperty("opennlp.postag.lexicon");
+    final String lexiconPath = System.getProperty(LEXICON_PROPERTY);
     if (lexiconPath != null && !lexiconPath.isBlank()) {
       lexicon = Files.readAllLines(Path.of(lexiconPath));
     }
@@ -109,7 +146,7 @@ public class ConlluPOSTaggerEvalTest {
 
     final long trainStart = System.currentTimeMillis();
     final FeedforwardPOSModel model;
-    try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
+    try (ObjectStream<POSSample> train = samples(dir.resolve(TRAIN_FILE))) {
       if (lexicon == null) {
         model = FeedforwardPOSTrainer.train(train,
             FeedforwardPOSTrainer.Settings.defaults(), vectors);
@@ -122,18 +159,17 @@ public class ConlluPOSTaggerEvalTest {
     logger.info("feedforward pretrained trained in {} ms",
         System.currentTimeMillis() - trainStart);
 
-    final double accuracy = evaluate(model, dir.resolve("test.conllu"));
+    final double accuracy = evaluate(model, dir.resolve(TEST_FILE));
     logger.info("feedforward pretrained UPOS accuracy {} (lexicon: {})", accuracy,
         lexicon == null ? "none" : lexicon.size() + " words");
     record("ff-pretrained" + (lexicon == null ? "" : "-lexicon"), accuracy, "");
 
-    // a regression floor, far below any plausible result; the log line is the measurement
-    assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
+    assertTrue(accuracy > ACCURACY_FLOOR, "UPOS accuracy regressed below the floor");
   }
 
   /**
-   * Appends one measurement line to {@code target/postag-eval-results.csv} so sweep
-   * results survive quiet console output.
+   * Appends one measurement line to {@link #RESULTS_FILE} so sweep results survive
+   * quiet console output.
    *
    * @param run The run label.
    * @param accuracy The measured value (UPOS accuracy, or tokens/s for throughput rows).
@@ -142,11 +178,10 @@ public class ConlluPOSTaggerEvalTest {
    */
   private static void record(String run, double accuracy, String config)
       throws IOException {
-    final Path results = Path.of("target", "postag-eval-results.csv");
-    Files.createDirectories(results.getParent());
-    Files.writeString(results,
+    Files.createDirectories(RESULTS_FILE.getParent());
+    Files.writeString(RESULTS_FILE,
         run + "," + accuracy + "," + config + "\n", StandardCharsets.UTF_8,
-        Files.exists(results) ? StandardOpenOption.APPEND : StandardOpenOption.CREATE);
+        Files.exists(RESULTS_FILE) ? StandardOpenOption.APPEND : StandardOpenOption.CREATE);
   }
 
   /**
@@ -183,6 +218,13 @@ public class ConlluPOSTaggerEvalTest {
         booleanProperty("pretrainedAdapter", base.pretrainedAdapter()));
   }
 
+  /**
+   * Renders the settings as the compact configuration label the results file carries,
+   * so a sweep row can be traced back to the run that produced it.
+   *
+   * @param s The settings of the run.
+   * @return The label. Never {@code null}.
+   */
   private static String bilstmLabel(BilstmPOSTrainer.Settings s) {
     return "h" + s.hiddenSize() + ";e" + s.epochs() + ";b" + s.batchSize() + ";lr"
         + s.learningRate() + ";d" + s.dropout() + ";seed" + s.seed() + ";t" + s.threads()
@@ -194,65 +236,95 @@ public class ConlluPOSTaggerEvalTest {
         + (multiTask() ? ";mt" : "");
   }
 
+  /**
+   * @return {@code true} when the BiLSTM run should train with the auxiliary heads.
+   */
   private static boolean multiTask() {
     return Boolean.parseBoolean(
-        System.getProperty("opennlp.postag.bilstm.multiTask", "false"));
+        System.getProperty(BILSTM_PROPERTY_PREFIX + "multiTask", "false"));
   }
 
+  /**
+   * Reads one {@link #BILSTM_PROPERTY_PREFIX} override.
+   *
+   * @param name The settings field name.
+   * @param fallback The value to use when the property is unset.
+   * @return The override, or {@code fallback}.
+   */
   private static int intProperty(String name, int fallback) {
-    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    final String value = System.getProperty(BILSTM_PROPERTY_PREFIX + name);
     return value != null ? Integer.parseInt(value) : fallback;
   }
 
+  /**
+   * Reads one {@link #BILSTM_PROPERTY_PREFIX} override.
+   *
+   * @param name The settings field name.
+   * @param fallback The value to use when the property is unset.
+   * @return The override, or {@code fallback}.
+   */
   private static long longProperty(String name, long fallback) {
-    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    final String value = System.getProperty(BILSTM_PROPERTY_PREFIX + name);
     return value != null ? Long.parseLong(value) : fallback;
   }
 
+  /**
+   * Reads one {@link #BILSTM_PROPERTY_PREFIX} override.
+   *
+   * @param name The settings field name.
+   * @param fallback The value to use when the property is unset.
+   * @return The override, or {@code fallback}.
+   */
   private static double doubleProperty(String name, double fallback) {
-    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    final String value = System.getProperty(BILSTM_PROPERTY_PREFIX + name);
     return value != null ? Double.parseDouble(value) : fallback;
   }
 
+  /**
+   * Reads one {@link #BILSTM_PROPERTY_PREFIX} override.
+   *
+   * @param name The settings field name.
+   * @param fallback The value to use when the property is unset.
+   * @return The override, or {@code fallback}.
+   */
   private static boolean booleanProperty(String name, boolean fallback) {
-    final String value = System.getProperty("opennlp.postag.bilstm." + name);
+    final String value = System.getProperty(BILSTM_PROPERTY_PREFIX + name);
     return value != null ? Boolean.parseBoolean(value) : fallback;
   }
 
   @Test
-  @EnabledIfSystemProperty(named = "opennlp.postag.ud.dir", matches = ".+")
+  @EnabledIfSystemProperty(named = UD_DIR_PROPERTY, matches = ".+")
   void testBilstmBaseline() throws IOException {
-    final Path dir = Path.of(System.getProperty("opennlp.postag.ud.dir"));
+    final Path dir = Path.of(System.getProperty(UD_DIR_PROPERTY));
 
     final long trainStart = System.currentTimeMillis();
     final BilstmPOSModel model;
     final BilstmPOSTrainer.Settings settings = bilstmSettings();
-    try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
+    try (ObjectStream<POSSample> train = samples(dir.resolve(TRAIN_FILE))) {
       model = BilstmPOSTrainer.train(train, settings);
     }
     logger.info("bilstm baseline trained in {} ms", System.currentTimeMillis() - trainStart);
 
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
-    final double accuracy = evaluate(tagger, dir.resolve("test.conllu"));
-    final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
+    final double accuracy = evaluate(tagger, dir.resolve(TEST_FILE));
+    final double throughput = measureThroughput(tagger, dir.resolve(TEST_FILE));
     logger.info("bilstm baseline UPOS accuracy {}, throughput {} tokens/s", accuracy,
         throughput);
     record("bilstm-baseline", accuracy, bilstmLabel(settings));
     record("bilstm-baseline-tokens-per-s", throughput, bilstmLabel(settings));
 
-    // a regression floor, far below any plausible result; the log line is the measurement
-    assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
+    assertTrue(accuracy > ACCURACY_FLOOR, "UPOS accuracy regressed below the floor");
   }
 
   @Test
-  @EnabledIfSystemProperty(named = "opennlp.postag.vectors", matches = ".+")
+  @EnabledIfSystemProperty(named = VECTORS_PROPERTY, matches = ".+")
   void testBilstmWithPretrainedVectors() throws IOException {
-    final Path dir = Path.of(System.getProperty("opennlp.postag.ud.dir"));
+    final Path dir = Path.of(System.getProperty(UD_DIR_PROPERTY));
     final Function<CharSequence, float[]> vectors = vectors(
-        Path.of(System.getProperty("opennlp.postag.vectors")));
+        Path.of(System.getProperty(VECTORS_PROPERTY)));
 
     final List<String> lexicon;
-    final String lexiconPath = System.getProperty("opennlp.postag.lexicon");
+    final String lexiconPath = System.getProperty(LEXICON_PROPERTY);
     if (lexiconPath != null && !lexiconPath.isBlank()) {
       lexicon = Files.readAllLines(Path.of(lexiconPath));
     }
@@ -265,12 +337,12 @@ public class ConlluPOSTaggerEvalTest {
     final BilstmPOSTrainer.Settings settings = bilstmSettings();
     if (multiTask()) {
       try (ObjectStream<BilstmPOSTrainer.MultiTaskSample> train =
-          new MultiTaskSampleStream(dir.resolve("train.conllu"))) {
+          new MultiTaskSampleStream(dir.resolve(TRAIN_FILE))) {
         model = BilstmPOSTrainer.trainMultiTask(train, settings, vectors, lexicon);
       }
     }
     else {
-      try (ObjectStream<POSSample> train = samples(dir.resolve("train.conllu"))) {
+      try (ObjectStream<POSSample> train = samples(dir.resolve(TRAIN_FILE))) {
         if (lexicon == null) {
           model = BilstmPOSTrainer.train(train, settings, vectors);
         }
@@ -282,10 +354,10 @@ public class ConlluPOSTaggerEvalTest {
     logger.info("bilstm pretrained trained in {} ms", System.currentTimeMillis() - trainStart);
 
     final BilstmPOSTagger tagger = new BilstmPOSTagger(model);
-    final double accuracy = evaluate(tagger, dir.resolve("test.conllu"));
-    final double throughput = measureThroughput(tagger, dir.resolve("test.conllu"));
-    final double[] profile = errorProfile(tagger, dir.resolve("train.conllu"),
-        dir.resolve("test.conllu"), vectors, lexicon);
+    final double accuracy = evaluate(tagger, dir.resolve(TEST_FILE));
+    final double throughput = measureThroughput(tagger, dir.resolve(TEST_FILE));
+    final double[] profile = errorProfile(tagger, dir.resolve(TRAIN_FILE),
+        dir.resolve(TEST_FILE), vectors, lexicon);
     logger.info("bilstm pretrained UPOS accuracy {} (lexicon: {}), throughput {} tokens/s",
         accuracy, lexicon == null ? "none" : lexicon.size() + " words", throughput);
     logger.info("bilstm pretrained IV {} OOV {} (vector-covered OOV {}, uncovered OOV {})",
@@ -299,16 +371,22 @@ public class ConlluPOSTaggerEvalTest {
     record(runLabel + "-oov-vec-acc", profile[2], config);
     record(runLabel + "-oov-novec-acc", profile[3], config);
 
-    final String saveModel = System.getProperty("opennlp.postag.saveModel");
+    final String saveModel = System.getProperty(SAVE_MODEL_PROPERTY);
     if (saveModel != null && !saveModel.isBlank()) {
       model.serialize(Path.of(saveModel));
       logger.info("model written to {}", saveModel);
     }
 
-    // a regression floor, far below any plausible result; the log line is the measurement
-    assertTrue(accuracy > 0.85d, "UPOS accuracy regressed below the floor");
+    assertTrue(accuracy > ACCURACY_FLOOR, "UPOS accuracy regressed below the floor");
   }
 
+  /**
+   * Opens a CoNLL-U file as a stream of word-based POS samples.
+   *
+   * @param conllu The CoNLL-U file.
+   * @return The sample stream; the caller closes it. Never {@code null}.
+   * @throws IOException Thrown if the file cannot be opened.
+   */
   private static ObjectStream<POSSample> samples(Path conllu) throws IOException {
     return new WordBasedPOSSampleStream(conllu);
   }
@@ -323,8 +401,9 @@ public class ConlluPOSTaggerEvalTest {
    */
   private static final class WordBasedPOSSampleStream implements ObjectStream<POSSample> {
 
-    private final java.io.BufferedReader reader;
+    private final BufferedReader reader;
     private final List<POSSample> pending = new ArrayList<>();
+    private int next;
     private boolean loaded;
 
     private WordBasedPOSSampleStream(Path conllu) throws IOException {
@@ -337,7 +416,7 @@ public class ConlluPOSTaggerEvalTest {
         load();
         loaded = true;
       }
-      return pending.isEmpty() ? null : pending.remove(0);
+      return next < pending.size() ? pending.get(next++) : null;
     }
 
     private void load() throws IOException {
@@ -390,8 +469,9 @@ public class ConlluPOSTaggerEvalTest {
   private static final class MultiTaskSampleStream
       implements ObjectStream<BilstmPOSTrainer.MultiTaskSample> {
 
-    private final java.io.BufferedReader reader;
+    private final BufferedReader reader;
     private final List<BilstmPOSTrainer.MultiTaskSample> pending = new ArrayList<>();
+    private int next;
     private boolean loaded;
 
     private MultiTaskSampleStream(Path conllu) throws IOException {
@@ -404,7 +484,7 @@ public class ConlluPOSTaggerEvalTest {
         load();
         loaded = true;
       }
-      return pending.isEmpty() ? null : pending.remove(0);
+      return next < pending.size() ? pending.get(next++) : null;
     }
 
     private void load() throws IOException {
@@ -457,11 +537,27 @@ public class ConlluPOSTaggerEvalTest {
     }
   }
 
+  /**
+   * Scores a feedforward model on a test split.
+   *
+   * @param model The model to wrap in a tagger and score.
+   * @param testConllu The test split.
+   * @return The UPOS word accuracy.
+   * @throws IOException Thrown if the split cannot be read.
+   */
   private static double evaluate(FeedforwardPOSModel model, Path testConllu)
       throws IOException {
     return evaluate(new FeedforwardPOSTagger(model), testConllu);
   }
 
+  /**
+   * Scores a tagger on a test split.
+   *
+   * @param tagger The tagger to score.
+   * @param testConllu The test split.
+   * @return The UPOS word accuracy.
+   * @throws IOException Thrown if the split cannot be read.
+   */
   private static double evaluate(POSTagger tagger, Path testConllu)
       throws IOException {
     final POSEvaluator evaluator = new POSEvaluator(tagger);
@@ -472,8 +568,13 @@ public class ConlluPOSTaggerEvalTest {
   }
 
   /**
-   * Times the tagger over the whole test split in one pass, warm representation
-   * cache included, and returns tokens per second.
+   * Times the tagger over the whole test split in one pass, warm representation cache
+   * included.
+   *
+   * @param tagger The tagger to time.
+   * @param testConllu The test split.
+   * @return The tagging rate in tokens per second.
+   * @throws IOException Thrown if the split cannot be read.
    */
   private static double measureThroughput(POSTagger tagger, Path testConllu)
       throws IOException {
@@ -495,13 +596,21 @@ public class ConlluPOSTaggerEvalTest {
 
   /**
    * Splits tagging accuracy into in-vocabulary and out-of-vocabulary tokens against
-   * the training vocabulary (cutoff 2, normalized like the tagger does), and further
+   * the training vocabulary ({@link #IN_VOCABULARY_CUTOFF}, normalized like the tagger
+   * does), and further
    * splits OOV by whether the token resolves a stored pretrained vector, the error
    * profile that drives sweep decisions. Also writes the OOV gold-to-predicted
-   * confusion counts to {@code target/postag-oov-confusion.csv}.
+   * confusion counts to {@link #CONFUSION_FILE}.
    *
+   * @param tagger The tagger to profile.
+   * @param trainConllu The training split the vocabulary is taken from.
+   * @param testConllu The test split the tagger is measured on.
+   * @param vectors The word vector source, or {@code null} when none was used.
+   * @param lexicon The additional stored-vector words, or {@code null} for none.
    * @return {IV accuracy, OOV accuracy, vector-covered OOV accuracy, uncovered OOV
    *         accuracy}; empty splits come back as 1.0.
+   * @throws IOException Thrown if a split or the confusion file cannot be read or
+   *         written.
    */
   private static double[] errorProfile(POSTagger tagger, Path trainConllu,
       Path testConllu, Function<CharSequence, float[]> vectors,
@@ -517,7 +626,7 @@ public class ConlluPOSTaggerEvalTest {
     }
     final Set<String> vocabulary = new HashSet<>();
     for (final Map.Entry<String, Integer> entry : counts.entrySet()) {
-      if (entry.getValue() >= 2) {
+      if (entry.getValue() >= IN_VOCABULARY_CUTOFF) {
         vocabulary.add(entry.getKey());
       }
     }
@@ -553,7 +662,8 @@ public class ConlluPOSTaggerEvalTest {
         final String[] gold = sample.getTags();
         for (int i = 0; i < gold.length; i++) {
           final boolean correct = assigned[i].equals(gold[i]);
-          if (vocabulary.contains(BilstmPOSModel.normalize(sample.getSentence()[i]))) {
+          final String normalized = BilstmPOSModel.normalize(sample.getSentence()[i]);
+          if (vocabulary.contains(normalized)) {
             ivTotal++;
             if (correct) {
               ivCorrect++;
@@ -564,7 +674,7 @@ public class ConlluPOSTaggerEvalTest {
             if (correct) {
               oovCorrect++;
             }
-            if (vectorWords.contains(BilstmPOSModel.normalize(sample.getSentence()[i]))) {
+            if (vectorWords.contains(normalized)) {
               vecTotal++;
               if (correct) {
                 vecCorrect++;
@@ -589,9 +699,8 @@ public class ConlluPOSTaggerEvalTest {
     for (final Map.Entry<String, Integer> entry : sorted) {
       out.append(entry.getKey()).append(',').append(entry.getValue()).append('\n');
     }
-    Files.writeString(Path.of("target", "postag-oov-confusion.csv"), out.toString(),
-        StandardCharsets.UTF_8);
-    return new double[] {(double) ivCorrect / ivTotal,
+    Files.writeString(CONFUSION_FILE, out.toString(), StandardCharsets.UTF_8);
+    return new double[] {ivTotal > 0 ? (double) ivCorrect / ivTotal : 1.0d,
         oovTotal > 0 ? (double) oovCorrect / oovTotal : 1.0d,
         vecTotal > 0 ? (double) vecCorrect / vecTotal : 1.0d,
         noVecTotal > 0 ? (double) noVecCorrect / noVecTotal : 1.0d};
@@ -643,30 +752,45 @@ public class ConlluPOSTaggerEvalTest {
     };
   }
 
+  /**
+   * Pools a word the table has no row for out of its subword pieces, matching greedily
+   * from the left and taking the longest piece the table knows at every position. All
+   * but the first piece are looked up with the {@link #CONTINUATION_PREFIX}.
+   *
+   * @param table The vector table.
+   * @param word The word to segment.
+   * @return The mean of the piece vectors, or {@code null} when the word cannot be
+   *         segmented.
+   */
   private static float[] subwordPool(WordVectorTable table, String word) {
     final float[] sum = new float[table.dimension()];
+    final StringBuilder piece = new StringBuilder();
     int count = 0;
     int start = 0;
     while (start < word.length()) {
-      String match = null;
-      final int longest = Math.min(word.length(), start + 60);
+      final int prefixLength = start == 0 ? 0 : CONTINUATION_PREFIX.length();
+      final int longest = Math.min(word.length(), start + MAX_SUBWORD_LENGTH);
+      piece.setLength(0);
+      if (start > 0) {
+        piece.append(CONTINUATION_PREFIX);
+      }
+      piece.append(word, start, longest);
+      WordVector vector = null;
       for (int end = longest; end > start; end--) {
-        final String piece =
-            (start == 0 ? "" : "##") + word.substring(start, end);
-        if (table.get(piece) != null) {
-          match = piece;
+        vector = table.get(piece.toString());
+        if (vector != null) {
           break;
         }
+        piece.setLength(piece.length() - 1);
       }
-      if (match == null) {
+      if (vector == null) {
         return null;
       }
-      final WordVector vector = table.get(match);
       for (int i = 0; i < sum.length; i++) {
         sum[i] += vector.getAsFloat(i);
       }
       count++;
-      start += match.length() - (start == 0 ? 0 : 2);
+      start += piece.length() - prefixLength;
     }
     for (int i = 0; i < sum.length; i++) {
       sum[i] /= count;

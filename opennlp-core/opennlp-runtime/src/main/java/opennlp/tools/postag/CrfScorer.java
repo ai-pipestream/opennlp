@@ -21,15 +21,19 @@ package opennlp.tools.postag;
  * A first-order linear-chain CRF over tag emissions: learned transition, start, and
  * end scores, the forward-backward algorithm for the negative log-likelihood and its
  * gradients, and Viterbi for decoding. All arithmetic runs in {@code double} with
- * max-shifted log-sum-exp, matching the precision discipline of {@link LstmLayer};
- * instances are stateless and thread-safe.
+ * max-shifted log-sum-exp, so no term of a sum can overflow. An instance holds only the
+ * tag count and every method works on caller-owned arrays, so one instance can be shared
+ * between threads.
  */
 final class CrfScorer {
 
   private final int tagCount;
 
   /**
+   * Initializes a scorer over a fixed tag inventory.
+   *
    * @param tagCount The number of tags. Must be positive.
+   * @throws IllegalArgumentException Thrown if {@code tagCount} is not positive.
    */
   CrfScorer(int tagCount) {
     if (tagCount <= 0) {
@@ -183,6 +187,15 @@ final class CrfScorer {
     return path;
   }
 
+  /**
+   * Runs the forward recursion, {@code alpha[t][k]} being the log sum of the scores of
+   * every prefix ending in tag {@code k} at position {@code t}.
+   *
+   * @param emissions The per-position emission scores.
+   * @param transitions The transition scores.
+   * @param start The start scores.
+   * @return The forward scores, {@code [T][tagCount]}. Never {@code null}.
+   */
   private double[][] forward(double[][] emissions, double[][] transitions,
       double[] start) {
     final int steps = emissions.length;
@@ -206,6 +219,16 @@ final class CrfScorer {
     return alpha;
   }
 
+  /**
+   * Runs the backward recursion, {@code beta[t][j]} being the log sum of the scores of
+   * every suffix starting after tag {@code j} at position {@code t}, the end score
+   * included.
+   *
+   * @param emissions The per-position emission scores.
+   * @param transitions The transition scores.
+   * @param end The end scores.
+   * @return The backward scores, {@code [T][tagCount]}. Never {@code null}.
+   */
   private double[][] backward(double[][] emissions, double[][] transitions,
       double[] end) {
     final int steps = emissions.length;
@@ -227,6 +250,14 @@ final class CrfScorer {
     return beta;
   }
 
+  /**
+   * Adds the end scores onto the last forward column, the terms whose log-sum-exp is
+   * the partition function.
+   *
+   * @param forward The forward scores.
+   * @param end The end scores.
+   * @return One logit per tag. Never {@code null}.
+   */
   private double[] lastColumnLogits(double[][] forward, double[] end) {
     final double[] logits = new double[tagCount];
     final int last = forward.length - 1;
@@ -236,6 +267,13 @@ final class CrfScorer {
     return logits;
   }
 
+  /**
+   * Sums values in the log domain, shifted by the largest of them so that no term of
+   * the sum can overflow.
+   *
+   * @param values The log-domain values. Must not be empty.
+   * @return The log of the sum of the exponentials of {@code values}.
+   */
   private static double logSumExp(double[] values) {
     double max = Double.NEGATIVE_INFINITY;
     for (final double value : values) {

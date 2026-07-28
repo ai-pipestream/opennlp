@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Finite-difference gradient checks for {@link LstmLayer}: the analytic
@@ -37,7 +36,7 @@ class LstmLayerGradientTest {
   private static final int INPUT_SIZE = 3;
   private static final int HIDDEN_SIZE = 4;
   private static final int STEPS = 5;
-  private static final double EPSILON = 1e-5d;
+  private static final double EPSILON = GradientChecks.EPSILON;
   private static final double TOLERANCE = 1e-6d;
 
   private final Random random = new Random(42L);
@@ -210,8 +209,6 @@ class LstmLayerGradientTest {
   }
 
   private static void assertClose(double analytic, double numerical, String what) {
-    final double scale = Math.max(1e-3d, Math.abs(analytic) + Math.abs(numerical));
-    assertTrue(Math.abs(analytic - numerical) / scale < TOLERANCE,
-        () -> what + " analytic " + analytic + " vs numerical " + numerical);
+    GradientChecks.assertClose(analytic, numerical, TOLERANCE, what);
   }
 }
