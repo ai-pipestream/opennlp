@@ -94,6 +94,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
 
   private static final Set<String> ISO_COUNTRIES = Set.of(Locale.getISOCountries());
 
+  private static final int FIRST_REGIONAL_INDICATOR = 0x1F1E6;
+  private static final int LAST_REGIONAL_INDICATOR = 0x1F1FF;
+
   private final Set<String> locationTypes;
 
   /**
@@ -209,9 +212,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     while (i < text.length()) {
       final int first = Character.codePointAt(text, i);
       final int width = Character.charCount(first);
-      if (EmojiFlags.isRegionalIndicator(first) && i + width < text.length()) {
+      if (isRegionalIndicator(first) && i + width < text.length()) {
         final int second = Character.codePointAt(text, i + width);
-        if (EmojiFlags.isRegionalIndicator(second)) {
+        if (isRegionalIndicator(second)) {
           final int end = i + width + Character.charCount(second);
           final String code = EmojiFlags.isoRegion(text.subSequence(i, end)).orElse(null);
           if (code != null && ISO_COUNTRIES.contains(code)) {
@@ -223,6 +226,18 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       }
       i += width;
     }
+  }
+
+  /**
+   * Determines whether a code point is a regional indicator symbol, the building block
+   * of a flag emoji. Kept local because the equivalent check in {@code EmojiFlags} is
+   * private to the decoder there.
+   *
+   * @param codePoint The code point to examine.
+   * @return {@code true} if the code point is a regional indicator symbol.
+   */
+  private static boolean isRegionalIndicator(int codePoint) {
+    return codePoint >= FIRST_REGIONAL_INDICATOR && codePoint <= LAST_REGIONAL_INDICATOR;
   }
 
   /**
