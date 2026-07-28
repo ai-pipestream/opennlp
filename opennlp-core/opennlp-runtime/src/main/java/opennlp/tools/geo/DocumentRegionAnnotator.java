@@ -44,10 +44,10 @@ import opennlp.tools.util.normalizer.EmojiFlags;
  * location entity resolved by the {@link GeocodeAnnotator} votes for its entry's country
  * weighted by the resolution confidence, so a coherence-aware geocoder makes the ballot
  * sharper. A country flag emoji anywhere in the text, a regional indicator pair naming an
- * assigned ISO 3166-1 code, votes for its country and needs no entity layer support at
- * all; subdivision tag-sequence flags name no country and cast no vote. Mentions with no
- * kind of evidence do not vote; a document without usable evidence gets an empty
- * layer.</p>
+ * assigned <a href="https://www.iso.org/iso-3166-country-codes.html">ISO 3166-1</a> code,
+ * votes for its country and needs no entity layer support at all; subdivision tag-sequence
+ * flags name no country and cast no vote. Mentions with no kind of evidence do not vote; a
+ * document without usable evidence gets an empty layer.</p>
  *
  * <p>Country-name evidence takes precedence over a gazetteer resolution for the same
  * mention: an entity spelled exactly like a country is direct evidence for that country,
@@ -209,9 +209,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     while (i < text.length()) {
       final int first = Character.codePointAt(text, i);
       final int width = Character.charCount(first);
-      if (isRegionalIndicator(first) && i + width < text.length()) {
+      if (EmojiFlags.isRegionalIndicator(first) && i + width < text.length()) {
         final int second = Character.codePointAt(text, i + width);
-        if (isRegionalIndicator(second)) {
+        if (EmojiFlags.isRegionalIndicator(second)) {
           final int end = i + width + Character.charCount(second);
           final String code = EmojiFlags.isoRegion(text.subSequence(i, end)).orElse(null);
           if (code != null && ISO_COUNTRIES.contains(code)) {
@@ -226,14 +226,6 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * {@return whether {@code codePoint} is a REGIONAL INDICATOR SYMBOL LETTER (A..Z)} The pair
-   * segmentation above needs the raw block check, which {@link EmojiFlags} does not expose.
-   */
-  private static boolean isRegionalIndicator(int codePoint) {
-    return codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF;
-  }
-
-  /**
    * Turns the weight sums into the ranked ballot: each country's share is its weight
    * over the total, and rows are ordered by descending share with ties broken by
    * ascending country code so the ranking is deterministic. The rows carry no spans,
@@ -245,7 +237,6 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * rather than a set of undefined shares.</p>
    *
    * @param weights The weight sums by country code.
-   * @param length The document text length, defining the whole-document span.
    * @return The ballot annotations in rank order. Never {@code null}; empty when no
    *         country has evidence.
    */
