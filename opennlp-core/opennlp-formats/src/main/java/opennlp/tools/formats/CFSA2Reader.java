@@ -25,20 +25,19 @@ import java.util.function.Consumer;
 /**
  * Reads a CFSA2 finite-state automaton and enumerates the byte sequences it accepts.
  *
- * <p>CFSA2 is the compact automaton format defined by the morfologik project (BSD); the
- * {@code .dict} files distributed for many languages are CFSA2 automata paired with a plain
- * {@code .info} metadata file. This is a clean-room reader written from the published format,
- * with no dependency on that library. It exposes the raw accepted byte sequences; interpreting
- * them as morphological entries (surface form, separator, encoded base form, separator, tag) is
- * left to the caller, which also owns the character encoding declared by the dictionary.</p>
+ * <p>CFSA2 is the compact automaton format defined by the morfologik project; the {@code .dict}
+ * files distributed for many languages are CFSA2 automata paired with a plain {@code .info}
+ * metadata file. This reader is written from the published format and adds no third-party
+ * dependency. It exposes the raw accepted byte sequences; interpreting them as morphological
+ * entries (surface form, separator, encoded base form, separator, tag) is left to the caller,
+ * which also owns the character encoding declared by the dictionary.</p>
  *
- * <p>Thread safety is implementation specific; a constructed instance holds only immutable state
- * and its {@link #forEachSequence(Consumer)} may be called concurrently.</p>
+ * <p>Instances hold only immutable state, so {@link #forEachSequence(Consumer)} may be called
+ * concurrently.</p>
  */
 public final class CFSA2Reader implements FsaSequenceReader {
 
-  private static final byte VERSION = (byte) 0xc6;
-
+  /** Set in the header flags when every node is prefixed with a variable-length entry count. */
   private static final int FLAG_NUMBERS = 0x0100;
 
   private static final int BIT_TARGET_NEXT = 0x80;
@@ -81,13 +80,21 @@ public final class CFSA2Reader implements FsaSequenceReader {
     return fromBytes(in.readAllBytes());
   }
 
+  /**
+   * Reads a CFSA2 automaton from bytes already in memory.
+   *
+   * @param bytes The whole automaton, magic header included.
+   * @return A reader over the automaton.
+   * @throws IOException Thrown if {@code bytes} is not a CFSA2 automaton or its header is
+   *                     truncated.
+   */
   static CFSA2Reader fromBytes(byte[] bytes) throws IOException {
     if (bytes.length < HEADER_SIZE
         || bytes[0] != MAGIC[0] || bytes[1] != MAGIC[1]
         || bytes[2] != MAGIC[2] || bytes[3] != MAGIC[3]) {
       throw new IOException("not an FSA automaton: bad magic header");
     }
-    if (bytes[4] != VERSION) {
+    if ((bytes[4] & 0xff) != VERSION_CFSA2) {
       throw new IOException("unsupported FSA version 0x"
           + Integer.toHexString(bytes[4] & 0xff) + "; only CFSA2 (0xc6) is read");
     }
@@ -103,11 +110,10 @@ public final class CFSA2Reader implements FsaSequenceReader {
   }
 
   /**
-   * Passes every byte sequence the automaton accepts to {@code action}, in stored (lexicographic)
-   * order. Each sequence is a fresh array owned by the callee.
+   * {@inheritDoc}
    *
-   * @param action The action to run for each accepted sequence. Must not be {@code null}.
-   * @throws IllegalArgumentException if {@code action} is {@code null}.
+   * <p>Sequences are produced in the automaton's stored, lexicographic order.</p>
+   *
    * @throws IllegalStateException if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes, which
    *                               indicates a malformed automaton.
    */
@@ -119,6 +125,14 @@ public final class CFSA2Reader implements FsaSequenceReader {
     enumerate(rootNode, new GrowableByteSequence(), action);
   }
 
+  /**
+   * Walks every arc reachable from {@code node} depth first, reporting each accepting path.
+   *
+   * @param node   The offset of the node to descend into.
+   * @param path   The labels collected on the way down; pushed and popped in place.
+   * @param action The action to run for each accepted sequence.
+   * @throws IllegalStateException if the path grows past {@value #MAX_SEQUENCE_LENGTH} bytes.
+   */
   private void enumerate(int node, GrowableByteSequence path, Consumer<byte[]> action) {
     if (path.length() > MAX_SEQUENCE_LENGTH) {
       throw new IllegalStateException(
@@ -137,19 +151,39 @@ public final class CFSA2Reader implements FsaSequenceReader {
     }
   }
 
+  /**
+   * @param node The offset of a node.
+   * @return The offset of that node's first arc, skipping the entry count if the automaton
+   *         carries one.
+   */
   private int firstArc(int node) {
     return hasNumbers ? skipVInt(node) : node;
   }
 
+  /**
+   * @param arc The offset of an arc.
+   * @return The offset of the following arc of the same node, or {@value #NO_ARC} if {@code arc}
+   *         is the last one.
+   */
   private int nextArc(int arc) {
     return (arcs[arc] & BIT_LAST_ARC) != 0 ? NO_ARC : skipArc(arc);
   }
 
+  /**
+   * @param arc The offset of an arc.
+   * @return The arc's label, taken from the header's label table when the flags byte indexes it,
+   *         otherwise stored inline after the flags byte.
+   */
   private byte arcLabel(int arc) {
     final int index = arcs[arc] & LABEL_INDEX_MASK;
     return index > 0 ? labelMapping[index] : arcs[arc + 1];
   }
 
+  /**
+   * @param arc The offset of an arc.
+   * @return The offset of the node the arc points at, which is either the node laid out directly
+   *         after the arc's own node or an explicit variable-length address.
+   */
   private int destinationNode(int arc) {
     if ((arcs[arc] & BIT_TARGET_NEXT) != 0) {
       int last = arc;
@@ -161,6 +195,10 @@ public final class CFSA2Reader implements FsaSequenceReader {
     return readVInt(arc + ((arcs[arc] & LABEL_INDEX_MASK) == 0 ? 2 : 1));
   }
 
+  /**
+   * @param offset The offset of an arc.
+   * @return The offset just past that arc, that is, the start of whatever follows it.
+   */
   private int skipArc(int offset) {
     final int flag = arcs[offset++];
     if ((flag & LABEL_INDEX_MASK) == 0) {
@@ -172,6 +210,13 @@ public final class CFSA2Reader implements FsaSequenceReader {
     return offset;
   }
 
+  /**
+   * Reads the variable-length integer starting at {@code offset}: seven value bits per byte,
+   * least significant group first, with the high bit set on every byte but the last.
+   *
+   * @param offset The offset of the first byte of the integer.
+   * @return The decoded value.
+   */
   private int readVInt(int offset) {
     byte b = arcs[offset];
     int value = b & 0x7f;
@@ -182,6 +227,10 @@ public final class CFSA2Reader implements FsaSequenceReader {
     return value;
   }
 
+  /**
+   * @param offset The offset of the first byte of a variable-length integer.
+   * @return The offset just past that integer.
+   */
   private int skipVInt(int offset) {
     while (arcs[offset] < 0) {
       offset++;
