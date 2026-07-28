@@ -18,6 +18,7 @@
 package opennlp.tools.assets;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.stream.Stream;
@@ -82,13 +83,13 @@ public class CursorAssetDetectorTest {
   /**
    * Builds a RIFF prefix.
    *
-   * @param kind The four-character form type, {@code WEBP} or {@code WAVE}.
+   * @param kind The four-character form type, for example {@code WEBP}.
    * @return The leading bytes of a RIFF file.
    */
   private static byte[] riff(String kind) {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     out.writeBytes(new byte[] {'R', 'I', 'F', 'F', 100, 0, 0, 0});
-    out.writeBytes(kind.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    out.writeBytes(kind.getBytes(StandardCharsets.US_ASCII));
     out.writeBytes(new byte[20]);
     return out.toByteArray();
   }
@@ -107,6 +108,16 @@ public class CursorAssetDetectorTest {
       out.writeBytes(new byte[30 - out.size()]);
     }
     return out.toByteArray();
+  }
+
+  /**
+   * Surrounds a run with plain words, so it has a text boundary on either side.
+   *
+   * @param run The run to embed.
+   * @return The run with surrounding text.
+   */
+  private static String embed(String run) {
+    return "x " + run + " y";
   }
 
   @Test
@@ -143,9 +154,9 @@ public class CursorAssetDetectorTest {
   @Test
   void testDataUriWithUnknownHeaderKeepsTheDeclaredFormat() {
     final byte[] bytes = "just some plain bytes padded out".getBytes(
-        java.nio.charset.StandardCharsets.US_ASCII);
+        StandardCharsets.US_ASCII);
     final String uri = "data:text/plain;base64," + Base64.getEncoder().encodeToString(bytes);
-    final List<EmbeddedAsset> assets = detector.detect("x " + uri + " y");
+    final List<EmbeddedAsset> assets = detector.detect(embed(uri));
     assertEquals(1, assets.size());
     assertEquals("plain", assets.get(0).format());
     assertEquals("text/plain", assets.get(0).mediaType());
@@ -161,7 +172,7 @@ public class CursorAssetDetectorTest {
     final String avi = Base64.getEncoder().encodeToString(riff("AVI "));
     final String pdf = Base64.getEncoder().encodeToString(
         padded("%PDF-1.7 stub content".getBytes(
-            java.nio.charset.StandardCharsets.US_ASCII)));
+            StandardCharsets.US_ASCII)));
     final String zip = Base64.getEncoder().encodeToString(
         padded(new byte[] {'P', 'K', 3, 4}));
     final String text = String.join("\n", gif, jpeg, webp, wave, avi, pdf, zip);
@@ -188,7 +199,7 @@ public class CursorAssetDetectorTest {
    */
   private static Stream<Arguments> knownFormatHeaders() {
     final ByteArrayOutputStream sqlite = new ByteArrayOutputStream();
-    sqlite.writeBytes("SQLite format 3".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    sqlite.writeBytes("SQLite format 3".getBytes(StandardCharsets.US_ASCII));
     sqlite.write(0);
     return Stream.of(
         Arguments.of(EmbeddedAsset.FORMAT_TIFF, "image/tiff",
@@ -229,7 +240,7 @@ public class CursorAssetDetectorTest {
         Arguments.of(EmbeddedAsset.FORMAT_WASM, "application/wasm",
             new byte[] {0, 'a', 's', 'm', 1, 0, 0, 0}),
         Arguments.of("rtf", "application/rtf",
-            "{\\rtf1\\ansi minimal".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+            "{\\rtf1\\ansi minimal".getBytes(StandardCharsets.US_ASCII)),
         Arguments.of("xz", "application/x-xz",
             new byte[] {(byte) 0xFD, '7', 'z', 'X', 'Z', 0}),
         Arguments.of("matroska", "application/x-matroska",
@@ -242,11 +253,11 @@ public class CursorAssetDetectorTest {
             new byte[] {(byte) 0xFE, (byte) 0xED, (byte) 0xFA, (byte) 0xCE}),
         Arguments.of("pem-cert", "application/x-x509-cert",
             "-----BEGIN CERTIFICATE-----".getBytes(
-                java.nio.charset.StandardCharsets.US_ASCII)),
+                StandardCharsets.US_ASCII)),
         Arguments.of("torrent", "application/x-bittorrent",
-            "d8:announce27:http".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+            "d8:announce27:http".getBytes(StandardCharsets.US_ASCII)),
         Arguments.of("php", "text/x-php",
-            "<?php echo 'shell';".getBytes(java.nio.charset.StandardCharsets.US_ASCII)),
+            "<?php echo 'shell';".getBytes(StandardCharsets.US_ASCII)),
         Arguments.of("parquet", "application/x-parquet",
             new byte[] {'P', 'A', 'R', '1'}));
   }
@@ -255,11 +266,12 @@ public class CursorAssetDetectorTest {
   @MethodSource("knownFormatHeaders")
   void testExpandedMagicTableIdentifies(String format, String mediaType, byte[] header) {
     final String encoded = Base64.getEncoder().encodeToString(padded(header));
-    final List<EmbeddedAsset> assets = detector.detect("x " + encoded + " y");
+    final String text = embed(encoded);
+    final List<EmbeddedAsset> assets = detector.detect(text);
     assertEquals(1, assets.size());
     assertEquals(format, assets.get(0).format());
     assertEquals(mediaType, assets.get(0).mediaType());
-    assertEquals(encoded, assets.get(0).span().getCoveredText("x " + encoded + " y").toString());
+    assertEquals(encoded, assets.get(0).span().getCoveredText(text).toString());
   }
 
   /**
@@ -271,7 +283,7 @@ public class CursorAssetDetectorTest {
     final String lookalike = Base64.getEncoder().encodeToString(
         padded(new byte[] {'I', 'I', 0x2A, 0x01}));
     assertTrue(lookalike.startsWith("SUkqA"));
-    assertEquals(List.of(), detector.detect("x " + lookalike + " y"));
+    assertEquals(List.of(), detector.detect(embed(lookalike)));
   }
 
   /**
@@ -283,7 +295,7 @@ public class CursorAssetDetectorTest {
     final String lookalike = Base64.getEncoder().encodeToString(
         padded(new byte[] {'M', 'Z', (byte) 0x90, 0x01}));
     assertTrue(lookalike.startsWith("TVqQA"));
-    assertEquals(List.of(), detector.detect("x " + lookalike + " y"));
+    assertEquals(List.of(), detector.detect(embed(lookalike)));
   }
 
   /** A short base64-looking token, such as a URL path segment, is never an asset. */
@@ -297,22 +309,18 @@ public class CursorAssetDetectorTest {
   void testLongRunWithoutMagicIsIgnored() {
     final String encoded = Base64.getEncoder().encodeToString(
         "this is just text encoded as base64 for transport".getBytes(
-            java.nio.charset.StandardCharsets.US_ASCII));
+            StandardCharsets.US_ASCII));
     assertEquals(List.of(), detector.detect("payload: " + encoded));
   }
 
   /** A magic prefix whose decoded header does not verify is not an asset. */
   @Test
   void testMagicPrefixWithoutVerifyingHeaderIsIgnored() {
-    // A RIFF container whose form type is neither WEBP nor WAVE: the payload starts
-    // with the RIFF prefix characters, but the header check rejects it.
-    final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    out.writeBytes(new byte[] {'R', 'I', 'F', 'F', 100, 0, 0, 0});
-    out.writeBytes(new byte[] {'J', 'U', 'N', 'K'});
-    out.writeBytes(new byte[20]);
-    final String lookalike = Base64.getEncoder().encodeToString(out.toByteArray());
+    // A RIFF container carrying an unrecognized form type: the payload starts with the
+    // RIFF prefix characters, but the header check rejects it.
+    final String lookalike = Base64.getEncoder().encodeToString(riff("JUNK"));
     assertTrue(lookalike.startsWith("UklGR"));
-    assertEquals(List.of(), detector.detect("x " + lookalike + " y"));
+    assertEquals(List.of(), detector.detect(embed(lookalike)));
   }
 
   /** An ordinary paragraph, with words of base64 characters, yields nothing. */

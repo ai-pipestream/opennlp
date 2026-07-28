@@ -34,8 +34,8 @@ import opennlp.tools.util.Span;
  * URI declares its media type, so it is reported at any payload length, with the format
  * sniffed from the decoded header when it is a known one.</p>
  *
- * <p>Payload runs must be unbroken: a payload wrapped across lines, as transported mail
- * bodies wrap it, is out of scope here and a candidate for a later tier.</p>
+ * <p>Payload runs must be unbroken: a payload wrapped across several lines, as MIME
+ * transport encoding wraps it, is not detected.</p>
  *
  * <p>The detector is stateless and safe for concurrent use by multiple threads.</p>
  *
@@ -56,6 +56,16 @@ public final class CursorAssetDetector implements AssetDetector {
    */
   private static final String RIFF_PREFIX = "UklGR";
 
+  /** The RIFF container magic, and the offset its four-character form type sits at. */
+  private static final String RIFF_MAGIC = "RIFF";
+  private static final int RIFF_FORM_TYPE = 8;
+
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The returned assets never overlap: the scan resumes behind the payload of the
+   * asset it just reported.</p>
+   */
   @Override
   public List<EmbeddedAsset> detect(CharSequence text) {
     if (text == null) {
@@ -178,7 +188,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param header The decoded leading bytes.
    * @return The asset. Never {@code null}.
    */
-  private static EmbeddedAsset asset(CharSequence text, int spanStart, int payloadStart,
+  private EmbeddedAsset asset(CharSequence text, int spanStart, int payloadStart,
       int payloadEnd, String format, String mediaType, byte[] header) {
     if ((payloadEnd - payloadStart) % 4 == 1) {
       // A length of 1 mod 4 cannot end a base64 payload; the run is truncated, so the
@@ -218,7 +228,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param start The run start.
    * @return The exclusive end index.
    */
-  private static int payloadEnd(CharSequence text, int start) {
+  private int payloadEnd(CharSequence text, int start) {
     final int length = text.length();
     int i = start;
     while (i < length && isBase64Char(text.charAt(i))) {
@@ -241,7 +251,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @return The decoded leading bytes, or {@code null} when fewer than four whole
    *         payload characters are available.
    */
-  private static byte[] decodeHeader(CharSequence text, int start, int end) {
+  private byte[] decodeHeader(CharSequence text, int start, int end) {
     final int usable = Math.min(end - start, 32) & ~3;
     if (usable < 4) {
       return null;
@@ -258,22 +268,21 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param header The decoded leading bytes.
    * @return The format tag, or {@code null} when the bytes match no known magic.
    */
-  private static String formatOf(byte[] header) {
+  private String formatOf(byte[] header) {
     final String known = KnownMagics.formatOf(header);
     if (known != null) {
       return known;
     }
-    if (startsWith(header, 'R', 'I', 'F', 'F') && header.length >= 12) {
-      if (header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P') {
+    if (carries(header, 0, RIFF_MAGIC)) {
+      if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
         return EmbeddedAsset.FORMAT_WEBP;
       }
-      if (header[8] == 'W' && header[9] == 'A' && header[10] == 'V' && header[11] == 'E') {
+      if (carries(header, RIFF_FORM_TYPE, "WAVE")) {
         return EmbeddedAsset.FORMAT_WAV;
       }
-      if (header[8] == 'A' && header[9] == 'V' && header[10] == 'I' && header[11] == ' ') {
+      if (carries(header, RIFF_FORM_TYPE, "AVI ")) {
         return EmbeddedAsset.FORMAT_AVI;
       }
-      return null;
     }
     return null;
   }
@@ -285,7 +294,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param format The format tag, or {@code null}.
    * @return The media type, or {@code null} for an unknown format.
    */
-  private static String mediaTypeOf(String format) {
+  private String mediaTypeOf(String format) {
     if (format == null) {
       return null;
     }
@@ -304,7 +313,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param mediaType The media type.
    * @return The subtype.
    */
-  private static String subtype(String mediaType) {
+  private String subtype(String mediaType) {
     final int slash = mediaType.indexOf('/');
     return slash >= 0 && slash + 1 < mediaType.length()
         ? mediaType.substring(slash + 1) : mediaType;
@@ -318,7 +327,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param literal The literal.
    * @return {@code true} on a full match within bounds.
    */
-  private static boolean matches(CharSequence text, int at, String literal) {
+  private boolean matches(CharSequence text, int at, String literal) {
     if (at + literal.length() > text.length()) {
       return false;
     }
@@ -331,18 +340,19 @@ public final class CursorAssetDetector implements AssetDetector {
   }
 
   /**
-   * Whether the bytes start with the values.
+   * Whether the bytes carry an ASCII tag at an offset.
    *
    * @param bytes The bytes.
-   * @param values The expected leading values, given as int for readability.
+   * @param at The offset.
+   * @param tag The expected characters, all of them ASCII.
    * @return {@code true} on a full match within bounds.
    */
-  private static boolean startsWith(byte[] bytes, int... values) {
-    if (bytes.length < values.length) {
+  private boolean carries(byte[] bytes, int at, String tag) {
+    if (at + tag.length() > bytes.length) {
       return false;
     }
-    for (int i = 0; i < values.length; i++) {
-      if ((bytes[i] & 0xFF) != values[i]) {
+    for (int i = 0; i < tag.length(); i++) {
+      if ((bytes[at + i] & 0xFF) != tag.charAt(i)) {
         return false;
       }
     }
@@ -356,7 +366,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param at The offset.
    * @return The value.
    */
-  private static int readInt(byte[] bytes, int at) {
+  private int readInt(byte[] bytes, int at) {
     return ((bytes[at] & 0xFF) << 24) | ((bytes[at + 1] & 0xFF) << 16)
         | ((bytes[at + 2] & 0xFF) << 8) | (bytes[at + 3] & 0xFF);
   }
@@ -367,7 +377,7 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param c The character.
    * @return {@code true} for the 64 payload characters.
    */
-  private static boolean isBase64Char(char c) {
+  private boolean isBase64Char(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
         || c == '+' || c == '/';
   }
