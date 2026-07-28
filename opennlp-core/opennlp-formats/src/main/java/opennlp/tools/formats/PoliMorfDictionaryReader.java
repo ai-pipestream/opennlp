@@ -41,18 +41,23 @@ import opennlp.tools.util.StringUtil;
  * {@code word\tpostag\tlemma}, and a single row per {@code (word, postag)} key with alternative
  * lemmas joined by {@code #}. This reader performs that adaptation: it re-orders the columns and
  * merges every lemma seen for the same form and tag into one entry, preserving first-seen order.
- * The bundled dictionary data itself is never shipped; callers supply it.</p>
+ * Dictionary data is supplied by the caller; none is bundled with OpenNLP.</p>
  *
  * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
  * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
  * unreachable. Tags are kept verbatim and must match the tags the caller's tagger emits.</p>
  *
- * <p>Thread safety is implementation specific.</p>
+ * <p>This class is stateless, so its methods may be called concurrently.</p>
  */
 public final class PoliMorfDictionaryReader {
 
+  /** Separates the columns of both the source table and the text {@link DictionaryLemmatizer} reads. */
   private static final String FIELD_SEPARATOR = "\t";
+
+  /** Separates alternative lemmas of one word and postag. */
   private static final String LEMMA_SEPARATOR = "#";
+
+  /** The number of columns a non-blank row must carry. */
   private static final int MIN_FIELDS = 3;
 
   private PoliMorfDictionaryReader() {
@@ -92,7 +97,8 @@ public final class PoliMorfDictionaryReader {
       throw new IllegalArgumentException("charset must not be null");
     }
 
-    // key "form\ttag" -> alternative lemmas, both maps ordered so the output is deterministic.
+    // Maps "form<TAB>tag" to its alternative lemmas. Map and set both keep insertion order, so
+    // the adapted dictionary comes out the same for the same input.
     final Map<String, LinkedHashSet<String>> entries = new LinkedHashMap<>();
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(dictionary, charset))) {
       String line;
