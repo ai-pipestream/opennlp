@@ -44,10 +44,10 @@
 	<section xml:id="tools.artifacts.detection">
 		<title>Detecting artifacts</title>
 		<para>
-			The detector works on any character sequence. In the text below, the word
-			<code>cafÃ©</code> is the UTF-8 form of a word read through a
-			single-byte decoding, and <code>�</code> is a replacement character left
-			by a failed decode:
+			The detector works on any character sequence. In the text below,
+			<code>cafÃ©</code> is what <code>café</code> becomes when its UTF-8
+			bytes are read through the Windows-1252 decoding, and <code>�</code> is a
+			replacement character left by a failed decode:
 			<programlisting language="java"><![CDATA[
 ArtifactDetector detector = new CursorArtifactDetector();
 String text = "cafÃ© costs �8";
