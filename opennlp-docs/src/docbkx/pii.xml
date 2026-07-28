@@ -24,8 +24,8 @@
 			mentions as exact spans over the original text. A
 			<code>PiiAnnotator</code> writes the <code>opennlp:pii</code> layer from a
 			<code>PiiExtractor</code>; the built-in <code>CursorPiiExtractor</code>
-			recognizes email addresses, phone numbers, and payment card numbers, each
-			with a type constant and a normalized form.
+			recognizes email addresses, phone numbers, IBANs, and payment card
+			numbers, each with a type constant and a normalized form.
 		</para>
 	</section>
 
