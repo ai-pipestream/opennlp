@@ -80,30 +80,6 @@ public class GeocodeAnnotatorTest {
   }
 
   /**
-   * Builds a geocoder that resolves mentions by a fixed name-to-country table with a
-   * fixed confidence and omits every name the table does not know.
-   *
-   * @param countryByName The resolvable surface forms mapped to their country codes.
-   * @param confidence The confidence given to every resolution.
-   * @return The table-backed geocoder. Never {@code null}.
-   */
-  private static Geocoder tableGeocoder(Map<String, String> countryByName,
-                                        double confidence) {
-    return (text, mentions) -> {
-      final List<GeoResolution> resolutions = new ArrayList<>();
-      for (final Span mention : mentions) {
-        final String name =
-            text.subSequence(mention.getStart(), mention.getEnd()).toString();
-        final String country = countryByName.get(name);
-        if (country != null) {
-          resolutions.add(new GeoResolution(mention, entry(name, country), confidence));
-        }
-      }
-      return resolutions;
-    };
-  }
-
-  /**
    * Builds a geocoder that fails the test when it is called, for documents whose
    * entities must never reach the geocoder.
    *
@@ -115,36 +91,12 @@ public class GeocodeAnnotatorTest {
     };
   }
 
-  /**
-   * Builds a minimal gazetteer entry whose record id equals its name.
-   *
-   * @param name The place name.
-   * @param country The ISO 3166-1 alpha-2 country code.
-   * @return The entry. Never {@code null}.
-   */
-  private static GazetteerEntry entry(String name, String country) {
-    return entry(name, name, country);
-  }
-
-  /**
-   * Builds a minimal gazetteer entry, with a distinct record id for same-name places.
-   *
-   * @param recordId The source-scoped record id.
-   * @param name The place name.
-   * @param country The ISO 3166-1 alpha-2 country code.
-   * @return The entry. Never {@code null}.
-   */
-  private static GazetteerEntry entry(String recordId, String name, String country) {
-    return new GazetteerEntry("test", recordId, name, List.of(), new GeoPoint(0.0, 0.0),
-        country, List.of(), 1000, GazetteerEntry.FEATURE_CLASS_CITY, Map.of());
-  }
-
   @Test
   void testUsageExamplePipelineFromEntitiesToRegionBallot() {
     // Two location entities go in; the geocoder knows Berlin and not Atlantis, so the
     // locations layer keeps exactly the one resolvable mention with its resolution, and
     // the region ballot downstream is built from that same layer.
-    final Geocoder geocoder = tableGeocoder(Map.of("Berlin", "DE"), 0.9);
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of("Berlin", "DE"), 0.9);
     final String text = "flights from Berlin to Atlantis this week";
 
     final Document document = DocumentAnalyzer.builder()
@@ -175,7 +127,7 @@ public class GeocodeAnnotatorTest {
   void testCustomLocationTypesMatchCaseInsensitively() {
     // The set is configured mixed-case and the entities are typed upper- and
     // lower-case; every case combination of the same label qualifies.
-    final Geocoder geocoder = tableGeocoder(Map.of("Paris", "FR", "Lyon", "FR"), 0.7);
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of("Paris", "FR", "Lyon", "FR"), 0.7);
     final String text = "from Paris to Lyon";
     final Document input = Document.of(text).with(Layers.ENTITIES, List.of(
         new Annotation<>(new Span(5, 10), "PLACE"),
@@ -241,7 +193,7 @@ public class GeocodeAnnotatorTest {
       for (final Span mention : mentions) {
         resolutions.add(new GeoResolution(
             new Span(mention.getStart(), mention.getEnd()),
-            entry("sydney", "Sydney", "AU"), 0.8));
+            GeoTestUtil.entry("sydney", "Sydney", "AU"), 0.8));
       }
       return resolutions;
     };
@@ -267,7 +219,7 @@ public class GeocodeAnnotatorTest {
     final Geocoder passThrough = (text, mentions) -> {
       final List<GeoResolution> resolutions = new ArrayList<>();
       for (final Span mention : mentions) {
-        resolutions.add(new GeoResolution(mention, entry("sydney", "Sydney", "AU"), 0.8));
+        resolutions.add(new GeoResolution(mention, GeoTestUtil.entry("sydney", "Sydney", "AU"), 0.8));
       }
       return resolutions;
     };
@@ -289,9 +241,9 @@ public class GeocodeAnnotatorTest {
       final List<GeoResolution> ranked = new ArrayList<>();
       for (final Span mention : mentions) {
         ranked.add(new GeoResolution(mention,
-            entry("springfield-us", "Springfield", "US"), 0.6));
+            GeoTestUtil.entry("springfield-us", "Springfield", "US"), 0.6));
         ranked.add(new GeoResolution(mention,
-            entry("springfield-ca", "Springfield", "CA"), 0.3));
+            GeoTestUtil.entry("springfield-ca", "Springfield", "CA"), 0.3));
       }
       return ranked;
     };
@@ -327,7 +279,7 @@ public class GeocodeAnnotatorTest {
 
   @Test
   void testAnnotatingTwiceRejectsTheDuplicateLayer() {
-    final Geocoder geocoder = tableGeocoder(Map.of(), 0.5);
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(), 0.5);
     final GeocodeAnnotator annotator = new GeocodeAnnotator(geocoder);
     final Document once = annotator
         .annotate(Document.of("plain text").with(Layers.ENTITIES, List.of()));
@@ -345,7 +297,7 @@ public class GeocodeAnnotatorTest {
       for (final Span mention : mentions) {
         resolutions.add(new GeoResolution(
             new Span(mention.getStart(), mention.getEnd() - 1),
-            entry("Sydney", "AU"), 0.8));
+            GeoTestUtil.entry("Sydney", "AU"), 0.8));
       }
       return resolutions;
     };
@@ -360,7 +312,7 @@ public class GeocodeAnnotatorTest {
 
   @Test
   void testTypeSetValidation() {
-    final Geocoder geocoder = tableGeocoder(Map.of(), 0.5);
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(), 0.5);
     assertThrows(IllegalArgumentException.class,
         () -> new GeocodeAnnotator(geocoder, null));
     assertThrows(IllegalArgumentException.class,
