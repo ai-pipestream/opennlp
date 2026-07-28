@@ -45,14 +45,11 @@ public class PlaceProfilesEdgeCaseTest {
    * Loads a profile table from an in-memory string through the stream entry point,
    * exactly as production code would read the same bytes from any stream.
    *
-   * @param table The tab-separated table content. Must not be {@code null}.
+   * @param table The tab-separated table content.
    * @return The loaded profiles. Never {@code null}.
    * @throws IOException Thrown if the table is malformed.
    */
   private static PlaceProfiles load(String table) throws IOException {
-    if (table == null) {
-      throw new IllegalArgumentException("table must not be null");
-    }
     return PlaceProfiles.load(
         new ByteArrayInputStream(table.getBytes(StandardCharsets.UTF_8)));
   }
@@ -218,20 +215,25 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that {@code null} arguments to the stream loader and to the query methods
-   * fail loud with {@link IllegalArgumentException} before any computation happens.
+   * Asserts that {@code null} arguments to the stream loader and to every query method
+   * fail loud with {@link IllegalArgumentException} before any computation happens, and
+   * that the failure names the argument that was {@code null} rather than the first one.
    */
   @Test
   void testNullArgumentsFailLoud() throws IOException {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> PlaceProfiles.load((InputStream) null));
     final PlaceProfiles profiles = load("id\ta\np\t1\nq\t2\n");
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> profiles.similarity(null, "p"));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> profiles.similarity("p", null));
+    Assertions.assertEquals("id must not be null",
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> profiles.similarity(null, "p")).getMessage());
+    Assertions.assertEquals("otherId must not be null",
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> profiles.similarity("p", null)).getMessage());
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> profiles.mostSimilar(null, 1));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> profiles.contains(null));
   }
 
   /**
@@ -518,6 +520,21 @@ public class PlaceProfilesEdgeCaseTest {
         () -> load(String.join("\n",
             "id\tpopulation\t\tarea",
             "a\t1\t2\t3",
+            "")));
+    Assertions.assertEquals("empty metric name in header column 3", e.getMessage());
+  }
+
+  /**
+   * Asserts that the header is fully validated before any row is parsed, so a table that
+   * is broken in both places reports the header rather than the first bad row: the header
+   * is what the user has to fix first, and a large table is not parsed to find that out.
+   */
+  @Test
+  void testHeaderIsValidatedBeforeRows() {
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
+            "id\tpopulation\t\tarea",
+            "a\t1\tnot-a-number\t3",
             "")));
     Assertions.assertEquals("empty metric name in header column 3", e.getMessage());
   }

@@ -20,11 +20,14 @@ package opennlp.geo;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Tests place-profile similarity against a project-authored miniature table; no
@@ -44,8 +47,19 @@ public class PlaceProfilesTest {
 
   @BeforeAll
   static void loadProfiles() throws IOException {
-    profiles = PlaceProfiles.load(
-        new ByteArrayInputStream(TABLE.getBytes(StandardCharsets.UTF_8)));
+    profiles = load(TABLE);
+  }
+
+  /**
+   * Loads a table held as a string through the stream entry point.
+   *
+   * @param table The tab-separated table content.
+   * @return The loaded profiles. Never {@code null}.
+   * @throws IOException Thrown if the table is malformed.
+   */
+  private static PlaceProfiles load(String table) throws IOException {
+    return PlaceProfiles.load(
+        new ByteArrayInputStream(table.getBytes(StandardCharsets.UTF_8)));
   }
 
   @Test
@@ -75,24 +89,20 @@ public class PlaceProfilesTest {
     Assertions.assertFalse(profiles.contains("atlantis"));
   }
 
-  @Test
-  void testMalformedTablesFailLoud() {
-    Assertions.assertThrows(IOException.class, () -> PlaceProfiles.load(
-        new ByteArrayInputStream("density\tincome\n".getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertThrows(IOException.class, () -> PlaceProfiles.load(
-        new ByteArrayInputStream("id\tdensity\na\tnot-a-number\n"
-            .getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertThrows(IOException.class, () -> PlaceProfiles.load(
-        new ByteArrayInputStream("id\tdensity\na\t1\t2\n"
-            .getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertThrows(IOException.class, () -> PlaceProfiles.load(
-        new ByteArrayInputStream("id\tdensity\n".getBytes(StandardCharsets.UTF_8))));
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "density\tincome\n",
+      "id\tdensity\na\tnot-a-number\n",
+      "id\tdensity\na\t1\t2\n",
+      "id\tdensity\n"})
+  void testMalformedTablesFailLoud(String table) {
+    Assertions.assertThrows(IOException.class, () -> load(table));
   }
 
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
-        () -> PlaceProfiles.load((java.nio.file.Path) null));
+        () -> PlaceProfiles.load((Path) null));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> profiles.similarity("park-slope", "atlantis"));
     Assertions.assertThrows(IllegalArgumentException.class,

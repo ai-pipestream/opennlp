@@ -361,8 +361,9 @@ List<GeoResolution> resolutions = geocoder.resolve(text, mentions);
 			pairwise cosine similarities after standardizing each column. The first
 			column is the place id; further columns are numeric metrics. Neighbor
 			queries return other places in descending score order and never include
-			the query place itself. <code>PlaceProfilesUsageTest</code> asserts the
-			behavior shown here.
+			the query place itself, and places with equal scores are ordered by
+			ascending id. The table is user-supplied; no metric data is bundled.
+			<code>PlaceProfilesUsageTest</code> asserts the behavior shown here.
 			<programlisting language="java"><![CDATA[
 PlaceProfiles profiles = PlaceProfiles.load(Path.of("profiles.tsv"));
 // columns: id, density, income, transit
