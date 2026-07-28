@@ -45,11 +45,9 @@ import opennlp.tools.util.StringUtil;
  * dictionary that tier never fires. A token the dictionary accepts is never flagged,
  * whatever its structure.</p>
  *
- * <p>Known conservatism: a mash of ordinary syllables with normal vowel spacing
- * passes the structural signals; catching it needs a character-level language model,
- * which is a planned addition behind this same interface. Tokens interleaving letters
- * and digits heavily are reported as damaged, which can flag technical identifiers in
- * running prose.</p>
+ * <p>Known limitations: a mash of ordinary syllables with normal vowel spacing passes
+ * the structural signals, and tokens interleaving letters and digits heavily are
+ * reported as damaged, which can flag technical identifiers in running prose.</p>
  *
  * <p>The scorer is stateless beyond its dictionary and safe for concurrent use when
  * the dictionary is.</p>
@@ -58,8 +56,14 @@ import opennlp.tools.util.StringUtil;
  */
 public final class StructuralNoiseScorer implements NoiseScorer {
 
+  /** Cores shorter than this are never scored. */
+  private static final int MIN_CORE_LENGTH = 3;
+
   /** Tokens at least this long with base64 shape score as binary-ish. */
   private static final int BINARYISH_MIN_LENGTH = 24;
+
+  /** The core length at which the binary-ish score reaches {@code 1.0}. */
+  private static final double BINARYISH_SATURATION_LENGTH = 48.0;
 
   /**
    * Case flips marking base64 shape in a pure-letter run. A camel-case identifier
@@ -74,11 +78,32 @@ public final class StructuralNoiseScorer implements NoiseScorer {
   /** No English word repeats one character four times in a row. */
   private static final int REPEAT_RUN_SIGNAL = 4;
 
-  /** Below this vowel share a long token is vowel-starved; strengths is 0.111. */
+  /** Below this vowel share a long token is vowel-starved; {@code strengths} is 0.111. */
   private static final double LOW_VOWEL_RATIO = 0.10;
+
+  /** A vowelless core needs at least this many letters to raise a signal. */
+  private static final int VOWELLESS_MIN_LETTERS = 5;
+
+  /** A core needs at least this many letters before its vowel share is judged. */
+  private static final int LOW_VOWEL_MIN_LETTERS = 8;
 
   /** Letter-digit alternations marking interleaved damage. */
   private static final int INTERLEAVE_SIGNAL = 4;
+
+  /** A core needs at least this many characters before interleaving is judged. */
+  private static final int INTERLEAVE_MIN_LENGTH = 8;
+
+  /** Agreeing signals needed for the gibberish tier; one alone is damage. */
+  private static final int GIBBERISH_MIN_SIGNALS = 2;
+
+  /** The signal count at which the gibberish score reaches {@code 1.0}. */
+  private static final double GIBBERISH_SATURATION_SIGNALS = 4.0;
+
+  /** The score of a single-signal finding. */
+  private static final double DAMAGED_SCORE = 0.5;
+
+  /** The score of a core one confusion repair away from a dictionary word. */
+  private static final double MISSPELLED_SCORE = 0.9;
 
   /**
    * The confusion pairs of optical recognition damage, as from-to sibling entries.
@@ -128,7 +153,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
         throw new IllegalArgumentException("exclude must not contain null");
       }
     }
-    final List<NoiseSpan> tokens = new ArrayList<>();
+    final List<NoiseSpan> findings = new ArrayList<>();
     final int length = text.length();
     int i = 0;
     while (i < length) {
@@ -143,11 +168,11 @@ public final class StructuralNoiseScorer implements NoiseScorer {
       if (!overlapsAny(start, i, exclude)) {
         final NoiseSpan scored = scoreToken(text, start, i);
         if (scored != null) {
-          tokens.add(scored);
+          findings.add(scored);
         }
       }
     }
-    return merge(tokens, text);
+    return merge(findings, text);
   }
 
   /**
@@ -160,11 +185,12 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    */
   private NoiseSpan scoreToken(CharSequence text, int start, int end) {
     final String token = text.subSequence(start, end).toString();
-    final String core = trimPunctuation(token);
-    if (core.length() < 3 || !isAscii(core)) {
+    final int from = leadingPunctuation(token);
+    final String core = trimPunctuation(token, from);
+    if (core.length() < MIN_CORE_LENGTH || !isAscii(core)) {
       return null;
     }
-    final int coreStart = start + token.indexOf(core);
+    final int coreStart = start + from;
     final Span span = new Span(coreStart, coreStart + core.length());
     if (dictionary != null && dictionary.test(core.toLowerCase(Locale.ROOT))) {
       return null;
@@ -187,7 +213,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param span The token span.
    * @return The finding, or {@code null}.
    */
-  private static NoiseSpan binaryish(String core, Span span) {
+  private NoiseSpan binaryish(String core, Span span) {
     if (core.length() < BINARYISH_MIN_LENGTH) {
       return null;
     }
@@ -215,7 +241,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     }
     if (digit || symbol || caseFlips >= BINARYISH_MIN_CASE_FLIPS) {
       return new NoiseSpan(span, NoiseSpan.SEVERITY_BINARYISH,
-          Math.min(1.0, core.length() / 48.0));
+          Math.min(1.0, core.length() / BINARYISH_SATURATION_LENGTH));
     }
     return null;
   }
@@ -228,7 +254,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param span The token span.
    * @return The finding, or {@code null}.
    */
-  private static NoiseSpan structural(String core, Span span) {
+  private NoiseSpan structural(String core, Span span) {
     int letters = 0;
     int vowels = 0;
     int consonantRun = 0;
@@ -265,10 +291,11 @@ public final class StructuralNoiseScorer implements NoiseScorer {
       lastLetter = letter;
     }
     int signals = 0;
-    if (letters >= 5 && vowels == 0) {
+    if (letters >= VOWELLESS_MIN_LETTERS && vowels == 0) {
       signals++;
     }
-    if (letters >= 8 && vowels > 0 && (double) vowels / letters <= LOW_VOWEL_RATIO) {
+    if (letters >= LOW_VOWEL_MIN_LETTERS && vowels > 0
+        && (double) vowels / letters <= LOW_VOWEL_RATIO) {
       signals++;
     }
     if (maxConsonantRun >= CONSONANT_RUN_SIGNAL) {
@@ -277,15 +304,15 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     if (maxRepeatRun >= REPEAT_RUN_SIGNAL) {
       signals++;
     }
-    if (core.length() >= 8 && interleave >= INTERLEAVE_SIGNAL) {
+    if (core.length() >= INTERLEAVE_MIN_LENGTH && interleave >= INTERLEAVE_SIGNAL) {
       signals++;
     }
-    if (signals >= 2) {
+    if (signals >= GIBBERISH_MIN_SIGNALS) {
       return new NoiseSpan(span, NoiseSpan.SEVERITY_GIBBERISH,
-          Math.min(1.0, signals / 4.0));
+          Math.min(1.0, signals / GIBBERISH_SATURATION_SIGNALS));
     }
-    if (signals == 1) {
-      return new NoiseSpan(span, NoiseSpan.SEVERITY_DAMAGED, 0.5);
+    if (signals > 0) {
+      return new NoiseSpan(span, NoiseSpan.SEVERITY_DAMAGED, DAMAGED_SCORE);
     }
     return null;
   }
@@ -311,7 +338,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
         final String candidate =
             lower.substring(0, at) + to + lower.substring(at + from.length());
         if (dictionary.test(candidate)) {
-          return new NoiseSpan(span, NoiseSpan.SEVERITY_MISSPELLED, 0.9);
+          return new NoiseSpan(span, NoiseSpan.SEVERITY_MISSPELLED, MISSPELLED_SCORE);
         }
         at = lower.indexOf(from, at + 1);
       }
@@ -327,7 +354,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param text The text, to check that only whitespace separates neighbors.
    * @return The merged findings. Never {@code null}.
    */
-  private static List<NoiseSpan> merge(List<NoiseSpan> findings, CharSequence text) {
+  private List<NoiseSpan> merge(List<NoiseSpan> findings, CharSequence text) {
     final List<NoiseSpan> merged = new ArrayList<>();
     for (final NoiseSpan finding : findings) {
       if (!merged.isEmpty()) {
@@ -354,7 +381,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param to The exclusive end.
    * @return {@code true} if every character in between is whitespace.
    */
-  private static boolean onlyWhitespaceBetween(CharSequence text, int from, int to) {
+  private boolean onlyWhitespaceBetween(CharSequence text, int from, int to) {
     for (int i = from; i < to; i++) {
       if (!StringUtil.isWhitespace(text.charAt(i))) {
         return false;
@@ -370,7 +397,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param b The other.
    * @return The worse one.
    */
-  private static String worse(String a, String b) {
+  private String worse(String a, String b) {
     return rank(a) >= rank(b) ? a : b;
   }
 
@@ -378,33 +405,47 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * Orders this scorer's tiers.
    *
    * @param severity The severity.
-   * @return Its rank, higher is worse.
+   * @return Its rank, higher is worse; {@code 0} for a tier this scorer does not
+   *         report.
    */
-  private static int rank(String severity) {
+  private int rank(String severity) {
     return switch (severity) {
       case NoiseSpan.SEVERITY_BINARYISH -> 4;
       case NoiseSpan.SEVERITY_GIBBERISH -> 3;
       case NoiseSpan.SEVERITY_DAMAGED -> 2;
-      default -> 1;
+      case NoiseSpan.SEVERITY_MISSPELLED -> 1;
+      default -> 0;
     };
   }
 
   /**
-   * Strips leading and trailing ASCII punctuation, keeping the word core.
+   * Counts the ASCII punctuation a token starts with.
    *
    * @param token The whitespace-delimited token.
-   * @return The core, possibly empty.
+   * @return The index of the first character that is not surrounding punctuation, or
+   *         the token length when the token is punctuation throughout.
    */
-  private static String trimPunctuation(String token) {
+  private int leadingPunctuation(String token) {
     int start = 0;
-    int end = token.length();
-    while (start < end && isAsciiPunctuation(token.charAt(start))) {
+    while (start < token.length() && isAsciiPunctuation(token.charAt(start))) {
       start++;
     }
-    while (end > start && isAsciiPunctuation(token.charAt(end - 1))) {
+    return start;
+  }
+
+  /**
+   * Strips trailing ASCII punctuation, keeping the word core.
+   *
+   * @param token The whitespace-delimited token.
+   * @param from The index {@link #leadingPunctuation(String)} returned for the token.
+   * @return The core, possibly empty.
+   */
+  private String trimPunctuation(String token, int from) {
+    int end = token.length();
+    while (end > from && isAsciiPunctuation(token.charAt(end - 1))) {
       end--;
     }
-    return token.substring(start, end);
+    return token.substring(from, end);
   }
 
   /**
@@ -414,7 +455,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param c The character.
    * @return {@code true} for surrounding punctuation.
    */
-  private static boolean isAsciiPunctuation(char c) {
+  private boolean isAsciiPunctuation(char c) {
     return c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?'
         || c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']'
         || c == '{' || c == '}';
@@ -426,7 +467,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param token The token.
    * @return {@code true} when no character exceeds 0x7F.
    */
-  private static boolean isAscii(String token) {
+  private boolean isAscii(String token) {
     for (int i = 0; i < token.length(); i++) {
       if (token.charAt(i) > 0x7F) {
         return false;
@@ -443,7 +484,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    * @param exclude The excluded spans.
    * @return {@code true} on any overlap.
    */
-  private static boolean overlapsAny(int start, int end, Collection<Span> exclude) {
+  private boolean overlapsAny(int start, int end, Collection<Span> exclude) {
     for (final Span span : exclude) {
       if (start < span.getEnd() && span.getStart() < end) {
         return true;

@@ -47,8 +47,8 @@
 			token one known confusion repair away from a word is reported as misspelled,
 			the shape optical recognition damage takes; adjacent findings merge into one
 			span:
-			<programlisting language="java"><![CDATA[
-Set<String> words = Set.of("modern", "times");
+			<programlisting language="java">
+<![CDATA[Set<String> words = Set.of("modern", "times");
 NoiseScorer scorer = new StructuralNoiseScorer(words::contains);
 
 String text = "rnodern tirnes and zxkcvbnmsdfg";
@@ -60,8 +60,8 @@ for (NoiseSpan noise : scorer.score(text, List.of())) {
 			two dictionary words through the <code>rn</code> to <code>m</code> confusion
 			and merges into one span, and the mash carries two agreeing structural
 			signals:
-			<programlisting><![CDATA[
-misspelled [0..14)
+			<programlisting>
+<![CDATA[misspelled [0..14)
 gibberish [19..31)]]>
 			</programlisting>
 			Without a dictionary the same call reports only the gibberish: the misspelled
@@ -78,8 +78,8 @@ gibberish [19..31)]]>
 			from scoring, so an embedded binary is explained once, by the asset layer, and
 			never again as noise. The standalone mode scores the whole text and requires
 			nothing:
-			<programlisting language="java"><![CDATA[
-Document document = new AssetAnnotator().annotate(Document.of(text));
+			<programlisting language="java">
+<![CDATA[Document document = new AssetAnnotator().annotate(Document.of(text));
 document = new NoiseAnnotator().annotate(document);
 
 List<Annotation<NoiseSpan>> noise = document.get(NoiseAnnotator.NOISE);]]>
