@@ -83,6 +83,9 @@ public class CorefAnnotator implements DocumentAnnotator {
   public static final LayerKey<CorefMention> CHAINS =
       Layers.key("chains", CorefMention.class);
 
+  /** The message prefix of every absent-required-layer rejection in this annotator. */
+  private static final String MISSING_LAYER = "document lacks the required layer ";
+
   /** How many sentences back a pronoun may find its antecedent. */
   private static final int MAX_SENTENCE_DISTANCE = 1;
 
@@ -100,14 +103,14 @@ public class CorefAnnotator implements DocumentAnnotator {
   /** Third-person neutral pronoun forms that resolve only to non-person entities. */
   private static final Set<String> NEUTRAL_PRONOUNS = Set.of("it", "its", "itself");
 
+  /** The preposition that separates a name's head segment from a trailing qualifier. */
+  private static final String OF = "of";
+
   /**
    * Words carrying no name content, excluded from word inclusion and modifier checks
    * so that shared articles and linkers alone never support a strict head match link.
    */
-  private static final Set<String> STOP_WORDS = Set.of("the", "a", "an", "of", "and");
-
-  /** The preposition that separates a name's head segment from a trailing qualifier. */
-  private static final String OF = "of";
+  private static final Set<String> STOP_WORDS = Set.of("the", "a", "an", OF, "and");
 
   /** Lowercased entity type labels gendered pronouns may resolve to. */
   private final Set<String> personTypes;
@@ -145,6 +148,8 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param types The type labels.
    * @param name The parameter name for error messages.
    * @return The lowercased set. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code types} is {@code null}, empty, or
+   *         contains a {@code null} or blank entry.
    */
   private static Set<String> lowered(Set<String> types, String name) {
     if (types == null || types.isEmpty()) {
@@ -152,7 +157,7 @@ public class CorefAnnotator implements DocumentAnnotator {
     }
     final Set<String> lowered = new HashSet<>(types.size());
     for (final String type : types) {
-      if (type == null || type.isBlank()) {
+      if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException(name + " must not contain blank entries");
       }
       lowered.add(StringUtil.toLowerCase(type));
@@ -161,10 +166,15 @@ public class CorefAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * One collected mention before chain assignment: its character span, its kind, the
-   * index of its source entity or {@link CorefMention#NO_ENTITY} for pronouns, the
-   * lowercased entity type or {@code null} for pronouns, the lowercased covered text,
-   * and the index of the sentence the mention starts in.
+   * One collected mention before chain assignment.
+   *
+   * @param span The span the mention covers in the document text.
+   * @param kind The mention kind, for example {@link CorefMention#KIND_ENTITY}.
+   * @param entity The index of the source entity in the entity layer, or
+   *               {@link CorefMention#NO_ENTITY} for a pronoun mention.
+   * @param type The lowercased entity type, or {@code null} for a pronoun mention.
+   * @param normalized The lowercased text the mention covers.
+   * @param sentence The index of the sentence the mention starts in.
    */
   private record Mention(Span span, String kind, int entity, String type,
       String normalized, int sentence) {
@@ -173,20 +183,36 @@ public class CorefAnnotator implements DocumentAnnotator {
   /**
    * Resolves coreference over the document and adds the {@link #CHAINS} layer.
    *
-   * <p>A document whose token layer is empty gets an empty chains layer without further
-   * checks. Otherwise the token and POS tag layers must be aligned one to one and the
-   * sentence layer must not be empty.</p>
+   * <p>The required layers must be present, but they may be empty, and the token and POS
+   * tag layers must be aligned one to one. A document without tokens then yields a
+   * present-but-empty chains layer; a document that has tokens needs a non-empty sentence
+   * layer to place its mentions in.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
+   * @param document The document to annotate. Must not be {@code null} and must carry the
+   *                 {@link Layers#SENTENCES}, {@link Layers#TOKENS},
+   *                 {@link Layers#POS_TAGS}, and {@link Layers#ENTITIES} layers.
    * @return A new {@link Document} carrying the {@link #CHAINS} layer. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the
-   *         token and POS tag layers differ in size, or tokens are present but the
-   *         sentence layer is empty.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, a
+   *         required layer is absent, the token and POS tag layers differ in size, or
+   *         tokens are present but the sentence layer is empty.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    final Set<LayerKey<?>> present = document.layers();
+    if (!present.contains(Layers.SENTENCES)) {
+      throw new IllegalArgumentException(MISSING_LAYER + Layers.SENTENCES);
+    }
+    if (!present.contains(Layers.TOKENS)) {
+      throw new IllegalArgumentException(MISSING_LAYER + Layers.TOKENS);
+    }
+    if (!present.contains(Layers.POS_TAGS)) {
+      throw new IllegalArgumentException(MISSING_LAYER + Layers.POS_TAGS);
+    }
+    if (!present.contains(Layers.ENTITIES)) {
+      throw new IllegalArgumentException(MISSING_LAYER + Layers.ENTITIES);
     }
     final CharSequence text = document.text();
     final List<Annotation<String>> sentences = document.get(Layers.SENTENCES);
@@ -288,7 +314,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param mentions The mentions in text order.
    * @param chains The chain forest over mention indices.
    */
-  private static void exactMatchSieve(List<Mention> mentions, Chains chains) {
+  private void exactMatchSieve(List<Mention> mentions, Chains chains) {
     final Map<String, List<Integer>> earlierByText = new HashMap<>();
     for (int i = 0; i < mentions.size(); i++) {
       final Mention mention = mentions.get(i);
@@ -325,7 +351,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param requireCompatibleModifiers Whether the later mention's non-head words must
    *        all appear in the candidate mention.
    */
-  private static void strictHeadMatchSieve(List<Mention> mentions, Chains chains,
+  private void strictHeadMatchSieve(List<Mention> mentions, Chains chains,
       boolean requireCompatibleModifiers) {
     final List<List<String>> words = new ArrayList<>(mentions.size());
     final List<String> heads = new ArrayList<>(mentions.size());
@@ -390,7 +416,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param normalized The lowercased mention text.
    * @return The words in order; empty only for a blank mention. Never {@code null}.
    */
-  private static List<String> wordsOf(String normalized) {
+  private List<String> wordsOf(String normalized) {
     final List<String> words = new ArrayList<>();
     int start = -1;
     for (int i = 0; i < normalized.length(); i++) {
@@ -417,7 +443,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param words The mention's words. Must not be empty.
    * @return The head word. Never {@code null}.
    */
-  private static String headOf(List<String> words) {
+  private String headOf(List<String> words) {
     final int of = words.indexOf(OF);
     return of > 0 ? words.get(of - 1) : words.get(words.size() - 1);
   }
@@ -430,7 +456,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @return {@code true} if {@code antecedent} covers every non-stop word of
    *         {@code later}.
    */
-  private static boolean containsAllNonStop(Set<String> antecedent, Set<String> later) {
+  private boolean containsAllNonStop(Set<String> antecedent, Set<String> later) {
     for (final String word : later) {
       if (!STOP_WORDS.contains(word) && !antecedent.contains(word)) {
         return false;
@@ -448,7 +474,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param candidateWords The candidate mention's words.
    * @return {@code true} if the candidate carries every modifier of the mention.
    */
-  private static boolean modifiersAppearIn(List<String> mentionWords, String head,
+  private boolean modifiersAppearIn(List<String> mentionWords, String head,
       List<String> candidateWords) {
     for (final String word : mentionWords) {
       if (!word.equals(head) && !STOP_WORDS.contains(word)
@@ -466,7 +492,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param mentions The mentions in text order.
    * @param chains The chain forest over mention indices.
    */
-  private static void containmentSieve(List<Mention> mentions, Chains chains) {
+  private void containmentSieve(List<Mention> mentions, Chains chains) {
     for (int i = 0; i < mentions.size(); i++) {
       final Mention a = mentions.get(i);
       if (a.entity() == CorefMention.NO_ENTITY) {
@@ -494,7 +520,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @return {@code true} if {@code shorter} starts or ends {@code longer} and the
    *         character adjoining the shared part is a whitespace.
    */
-  private static boolean containsAsWords(String longer, String shorter) {
+  private boolean containsAsWords(String longer, String shorter) {
     if (longer.length() <= shorter.length()) {
       return false;
     }
@@ -565,7 +591,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param b The second lowercased entity type.
    * @return {@code true} if the types do not rule the link out.
    */
-  private static boolean typesCompatible(String a, String b) {
+  private boolean typesCompatible(String a, String b) {
     return a.equals(b)
         || NameFinderAnnotator.UNTYPED.equals(a) || NameFinderAnnotator.UNTYPED.equals(b);
   }
@@ -579,7 +605,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    *         span starting in the gap between two sentences counts to the following one;
    *         the last sentence when the span starts after every sentence end.
    */
-  private static int sentenceOf(Span span, List<Annotation<String>> sentences) {
+  private int sentenceOf(Span span, List<Annotation<String>> sentences) {
     for (int s = 0; s < sentences.size(); s++) {
       if (span.getStart() < sentences.get(s).span().getEnd()) {
         return s;
@@ -595,7 +621,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param entities The entity layer.
    * @return {@code true} if an entity covers the token.
    */
-  private static boolean coveredByEntity(Span span, List<Annotation<String>> entities) {
+  private boolean coveredByEntity(Span span, List<Annotation<String>> entities) {
     for (final Annotation<String> entity : entities) {
       if (span.getStart() >= entity.span().getStart()
           && span.getEnd() <= entity.span().getEnd()) {
@@ -603,27 +629,6 @@ public class CorefAnnotator implements DocumentAnnotator {
       }
     }
     return false;
-  }
-
-  /**
-   * Finds the representative of a mention's set, compressing the visited path so later
-   * lookups reach the root directly.
-   *
-   * @param parent The union-find forest.
-   * @param i The mention index.
-   * @return The root index.
-   */
-  private static int find(int[] parent, int i) {
-    int root = i;
-    while (parent[root] != root) {
-      root = parent[root];
-    }
-    while (parent[i] != root) {
-      final int next = parent[i];
-      parent[i] = root;
-      i = next;
-    }
-    return root;
   }
 
   /**
@@ -658,13 +663,24 @@ public class CorefAnnotator implements DocumentAnnotator {
     }
 
     /**
-     * Finds the root of a mention's chain, compressing the walked path.
+     * Finds the root of a mention's chain, compressing the walked path so later lookups
+     * reach the root directly.
      *
      * @param i The mention index.
      * @return The root index.
      */
     int find(int i) {
-      return CorefAnnotator.find(parent, i);
+      int root = i;
+      while (parent[root] != root) {
+        root = parent[root];
+      }
+      int node = i;
+      while (parent[node] != root) {
+        final int next = parent[node];
+        parent[node] = root;
+        node = next;
+      }
+      return root;
     }
 
     /**
