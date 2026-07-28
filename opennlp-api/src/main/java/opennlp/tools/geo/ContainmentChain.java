@@ -42,6 +42,12 @@ public record ContainmentChain(List<PlaceAncestor> ancestors) {
     if (ancestors == null || ancestors.isEmpty()) {
       throw new IllegalArgumentException("ancestors must not be null or empty");
     }
+    for (final PlaceAncestor ancestor : ancestors) {
+      if (ancestor == null) {
+        throw new IllegalArgumentException(
+            "ancestors must not contain a null element, got: " + ancestors);
+      }
+    }
     ancestors = List.copyOf(ancestors);
   }
 }

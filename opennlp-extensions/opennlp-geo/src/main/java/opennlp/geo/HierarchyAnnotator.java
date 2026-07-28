@@ -49,12 +49,11 @@ import opennlp.tools.util.StringUtil;
  * conventional Who's On First attribute, matching the identifiers the bundled
  * gazetteer derivations carry.</p>
  *
- * <p>A {@link GeocodeAnnotator} gives a mention it ranks against several candidates one
- * annotation per candidate, in the geocoder's order. Only the first annotation of a
- * span, which carries the geocoder's best candidate, decides that mention's chain: the
- * lower-ranked candidates are ignored, so one span never carries two contradicting
- * chains, and a mention whose best candidate cannot be expanded gets no annotation
- * rather than the chain of a candidate the geocoder ranked lower.</p>
+ * <p>A {@link GeocodeAnnotator} emits one annotation per candidate, in the geocoder's
+ * order, for a mention it ranks against several. Only the first annotation of a span
+ * decides that mention's chain, so one span never carries two contradicting chains and a
+ * mention whose best candidate cannot be expanded gets no annotation rather than the
+ * chain of a lower-ranked candidate.</p>
  *
  * <p>The annotator holds no per-call state; it is as thread-safe as its hierarchy.</p>
  *
@@ -106,16 +105,11 @@ public class HierarchyAnnotator implements DocumentAnnotator {
   /**
    * Annotates the document with the {@link #CONTAINMENT} layer.
    *
-   * <p>Each mention of the locations layer is expanded at most once: the first
-   * annotation of a span's character offsets decides the mention's chain, and any
-   * further annotation over the same offsets, which a multi-candidate mention carries
-   * for each lower-ranked candidate, is ignored. The offsets alone key the mention, so
-   * a typed and an untyped span over the same text are one mention, matching the
-   * offset-keyed alignment of the sibling annotators.</p>
+   * <p>A mention is keyed by its character offsets alone, so a typed and an untyped span
+   * over the same text are one mention and are expanded once.</p>
    *
    * <p>The locations layer must be present, but it may be empty: an absent layer is a
-   * pipeline error rather than a location-free document, because a missing geocode
-   * stage would otherwise silence every containment chain of every document.</p>
+   * pipeline error, not a location-free document.</p>
    *
    * @param document The document to annotate. Must not be {@code null} and must carry
    *                 the {@link GeocodeAnnotator#LOCATIONS} layer.
@@ -157,7 +151,6 @@ public class HierarchyAnnotator implements DocumentAnnotator {
   private static long offsets(Span span) {
     return ((long) span.getStart() << 32) | span.getEnd();
   }
-
 
   @Override
   public Set<LayerKey<?>> requires() {
