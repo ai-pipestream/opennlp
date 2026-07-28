@@ -32,10 +32,10 @@ import java.util.Map;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Metadata-grounded place similarity: each place carries a numeric profile from a
- * user-supplied table, population density, income, whatever the caller measures, and
- * places compare by the cosine of their standardized profiles. Two places are similar
- * when their measured profiles are, independent of their names or text co-occurrence.
+ * Compares places by the cosine of their standardized metric profiles. Each place carries
+ * one numeric value per metric, for example population density or median income, taken
+ * from a user-supplied table; two places are similar when their measured values are,
+ * independent of their names or of any text they occur in.
  *
  * <p>The table is tab-separated: a header line with {@code id} followed by metric
  * names, then one place per line with its identifier and one value per metric. The
@@ -44,13 +44,11 @@ import opennlp.tools.util.StringUtil;
  * zero and unit variance at load, so heterogeneous units contribute comparably; a
  * constant column contributes nothing.</p>
  *
- * <p>Every value the table holds must be a finite number. Standardization computes
- * each column's statistics in scaled form, so columns anywhere in the double range,
- * from subnormal magnitudes to near the maximum, standardize to their correct values
- * rather than overflowing or collapsing to zeros on the way. The rare column whose
- * spread itself exceeds the range of a double, or whose deviation is too small for a
- * double to hold, is rejected at load naming the metric, never answered from a
- * discarded or zeroed column. Scores are therefore always real numbers.</p>
+ * <p>Every value must be a finite number. Column statistics are computed in scaled form,
+ * so columns anywhere in the double range standardize to their correct values instead of
+ * overflowing or collapsing to zeros. A column whose spread exceeds the range of a double,
+ * or whose deviation is too small for one to hold, is rejected at load naming the metric,
+ * so a score is always a real number.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -66,6 +64,12 @@ public final class PlaceProfiles {
    */
   public record Neighbor(String id, double similarity) {
   }
+
+  /** The header cell naming the identifier column. */
+  private static final String ID_COLUMN = "id";
+
+  /** The prefix of the failure naming a cell that is not usable table data. */
+  private static final String MALFORMED_VALUE = "malformed value in row ";
 
   private final Map<String, double[]> profiles;
   private final List<String> metrics;
@@ -133,10 +137,19 @@ public final class PlaceProfiles {
       throw new IOException("the profile table has no header");
     }
     final List<String> header = splitTabs(lines.get(headerLine));
-    if (header.size() < 2 || !"id".equals(strip(header.get(0)))) {
+    if (header.size() < 2 || !ID_COLUMN.equals(strip(header.get(0)))) {
       throw new IOException("the header must be: id, then at least one metric");
     }
     final int width = header.size() - 1;
+    final List<String> strippedNames = new ArrayList<>(width);
+    for (int m = 1; m < header.size(); m++) {
+      final String name = strip(header.get(m));
+      if (name.isEmpty()) {
+        throw new IOException("empty metric name in header column " + (m + 1));
+      }
+      strippedNames.add(name);
+    }
+    final List<String> metricNames = List.copyOf(strippedNames);
     final Map<String, double[]> raw = new HashMap<>();
     for (int i = headerLine + 1; i < lines.size(); i++) {
       final String line = lines.get(i);
@@ -161,33 +174,19 @@ public final class PlaceProfiles {
     if (raw.isEmpty()) {
       throw new IOException("the profile table lists no places");
     }
-    final List<String> strippedNames = new ArrayList<>(width);
-    for (int m = 1; m < header.size(); m++) {
-      final String name = strip(header.get(m));
-      if (name.isEmpty()) {
-        throw new IOException("empty metric name in header column " + (m + 1));
-      }
-      strippedNames.add(name);
-    }
-    final List<String> metricNames = List.copyOf(strippedNames);
     standardize(raw, metricNames);
     return new PlaceProfiles(Map.copyOf(raw), metricNames);
   }
 
   /**
-   * Parses one metric cell, accepting only the finite numbers a metric table can
-   * meaningfully hold.
+   * Parses one metric cell, accepting only finite numbers.
    *
-   * <p>{@link Double#parseDouble} is deliberately not trusted on its own. It accepts
-   * {@code NaN}, {@code Infinity} and {@code -Infinity}, none of which is a measurement,
-   * and a single such cell would not stay in its own row: standardization takes the mean
-   * and deviation over the whole column, so one non-finite cell turns every profile in
-   * the table into non-finite values, and the guards downstream, which compare against
-   * {@code 0.0}, do not fire for them. It also accepts the Java {@code f} and {@code d}
-   * literal suffixes and Java's hexadecimal floating-point notation, which are Java
-   * source syntax rather than table data and indicate that whatever generated the
-   * table leaked its own literal syntax into the output. All of them are rejected
-   * here, at the only point where the offending row is still known.</p>
+   * <p>{@link Double#parseDouble} alone is not enough. It accepts {@code NaN} and both
+   * infinities, and one such cell does not stay in its own row: the column mean carries it
+   * into every profile in the table, past the downstream guards that compare against
+   * {@code 0.0}. It also accepts the Java {@code f} and {@code d} literal suffixes and
+   * hexadecimal floating-point notation, which are source syntax rather than table data.
+   * Both are rejected here, the only point where the offending row is still known.</p>
    *
    * @param text The cell content, already stripped of surrounding whitespace.
    * @param row The one-based line number of the row, for the failure message.
@@ -197,13 +196,13 @@ public final class PlaceProfiles {
    */
   private static double metricValue(String text, int row) throws IOException {
     if (hasJavaLiteralSuffix(text) || hasHexMarker(text)) {
-      throw new IOException("malformed value in row " + row + ": " + text);
+      throw new IOException(MALFORMED_VALUE + row + ": " + text);
     }
     final double value;
     try {
       value = Double.parseDouble(text);
     } catch (NumberFormatException e) {
-      throw new IOException("malformed value in row " + row + ": " + text, e);
+      throw new IOException(MALFORMED_VALUE + row + ": " + text, e);
     }
     if (!Double.isFinite(value)) {
       throw new IOException("non-finite value in row " + row + ": " + text);
@@ -276,29 +275,25 @@ public final class PlaceProfiles {
    * Rescales every column to mean zero and unit variance, in place, using the
    * population standard deviation over the listed places.
    *
-   * <p>A constant column has zero deviation and standardizes to all zeros instead of
-   * dividing by zero, so it contributes nothing to any similarity. That is the honest
-   * answer for such a column, because a metric that never varies genuinely
-   * distinguishes no two places. Constant columns are recognized directly, by their
-   * smallest and largest value being equal, so a constant column of any magnitude a
-   * double can hold gets this answer without touching any arithmetic that could
-   * overflow.</p>
+   * <p>A constant column, recognized by its smallest and largest value being equal, has
+   * zero deviation and standardizes to all zeros instead of dividing by zero, so it
+   * contributes nothing to any similarity: a metric that never varies distinguishes no two
+   * places. Recognizing it by range rather than by arithmetic keeps constant columns of any
+   * magnitude clear of anything that could overflow.</p>
    *
-   * <p>The statistics of a varying column are computed in scaled form. The mean sums
-   * per-place contributions already divided by the place count, and the deviation is
-   * taken over each value's centered distance divided by the column's largest centered
-   * distance, so the summed squares lie between one and the place count and neither
-   * overflow nor underflow, whatever the column's magnitude. The summed squares are
-   * order-independent in every way that matters: no intermediate value can cross the
-   * double range, so acceptance never depends on the iteration order of the underlying
-   * map. Standardized values are bounded by the square root of the place count.</p>
+   * <p>A varying column's statistics are computed in scaled form: the mean sums per-place
+   * contributions already divided by the place count, and the deviation is taken over each
+   * centered distance divided by the column's largest centered distance, so the summed
+   * squares lie between one and the place count whatever the column's magnitude. No
+   * intermediate value can cross the double range, so acceptance never depends on the
+   * iteration order of the map, and standardized values stay bounded by the square root of
+   * the place count.</p>
    *
-   * <p>Only genuinely inexpressible columns are rejected, naming the metric. A column
-   * whose centered distances exceed the largest double, which requires a spread beyond
-   * {@code Double.MAX_VALUE}, overflows; a varying column whose deviation is smaller
-   * than the smallest subnormal double underflows. Both describe a table the caller
-   * can trivially rescale, and the failure says so rather than answering from a
-   * discarded or zeroed metric.</p>
+   * <p>Only inexpressible columns are rejected, naming the metric: one whose centered
+   * distances exceed the largest double, which needs a spread beyond
+   * {@code Double.MAX_VALUE}, and one that varies but whose deviation is smaller than the
+   * smallest subnormal double. Both describe a table the caller can rescale, and the
+   * failure says so rather than answering from a zeroed metric.</p>
    *
    * @param profiles The raw profiles, keyed by place identifier; mutated in place.
    * @param metrics The metric names in column order, used to name a rejected column.
@@ -376,6 +371,8 @@ public final class PlaceProfiles {
   }
 
   /**
+   * Lists the metrics the table declared, in the order its columns carry them.
+   *
    * @return The metric names in column order, as an immutable list. Never
    *         {@code null}.
    */
@@ -386,10 +383,14 @@ public final class PlaceProfiles {
   /**
    * Checks whether a place is profiled.
    *
-   * @param id The place identifier.
+   * @param id The place identifier. Must not be {@code null}.
    * @return {@code true} if the table lists the place.
+   * @throws IllegalArgumentException Thrown if {@code id} is {@code null}.
    */
   public boolean contains(String id) {
+    if (id == null) {
+      throw new IllegalArgumentException("id must not be null");
+    }
     return profiles.containsKey(id);
   }
 
@@ -401,8 +402,9 @@ public final class PlaceProfiles {
    * overflow a double, so neither the profiles nor the sums taken over them here can
    * reach an infinity or a {@code NaN}.</p>
    *
-   * @param id The first place identifier. Must be listed.
-   * @param otherId The second place identifier. Must be listed.
+   * @param id The first place identifier. Must not be {@code null} and must be listed.
+   * @param otherId The second place identifier. Must not be {@code null} and must be
+   *                listed.
    * @return The cosine similarity, never {@code NaN}, nominally in {@code [-1, 1]}
    *         although rounding can place it up to one ulp outside; {@code 0} when either
    *         profile has no variance at all.
@@ -410,6 +412,12 @@ public final class PlaceProfiles {
    *         listed.
    */
   public double similarity(String id, String otherId) {
+    if (id == null) {
+      throw new IllegalArgumentException("id must not be null");
+    }
+    if (otherId == null) {
+      throw new IllegalArgumentException("otherId must not be null");
+    }
     return cosine(profile(id), profile(otherId));
   }
 
@@ -422,7 +430,7 @@ public final class PlaceProfiles {
    * same query against the same table always answers with the same places in the same
    * order.</p>
    *
-   * @param id The query place identifier. Must be listed.
+   * @param id The query place identifier. Must not be {@code null} and must be listed.
    * @param count The maximum number of neighbors. Must be positive.
    * @return The other places ordered by descending similarity and, among equal scores,
    *         by ascending identifier, at most {@code count}; the query place itself is
@@ -431,6 +439,9 @@ public final class PlaceProfiles {
    *         listed, or {@code count} is not positive.
    */
   public List<Neighbor> mostSimilar(String id, int count) {
+    if (id == null) {
+      throw new IllegalArgumentException("id must not be null");
+    }
     if (count <= 0) {
       throw new IllegalArgumentException("count must be positive: " + count);
     }
@@ -448,18 +459,14 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Resolves a place identifier to its standardized profile, failing loud on
-   * identifiers that are {@code null} or absent from the table.
+   * Resolves a place identifier to its standardized profile, failing loud on identifiers
+   * absent from the table. Callers validate the identifier is non-{@code null} first.
    *
    * @param id The place identifier to resolve.
    * @return The standardized profile of the place. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code id} is {@code null} or not
-   *         listed.
+   * @throws IllegalArgumentException Thrown if {@code id} is not listed.
    */
   private double[] profile(String id) {
-    if (id == null) {
-      throw new IllegalArgumentException("id must not be null");
-    }
     final double[] profile = profiles.get(id);
     if (profile == null) {
       throw new IllegalArgumentException("the table does not list place: " + id);
@@ -471,15 +478,12 @@ public final class PlaceProfiles {
    * Computes the cosine of two equal-length vectors: the dot product divided by the
    * product of the norms.
    *
-   * <p>The sums here need no overflow guard of their own, because standardization
-   * bounds what can reach them. Over the {@code n} listed places a standardized column
-   * sums its squares to exactly {@code n}, so no single standardized value exceeds
-   * {@code sqrt(n)} in magnitude, and each of the three sums below is bounded by
-   * {@code n} times the number of metrics. Both factors are sizes of in-memory
-   * structures, so their product cannot approach the range of a double; a table large
-   * enough to overflow these sums could not be held in the first place. This holds only
-   * because the caller cannot reach here with an infinite or {@code NaN} profile, which
-   * is what the load-time cell and column checks guarantee.</p>
+   * <p>The sums need no overflow guard of their own: standardization bounds what reaches
+   * them. Over {@code n} listed places a standardized column sums its squares to exactly
+   * {@code n}, so no standardized value exceeds {@code sqrt(n)} and each sum below is
+   * bounded by {@code n} times the metric count. Both are sizes of in-memory structures,
+   * so their product cannot approach the range of a double. This holds only because the
+   * load-time cell and column checks keep infinite and {@code NaN} profiles out.</p>
    *
    * @param a The first vector.
    * @param b The second vector, of the same length as {@code a}.
