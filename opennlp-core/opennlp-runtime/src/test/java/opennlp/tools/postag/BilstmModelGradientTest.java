@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Finite-difference gradient checks for the full training wiring of
@@ -38,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BilstmModelGradientTest {
 
-  private static final double EPSILON = 1e-5d;
+  private static final double EPSILON = GradientChecks.EPSILON;
   private static final double TOLERANCE = 1e-5d;
 
   private BilstmPOSTrainer.TrainingContext context;
@@ -515,8 +514,6 @@ class BilstmModelGradientTest {
   }
 
   private static void assertClose(double analytic, double numerical, String what) {
-    final double scale = Math.max(1e-3d, Math.abs(analytic) + Math.abs(numerical));
-    assertTrue(Math.abs(analytic - numerical) / scale < TOLERANCE,
-        () -> what + " analytic " + analytic + " vs numerical " + numerical);
+    GradientChecks.assertClose(analytic, numerical, TOLERANCE, what);
   }
 }

@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The trained parameters of the bidirectional LSTM POS tagger: word and character
@@ -38,14 +39,14 @@ import java.util.Map;
  * optional learned adapter projection when the model was trained with one.
  *
  * <p>Row zero of the word and character vocabularies is the unknown entry, so any
- * token can be encoded. A model is immutable once built and carries no per-call state,
- * which makes inference thread-safe; {@link #enableRepresentationCache()} may be
- * called by consumers that only read the model to skip recomputing word
- * representations of repeated tokens.</p>
+ * token can be encoded. The parameters never change once the model is built and
+ * scoring keeps no per-call state, which makes inference thread-safe;
+ * {@link #enableRepresentationCache()} may be called by consumers that only read the
+ * model to skip recomputing word representations of repeated tokens.</p>
  *
- * <p>The serialized form is a self-describing versioned binary with magic
- * {@code ONLP-BLPT-1}, following the same layout conventions as
- * {@link FeedforwardPOSModel}.</p>
+ * <p>The serialized form is a self-describing versioned binary whose magic identifies
+ * the layout, {@code ONLP-BLPT-1} through {@code ONLP-BLPT-5}, following the same
+ * layout conventions as {@link FeedforwardPOSModel}.</p>
  *
  * @see BilstmPOSTrainer
  * @see BilstmPOSTagger
@@ -58,7 +59,14 @@ public class BilstmPOSModel {
   static final String MAGIC_TWO_LAYER = "ONLP-BLPT-3";
   static final String MAGIC_TWO_LAYER_CRF = "ONLP-BLPT-4";
   static final String MAGIC_ADAPTER = "ONLP-BLPT-5";
+
+  /** Marks the built-in vocabulary symbols, which {@link #normalize} leaves alone. */
+  static final String SYMBOL_PREFIX = "*";
+
   static final String UNKNOWN = "*UNK*";
+
+  /** The most token representations {@link #enableRepresentationCache()} memoizes. */
+  private static final int REPRESENTATION_CACHE_LIMIT = 100_000;
 
   private final LinkedHashMap<String, Integer> words;
   private final LinkedHashMap<String, Integer> chars;
@@ -85,6 +93,15 @@ public class BilstmPOSModel {
 
   private volatile Map<String, double[]> representationCache;
 
+  /**
+   * Initializes a single-layer softmax model without a CRF output layer and without an
+   * adapter over the pretrained block.
+   *
+   * @see #BilstmPOSModel(LinkedHashMap, LinkedHashMap, String[], double[][], double[][],
+   *      LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, double[][],
+   *      double[], int, LinkedHashMap, float[][], double[][], double[], double[],
+   *      double[][], double[])
+   */
   BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
       String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
       LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
@@ -96,6 +113,15 @@ public class BilstmPOSModel {
         pretrainedIds, pretrainedVectors, null, null, null);
   }
 
+  /**
+   * Initializes a single-layer model with an optional CRF output layer and without an
+   * adapter over the pretrained block.
+   *
+   * @see #BilstmPOSModel(LinkedHashMap, LinkedHashMap, String[], double[][], double[][],
+   *      LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, double[][],
+   *      double[], int, LinkedHashMap, float[][], double[][], double[], double[],
+   *      double[][], double[])
+   */
   BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
       String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
       LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
@@ -109,6 +135,15 @@ public class BilstmPOSModel {
         startWeights, endWeights);
   }
 
+  /**
+   * Initializes a model with an optional stacked encoder and an optional CRF output
+   * layer, and without an adapter over the pretrained block.
+   *
+   * @see #BilstmPOSModel(LinkedHashMap, LinkedHashMap, String[], double[][], double[][],
+   *      LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, LstmLayer, double[][],
+   *      double[], int, LinkedHashMap, float[][], double[][], double[], double[],
+   *      double[][], double[])
+   */
   BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
       String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
       LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
@@ -122,6 +157,38 @@ public class BilstmPOSModel {
         startWeights, endWeights, null, null);
   }
 
+  /**
+   * Initializes a model from its vocabularies and parameter arrays. The trainer and the
+   * loader are the only callers; the arrays are taken over without copying and must not
+   * be mutated afterwards.
+   *
+   * @param words The word lookup form to embedding row mapping, row zero unknown.
+   * @param chars The character to embedding row mapping, row zero unknown.
+   * @param tags The tag inventory by output index.
+   * @param wordEmbeddings The learned word embeddings, one row per word.
+   * @param charEmbeddings The learned character embeddings, one row per character.
+   * @param charForward The forward character LSTM.
+   * @param charBackward The backward character LSTM.
+   * @param wordForward The forward sentence LSTM.
+   * @param wordBackward The backward sentence LSTM.
+   * @param wordForward2 The second forward sentence LSTM, or {@code null} when the
+   *                     encoder is single-layer.
+   * @param wordBackward2 The second backward sentence LSTM, or {@code null} when the
+   *                      encoder is single-layer.
+   * @param outputWeights The tag scorer weights, {@code [tags][2 * hidden]}.
+   * @param outputBias The tag scorer bias, one entry per tag.
+   * @param maxWordLength The maximum characters of a token fed to the character BiLSTM.
+   * @param pretrainedIds The word lookup form to pretrained vector row mapping, or
+   *                      {@code null} when the model carries no vector table.
+   * @param pretrainedVectors The pretrained vector table, or {@code null} when absent.
+   * @param transitionWeights The CRF transition scores, or {@code null} on a softmax
+   *                          model.
+   * @param startWeights The CRF start scores, or {@code null} on a softmax model.
+   * @param endWeights The CRF end scores, or {@code null} on a softmax model.
+   * @param adapterWeights The square adapter projection over the pretrained block, or
+   *                       {@code null} when the block enters unchanged.
+   * @param adapterBias The adapter bias, or {@code null} when there is no adapter.
+   */
   BilstmPOSModel(LinkedHashMap<String, Integer> words, LinkedHashMap<String, Integer> chars,
       String[] tags, double[][] wordEmbeddings, double[][] charEmbeddings,
       LstmLayer charForward, LstmLayer charBackward, LstmLayer wordForward,
@@ -220,7 +287,7 @@ public class BilstmPOSModel {
    * this.
    */
   public void enableRepresentationCache() {
-    representationCache = new java.util.concurrent.ConcurrentHashMap<>();
+    representationCache = new ConcurrentHashMap<>();
   }
 
   /**
@@ -232,7 +299,7 @@ public class BilstmPOSModel {
    * @return The lookup form. Never {@code null}.
    */
   public static String normalize(String token) {
-    return token.startsWith("*") ? token : token.toLowerCase(Locale.ROOT);
+    return token.startsWith(SYMBOL_PREFIX) ? token : token.toLowerCase(Locale.ROOT);
   }
 
   /**
@@ -294,12 +361,20 @@ public class BilstmPOSModel {
       }
     }
     final double[] representation = computeRepresentation(token);
-    if (representationCache != null && representationCache.size() < 100_000) {
+    if (representationCache != null
+        && representationCache.size() < REPRESENTATION_CACHE_LIMIT) {
       representationCache.putIfAbsent(token, representation.clone());
     }
     return representation;
   }
 
+  /**
+   * Builds the word representation of one token from scratch, bypassing the cache.
+   *
+   * @param token The token. Must not be {@code null}.
+   * @return The representation, length {@link #representationSize()}. Never
+   *         {@code null}.
+   */
   private double[] computeRepresentation(String token) {
     final double[] wordEmbedding = wordEmbeddings[wordId(token)];
     final int charHidden = charForward.hiddenSize();
@@ -331,15 +406,7 @@ public class BilstmPOSModel {
     if (pretrained != null) {
       final int offset = wordEmbedding.length + 2 * charHidden;
       if (adapterWeights != null) {
-        // the same projection training applied: out[i] = bias[i] plus the
-        // pretrained row mapped through adapterWeights[r][i]
-        for (int i = 0; i < pretrainedSize; i++) {
-          double sum = adapterBias[i];
-          for (int r = 0; r < pretrainedSize; r++) {
-            sum += adapterWeights[r][i] * pretrained[r];
-          }
-          representation[offset + i] = sum;
-        }
+        applyAdapter(pretrained, adapterWeights, adapterBias, representation, offset);
       }
       else {
         for (int i = 0; i < pretrainedSize; i++) {
@@ -351,6 +418,29 @@ public class BilstmPOSModel {
   }
 
   /**
+   * Writes one pretrained vector into a token representation through the adapter
+   * projection, {@code target[offset + i] = bias[i] + sum over r of weights[r][i] *
+   * vector[r]}. Training and tagging share this so a model scores at tagging time
+   * exactly as it was fit.
+   *
+   * @param vector The pretrained row. Must not be {@code null}.
+   * @param weights The square adapter projection. Must not be {@code null}.
+   * @param bias The adapter bias. Must not be {@code null}.
+   * @param target The representation to write into. Must not be {@code null}.
+   * @param offset The index of the pretrained block inside {@code target}.
+   */
+  static void applyAdapter(float[] vector, double[][] weights, double[] bias,
+      double[] target, int offset) {
+    for (int i = 0; i < bias.length; i++) {
+      double sum = bias[i];
+      for (int r = 0; r < weights.length; r++) {
+        sum += weights[r][i] * vector[r];
+      }
+      target[offset + i] = sum;
+    }
+  }
+
+  /**
    * Scores every tag at every position of a sentence: encodes each token, runs the
    * sentence BiLSTM (both layers when stacked), and applies the linear tagger to the
    * final states.
@@ -358,6 +448,7 @@ public class BilstmPOSModel {
    * @param tokens The sentence. Must not be {@code null} or empty.
    * @return The unnormalized tag scores, {@code [tokens.length][tags.length]}.
    *         Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code tokens} is {@code null} or empty.
    */
   public double[][] score(String[] tokens) {
     if (tokens == null || tokens.length == 0) {
@@ -418,9 +509,9 @@ public class BilstmPOSModel {
   /**
    * Serializes this model in the versioned {@code ONLP-BLPT} binary format. A model
    * carrying a pretrained adapter is written as {@code ONLP-BLPT-5}, whose body opens
-   * with the two shape flags (stacked encoder, CRF output layer) that the earlier
-   * magics encode in the version number itself; anything older keeps its exact
-   * historical layout.
+   * with two boolean shape flags (stacked encoder, CRF output layer); in
+   * {@code ONLP-BLPT-1} through {@code ONLP-BLPT-4} those two flags are encoded in the
+   * magic itself, and every one of those layouts stays readable.
    *
    * @param out The stream to write to; not closed. Must not be {@code null}.
    * @throws IOException Thrown if writing fails.
@@ -592,6 +683,14 @@ public class BilstmPOSModel {
     }
   }
 
+  /**
+   * Writes one LSTM layer: its two sizes, then the input weights, recurrence weights,
+   * and biases.
+   *
+   * @param data The stream to write to.
+   * @param layer The layer to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeLstm(DataOutputStream data, LstmLayer layer)
       throws IOException {
     data.writeInt(layer.inputSize());
@@ -601,6 +700,13 @@ public class BilstmPOSModel {
     writeVector(data, layer.b());
   }
 
+  /**
+   * Reads one LSTM layer written by {@link #writeLstm(DataOutputStream, LstmLayer)}.
+   *
+   * @param data The stream to read from.
+   * @return The layer over the read arrays. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static LstmLayer readLstm(DataInputStream data) throws IOException {
     final int inputSize = data.readInt();
     final int hiddenSize = data.readInt();
@@ -610,6 +716,14 @@ public class BilstmPOSModel {
     return LstmLayer.ofWeights(inputSize, hiddenSize, w, u, b);
   }
 
+  /**
+   * Writes a vocabulary as its size followed by symbol and row pairs, in iteration
+   * order.
+   *
+   * @param data The stream to write to.
+   * @param vocabulary The vocabulary to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeVocabulary(DataOutputStream data,
       LinkedHashMap<String, Integer> vocabulary) throws IOException {
     data.writeInt(vocabulary.size());
@@ -619,6 +733,14 @@ public class BilstmPOSModel {
     }
   }
 
+  /**
+   * Reads a vocabulary written by
+   * {@link #writeVocabulary(DataOutputStream, LinkedHashMap)}, preserving its order.
+   *
+   * @param data The stream to read from.
+   * @return The vocabulary. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static LinkedHashMap<String, Integer> readVocabulary(DataInputStream data)
       throws IOException {
     final int size = data.readInt();
@@ -629,6 +751,13 @@ public class BilstmPOSModel {
     return vocabulary;
   }
 
+  /**
+   * Writes a rectangular matrix as its two dimensions followed by the values, row major.
+   *
+   * @param data The stream to write to.
+   * @param matrix The matrix to write; must have at least one row.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeMatrix(DataOutputStream data, double[][] matrix)
       throws IOException {
     data.writeInt(matrix.length);
@@ -640,6 +769,13 @@ public class BilstmPOSModel {
     }
   }
 
+  /**
+   * Reads a matrix written by {@link #writeMatrix(DataOutputStream, double[][])}.
+   *
+   * @param data The stream to read from.
+   * @return The matrix. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static double[][] readMatrix(DataInputStream data) throws IOException {
     final int rows = data.readInt();
     final int cols = data.readInt();
@@ -652,6 +788,13 @@ public class BilstmPOSModel {
     return matrix;
   }
 
+  /**
+   * Writes a vector as its length followed by the values.
+   *
+   * @param data The stream to write to.
+   * @param vector The vector to write.
+   * @throws IOException Thrown if writing fails.
+   */
   private static void writeVector(DataOutputStream data, double[] vector)
       throws IOException {
     data.writeInt(vector.length);
@@ -660,6 +803,13 @@ public class BilstmPOSModel {
     }
   }
 
+  /**
+   * Reads a vector written by {@link #writeVector(DataOutputStream, double[])}.
+   *
+   * @param data The stream to read from.
+   * @return The vector. Never {@code null}.
+   * @throws IOException Thrown if reading fails.
+   */
   private static double[] readVector(DataInputStream data) throws IOException {
     final double[] vector = new double[data.readInt()];
     for (int i = 0; i < vector.length; i++) {

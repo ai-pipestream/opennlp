@@ -26,10 +26,12 @@ import java.util.SortedMap;
 /**
  * The Adam optimizer over a registered set of weight arrays, with global-norm
  * gradient clipping. Weight arrays are shared with the caller, gradient mirrors are
- * owned here and accumulated in place by the training loop, and each {@link #step}
- * applies the Adam update in place and reports nothing. Vectors register as one-row
- * matrices so there is a single code path. Not thread-safe; the training loop is
- * single-threaded by design.
+ * owned here, and {@link #step} updates every registered array in place. Vectors
+ * register as one-row matrices so there is a single update path.
+ *
+ * <p>An instance is not thread-safe. Parallel training keeps it on the coordinating
+ * thread: workers accumulate into their own {@link #newGradientBuffers() buffers} and
+ * the coordinator folds those in with {@link #absorb} before stepping.</p>
  */
 final class AdamOptimizer {
 
@@ -49,6 +51,7 @@ final class AdamOptimizer {
    * @param weight The weight array, shared and updated in place. Must not be
    *               {@code null}.
    * @return The index used to reach the gradient mirror.
+   * @throws IllegalArgumentException Thrown if {@code weight} is {@code null}.
    */
   int register(double[][] weight) {
     return register(weight, 1.0d);
@@ -63,6 +66,8 @@ final class AdamOptimizer {
    * @param lrMultiplier Multiplier applied to the learning rate for this group; must
    *                     be positive.
    * @return The index used to reach the gradient mirror.
+   * @throws IllegalArgumentException Thrown if {@code weight} is {@code null} or
+   *         {@code lrMultiplier} is not positive.
    */
   int register(double[][] weight, double lrMultiplier) {
     if (weight == null) {
@@ -93,6 +98,7 @@ final class AdamOptimizer {
    * @param weight The weight array, shared and updated in place. Must not be
    *               {@code null}.
    * @return The index used to reach the gradient mirror.
+   * @throws IllegalArgumentException Thrown if {@code weight} is {@code null}.
    */
   int register(double[] weight) {
     if (weight == null) {
@@ -145,6 +151,7 @@ final class AdamOptimizer {
    * @param learningRate The step size.
    * @param timestep The one-based number of this update, driving bias correction.
    *        Must be positive.
+   * @throws IllegalArgumentException Thrown if {@code timestep} is not positive.
    */
   void step(double learningRate, int timestep) {
     if (timestep <= 0) {

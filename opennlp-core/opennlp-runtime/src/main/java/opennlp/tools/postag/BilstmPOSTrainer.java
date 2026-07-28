@@ -43,7 +43,10 @@ import opennlp.tools.util.ObjectStream;
  * representations concatenated with learned word embeddings (and an optional frozen
  * pretrained-vector table), a word-level BiLSTM sentence encoder, and a linear
  * softmax tagger, all fit by cross-entropy with backpropagation through time, Adam,
- * global-norm gradient clipping, and input dropout on the word representations.
+ * global-norm gradient clipping, and input dropout on the word representations. The
+ * {@link Settings} switch on the optional parts: a linear-chain CRF output layer, a
+ * second stacked encoder layer, encoder and pretrained-block dropout, a learned adapter
+ * over or fine-tuning of the pretrained table, and auxiliary training heads.
  *
  * <p>Everything is hand-rolled {@code double} arithmetic with no native runtime; two
  * separately seeded random streams (one for initialization, one for shuffling and
@@ -56,6 +59,13 @@ import opennlp.tools.util.ObjectStream;
 public final class BilstmPOSTrainer {
 
   private static final Logger logger = LoggerFactory.getLogger(BilstmPOSTrainer.class);
+
+  /**
+   * Spreads the per-sentence dropout-mask seeds apart across epochs. Any large odd
+   * value works; this one only has to keep the epoch and position parts of the seed
+   * from colliding.
+   */
+  private static final long EPOCH_SEED_STRIDE = 1000003L;
 
   private BilstmPOSTrainer() {
   }
@@ -319,6 +329,19 @@ public final class BilstmPOSTrainer {
     return trainCorpus(corpus, settings, wordVectors, lexicon);
   }
 
+  /**
+   * Reads the sample stream into a corpus of single-task samples and trains on it, the
+   * shared path behind every {@code train} overload.
+   *
+   * @param samples The training samples. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source, or {@code null} to train without one.
+   * @param lexicon Additional words to store vectors for, or {@code null} for none.
+   * @return A trained {@link BilstmPOSModel}. Never {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
+   *         {@code null}, or the samples contain no token.
+   */
   private static BilstmPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
       Iterable<? extends CharSequence> lexicon) throws IOException {
@@ -336,6 +359,20 @@ public final class BilstmPOSTrainer {
     return trainCorpus(corpus, settings, wordVectors, lexicon);
   }
 
+  /**
+   * Runs the epoch loop over an in-memory corpus: shuffle, sentence-parallel batches,
+   * global-norm clipping, one Adam step per batch, and the learning-rate half-life
+   * decay.
+   *
+   * @param corpus The training corpus. Must not be {@code null}.
+   * @param settings The hyperparameters. Must not be {@code null}.
+   * @param wordVectors The word vector source, or {@code null} to train without one.
+   * @param lexicon Additional words to store vectors for, or {@code null} for none.
+   * @return A trained {@link BilstmPOSModel}. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code corpus} is empty.
+   * @throws IllegalStateException Thrown if a training worker fails or the training
+   *         thread is interrupted.
+   */
   private static BilstmPOSModel trainCorpus(List<MultiTaskSample> corpus,
       Settings settings, Function<CharSequence, float[]> wordVectors,
       Iterable<? extends CharSequence> lexicon) {
@@ -432,10 +469,26 @@ public final class BilstmPOSTrainer {
     return context.toModel();
   }
 
+  /**
+   * Derives the dropout-mask stream of one sentence. The stream depends only on the
+   * run seed, the epoch, and the sentence's position in the epoch, never on which
+   * worker picks the sentence up, which is what makes parallel training reproducible.
+   *
+   * @param seed The run seed.
+   * @param epoch The one-based epoch.
+   * @param position The sentence's index in the shuffled order.
+   * @return The mask stream for that sentence. Never {@code null}.
+   */
   private static Random maskRandom(long seed, int epoch, int position) {
-    return new Random(seed + epoch * 1000003L + position);
+    return new Random(seed + epoch * EPOCH_SEED_STRIDE + position);
   }
 
+  /**
+   * Shuffles an index order in place with a Fisher-Yates pass.
+   *
+   * @param order The indices to shuffle.
+   * @param random The shuffle stream.
+   */
   private static void shuffle(int[] order, Random random) {
     for (int i = order.length - 1; i > 0; i--) {
       final int j = random.nextInt(i + 1);
@@ -446,11 +499,22 @@ public final class BilstmPOSTrainer {
   }
 
   /**
-   * The mutable state of one training run: vocabularies, parameters, optimizer, and
-   * the per-sentence forward/backward wiring. Single-threaded by design. Package
-   * visible for white-box gradient checks of the wiring.
+   * The state of one training run: vocabularies, parameters, optimizer, and the
+   * per-sentence forward/backward wiring. Package visible for white-box gradient
+   * checks of the wiring.
+   *
+   * <p>{@link #sentenceGradients} runs concurrently on several workers and writes only
+   * into the {@link Worker} it is handed; the parameters and the optimizer are touched
+   * from the coordinating thread alone, between batches.</p>
    */
   static final class TrainingContext {
+
+    /**
+     * The optimizer registrations every model has, before the optional CRF, stacked
+     * encoder, auxiliary head, fine-tuning, and adapter blocks are appended. See the
+     * registration order documented in {@link #build}.
+     */
+    private static final int BASE_REGISTRATIONS = 16;
 
     private final Settings settings;
     private final LinkedHashMap<String, Integer> words;
@@ -489,6 +553,19 @@ public final class BilstmPOSTrainer {
     private final double[][] featsWeights;
     private final double[] featsBias;
 
+    private final int crfIndex;
+    private final int layer2Index;
+    private final int xposIndex;
+    private final int featsIndex;
+    private final int tuningIndex;
+    private final int adapterIndex;
+
+    /**
+     * Takes over the vocabularies, parameter arrays, and optimizer that
+     * {@link #build(List, Settings, Function, Iterable)} assembled, and derives the
+     * optimizer registration index of every optional block from the settings.
+     * {@code build} is the only caller.
+     */
     private TrainingContext(Settings settings, LinkedHashMap<String, Integer> words,
         LinkedHashMap<String, Integer> chars, String[] tags,
         Map<String, Integer> tagIds, double[][] wordEmbeddings,
@@ -537,7 +614,7 @@ public final class BilstmPOSTrainer {
       this.pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
       this.inputSize = inputSize;
       this.adam = adam;
-      int index = 16;
+      int index = BASE_REGISTRATIONS;
       crfIndex = settings.crf() ? index : -1;
       if (settings.crf()) {
         index += 3;
@@ -560,13 +637,6 @@ public final class BilstmPOSTrainer {
       }
       adapterIndex = adapterWeights != null ? index : -1;
     }
-
-    private final int crfIndex;
-    private final int layer2Index;
-    private final int xposIndex;
-    private final int featsIndex;
-    private final int tuningIndex;
-    private final int adapterIndex;
 
     /**
      * Rebuilds the transposed weight views of every encoder layer after an
@@ -667,6 +737,20 @@ public final class BilstmPOSTrainer {
       private final double[][] adapterWeightGrads;
       private final double[] adapterBiasGrads;
 
+      /**
+       * Names the buffers of one worker, following the registration order documented
+       * in {@link TrainingContext#build(List, Settings, Function, Iterable)}. A
+       * negative index means the model does not carry that optional block.
+       *
+       * @param buffers The worker's own gradient buffers, in registration order.
+       * @param crfIndex The registration of the CRF transitions, or a negative value.
+       * @param layer2Index The registration of the second encoder layer, or negative.
+       * @param xposIndex The registration of the xpos head, or a negative value.
+       * @param featsIndex The registration of the feats head, or a negative value.
+       * @param tuningIndex The registration of the fine-tuned vector table, whose
+       *                    gradients are held sparsely instead, or a negative value.
+       * @param adapterIndex The registration of the adapter, or a negative value.
+       */
       private Worker(List<double[][]> buffers, int crfIndex, int layer2Index,
           int xposIndex, int featsIndex, int tuningIndex, int adapterIndex) {
         this.buffers = buffers;
@@ -798,6 +882,27 @@ public final class BilstmPOSTrainer {
       return charBackward;
     }
 
+    /**
+     * Builds the vocabularies and tag inventories from the corpus, initializes every
+     * parameter from the seeded init stream, collects the pretrained vector slice, and
+     * registers everything with a fresh optimizer.
+     *
+     * <p>The registration order is part of the contract between this method and
+     * {@link Worker}, and the white-box gradient checks assert against it: 0 word
+     * embeddings, 1 char embeddings, 2-4 char forward w/u/b, 5-7 char backward w/u/b,
+     * 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights, 15 output
+     * bias, then, each only when the corresponding block exists, CRF
+     * transitions/start/end, second-layer forward/backward w/u/b, xpos weights/bias,
+     * feats weights/bias, the fine-tuning table, and adapter weights/bias.</p>
+     *
+     * @param corpus The training corpus. Must not be {@code null} or empty.
+     * @param settings The hyperparameters. Must not be {@code null}.
+     * @param wordVectors The word vector source, or {@code null} to train without one.
+     * @param lexicon Additional words to store vectors for, or {@code null} for none.
+     * @return The initialized context. Never {@code null}.
+     * @throws IllegalArgumentException Thrown if {@code lexicon} contains {@code null}
+     *         or {@code wordVectors} returns no vector for any word.
+     */
     static TrainingContext build(List<MultiTaskSample> corpus, Settings settings,
         Function<CharSequence, float[]> wordVectors,
         Iterable<? extends CharSequence> lexicon) {
@@ -911,10 +1016,9 @@ public final class BilstmPOSTrainer {
       }
       final int pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
 
-      // identity-initialized projection over the frozen block: exactly the
-      // pass-through at start, trained away from it only where the loss benefits;
-      // consumes no init-stream randomness, so enabling it changes no other
-      // parameter's initialization
+      // The adapter starts as the identity, so a run with it begins from exactly the
+      // frozen pass-through. It draws nothing from the init stream, so enabling it
+      // leaves every other parameter's initialization unchanged.
       final double[][] adapterWeights;
       final double[] adapterBias;
       if (pretrainedVectors != null && settings.pretrainedAdapter()) {
@@ -994,14 +1098,8 @@ public final class BilstmPOSTrainer {
       }
 
       final AdamOptimizer adam = new AdamOptimizer();
-      // registration order, relied on by white-box tests: 0 word embeddings,
-      // 1 char embeddings, 2-4 char forward w/u/b, 5-7 char backward w/u/b,
-      // 8-10 word forward w/u/b, 11-13 word backward w/u/b, 14 output weights,
-      // 15 output bias, then CRF transitions/start/end (crf only), then
-      // second-layer forward/backward w/u/b (encoderLayers 2 only), then the
-      // auxiliary xpos weights/bias and feats weights/bias (multi-task only),
-      // then the fine-tuning table (pretrainedTuning only), then the adapter
-      // weights/bias (pretrainedAdapter only)
+      // The order of these calls is the registration order documented on this method;
+      // Worker and the gradient checks index the buffers by it.
       adam.register(wordEmbeddings);
       adam.register(charEmbeddings);
       adam.register(charForward.w());
@@ -1055,6 +1153,17 @@ public final class BilstmPOSTrainer {
           xposIds, xposWeights, xposBias, featsTags, featsIds, featsWeights, featsBias);
     }
 
+    /**
+     * Asks the vector source for each candidate word not already collected and appends
+     * the vectors it returns, assigning row numbers in encounter order.
+     *
+     * @param candidates The normalized words to look up.
+     * @param wordVectors The word vector source.
+     * @param ids Receives the word to row mapping.
+     * @param collected Receives the vectors, indexed by row.
+     * @throws IllegalArgumentException Thrown if the source returns a vector of length
+     *         zero or of a length differing from the first one it returned.
+     */
     private static void collectVectors(Iterable<String> candidates,
         Function<CharSequence, float[]> wordVectors,
         LinkedHashMap<String, Integer> ids, List<float[]> collected) {
@@ -1098,6 +1207,15 @@ public final class BilstmPOSTrainer {
       return matrix;
     }
 
+    /**
+     * Fills a matrix from the uniform distribution over {@code [-limit, limit]}.
+     *
+     * @param rows The row count.
+     * @param cols The column count.
+     * @param limit The bound of the uniform draw.
+     * @param random The initialization stream.
+     * @return The initialized matrix. Never {@code null}.
+     */
     private static double[][] randomMatrix(int rows, int cols, double limit,
         Random random) {
       final double[][] matrix = new double[rows][cols];
@@ -1113,11 +1231,12 @@ public final class BilstmPOSTrainer {
      * Runs the full forward and backward pass of one sentence, accumulating every
      * parameter gradient into the worker's buffers.
      *
-     * @param sample The sentence with gold tags.
+     * @param sample The sentence with its gold taggings. Must not be {@code null}.
      * @param random The dropout-mask random stream, seeded per sentence by the caller
-     *               so parallel training is deterministic per (seed, threads).
+     *               so parallel training is deterministic per (seed, threads). Must
+     *               not be {@code null}.
      * @param worker The gradient-storage owner. Must not be {@code null}.
-     * @return The summed cross-entropy loss of the sentence.
+     * @return The summed cross-entropy loss of the sentence, auxiliary heads included.
      */
     double sentenceGradients(MultiTaskSample sample, Random random, Worker worker) {
       final double[][] wordEmbeddingGrads = worker.wordEmbeddingGrads;
@@ -1185,9 +1304,8 @@ public final class BilstmPOSTrainer {
           final Integer row = pretrainedIds.get(BilstmPOSModel.normalize(token));
           if (row != null) {
             pretrainedRows[t] = row;
-            // whole-block dropout trains the character path for the tokens that
-            // resolve no vector at tagging time; drawn only when enabled, so runs
-            // without it keep their exact mask stream
+            // Drawn only when the option is on, so switching it off reproduces the
+            // mask stream of a run that never had it.
             if (settings.pretrainedDropout() > 0.0d
                 && random.nextDouble() < settings.pretrainedDropout()) {
               blockDropped[t] = true;
@@ -1195,15 +1313,8 @@ public final class BilstmPOSTrainer {
             else {
               final int offset = wordSize + 2 * charHidden;
               if (adapterWeights != null) {
-                // x[offset+i] = sum_r adapterWeights[r][i] * pretrained[r] + bias[i]
-                final float[] pretrained = pretrainedVectors[row];
-                for (int i = 0; i < pretrainedSize; i++) {
-                  double sum = adapterBias[i];
-                  for (int r = 0; r < pretrainedSize; r++) {
-                    sum += adapterWeights[r][i] * pretrained[r];
-                  }
-                  x[offset + i] = sum;
-                }
+                BilstmPOSModel.applyAdapter(pretrainedVectors[row], adapterWeights,
+                    adapterBias, x, offset);
               }
               else if (pretrainedTrainable != null) {
                 System.arraycopy(pretrainedTrainable[row], 0, x, offset, pretrainedSize);
@@ -1240,9 +1351,9 @@ public final class BilstmPOSTrainer {
         System.arraycopy(hFwd[t], 0, states[t], 0, hidden);
         System.arraycopy(hBackwardReversed[steps - 1 - t], 0, states[t], hidden, hidden);
       }
-      // inverted dropout on the encoder outputs: between stacked layers and on the
-      // states feeding the scorers; masks drawn only when enabled, so runs without
-      // it keep their exact mask stream
+      // Inverted dropout on the encoder outputs, between the stacked layers and on the
+      // states feeding the scorers. Masks are drawn only when the option is on, so
+      // switching it off reproduces the mask stream of a run that never had it.
       final double encoderKeep = 1.0d - settings.encoderDropout();
       double[][] topStates = states;
       LstmLayer.ForwardCache layer2ForwardCache = null;
@@ -1410,8 +1521,7 @@ public final class BilstmPOSTrainer {
           }
         }
         if (pretrainedRows[t] >= 0 && !blockDropped[t] && worker.adapterWeightGrads != null) {
-          // dAdapterWeights[r][i] += dx[offset+i] * pretrained[r]; no gradient
-          // flows into the frozen table itself through the projection
+          // Only the projection learns here; the vector table it reads stays frozen.
           final int offset = wordSize + 2 * charHidden;
           final float[] pretrained = pretrainedVectors[pretrainedRows[t]];
           for (int r = 0; r < pretrainedSize; r++) {
@@ -1553,10 +1663,27 @@ public final class BilstmPOSTrainer {
       return loss;
     }
 
+    /**
+     * Maps a token to its row in the training word vocabulary, unknown words to row
+     * zero. The built model's {@link BilstmPOSModel#wordId} is the same lookup over
+     * the same vocabulary.
+     *
+     * @param token The token.
+     * @return The embedding row.
+     */
     private int wordId(String token) {
       return words.getOrDefault(BilstmPOSModel.normalize(token), 0);
     }
 
+    /**
+     * Maps a token to its character-vocabulary rows, capped at
+     * {@link Settings#maxWordLength()} leading characters, unknown characters to row
+     * zero.
+     *
+     * @param token The token.
+     * @return One row per kept character, empty for an empty token. Never
+     *         {@code null}.
+     */
     private int[] charIds(String token) {
       final int length = Math.min(token.length(), settings.maxWordLength());
       final int[] ids = new int[length];
@@ -1566,6 +1693,13 @@ public final class BilstmPOSTrainer {
       return ids;
     }
 
+    /**
+     * Wraps the trained parameters as a model, narrowing a fine-tuned vector table
+     * back to {@code float} for storage. The auxiliary heads are dropped here: they
+     * regularize the shared encoder during training and have no role at tagging time.
+     *
+     * @return The trained model. Never {@code null}.
+     */
     private BilstmPOSModel toModel() {
       final float[][] vectors;
       if (pretrainedTrainable != null) {
