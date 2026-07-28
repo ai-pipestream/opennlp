@@ -40,7 +40,9 @@
 			folding is on, so a registered lowercase term still covers a mixed-case
 			mention while the span points at the original characters.
 			<code>GlossaryUsageExampleTest</code> asserts the behavior shown here.
-			<programlisting language="java"><![CDATA[
+		</para>
+		<programlisting language="java">
+				<![CDATA[
 List<GlossaryEntry> glossary = List.of(
     new GlossaryEntry("LIB-1", "Apache OpenNLP"),
     new GlossaryEntry("ALG-42", "maximum entropy model"),
@@ -56,7 +58,8 @@ Document document = analyzer.analyze(
 
 List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
 // three hits: "Apache OpenNLP", "Maximum Entropy model", "perceptron model"]]>
-			</programlisting>
+		</programlisting>
+		<para>
 			A document that never saw a glossary annotator reads an empty glossary
 			layer, and the key is absent from <code>layers()</code>.
 		</para>
