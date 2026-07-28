@@ -27,16 +27,15 @@ import java.util.function.Predicate;
  * the document satisfies every downstream {@link DocumentAnnotator#requires()} exactly
  * as if the delegate had run and found nothing.
  *
- * <p>The condition is a plain {@link Predicate}, so any expression engine can compile
- * into it without this toolkit depending on one; a pipeline guard is whatever the
- * caller can phrase over the document and its layers.</p>
- *
  * <p>This annotator is safe for concurrent use when its delegate and condition
  * are.</p>
  *
  * @since 3.0.0
  */
 public final class ConditionalAnnotator implements DocumentAnnotator {
+
+  /** The message prefix of every absent-required-layer rejection in this wrapper. */
+  private static final String MISSING_LAYER = "document lacks the required layer ";
 
   private final Predicate<Document> condition;
   private final DocumentAnnotator delegate;
@@ -61,10 +60,28 @@ public final class ConditionalAnnotator implements DocumentAnnotator {
     this.delegate = delegate;
   }
 
+  /**
+   * Tests the condition and either runs the delegate or adds every layer the delegate
+   * provides as an empty layer. The delegate's required layers must be present in both
+   * cases.
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 every layer the delegate requires.
+   * @return A new {@link Document} carrying the delegate's provided layers, populated
+   *         when the condition held and empty otherwise. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
+   *         lacks a layer the delegate requires.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    final Set<LayerKey<?>> present = document.layers();
+    for (final LayerKey<?> required : delegate.requires()) {
+      if (!present.contains(required)) {
+        throw new IllegalArgumentException(MISSING_LAYER + required);
+      }
     }
     if (condition.test(document)) {
       return delegate.annotate(document);
@@ -77,14 +94,14 @@ public final class ConditionalAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Adds one empty layer.
+   * Adds one layer, present but empty.
    *
    * @param document The document.
    * @param layer The layer to add empty.
    * @param <T> The layer's value type.
    * @return The document with the layer present and empty.
    */
-  private static <T> Document withEmpty(Document document, LayerKey<T> layer) {
+  private <T> Document withEmpty(Document document, LayerKey<T> layer) {
     return document.with(layer, List.of());
   }
 
