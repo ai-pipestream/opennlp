@@ -95,6 +95,12 @@ public class NoiseAnnotator implements DocumentAnnotator {
     return document.with(NOISE, found);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The default mode requires {@link AssetAnnotator#ASSETS}; the standalone mode
+   * requires nothing.</p>
+   */
   @Override
   public Set<LayerKey<?>> requires() {
     return excludeAssets ? Set.of(AssetAnnotator.ASSETS) : Set.of();
