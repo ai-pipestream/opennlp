@@ -40,14 +40,24 @@ import java.util.Set;
  * types where a registration exists, otherwise the form in prevailing use.</p>
  *
  * <p>Entries are held longest magic first, so a lookup always yields the most specific
- * match. The RIFF container is not in this table: its form type sits at offset eight,
- * and {@link CursorAssetDetector} resolves it from the decoded header.</p>
+ * match. The bare RIFF container magic is not in this table: its form type sits at
+ * offset eight, and {@link CursorAssetDetector} resolves it from the decoded header.
+ * Only a RIFF format whose whole leading sequence is fixed, such as CDA, is an entry
+ * here.</p>
  *
  * @since 3.0.0
  */
 final class KnownMagics {
 
-  /** One table entry: the magic bytes, their precomputed base64 image, and the tags. */
+  /**
+   * One table entry: the magic bytes, their precomputed base64 image, and the tags.
+   *
+   * @param magic The leading bytes a file of the format starts with.
+   * @param prefix The base64 image of {@code magic}, floored to the characters the
+   *               magic fully determines.
+   * @param format The format tag.
+   * @param mediaType The media type.
+   */
   record Entry(byte[] magic, String prefix, String format, String mediaType) {
   }
 
@@ -188,7 +198,7 @@ final class KnownMagics {
       e("762f310102000000", "exr", "image/aces"), // v/1.....
       e("762f310102040000", "exr", "image/aces"), // v/1.....
       e("974a42320d0a1a0a", "jb2", "image/x-jbig2"), // .JB2....
-      e("efbbbf255044462d", "pdf", "application/pdf"), // ...%PDF-
+      e("efbbbf255044462d", EmbeddedAsset.FORMAT_PDF, "application/pdf"), // ...%PDF-
       e("efbbbf3c3f786d6c", "xml", "application/xml"), // ...<?xml
       e("234558544d3355", "m3u8", "application/vnd.apple.mpegurl"), // #EXTM3U
       e("53747566664974", "sit", "application/x-stuffit"), // StuffIt
@@ -309,7 +319,7 @@ final class KnownMagics {
   static final List<Entry> ENTRIES;
 
   /** The distinct base64 prefixes of all entries, for bare-run scanning. */
-  static final String[] PREFIXES;
+  static final List<String> PREFIXES;
 
   static {
     final List<Entry> entries = new ArrayList<>(CORE);
@@ -320,7 +330,7 @@ final class KnownMagics {
     for (final Entry entry : ENTRIES) {
       prefixes.add(entry.prefix());
     }
-    PREFIXES = prefixes.toArray(new String[0]);
+    PREFIXES = List.copyOf(prefixes);
   }
 
   private KnownMagics() {

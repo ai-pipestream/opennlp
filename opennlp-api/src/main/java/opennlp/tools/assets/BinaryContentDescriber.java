@@ -18,11 +18,9 @@
 package opennlp.tools.assets;
 
 /**
- * Turns the bytes of an embedded asset into a text description, the seam through which
- * external binary understanding joins the pipeline: document text extraction, image
- * description, or any other byte-to-text service. Implementations are supplied by the
- * caller and injected by constructor, so integrating one adds no dependency to this
- * toolkit.
+ * Turns the bytes of an embedded asset into a text description, for example by
+ * extracting the text of a document or by captioning an image. Callers supply the
+ * implementation; this toolkit ships none.
  *
  * <p>Thread safety is implementation specific.</p>
  *

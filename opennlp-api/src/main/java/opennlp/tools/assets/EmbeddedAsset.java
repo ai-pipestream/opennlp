@@ -133,8 +133,11 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
    *         {@code null} or blank, or {@code decodedLength} is negative.
    */
   public EmbeddedAsset {
-    if (span == null || payload == null) {
-      throw new IllegalArgumentException("span and payload must not be null");
+    if (span == null) {
+      throw new IllegalArgumentException("span must not be null");
+    }
+    if (payload == null) {
+      throw new IllegalArgumentException("payload must not be null");
     }
     if (payload.getStart() < span.getStart() || payload.getEnd() > span.getEnd()) {
       throw new IllegalArgumentException("payload must lie inside the span");
