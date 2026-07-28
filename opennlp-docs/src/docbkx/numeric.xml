@@ -21,11 +21,15 @@
 		<title>Introduction</title>
 		<para>
 			Numeric extraction on the document pipeline combines temporal mentions,
-			document-date election, money amounts, and optional document-dated
-			currency conversion. A dateline elects the document date; money mentions
-			carry normalized <code>BigDecimal</code> amounts and ISO currency codes;
-			<code>MoneyConversionAnnotator</code> restates those amounts in one target
-			currency as of that date.
+			document-date election, money amounts, measured quantities, and optional
+			document-dated currency conversion. A dateline elects the document date;
+			money mentions carry normalized <code>BigDecimal</code> amounts and ISO
+			currency codes; <code>MoneyConversionAnnotator</code> restates those amounts
+			in one target currency as of that date.
+		</para>
+		<para>
+			All extractors are model-free: they scan the text once, without regular
+			expressions, and every mention keeps the span it covers in the original text.
 		</para>
 	</section>
 
@@ -53,6 +57,33 @@ Document document = DocumentAnalyzer.builder()
 // TEMPORALS / DOCUMENT_DATE: 14 July 2026 -> 2026-07-14
 // MONEY: €2.5 million -> 2500000 EUR; $2,400,000 -> 2400000 USD
 // CONVERTED_MONEY: 3000000 USD and 2400000 USD on the same spans]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.numeric.quantities">
+		<title>Quantities</title>
+		<para>
+			<code>QuantityAnnotator</code> adds a quantity layer over the raw text, so it
+			requires no other layer. A mention is a number with a percent marker or a unit
+			token; a bare number is never a quantity, which also keeps money mentions out
+			of this layer. Percentages are reported with the unit <code>%</code>, whether
+			written as a sign or as the word <code>percent</code>. No unit conversion is
+			performed: <code>2.5km</code> keeps the value <code>2.5</code> and the unit
+			<code>km</code>.
+		</para>
+		<para>
+			Units are matched exactly and case-sensitively against a curated default set;
+			ambiguous English words such as <code>in</code> are excluded. Pass your own set
+			to the <code>CursorQuantityExtractor(Set)</code> constructor to extend or
+			replace it.
+			<programlisting language="java"><![CDATA[
+Document document = DocumentAnalyzer.builder()
+    .add(new QuantityAnnotator(new CursorQuantityExtractor()))
+    .build()
+    .analyze("battery lasts 12 hr at 45% load");
+
+// QUANTITIES: 12 hr -> 12 hr; 45% -> 45 %]]>
 			</programlisting>
 		</para>
 	</section>

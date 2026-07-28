@@ -20,6 +20,7 @@ package opennlp.tools.money;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
@@ -49,14 +50,21 @@ public class MoneyConversionAnnotatorTest {
       "2026-07-10,1.2000,1.8000,",
       "") + "\n";
 
+  private static final Locale AUSTRALIA = Locale.of("en", "AU");
+
+  private static final LocalDate REFERENCE_DATE = LocalDate.parse("2026-07-10");
+
+  private static EcbFxRates rates() throws IOException {
+    return EcbFxRates.load(
+        new ByteArrayInputStream(FIXTURE.getBytes(StandardCharsets.UTF_8)));
+  }
+
   @Test
   void testRegionalSymbolsFeedConversion() throws IOException {
-    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
     // an Australian document: $ means AUD, then everything is restated in USD
     final Document document = DocumentAnalyzer.builder()
-        .add(new MoneyAnnotator(CursorMoneyExtractor.forRegion(
-            Locale.of("en", "AU"))))
-        .add(new MoneyConversionAnnotator(rates, "USD", LocalDate.parse("2026-07-10")))
+        .add(new MoneyAnnotator(CursorMoneyExtractor.forRegion(AUSTRALIA)))
+        .add(new MoneyConversionAnnotator(rates(), "USD", REFERENCE_DATE))
         .build()
         .analyze("the house sold for $900,000 last week");
 
@@ -76,10 +84,9 @@ public class MoneyConversionAnnotatorTest {
 
   @Test
   void testUnconvertibleMentionsAreOmitted() throws IOException {
-    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
     final Document document = DocumentAnalyzer.builder()
         .add(new MoneyAnnotator(new CursorMoneyExtractor()))
-        .add(new MoneyConversionAnnotator(rates, "USD", LocalDate.parse("2026-07-10")))
+        .add(new MoneyConversionAnnotator(rates(), "USD", REFERENCE_DATE))
         .build()
         .analyze("we spent $10 in transit and CHF 20 at the airport");
 
@@ -93,12 +100,11 @@ public class MoneyConversionAnnotatorTest {
 
   @Test
   void testDocumentDateAnchorsTheConversion() throws IOException {
-    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
     final Document document = DocumentAnalyzer.builder()
         .add(new TemporalAnnotator(new CursorTemporalExtractor()))
         .add(new DocumentDateAnnotator())
-        .add(new MoneyAnnotator(CursorMoneyExtractor.forRegion(Locale.of("en", "AU"))))
-        .add(new MoneyConversionAnnotator(rates, "USD"))
+        .add(new MoneyAnnotator(CursorMoneyExtractor.forRegion(AUSTRALIA)))
+        .add(new MoneyConversionAnnotator(rates(), "USD"))
         .build()
         .analyze("Sydney, 2026-07-10. The house sold for $900,000 at auction.");
 
@@ -111,12 +117,11 @@ public class MoneyConversionAnnotatorTest {
 
   @Test
   void testNoDocumentDateConvertsNothing() throws IOException {
-    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
     final Document document = DocumentAnalyzer.builder()
         .add(new TemporalAnnotator(new CursorTemporalExtractor()))
         .add(new DocumentDateAnnotator())
         .add(new MoneyAnnotator(new CursorMoneyExtractor()))
-        .add(new MoneyConversionAnnotator(rates, "USD"))
+        .add(new MoneyConversionAnnotator(rates(), "USD"))
         .build()
         .analyze("the undated draft mentions $10");
 
@@ -153,13 +158,37 @@ public class MoneyConversionAnnotatorTest {
 
   @Test
   void testAnnotatorValidation() throws IOException {
-    final EcbFxRates rates = EcbFxRates.load(new ByteArrayInputStream(FIXTURE.getBytes()));
-    final LocalDate date = LocalDate.parse("2026-07-10");
+    final EcbFxRates rates = rates();
     assertThrows(IllegalArgumentException.class,
-        () -> new MoneyConversionAnnotator(null, "USD", date));
+        () -> new MoneyConversionAnnotator(null, "USD", REFERENCE_DATE));
     assertThrows(IllegalArgumentException.class,
-        () -> new MoneyConversionAnnotator(rates, " ", date));
+        () -> new MoneyConversionAnnotator(rates, " ", REFERENCE_DATE));
     assertThrows(IllegalArgumentException.class,
         () -> new MoneyConversionAnnotator(rates, "USD", null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new MoneyConversionAnnotator(rates, "USD", REFERENCE_DATE).annotate(null));
+  }
+
+  /**
+   * Verifies that an absent required layer fails loud, naming the missing layer: the
+   * money layer in fixed-date mode, and the document date layer in document-dated mode.
+   */
+  @Test
+  void testMissingRequiredLayersFailLoud() throws IOException {
+    final EcbFxRates rates = rates();
+    final Document text = Document.of("we spent $10 in transit");
+
+    final IllegalArgumentException missingMoney = assertThrows(
+        IllegalArgumentException.class,
+        () -> new MoneyConversionAnnotator(rates, "USD", REFERENCE_DATE).annotate(text));
+    assertEquals("document lacks the required layer opennlp:money<MoneyAmount>",
+        missingMoney.getMessage());
+
+    final Document withMoney = new MoneyAnnotator(new CursorMoneyExtractor()).annotate(text);
+    final IllegalArgumentException missingDate = assertThrows(
+        IllegalArgumentException.class,
+        () -> new MoneyConversionAnnotator(rates, "USD").annotate(withMoney));
+    assertEquals("document lacks the required layer opennlp:document.date<LocalDate>",
+        missingDate.getMessage());
   }
 }

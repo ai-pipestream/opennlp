@@ -88,13 +88,21 @@ public class DocumentDateAnnotatorTest {
   }
 
   /**
-   * Verifies that a document without a temporal layer gets an empty date layer, because
-   * an absent layer reads as an empty list.
+   * Verifies that an absent temporal layer fails loud, naming the missing layer, rather
+   * than being read as an empty list, and that an empty temporal layer is valid input
+   * that simply elects nothing.
    */
   @Test
-  void testMissingTemporalLayerElectsNothing() {
-    final Document dated =
-        new DocumentDateAnnotator().annotate(Document.of("no dates here"));
+  void testMissingTemporalLayerFailsLoud() {
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new DocumentDateAnnotator().annotate(Document.of("no dates here")));
+    Assertions.assertEquals(
+        "document lacks the required layer opennlp:temporals<TemporalExpression>",
+        e.getMessage());
+
+    final Document dated = new DocumentDateAnnotator().annotate(
+        Document.of("no dates here").with(TemporalAnnotator.TEMPORALS, List.of()));
     Assertions.assertTrue(dated.get(DocumentDateAnnotator.DOCUMENT_DATE).isEmpty());
   }
 

@@ -61,6 +61,17 @@ public class QuantityAnnotator implements DocumentAnnotator {
     this.extractor = extractor;
   }
 
+  /**
+   * Scans the document text and adds the {@link #QUANTITIES} layer.
+   *
+   * <p>No other layer is read, so a document without any layer yields the quantity layer
+   * present and, if the text holds no quantity mention, empty.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #QUANTITIES} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

@@ -21,8 +21,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Currency;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,10 +49,10 @@ import opennlp.tools.util.Span;
  * {@link #CursorMoneyExtractor(Map)}. ISO codes are taken from
  * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
  *
- * <p>Out of scope in this version, by design: accounting negatives in parentheses,
- * multi-character symbols such as {@code kr}, spelled-out currency words such as
- * {@code dollars}, and locale-dependent decimal commas. The extractor holds no per-call
- * state and is safe to share between threads.</p>
+ * <p>Not recognized: accounting negatives in parentheses, multi-character symbols such as
+ * {@code kr}, spelled-out currency words such as {@code dollars}, and locale-dependent
+ * decimal commas. The extractor holds no per-call state and is safe to share between
+ * threads.</p>
  *
  * @since 3.0.0
  */
@@ -119,7 +121,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * @throws IllegalArgumentException Thrown if {@code region} is {@code null} or has no
    *         currency.
    */
-  public static CursorMoneyExtractor forRegion(java.util.Locale region) {
+  public static CursorMoneyExtractor forRegion(Locale region) {
     if (region == null) {
       throw new IllegalArgumentException("region must not be null");
     }
@@ -137,11 +139,16 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     if (Character.getType(cp) != Character.CURRENCY_SYMBOL) {
       return new CursorMoneyExtractor();
     }
-    final Map<Integer, String> symbols = new java.util.HashMap<>(DEFAULT_SYMBOLS);
+    final Map<Integer, String> symbols = new HashMap<>(DEFAULT_SYMBOLS);
     symbols.put(cp, currency.getCurrencyCode());
     return new CursorMoneyExtractor(symbols);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The scan resumes behind each reported mention, so mentions never overlap.</p>
+   */
   @Override
   public List<MoneyAmount> extract(CharSequence text) {
     if (text == null) {
@@ -165,8 +172,11 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * Tries the three mention shapes at one position: symbol first, ISO code first,
    * number first. A leading {@code -} counts as a minus sign only at a left boundary,
    * on the symbol-first path exactly as on the number-first path, so the hyphen in a
-   * range such as {@code $100-$200} never negates the second amount. Returns
-   * {@code null} when none matches.
+   * range such as {@code $100-$200} never negates the second amount.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the candidate mention would start at.
+   * @return The mention starting at {@code start}, or {@code null} when none matches.
    */
   private MoneyAmount matchAt(CharSequence text, int start) {
     int i = start;
@@ -194,7 +204,15 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return null;
   }
 
-  /** Matches {@code $1,234.56}, {@code -$5}, {@code $1.2M}, {@code $ 100}. */
+  /**
+   * Matches {@code $1,234.56}, {@code -$5}, {@code $1.2M}, and {@code $ 100}.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the mention starts at, the minus sign included.
+   * @param symbolIndex The offset of the currency symbol.
+   * @param negative {@code true} if a minus sign opens the mention.
+   * @return The mention, or {@code null} when no number follows the symbol.
+   */
   private MoneyAmount symbolFirst(CharSequence text, int start, int symbolIndex,
       boolean negative) {
     final String currency = symbols.get(NumberScan.codePointAt(text, symbolIndex));
@@ -205,7 +223,14 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return mention(text, start, NumberScan.parse(text, i, true), currency, negative);
   }
 
-  /** Matches {@code USD 100} and {@code USD 1.2 million}. */
+  /**
+   * Matches {@code USD 100} and {@code USD 1.2 million}.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the mention starts at.
+   * @param codeIndex The offset of the ISO 4217 code.
+   * @return The mention, or {@code null} when no known code and number follow.
+   */
   private MoneyAmount isoFirst(CharSequence text, int start, int codeIndex) {
     final String code = isoCodeAt(text, codeIndex);
     if (code == null || NumberScan.charAt(text, codeIndex + 3) != ' ') {
@@ -214,7 +239,15 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return mention(text, start, NumberScan.parse(text, codeIndex + 4, true), code, false);
   }
 
-  /** Matches {@code 100 USD}, {@code 50\u20AC}, and {@code 3.5m USD}. */
+  /**
+   * Matches {@code 100 USD}, {@code 50\u20AC} (euro sign), and {@code 3.5m USD}.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the mention starts at, the minus sign included.
+   * @param digitIndex The offset of the first digit.
+   * @param negative {@code true} if a minus sign opens the mention.
+   * @return The mention, or {@code null} when no currency marker follows the number.
+   */
   private MoneyAmount numberFirst(CharSequence text, int start, int digitIndex,
       boolean negative) {
     final NumberScan.Result number = NumberScan.parse(text, digitIndex, true);
@@ -237,6 +270,17 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return null;
   }
 
+  /**
+   * Builds a mention from a scanned number, rejecting it when the number is missing or
+   * does not end at a boundary.
+   *
+   * @param text The text being scanned.
+   * @param start The offset the mention starts at.
+   * @param number The scanned number, or {@code null} when the scan failed.
+   * @param currency The ISO 4217 code of the mention.
+   * @param negative {@code true} if a minus sign opens the mention.
+   * @return The mention, or {@code null} when it is not a complete match.
+   */
   private MoneyAmount mention(CharSequence text, int start, NumberScan.Result number,
       String currency, boolean negative) {
     if (number == null || !NumberScan.boundaryAfter(text, number.end())) {
@@ -246,8 +290,15 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return new MoneyAmount(new Span(start, number.end()), amount, currency);
   }
 
-  /** Reads a known ISO 4217 code at the position, or {@code null}. */
-  private static String isoCodeAt(CharSequence text, int start) {
+  /**
+   * Reads a known ISO 4217 code at a position.
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the first letter of the candidate code.
+   * @return The code, or {@code null} when the three letters at {@code start} are no
+   *         known code or are part of a longer run.
+   */
+  private String isoCodeAt(CharSequence text, int start) {
     if (start + 3 > text.length() || !NumberScan.boundaryBefore(text, start)) {
       return null;
     }
@@ -263,10 +314,17 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     return ISO_CODES.contains(code) ? code : null;
   }
 
-  private static boolean isUpperAscii(int cp) {
+  /**
+   * @param cp The code point to classify.
+   * @return {@code true} if {@code cp} is an ASCII capital letter.
+   */
+  private boolean isUpperAscii(int cp) {
     return cp >= 'A' && cp <= 'Z';
   }
 
+  /**
+   * @return The alphabetic codes of every currency the JDK knows. Never {@code null}.
+   */
   private static Set<String> isoCodes() {
     final Set<String> codes = new HashSet<>();
     for (final Currency currency : Currency.getAvailableCurrencies()) {

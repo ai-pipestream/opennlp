@@ -59,6 +59,8 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
   private static final Logger logger =
       LoggerFactory.getLogger(MoneyConversionAnnotator.class);
 
+  private static final String MISSING_LAYER = "document lacks the required layer ";
+
   private final FxRates rates;
   private final String target;
   private final LocalDate asOf;
@@ -74,11 +76,9 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    *         {@code target} is blank.
    */
   public MoneyConversionAnnotator(FxRates rates, String target, LocalDate asOf) {
-    if (rates == null || asOf == null) {
-      throw new IllegalArgumentException("rates and asOf must not be null");
-    }
-    if (target == null || target.isBlank()) {
-      throw new IllegalArgumentException("target must not be null or blank");
+    checkProviderAndTarget(rates, target);
+    if (asOf == null) {
+      throw new IllegalArgumentException("asOf must not be null");
     }
     this.rates = rates;
     this.target = target;
@@ -96,21 +96,58 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    *         {@code target} is {@code null} or blank.
    */
   public MoneyConversionAnnotator(FxRates rates, String target) {
+    checkProviderAndTarget(rates, target);
+    this.rates = rates;
+    this.target = target;
+    this.asOf = null;
+  }
+
+  /**
+   * Validates the arguments both constructors share.
+   *
+   * @param rates The rate provider.
+   * @param target The ISO 4217 code of the target currency.
+   * @throws IllegalArgumentException Thrown if {@code rates} is {@code null} or
+   *         {@code target} is {@code null} or blank.
+   */
+  private static void checkProviderAndTarget(FxRates rates, String target) {
     if (rates == null) {
       throw new IllegalArgumentException("rates must not be null");
     }
     if (target == null || target.isBlank()) {
       throw new IllegalArgumentException("target must not be null or blank");
     }
-    this.rates = rates;
-    this.target = target;
-    this.asOf = null;
   }
 
+  /**
+   * Restates the money layer in the target currency and adds the
+   * {@link #CONVERTED_MONEY} layer.
+   *
+   * <p>The required layers must be present, but they may be empty. A mention without a
+   * usable rate is left out of the converted layer, so the converted layer is a subset
+   * of the money layer, aligned with it by span.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link MoneyAnnotator#MONEY} layer, plus the
+   *                 {@link DocumentDateAnnotator#DOCUMENT_DATE} layer in document-dated
+   *                 mode.
+   * @return A new {@link Document} with the {@link #CONVERTED_MONEY} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or a
+   *         required layer is absent.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    if (!document.layers().contains(MoneyAnnotator.MONEY)) {
+      throw new IllegalArgumentException(MISSING_LAYER + MoneyAnnotator.MONEY);
+    }
+    if (asOf == null
+        && !document.layers().contains(DocumentDateAnnotator.DOCUMENT_DATE)) {
+      throw new IllegalArgumentException(MISSING_LAYER
+          + DocumentDateAnnotator.DOCUMENT_DATE);
     }
     final LocalDate date = asOf != null ? asOf : documentDate(document);
     final List<Annotation<MoneyAmount>> converted = new ArrayList<>();
@@ -132,10 +169,10 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
   /**
    * Reads the document's elected reference date.
    *
-   * @param document The document being annotated.
+   * @param document The document being annotated. Must not be {@code null}.
    * @return The date, or {@code null} when the layer is empty.
    */
-  private static LocalDate documentDate(Document document) {
+  private LocalDate documentDate(Document document) {
     final List<Annotation<LocalDate>> dates =
         document.get(DocumentDateAnnotator.DOCUMENT_DATE);
     return dates.isEmpty() ? null : dates.get(0).value();
