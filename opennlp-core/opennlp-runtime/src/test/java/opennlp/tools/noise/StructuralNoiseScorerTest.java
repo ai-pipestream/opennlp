@@ -17,6 +17,7 @@
 
 package opennlp.tools.noise;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -31,7 +32,6 @@ import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the structural scorer's calibration: the most consonant-heavy legitimate
@@ -103,11 +103,11 @@ public class StructuralNoiseScorerTest {
   @ParameterizedTest
   @MethodSource("gibberish")
   void testTwoAgreeingSignalsAreGibberish(String token) {
-    final List<NoiseSpan> found = scorer.score("start " + token + " end", List.of());
+    final String text = "start " + token + " end";
+    final List<NoiseSpan> found = scorer.score(text, List.of());
     assertEquals(1, found.size());
     assertEquals(NoiseSpan.SEVERITY_GIBBERISH, found.get(0).severity());
-    assertEquals(token,
-        found.get(0).span().getCoveredText("start " + token + " end").toString());
+    assertEquals(token, found.get(0).span().getCoveredText(text).toString());
   }
 
   /** One signal alone is damage: an eight-consonant run with healthy vowels. */
@@ -192,20 +192,21 @@ public class StructuralNoiseScorerTest {
   void testRejectsContractViolations() {
     assertThrows(IllegalArgumentException.class, () -> scorer.score(null, List.of()));
     assertThrows(IllegalArgumentException.class, () -> scorer.score("x", null));
-    final java.util.List<Span> holdsNull = new java.util.ArrayList<>();
+    final List<Span> holdsNull = new ArrayList<>();
     holdsNull.add(null);
     assertThrows(IllegalArgumentException.class, () -> scorer.score("x", holdsNull));
     assertThrows(IllegalArgumentException.class,
         () -> new StructuralNoiseScorer(null));
   }
 
-  /** Scores are within their documented range and saturate for long payloads. */
+  /** A payload past the saturation length scores the maximum of its tier. */
   @Test
-  void testScoresStayInRange() {
+  void testLongPayloadSaturatesTheScore() {
     final String longRun = "QWxh1ZGRp2bjF2c3BlbjRzZXNhbWU5QWxh1ZGRp2bjF2c3BlbjR"
         + "zZXNhbWU5";
-    for (final NoiseSpan span : scorer.score(longRun, List.of())) {
-      assertTrue(span.score() > 0.0 && span.score() <= 1.0);
-    }
+    final List<NoiseSpan> found = scorer.score(longRun, List.of());
+    assertEquals(1, found.size());
+    assertEquals(NoiseSpan.SEVERITY_BINARYISH, found.get(0).severity());
+    assertEquals(1.0, found.get(0).score());
   }
 }
