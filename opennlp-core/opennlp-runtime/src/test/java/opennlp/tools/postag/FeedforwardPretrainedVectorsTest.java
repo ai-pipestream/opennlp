@@ -22,6 +22,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
 
@@ -185,7 +186,7 @@ public class FeedforwardPretrainedVectorsTest {
         "a null lexicon must fail loud on the lexicon overload");
     assertThrows(IllegalArgumentException.class, () -> FeedforwardPOSTrainer.train(
         ObjectStreamUtils.createObjectStream(corpus()), settings(), VECTORS,
-        java.util.Arrays.asList("aazqy", null)),
+        Arrays.asList("aazqy", null)),
         "a lexicon containing null must fail loud");
   }
 

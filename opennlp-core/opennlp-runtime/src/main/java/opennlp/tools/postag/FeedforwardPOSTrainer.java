@@ -34,11 +34,9 @@ import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Trains the {@link FeedforwardPOSModel} entirely in Java: one example per token with
- * gold tag history, minibatch AdaGrad over a softmax cross-entropy loss, cube
- * activation, and inverted dropout on the hidden layer. No external training framework
- * is involved, so the whole neural tagging tier, training and inference, is plain array
- * arithmetic inside the JVM.
+ * Trains the {@link FeedforwardPOSModel} with plain array arithmetic inside the JVM: one
+ * example per token with gold tag history, minibatch AdaGrad over a softmax
+ * cross-entropy loss, cube activation, and inverted dropout on the hidden layer.
  *
  * <p>Words and suffixes below their frequency cutoffs share learned unknown embeddings;
  * positions outside the sentence share a learned padding embedding. Training is
@@ -47,8 +45,7 @@ import opennlp.tools.util.StringUtil;
  * <p>Pretrained word vectors are an opt-in through
  * {@link #train(ObjectStream, Settings, Function)}: the vectors of the words seen in
  * training extend the input layer as a frozen window block and are stored inside the
- * model, so the resulting model infers without any embedding component. Training
- * without the option is unchanged and produces the original model format.</p>
+ * model, so the resulting model infers without any embedding component.</p>
  *
  * @since 3.0.0
  */
@@ -57,9 +54,6 @@ public final class FeedforwardPOSTrainer {
   private static final Logger logger = LoggerFactory.getLogger(FeedforwardPOSTrainer.class);
 
   private static final double ADAGRAD_EPSILON = 1e-6;
-
-  private static final List<String> SHAPES = List.of(
-      "*lower*", "*cap*", "*allcaps*", "*digit*", "*alnum*", "*other*");
 
   private FeedforwardPOSTrainer() {
     // This class only exposes static training methods and is never instantiated.
@@ -92,17 +86,32 @@ public final class FeedforwardPOSTrainer {
      *         range.
      */
     public Settings {
-      if (embeddingSize <= 0 || hiddenSize <= 0 || epochs <= 0 || batchSize <= 0) {
-        throw new IllegalArgumentException("sizes, epochs and batch must be positive");
+      if (embeddingSize <= 0) {
+        throw new IllegalArgumentException("embeddingSize must be positive: " + embeddingSize);
       }
-      if (learningRate <= 0.0 || l2 < 0.0) {
-        throw new IllegalArgumentException("learningRate must be positive, l2 not negative");
+      if (hiddenSize <= 0) {
+        throw new IllegalArgumentException("hiddenSize must be positive: " + hiddenSize);
+      }
+      if (epochs <= 0) {
+        throw new IllegalArgumentException("epochs must be positive: " + epochs);
+      }
+      if (batchSize <= 0) {
+        throw new IllegalArgumentException("batchSize must be positive: " + batchSize);
+      }
+      if (learningRate <= 0.0) {
+        throw new IllegalArgumentException("learningRate must be positive: " + learningRate);
+      }
+      if (l2 < 0.0) {
+        throw new IllegalArgumentException("l2 must not be negative: " + l2);
       }
       if (!(dropout >= 0.0 && dropout < 1.0)) {
         throw new IllegalArgumentException("dropout must be in [0, 1): " + dropout);
       }
-      if (wordCutoff < 0 || suffixCutoff < 0) {
-        throw new IllegalArgumentException("cutoffs must not be negative");
+      if (wordCutoff < 0) {
+        throw new IllegalArgumentException("wordCutoff must not be negative: " + wordCutoff);
+      }
+      if (suffixCutoff < 0) {
+        throw new IllegalArgumentException("suffixCutoff must not be negative: " + suffixCutoff);
       }
     }
 
@@ -200,6 +209,9 @@ public final class FeedforwardPOSTrainer {
    * @param lexicon Additional words to store vectors for, or {@code null} for none.
    * @return A trained {@link FeedforwardPOSModel}. Never {@code null}.
    * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
+   *         {@code null}, the samples contain no token, or {@code wordVectors} violates
+   *         its contract.
    */
   private static FeedforwardPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -251,7 +263,12 @@ public final class FeedforwardPOSTrainer {
    *
    * @param corpus The non-empty training samples.
    * @param settings The hyperparameters controlling the cutoffs and layer sizes.
+   * @param wordVectors The word vector source, or {@code null} to build no vector block.
+   * @param lexicon Additional words to store vectors for, or {@code null} for none.
    * @return An untrained model with all vocabularies in place. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code wordVectors} returns an empty
+   *         vector, vectors of differing lengths, or no vector for any training word,
+   *         or if {@code lexicon} contains {@code null}.
    */
   private static FeedforwardPOSModel initialize(List<POSSample> corpus,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -264,8 +281,10 @@ public final class FeedforwardPOSTrainer {
         final String word = FeedforwardPOSModel.normalize(token);
         wordCounts.merge(word, 1, Integer::sum);
         final String lowered = StringUtil.toLowerCase(token);
-        suffixCounts.merge(FeedforwardPOSContext.suffix(lowered, 2), 1, Integer::sum);
-        suffixCounts.merge(FeedforwardPOSContext.suffix(lowered, 3), 1, Integer::sum);
+        suffixCounts.merge(FeedforwardPOSContext.suffix(lowered,
+            FeedforwardPOSContext.SHORT_SUFFIX_LENGTH), 1, Integer::sum);
+        suffixCounts.merge(FeedforwardPOSContext.suffix(lowered,
+            FeedforwardPOSContext.LONG_SUFFIX_LENGTH), 1, Integer::sum);
       }
       for (final String tag : s.getTags()) {
         tagSet.putIfAbsent(tag, 0);
@@ -299,7 +318,7 @@ public final class FeedforwardPOSTrainer {
         FeedforwardPOSModel.ABSENT)) {
       shapeIds.put(special, row++);
     }
-    for (final String shape : SHAPES) {
+    for (final String shape : FeedforwardPOSContext.SHAPES) {
       shapeIds.put(shape, row++);
     }
     final Map<String, Integer> tagIds = new LinkedHashMap<>();
