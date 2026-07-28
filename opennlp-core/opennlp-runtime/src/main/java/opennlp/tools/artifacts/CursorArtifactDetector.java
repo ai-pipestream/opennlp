@@ -35,11 +35,11 @@ import opennlp.tools.util.StringUtil;
  * Runs of two or more zero-width characters and occurrences without such context
  * are.</p>
  *
- * <p>Mojibake is reported when a maximal run of non-ASCII, single-byte-encodable
- * characters maps to a byte sequence that is entirely valid UTF-8 encoding at least one
- * non-ASCII character. Text damaged by reading UTF-8 through a legacy single-byte
- * decoding satisfies this by construction, while ordinarily accented words do not: their
- * bytes are not valid UTF-8 sequences.</p>
+ * <p>Mojibake is reported when a maximal run of non-ASCII characters that Windows-1252
+ * can encode maps to a byte sequence that is entirely valid UTF-8 encoding at least one
+ * non-ASCII character. Text damaged by reading UTF-8 through that decoding satisfies this
+ * by construction, while ordinarily accented words do not: their bytes are not valid
+ * UTF-8 sequences.</p>
  *
  * <p>The detector is stateless and safe for concurrent use by multiple threads.</p>
  *
@@ -56,9 +56,10 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   private static final int VARIATION_SELECTOR_16 = 0xFE0F;
 
   /**
-   * The characters the single-byte encoding places at 0x80-0x9F, indexed by byte value
-   * minus 0x80; -1 marks the five bytes it leaves undefined. All other characters up to
-   * U+00FF encode as their own code point.
+   * The characters <a href="https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT">
+   * Windows-1252</a> places at 0x80-0x9F, indexed by byte value minus 0x80; -1 marks the
+   * five bytes it leaves undefined. All other characters up to U+00FF encode as their own
+   * code point.
    */
   private static final int[] SINGLE_BYTE_SPECIALS = {
       0x20AC, -1, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
@@ -67,6 +68,12 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, -1, 0x017E, 0x0178,
   };
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>The reported spans never overlap, so a caller can apply them to the text in one
+   * pass.</p>
+   */
   @Override
   public List<TextArtifact> detect(CharSequence text) {
     if (text == null) {
@@ -136,7 +143,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @return The artifact type, or {@code null} for an ordinary code point. Zero-width
    *         characters classify as {@code null} here because they are context-resolved.
    */
-  private static String classify(int codePoint) {
+  private String classify(int codePoint) {
     if (codePoint == REPLACEMENT) {
       return TextArtifact.TYPE_REPLACEMENT;
     }
@@ -166,7 +173,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @param codePoint The code point.
    * @return {@code true} for the zero-width characters this detector resolves.
    */
-  private static boolean isZeroWidth(int codePoint) {
+  private boolean isZeroWidth(int codePoint) {
     return codePoint == ZERO_WIDTH_SPACE || codePoint == ZERO_WIDTH_NON_JOINER
         || codePoint == ZERO_WIDTH_JOINER || codePoint == WORD_JOINER
         || codePoint == ZERO_WIDTH_NO_BREAK_SPACE;
@@ -221,7 +228,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @return {@code true} if the neighbor is extended pictographic or the emoji
    *         variation selector.
    */
-  private static boolean isEmojiContext(int neighbor) {
+  private boolean isEmojiContext(int neighbor) {
     return neighbor >= 0
         && (ExtendedPictographic.is(neighbor) || neighbor == VARIATION_SELECTOR_16);
   }
@@ -233,7 +240,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @param index The exclusive end index.
    * @return The code point before {@code index}, or -1 at the text start.
    */
-  private static int before(CharSequence text, int index) {
+  private int before(CharSequence text, int index) {
     return index > 0 ? Character.codePointBefore(text, index) : -1;
   }
 
@@ -273,7 +280,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @param c The character.
    * @return The byte value 0x00-0xFF, or -1 when the encoding has no byte for it.
    */
-  private static int singleByte(char c) {
+  private int singleByte(char c) {
     if (c < 0x80) {
       return c;
     }
@@ -290,13 +297,15 @@ public final class CursorArtifactDetector implements ArtifactDetector {
 
   /**
    * Validates the bytes as one or more complete, strictly well-formed UTF-8 sequences
-   * encoding at least one non-ASCII code point. Overlong forms, surrogate encodings,
-   * and values past U+10FFFF are rejected, as the Unicode specification requires.
+   * encoding at least one non-ASCII code point. Overlong forms, surrogate encodings, and
+   * values past U+10FFFF are rejected, as
+   * <a href="https://www.rfc-editor.org/rfc/rfc3629#section-3">RFC 3629, section 3</a>
+   * requires.
    *
    * @param bytes The candidate bytes.
    * @return {@code true} if the whole array is well-formed multi-byte UTF-8.
    */
-  private static boolean isUtf8(byte[] bytes) {
+  private boolean isUtf8(byte[] bytes) {
     boolean multiByte = false;
     int i = 0;
     while (i < bytes.length) {
