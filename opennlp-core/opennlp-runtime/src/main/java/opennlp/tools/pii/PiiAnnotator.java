@@ -59,6 +59,17 @@ public class PiiAnnotator implements DocumentAnnotator {
     this.extractor = extractor;
   }
 
+  /**
+   * Scans the document text and adds the {@link #PII} layer.
+   *
+   * <p>No other layer is required: a text without any PII yields a present-but-empty
+   * PII layer.</p>
+   *
+   * @param document The document to annotate. Must not be {@code null}.
+   * @return A new {@link Document} with the {@link #PII} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

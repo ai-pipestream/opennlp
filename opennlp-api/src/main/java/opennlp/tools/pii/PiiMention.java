@@ -24,11 +24,9 @@ import opennlp.tools.util.Span;
  * covers in the original text, its type, and a normalized form with formatting removed.
  *
  * <p>The type is an open string so extractors can introduce new types without an API
- * change; the constants on this record name the types the built-in extractor reports.
- * The normalized form is suitable for comparison and lookup: email addresses are
- * lowercased, IBANs keep their uppercase letters and digits with separators removed,
- * and phone and card numbers keep digits only, with a leading {@code +} preserved for
- * phone numbers.</p>
+ * change; the constants on this record name the commonly reported types. The normalized
+ * form is the mention with its formatting removed, in a shape suitable for comparison
+ * and lookup; which shape that is per type is defined by the reporting extractor.</p>
  *
  * @param span The location of the mention in the original text. Must not be
  *             {@code null}.

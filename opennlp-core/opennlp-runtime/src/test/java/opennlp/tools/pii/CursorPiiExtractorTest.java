@@ -21,6 +21,9 @@ import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 public class CursorPiiExtractorTest {
 
@@ -47,14 +50,15 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals("jane@example.com", mentions.get(0).normalized());
   }
 
-  @Test
-  void testEmailRejectsInvalidForms() {
-    Assertions.assertTrue(extractor.extract("no at sign here").isEmpty());
-    Assertions.assertTrue(extractor.extract("broken @example.com address").isEmpty());
-    Assertions.assertTrue(extractor.extract("missing tld user@localhost").isEmpty());
-    Assertions.assertTrue(extractor.extract("doubled dots user..name@example.com")
-        .stream().noneMatch(m -> m.normalized().contains("..")));
-    Assertions.assertTrue(extractor.extract("numeric tld user@example.c1").isEmpty());
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "no at sign here",
+      "broken @example.com address",
+      "missing tld user@localhost",
+      "doubled dots user..name@example.com",
+      "numeric tld user@example.c1"})
+  void testEmailRejectsInvalidForms(String text) {
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
   @Test
@@ -66,22 +70,13 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals("+442079460958", mentions.get(0).normalized());
   }
 
-  @Test
-  void testPhoneDomesticFormats() {
-    Assertions.assertEquals("5551234567",
-        extractor.extract("Call (555) 123-4567 today.").get(0).normalized());
-    Assertions.assertEquals("5551234567",
-        extractor.extract("Call 555-123-4567 today.").get(0).normalized());
-    Assertions.assertEquals("15551234567",
-        extractor.extract("Call 1 555 123 4567 today.").get(0).normalized());
-  }
-
-  @Test
-  void testPhoneRejectsUnformattedAndDecimals() {
-    Assertions.assertTrue(extractor.extract("id 5551234567 in the table").isEmpty());
-    Assertions.assertTrue(extractor.extract("value 1234567890.25 total").isEmpty());
-    Assertions.assertTrue(extractor.extract("pi is 3.1415926535").isEmpty());
-    Assertions.assertTrue(extractor.extract("+123 is too short").isEmpty());
+  @ParameterizedTest
+  @CsvSource({
+      "Call (555) 123-4567 today., 5551234567",
+      "Call 555-123-4567 today., 5551234567",
+      "Call 1 555 123 4567 today., 15551234567"})
+  void testPhoneDomesticFormats(String text, String normalized) {
+    Assertions.assertEquals(normalized, extractor.extract(text).get(0).normalized());
   }
 
   @Test
@@ -97,12 +92,12 @@ public class CursorPiiExtractorTest {
         mention.span().getStart(), mention.span().getEnd()));
   }
 
-  @Test
-  void testIbanCompactAndWithLetters() {
-    Assertions.assertEquals("GB82WEST12345698765432",
-        extractor.extract("account GB82WEST12345698765432 closed").get(0).normalized());
-    Assertions.assertEquals("GB82WEST12345698765432",
-        extractor.extract("account GB82 WEST 1234 5698 7654 32 closed").get(0).normalized());
+  @ParameterizedTest
+  @CsvSource({
+      "account GB82WEST12345698765432 closed, GB82WEST12345698765432",
+      "account GB82 WEST 1234 5698 7654 32 closed, GB82WEST12345698765432"})
+  void testIbanCompactAndWithLetters(String text, String normalized) {
+    Assertions.assertEquals(normalized, extractor.extract(text).get(0).normalized());
   }
 
   @Test
@@ -125,14 +120,20 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals("4111111111111111", mentions.get(0).normalized());
   }
 
-  @Test
-  void testCardFormatsAndChecksum() {
-    Assertions.assertEquals("4111111111111111",
-        extractor.extract("card 4111-1111-1111-1111 on file").get(0).normalized());
-    Assertions.assertEquals("378282246310005",
-        extractor.extract("amex 378282246310005 on file").get(0).normalized());
-    Assertions.assertTrue(extractor.extract("card 4111 1111 1111 1112 on file").isEmpty());
-    Assertions.assertTrue(extractor.extract("serial 1111 2222 3333 4444 here").isEmpty());
+  @ParameterizedTest
+  @CsvSource({
+      "card 4111-1111-1111-1111 on file, 4111111111111111",
+      "amex 378282246310005 on file, 378282246310005"})
+  void testCardAcceptedFormats(String text, String normalized) {
+    Assertions.assertEquals(normalized, extractor.extract(text).get(0).normalized());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "card 4111 1111 1111 1112 on file",
+      "serial 1111 2222 3333 4444 here"})
+  void testCardRejectsFailedChecksumAndUnassignedLeadingDigit(String text) {
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
   @Test
@@ -275,15 +276,22 @@ public class CursorPiiExtractorTest {
   }
 
   /**
-   * Verifies rejected phone-like forms: a bare ten-digit run without any formatting, a
-   * separated run with only nine digits, and an international candidate whose digits
-   * admit no split into an assigned calling code and a plausible national length.
+   * Verifies rejected phone-like forms: bare digit runs without any formatting, a
+   * separated run with only nine digits, decimal and grouped numbers, and international
+   * candidates whose digits admit no split into an assigned calling code and a plausible
+   * national length.
    */
-  @Test
-  void testPhoneRejectedForms() {
-    Assertions.assertTrue(extractor.extract("Order 4155550123 shipped.").isEmpty());
-    Assertions.assertTrue(extractor.extract("Ref 415-555-012 code.").isEmpty());
-    Assertions.assertTrue(extractor.extract("+1234567 is short").isEmpty());
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "id 5551234567 in the table",
+      "Order 4155550123 shipped.",
+      "Ref 415-555-012 code.",
+      "value 1234567890.25 total",
+      "pi is 3.1415926535",
+      "+123 is too short",
+      "+1234567 is short"})
+  void testPhoneRejectedForms(String text) {
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
   /**

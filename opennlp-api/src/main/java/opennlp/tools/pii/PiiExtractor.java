@@ -24,6 +24,8 @@ import java.util.List;
  * mentions in a text and report each as a {@link PiiMention} with its span in the
  * original text.
  *
+ * <p>Thread safety is implementation specific.</p>
+ *
  * @see PiiMention
  * @since 3.0.0
  */

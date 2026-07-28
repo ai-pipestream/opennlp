@@ -27,10 +27,10 @@ import opennlp.tools.document.Document;
 
 public class PiiAnnotatorTest {
 
+  private final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
+
   @Test
   void testProvidesPiiLayer() {
-    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
-
     final Document document = annotator.annotate(
         Document.of("Invoice for jane@example.com, card 4111 1111 1111 1111."));
 
@@ -44,7 +44,6 @@ public class PiiAnnotatorTest {
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new PiiAnnotator(null));
-    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 
@@ -55,8 +54,6 @@ public class PiiAnnotatorTest {
    */
   @Test
   void testTextWithoutPiiGetsEmptyLayer() {
-    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
-
     final Document document = annotator.annotate(
         Document.of("The quick brown fox jumps over the lazy dog."));
 
