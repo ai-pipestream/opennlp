@@ -17,6 +17,8 @@
 
 package opennlp.tools.coref;
 
+import opennlp.tools.util.StringUtil;
+
 /**
  * One mention in a coreference chain: the chain it belongs to, what kind of mention it
  * is, and, for mentions lifted from the entity layer, the index of the entity it came
@@ -58,7 +60,7 @@ public record CorefMention(int chain, String kind, int entity) {
     if (chain < 0) {
       throw new IllegalArgumentException("chain must not be negative: " + chain);
     }
-    if (kind == null || kind.isBlank()) {
+    if (kind == null || StringUtil.isBlank(kind)) {
       throw new IllegalArgumentException("kind must not be null or blank");
     }
     if (entity < NO_ENTITY) {

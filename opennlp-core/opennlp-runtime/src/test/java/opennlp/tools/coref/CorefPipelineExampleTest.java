@@ -283,6 +283,18 @@ public class CorefPipelineExampleTest {
   }
 
   /**
+   * Reads the text one annotation covers.
+   *
+   * @param document The annotated document.
+   * @param mention The annotation to read.
+   * @return The covered text. Never {@code null}.
+   */
+  private static String surface(Document document, Annotation<CorefMention> mention) {
+    return document.text().subSequence(
+        mention.span().getStart(), mention.span().getEnd()).toString();
+  }
+
+  /**
    * Reads the surface text covered by every chain annotation, in layer order.
    *
    * @param document The annotated document.
@@ -292,8 +304,7 @@ public class CorefPipelineExampleTest {
   private static List<String> surfaces(Document document, List<Annotation<CorefMention>> chains) {
     final List<String> surfaces = new ArrayList<>(chains.size());
     for (final Annotation<CorefMention> mention : chains) {
-      surfaces.add(document.text().subSequence(
-          mention.span().getStart(), mention.span().getEnd()).toString());
+      surfaces.add(surface(document, mention));
     }
     return surfaces;
   }
@@ -311,8 +322,7 @@ public class CorefPipelineExampleTest {
     final List<String> surfaces = new ArrayList<>();
     for (final Annotation<CorefMention> mention : chains) {
       if (mention.value().chain() == chain) {
-        surfaces.add(document.text().subSequence(
-            mention.span().getStart(), mention.span().getEnd()).toString());
+        surfaces.add(surface(document, mention));
       }
     }
     return surfaces;
