@@ -39,6 +39,8 @@ public class PiiUsageExampleTest {
   private static final String TEXT =
       "Contact jane@example.com, call (555) 123-4567, or charge card 4111 1111 1111 1111.";
 
+  private final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
+
   /**
    * Annotates the example text and verifies the complete PII layer: three mentions in
    * text order, each with its exact span offsets, the exact text the span covers, the
@@ -46,8 +48,6 @@ public class PiiUsageExampleTest {
    */
   @Test
   void testAnnotateAndReadPiiLayer() {
-    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
-
     final Document document = annotator.annotate(Document.of(TEXT));
 
     Assertions.assertTrue(document.layers().contains(PiiAnnotator.PII));
@@ -68,7 +68,6 @@ public class PiiUsageExampleTest {
    */
   @Test
   void testMaskProducesExactRedactedText() {
-    final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
     final Document document = annotator.annotate(Document.of(TEXT));
 
     final String masked = Masker.mask(document, PiiAnnotator.PII, '*');
@@ -91,13 +90,9 @@ public class PiiUsageExampleTest {
    * @param type The expected mention type.
    * @param covered The exact text the span is expected to cover.
    * @param normalized The exact expected normalized form.
-   * @throws IllegalArgumentException Thrown if {@code annotation} is {@code null}.
    */
-  private static void assertMention(Annotation<PiiMention> annotation, int start, int end,
+  private void assertMention(Annotation<PiiMention> annotation, int start, int end,
       String type, String covered, String normalized) {
-    if (annotation == null) {
-      throw new IllegalArgumentException("annotation must not be null");
-    }
     Assertions.assertEquals(start, annotation.span().getStart());
     Assertions.assertEquals(end, annotation.span().getEnd());
     Assertions.assertEquals(annotation.span(), annotation.value().span());

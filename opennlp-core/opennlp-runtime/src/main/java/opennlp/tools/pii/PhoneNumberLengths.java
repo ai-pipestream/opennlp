@@ -74,8 +74,17 @@ final class PhoneNumberLengths {
       993, 0x100, 994, 0x200, 995, 0x200, 996, 0x600, 998, 0x200,
   };
 
+  /** The number of leading digits a calling code may span. */
+  private static final int MAX_CALLING_CODE_DIGITS = 3;
+
+  /** The longest national number a mask bit can express. */
+  private static final int MAX_NATIONAL_LENGTH = 31;
+
+  /** One slot per possible calling code, that is per value of at most three digits. */
+  private static final int CODE_TABLE_SIZE = 1000;
+
   /** Length bitmask per calling code; {@code 0} marks an unassigned code. */
-  private static final int[] MASKS = new int[1000];
+  private static final int[] MASKS = new int[CODE_TABLE_SIZE];
 
   static {
     for (int i = 0; i < CODE_AND_MASK.length; i += 2) {
@@ -99,10 +108,10 @@ final class PhoneNumberLengths {
    */
   static boolean plausibleInternational(String digits) {
     int code = 0;
-    for (int i = 0; i < 3 && i < digits.length(); i++) {
+    for (int i = 0; i < MAX_CALLING_CODE_DIGITS && i < digits.length(); i++) {
       code = code * 10 + (digits.charAt(i) - '0');
       final int nationalLength = digits.length() - i - 1;
-      if (nationalLength > 0 && nationalLength < 32
+      if (nationalLength > 0 && nationalLength <= MAX_NATIONAL_LENGTH
           && (MASKS[code] & 1 << nationalLength) != 0) {
         return true;
       }

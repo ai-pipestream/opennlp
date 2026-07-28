@@ -58,6 +58,10 @@ import opennlp.tools.util.Span;
  * overlap. All candidates are checked against word boundaries so nothing is reported
  * from inside a longer alphanumeric run.</p>
  *
+ * <p>Normalized forms: email addresses are lowercased, IBANs keep their uppercase
+ * letters and digits with separators removed, and phone and card numbers keep digits
+ * only, with a leading {@code +} preserved for phone numbers.</p>
+ *
  * <p>The extractor holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
@@ -71,9 +75,15 @@ public class CursorPiiExtractor implements PiiExtractor {
 
   private static final int IBAN_MIN_LENGTH = 15;
   private static final int IBAN_MAX_LENGTH = 34;
+  private static final int IBAN_MODULUS = 97;
+  private static final int IBAN_ROTATION = 4;
   private static final int CARD_MIN_DIGITS = 13;
   private static final int CARD_MAX_DIGITS = 19;
   private static final int PHONE_MAX_DIGITS = 15;
+  private static final int PHONE_DOMESTIC_MIN_DIGITS = 10;
+  private static final int PHONE_DOMESTIC_MAX_DIGITS = 11;
+  private static final int DOMAIN_LABEL_MAX_LENGTH = 63;
+  private static final int TLD_MIN_LENGTH = 2;
 
   /**
    * One candidate found by a scanner, held until overlap resolution decides which
@@ -88,6 +98,12 @@ public class CursorPiiExtractor implements PiiExtractor {
   private record Hit(int start, int end, int priority, PiiMention mention) {
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>Each type is scanned for independently; overlapping candidates are then reduced
+   * to the non-overlapping set this class describes.</p>
+   */
   @Override
   public List<PiiMention> extract(CharSequence text) {
     if (text == null) {
@@ -107,7 +123,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private static void scanEmails(CharSequence text, List<Hit> hits) {
+  private void scanEmails(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       if (text.charAt(i) != '@') {
         continue;
@@ -148,7 +164,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param at The position of the {@code @}.
    * @return {@code true} if the local part is acceptable.
    */
-  private static boolean validLocalPart(CharSequence text, int start, int at) {
+  private boolean validLocalPart(CharSequence text, int start, int at) {
     if (text.charAt(start) == '.' || text.charAt(at - 1) == '.') {
       return false;
     }
@@ -167,13 +183,13 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param domain The domain without the {@code @}.
    * @return {@code true} if the domain is acceptable.
    */
-  private static boolean validDomain(String domain) {
+  private boolean validDomain(String domain) {
     int labels = 0;
     int labelStart = 0;
     for (int i = 0; i <= domain.length(); i++) {
       if (i == domain.length() || domain.charAt(i) == '.') {
         final int length = i - labelStart;
-        if (length < 1 || length > 63
+        if (length < 1 || length > DOMAIN_LABEL_MAX_LENGTH
             || domain.charAt(labelStart) == '-' || domain.charAt(i - 1) == '-') {
           return false;
         }
@@ -185,7 +201,7 @@ public class CursorPiiExtractor implements PiiExtractor {
       return false;
     }
     final int tldStart = domain.lastIndexOf('.') + 1;
-    if (domain.length() - tldStart < 2) {
+    if (domain.length() - tldStart < TLD_MIN_LENGTH) {
       return false;
     }
     for (int i = tldStart; i < domain.length(); i++) {
@@ -203,7 +219,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private static void scanIbans(CharSequence text, List<Hit> hits) {
+  private void scanIbans(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       if (!isAsciiUpper(text.charAt(i))
           || (i > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, i)))
@@ -238,8 +254,8 @@ public class CursorPiiExtractor implements PiiExtractor {
                 && Character.isLetterOrDigit(Character.codePointAt(text, textEnd)))) {
           continue;
         }
-        final String candidate = compact.substring(0, length);
-        if (mod97(candidate) == 1) {
+        if (mod97(compact, length) == 1) {
+          final String candidate = compact.substring(0, length);
           hits.add(new Hit(i, textEnd, PRIORITY_IBAN,
               new PiiMention(new Span(i, textEnd), PiiMention.TYPE_IBAN, candidate)));
           i = textEnd;
@@ -259,13 +275,10 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private static void scanCards(CharSequence text, List<Hit> hits) {
+  private void scanCards(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char first = text.charAt(i);
-      // The leading-digit gate runs before anything is allocated: a digit run that can
-      // never be a card, which is most digit runs in most text, costs one comparison.
-      if (first < '2' || first > '6'
-          || !isAsciiDigit(first) || !onNumberStartBoundary(text, i)) {
+      if (first < '2' || first > '6' || !onNumberStartBoundary(text, i)) {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
@@ -295,11 +308,12 @@ public class CursorPiiExtractor implements PiiExtractor {
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
             || (end < text.length()
                 && Character.isLetterOrDigit(Character.codePointAt(text, end)))
-            || !luhnValid(digits.substring(0, length))) {
+            || !luhnValid(digits, length)) {
           continue;
         }
+        final String candidate = digits.substring(0, length);
         hits.add(new Hit(i, end, PRIORITY_CARD,
-            new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, digits.substring(0, length))));
+            new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, candidate)));
         i = end;
         break;
       }
@@ -318,7 +332,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private static void scanPhones(CharSequence text, List<Hit> hits) {
+  private void scanPhones(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char c = text.charAt(i);
       final boolean plus = c == '+';
@@ -376,7 +390,8 @@ public class CursorPiiExtractor implements PiiExtractor {
         final String candidate = digitRun.substring(0, count);
         final boolean lengthOk = plus
             ? count <= PHONE_MAX_DIGITS && PhoneNumberLengths.plausibleInternational(candidate)
-            : (count == 10 || count == 11) && visiblySeparated;
+            : count >= PHONE_DOMESTIC_MIN_DIGITS && count <= PHONE_DOMESTIC_MAX_DIGITS
+                && visiblySeparated;
         if (!lengthOk
             || (end < text.length()
                 && Character.isLetterOrDigit(Character.codePointAt(text, end)))
@@ -401,7 +416,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param start The candidate start.
    * @return {@code true} if the candidate may start here.
    */
-  private static boolean onNumberStartBoundary(CharSequence text, int start) {
+  private boolean onNumberStartBoundary(CharSequence text, int start) {
     if (start == 0) {
       return true;
     }
@@ -420,7 +435,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param hits The raw candidates.
    * @return The surviving mentions in text order. Never {@code null}.
    */
-  private static List<PiiMention> resolveOverlaps(List<Hit> hits) {
+  private List<PiiMention> resolveOverlaps(List<Hit> hits) {
     hits.sort((a, b) -> {
       if (a.start() != b.start()) {
         return Integer.compare(a.start(), b.start());
@@ -442,35 +457,39 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Computes the IBAN mod-97 remainder of a compact candidate.
+   * Computes the IBAN mod-97 remainder of a compact candidate. The four leading
+   * characters are read last, which is the rearrangement the check prescribes.
    *
-   * @param compact The candidate without spaces, uppercase letters and digits only.
+   * @param compact The candidate characters without spaces, uppercase letters and digits
+   *                only.
+   * @param length The number of leading characters that form the candidate; must be
+   *               longer than the four characters that are rotated.
    * @return The remainder; {@code 1} for a valid IBAN.
    */
-  private static int mod97(String compact) {
-    final String rearranged = compact.substring(4) + compact.substring(0, 4);
+  private int mod97(CharSequence compact, int length) {
     int remainder = 0;
-    for (int i = 0; i < rearranged.length(); i++) {
-      final char c = rearranged.charAt(i);
+    for (int i = 0; i < length; i++) {
+      final char c = compact.charAt((i + IBAN_ROTATION) % length);
       if (isAsciiDigit(c)) {
-        remainder = (remainder * 10 + (c - '0')) % 97;
+        remainder = (remainder * 10 + (c - '0')) % IBAN_MODULUS;
       } else {
-        remainder = (remainder * 100 + (c - 'A' + 10)) % 97;
+        remainder = (remainder * 100 + (c - 'A' + 10)) % IBAN_MODULUS;
       }
     }
     return remainder;
   }
 
   /**
-   * Applies the Luhn check to a digit string.
+   * Applies the Luhn check to a digit sequence.
    *
    * @param digits The digits to check.
+   * @param length The number of leading digits that form the candidate.
    * @return {@code true} if the checksum passes.
    */
-  private static boolean luhnValid(String digits) {
+  private boolean luhnValid(CharSequence digits, int length) {
     int sum = 0;
     boolean twice = false;
-    for (int i = digits.length() - 1; i >= 0; i--) {
+    for (int i = length - 1; i >= 0; i--) {
       int d = digits.charAt(i) - '0';
       if (twice) {
         d *= 2;
@@ -490,7 +509,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param c The character.
    * @return {@code true} for ASCII letters, digits, and {@code . _ % + -}.
    */
-  private static boolean isLocalChar(char c) {
+  private boolean isLocalChar(char c) {
     return isAsciiLetter(c) || isAsciiDigit(c)
         || c == '.' || c == '_' || c == '%' || c == '+' || c == '-';
   }
@@ -501,7 +520,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param c The character.
    * @return {@code true} for ASCII letters, digits, dot, and hyphen.
    */
-  private static boolean isDomainChar(char c) {
+  private boolean isDomainChar(char c) {
     return isAsciiLetter(c) || isAsciiDigit(c) || c == '.' || c == '-';
   }
 
@@ -511,7 +530,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param c The character.
    * @return {@code true} for {@code A-Z} and {@code a-z}.
    */
-  private static boolean isAsciiLetter(char c) {
+  private boolean isAsciiLetter(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
   }
 
@@ -521,7 +540,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param c The character.
    * @return {@code true} for {@code A-Z}.
    */
-  private static boolean isAsciiUpper(char c) {
+  private boolean isAsciiUpper(char c) {
     return c >= 'A' && c <= 'Z';
   }
 
@@ -531,7 +550,7 @@ public class CursorPiiExtractor implements PiiExtractor {
    * @param c The character.
    * @return {@code true} for {@code 0-9}.
    */
-  private static boolean isAsciiDigit(char c) {
+  private boolean isAsciiDigit(char c) {
     return c >= '0' && c <= '9';
   }
 }

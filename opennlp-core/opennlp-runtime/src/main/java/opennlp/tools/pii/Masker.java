@@ -38,6 +38,7 @@ import opennlp.tools.document.LayerKey;
 public final class Masker {
 
   private Masker() {
+    // This class holds static methods only and is never instantiated.
   }
 
   /**
@@ -80,7 +81,6 @@ public final class Masker {
     if (layers == null || layers.isEmpty()) {
       throw new IllegalArgumentException("layers must not be null or empty");
     }
-    final StringBuilder masked = new StringBuilder(document.text());
     for (final LayerKey<?> layer : layers) {
       if (layer == null) {
         throw new IllegalArgumentException("layers must not contain null");
@@ -88,8 +88,12 @@ public final class Masker {
       if (!document.layers().contains(layer)) {
         throw new IllegalArgumentException("layer is not present on the document: " + layer);
       }
+    }
+    final StringBuilder masked = new StringBuilder(document.text());
+    for (final LayerKey<?> layer : layers) {
       for (final Annotation<?> annotation : document.get(layer)) {
-        for (int i = annotation.span().getStart(); i < annotation.span().getEnd(); i++) {
+        final int end = annotation.span().getEnd();
+        for (int i = annotation.span().getStart(); i < end; i++) {
           masked.setCharAt(i, mask);
         }
       }
