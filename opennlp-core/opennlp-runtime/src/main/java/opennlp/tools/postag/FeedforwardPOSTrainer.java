@@ -48,7 +48,7 @@ import opennlp.tools.util.StringUtil;
  * {@link #train(ObjectStream, Settings, Function)}: the vectors of the words seen in
  * training extend the input layer as a frozen window block and are stored inside the
  * model, so the resulting model infers without any embedding component. Training
- * without the option is unchanged and produces the original model format.</p>
+ * without the option touches neither the input layer nor the stored format.</p>
  *
  * @since 3.0.0
  */
@@ -57,9 +57,6 @@ public final class FeedforwardPOSTrainer {
   private static final Logger logger = LoggerFactory.getLogger(FeedforwardPOSTrainer.class);
 
   private static final double ADAGRAD_EPSILON = 1e-6;
-
-  private static final List<String> SHAPES = List.of(
-      "*lower*", "*cap*", "*allcaps*", "*digit*", "*alnum*", "*other*");
 
   private FeedforwardPOSTrainer() {
     // This class only exposes static training methods and is never instantiated.
@@ -299,7 +296,7 @@ public final class FeedforwardPOSTrainer {
         FeedforwardPOSModel.ABSENT)) {
       shapeIds.put(special, row++);
     }
-    for (final String shape : SHAPES) {
+    for (final String shape : FeedforwardPOSContext.SHAPES) {
       shapeIds.put(shape, row++);
     }
     final Map<String, Integer> tagIds = new LinkedHashMap<>();

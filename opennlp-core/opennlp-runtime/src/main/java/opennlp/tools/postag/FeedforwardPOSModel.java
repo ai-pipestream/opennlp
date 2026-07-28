@@ -47,7 +47,8 @@ import opennlp.tools.util.StringUtil;
  * <p>A model trained with pretrained word vectors additionally carries a frozen vector
  * block: the vectors of the words seen in training are stored inside the model, so
  * inference needs no embedding component, and a word without a stored vector scores as
- * zeros. Models without the block keep the original format byte for byte.</p>
+ * zeros. Such a model is written as {@code ONLP-FFPT-2}; one without the block is
+ * written as {@code ONLP-FFPT-1}, and both layouts stay readable.</p>
  *
  * @see FeedforwardPOSTagger
  * @see FeedforwardPOSTrainer

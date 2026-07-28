@@ -21,12 +21,16 @@ import java.io.IOException;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
+import opennlp.tools.parser.AbstractBottomUpParser;
 import opennlp.tools.parser.AbstractParserModelTest;
 import opennlp.tools.parser.HeadRules;
 import opennlp.tools.parser.Parse;
 import opennlp.tools.parser.ParserModel;
 import opennlp.tools.parser.ParserTestUtil;
+import opennlp.tools.postag.POSTagger;
+import opennlp.tools.postag.POSTaggerME;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.TrainingParameters;
 
@@ -54,17 +58,15 @@ public class ParserTest extends AbstractParserModelTest {
   }
 
   /**
-   * Verifies the caller-supplied tagger seam: the public tagger-accepting constructor
-   * builds a working parser around any {@link opennlp.tools.postag.POSTagger}, here
-   * the maxent implementation passed explicitly, and a {@code null} tagger is
-   * rejected loudly.
+   * Verifies that the tagger-accepting constructor builds a working parser around a
+   * caller-supplied {@link POSTagger}, and rejects a {@code null} one.
    */
-  @org.junit.jupiter.api.Test
+  @Test
   void testCallerSuppliedTaggerDrivesTheParser() {
     final Parser parser = new Parser(model,
-        new opennlp.tools.postag.POSTaggerME(model.getParserTaggerModel()),
-        opennlp.tools.parser.AbstractBottomUpParser.defaultBeamSize,
-        opennlp.tools.parser.AbstractBottomUpParser.defaultAdvancePercentage);
+        new POSTaggerME(model.getParserTaggerModel()),
+        AbstractBottomUpParser.defaultBeamSize,
+        AbstractBottomUpParser.defaultAdvancePercentage);
     final Parse sentence = Parse.parseParse(
         "(TOP  (S (NP (NNS Sales) (NNS executives)) (VP (VBD were)) (. .) ))");
     final Parse parsed = parser.parse(sentence);
@@ -73,8 +75,8 @@ public class ParserTest extends AbstractParserModelTest {
 
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new Parser(model, null,
-            opennlp.tools.parser.AbstractBottomUpParser.defaultBeamSize,
-            opennlp.tools.parser.AbstractBottomUpParser.defaultAdvancePercentage));
+            AbstractBottomUpParser.defaultBeamSize,
+            AbstractBottomUpParser.defaultAdvancePercentage));
   }
 
 }

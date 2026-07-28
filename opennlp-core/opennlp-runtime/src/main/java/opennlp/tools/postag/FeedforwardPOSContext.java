@@ -17,6 +17,8 @@
 
 package opennlp.tools.postag;
 
+import java.util.List;
+
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -47,6 +49,28 @@ final class FeedforwardPOSContext {
    * the learned slots in the input layer.
    */
   static final int PRETRAINED_SLOTS = 5;
+
+  /** The shape of a word holding both letters and digits. */
+  static final String SHAPE_ALPHANUMERIC = "*alnum*";
+
+  /** The shape of a word holding digits and no letter. */
+  static final String SHAPE_DIGIT = "*digit*";
+
+  /** The shape of a word holding neither a letter nor a digit. */
+  static final String SHAPE_OTHER = "*other*";
+
+  /** The shape of an all-uppercase word. */
+  static final String SHAPE_ALL_CAPS = "*allcaps*";
+
+  /** The shape of a word whose first character is uppercase. */
+  static final String SHAPE_CAPITALIZED = "*cap*";
+
+  /** The shape of every other word. */
+  static final String SHAPE_LOWER = "*lower*";
+
+  /** Every symbol {@link #shape(String)} can return, in embedding-row order. */
+  static final List<String> SHAPES = List.of(SHAPE_LOWER, SHAPE_CAPITALIZED,
+      SHAPE_ALL_CAPS, SHAPE_DIGIT, SHAPE_ALPHANUMERIC, SHAPE_OTHER);
 
   private FeedforwardPOSContext() {
     // This class only describes the feature template and is never instantiated.
@@ -119,20 +143,20 @@ final class FeedforwardPOSContext {
       }
     }
     if (letter && digit) {
-      return "*alnum*";
+      return SHAPE_ALPHANUMERIC;
     }
     if (digit) {
-      return "*digit*";
+      return SHAPE_DIGIT;
     }
     if (!letter) {
-      return "*other*";
+      return SHAPE_OTHER;
     }
     if (upper && !lower) {
-      return "*allcaps*";
+      return SHAPE_ALL_CAPS;
     }
     if (Character.isUpperCase(word.charAt(0))) {
-      return "*cap*";
+      return SHAPE_CAPITALIZED;
     }
-    return "*lower*";
+    return SHAPE_LOWER;
   }
 }
