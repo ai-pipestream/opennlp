@@ -26,6 +26,7 @@ import java.util.Currency;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 public class RegionAwareMoneyAnnotatorTest {
 
+  /**
+   * Builds a document that carries a region ballot with a single full-share vote for
+   * one country.
+   *
+   * @param text The document text. Must not be {@code null}.
+   * @param countryCode The winning ISO 3166-1 alpha-2 country code. Must not be
+   *                    {@code null}.
+   * @return A {@link Document} with a one-row region ballot. Never {@code null}.
+   */
   private static Document withBallot(String text, String countryCode) {
     return Document.of(text).with(DocumentRegionAnnotator.REGIONS,
         List.of(Annotation.of(new RegionVote(countryCode, 1.0))));
@@ -103,8 +113,8 @@ public class RegionAwareMoneyAnnotatorTest {
       }
 
       @Override
-      public java.util.Set<LayerKey<?>> provides() {
-        return java.util.Set.of(Layers.ENTITIES);
+      public Set<LayerKey<?>> provides() {
+        return Set.of(Layers.ENTITIES);
       }
     };
 

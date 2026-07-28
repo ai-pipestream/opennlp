@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,17 +36,16 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Votes on where a document speaks from: every location mention casts a ballot for a
- * country, and the document-scoped layer reports the ranked result as
- * {@link RegionVote} shares without spans.
+ * Derives the countries a document is about from its location entities and provides
+ * {@link #REGIONS}, a document-scoped layer of span-less {@link RegionVote} rows ranked
+ * by share.
  *
  * <p>Two kinds of evidence vote. A mention whose text is an English country name, for
- * example {@code Australia}, votes for that country directly, recognized through JDK
- * locale data with no gazetteer involved, since place gazetteers often carry no country
- * entries. Every other location mention goes through the {@link Geocoder}, and each
- * resolution votes for its entry's country weighted by the resolution confidence, so a
- * coherence-aware geocoder makes the ballot sharper. Mentions that resolve to nothing
- * simply do not vote; a document without usable evidence gets an empty layer.</p>
+ * example {@code Australia}, votes for that country directly through JDK locale data,
+ * because place gazetteers often carry no country entries. Every other location mention
+ * goes through the {@link Geocoder} and votes for its entry's country weighted by the
+ * resolution confidence. A mention that resolves to nothing does not vote, and a
+ * document without usable evidence gets an empty layer.</p>
  *
  * <p>The annotator holds no per-call state and is as thread-safe as its geocoder.</p>
  *
@@ -62,11 +62,14 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       Layers.documentKey("regions", RegionVote.class);
 
   /**
-   * The vote weight of a direct country-name mention, sitting near the top of the
-   * geocoder confidence range: naming a country outright counts like one confidently
-   * resolved city, without outvoting two independent mentions on its own.
+   * The vote weight of a direct country-name mention. It sits near the top of the
+   * geocoder confidence range, so one country name counts about as much as one
+   * confidently resolved city and never outvotes two independent mentions on its own.
    */
   private static final double COUNTRY_NAME_WEIGHT = 0.95;
+
+  /** The entity type label treated as a location unless the caller names others. */
+  private static final String DEFAULT_LOCATION_TYPE = "location";
 
   private static final Map<String, String> COUNTRY_NAMES = countryNames();
 
@@ -74,13 +77,13 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   private final Set<String> locationTypes;
 
   /**
-   * Initializes the annotator for entities typed {@code location}.
+   * Initializes the annotator for entities typed {@value #DEFAULT_LOCATION_TYPE}.
    *
    * @param geocoder The geocoder resolving location mentions. Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if {@code geocoder} is {@code null}.
    */
   public DocumentRegionAnnotator(Geocoder geocoder) {
-    this(geocoder, Set.of("location"));
+    this(geocoder, Set.of(DEFAULT_LOCATION_TYPE));
   }
 
   /**
@@ -100,7 +103,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("locationTypes must not be null or empty");
     }
     this.geocoder = geocoder;
-    final Set<String> lowered = new java.util.HashSet<>(locationTypes.size());
+    final Set<String> lowered = new HashSet<>(locationTypes.size());
     for (final String type : locationTypes) {
       if (type == null || StringUtil.isBlank(type)) {
         throw new IllegalArgumentException("locationTypes must not contain blank entries");
@@ -110,6 +113,12 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     this.locationTypes = Set.copyOf(lowered);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @throws UncheckedIOException Thrown if the {@link Geocoder} fails with an
+   *         {@link IOException}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
@@ -136,7 +145,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       try {
         resolutions = geocoder.resolve(text, toGeocode);
       } catch (IOException e) {
-        throw new UncheckedIOException("geocoding failed", e);
+        throw new UncheckedIOException("Unable to geocode the document's location mentions", e);
       }
       for (final GeoResolution resolution : resolutions) {
         final String countryCode = resolution.entry().countryCode();
@@ -152,12 +161,13 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
    * Turns the weight sums into a ranked ballot: each country's share is its weight over
    * the weight total, so shares sum to one, and rows are ordered by descending share
    * with ties broken by ascending country code. The rows carry no spans, since the
-   * ballot describes the document as a whole.
+   * ballot describes the document as a whole. A country whose weight sums to zero
+   * carries no evidence and gets no row, so a ballot without positive weights is empty
+   * rather than a set of undefined shares.
    *
-   * <p>A country whose weight sums to zero carries no evidence, which a resolution at
-   * confidence {@code 0.0} is entitled to report, so it casts no vote and gets no row.
-   * When no country has a positive weight the ballot is empty rather than a set of
-   * undefined shares.</p>
+   * @param weights Maps a country code to the summed weight of its evidence. Must not be
+   *                {@code null}.
+   * @return The ranked ballot rows. Never {@code null}.
    */
   private static List<Annotation<RegionVote>> ballot(Map<String, Double> weights) {
     double total = 0.0;
@@ -188,9 +198,11 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Maps lowercased English country display names from JDK locale data to their ISO
-   * 3166-1 alpha-2 codes. Codes for which the JDK has no distinct display name are
-   * skipped rather than mapped to themselves.
+   * Builds the country-name lookup from JDK locale data. Codes for which the JDK has no
+   * distinct display name are skipped rather than mapped to themselves.
+   *
+   * @return Lowercased English country display names mapped to their ISO 3166-1 alpha-2
+   *         codes. Never {@code null}.
    */
   private static Map<String, String> countryNames() {
     final Map<String, String> names = new HashMap<>();
