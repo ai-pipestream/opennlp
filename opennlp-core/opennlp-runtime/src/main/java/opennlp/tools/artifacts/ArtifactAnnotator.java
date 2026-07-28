@@ -67,6 +67,12 @@ public class ArtifactAnnotator implements DocumentAnnotator {
     this.detector = detector;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p>No layer is required, and the text is left unchanged: a clean document yields a
+   * present but empty {@link #ARTIFACTS} layer.</p>
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {

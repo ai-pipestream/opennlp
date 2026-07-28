@@ -34,10 +34,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 public class ArtifactsManualExampleTest {
 
-  /** The chapter's example text: {@code cafÃ© costs �8} built from code points. */
-  private static final String TEXT =
-      "caf" + new String(new int[] {0x00C3, 0x00A9}, 0, 2)
-          + " costs " + new String(new int[] {0xFFFD}, 0, 1) + "8";
+  /** The chapter's damaged word ending: U+00E9 read back through a single-byte decoding. */
+  private static final String DAMAGED_E_ACUTE = new String(new int[] {0x00C3, 0x00A9}, 0, 2);
+
+  /** The replacement character the chapter's example carries. */
+  private static final String REPLACEMENT = new String(new int[] {0xFFFD}, 0, 1);
+
+  /** The chapter's example text, built from code points so the source stays printable. */
+  private static final String TEXT = "caf" + DAMAGED_E_ACUTE + " costs " + REPLACEMENT + "8";
 
   /** The detection example: two findings with the printed types and offsets. */
   @Test
@@ -66,7 +70,7 @@ public class ArtifactsManualExampleTest {
     final List<Annotation<TextArtifact>> artifacts =
         document.get(ArtifactAnnotator.ARTIFACTS);
     assertEquals(2, artifacts.size());
-    assertEquals(new String(new int[] {0x00C3, 0x00A9}, 0, 2),
+    assertEquals(DAMAGED_E_ACUTE,
         artifacts.get(0).span().getCoveredText(TEXT).toString());
     assertEquals(TextArtifact.TYPE_MOJIBAKE, artifacts.get(0).value().type());
   }

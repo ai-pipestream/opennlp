@@ -24,11 +24,9 @@ import opennlp.tools.util.StringUtil;
  * One damaged or suspicious character sequence in a text: the {@link Span} it covers in
  * the original text and its artifact type.
  *
- * <p>The type is an open string so detectors can introduce new types without an API
- * change; the constants on this record name the types the built-in detector reports.
- * Detection never alters the text: an artifact only states where and what the problem
- * is, so a caller can mask, remove, or repair with full knowledge of the original
- * offsets.</p>
+ * <p>The type is an open string: a detector may report a type beyond the constants
+ * declared here. The span always refers to the text as the caller supplied it, never to
+ * a normalized or repaired form.</p>
  *
  * @param span The location of the artifact in the original text. Must not be
  *             {@code null}.
