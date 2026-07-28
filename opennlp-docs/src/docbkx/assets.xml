@@ -104,10 +104,9 @@ AlignedText described = AssetFolder.fold(document, annotation ->
     describer.describe(annotation.value().decode(text),
         annotation.value().mediaType()));]]>
 			</programlisting>
-			The interface takes bytes and a media type and returns text. Implementations
-			are constructor-injected, so integrating one adds no dependency to this
-			toolkit; any dependency injection container can register an implementation as
-			a bean unchanged.
+			The interface takes bytes and a media type and returns text. OpenNLP ships no
+			implementation: the caller supplies one, so integrating a binary
+			understanding service adds no dependency to this toolkit.
 		</para>
 	</section>
 </chapter>
