@@ -44,9 +44,8 @@ import opennlp.tools.document.LayerKey;
  * never consulted. Every resulting vector is anchored to the span it was computed from,
  * so the provided layer stays in original text coordinates.</p>
  *
- * <p>All fields of this class are immutable and {@link #annotate(Document)} keeps its
- * working state in local variables, so a single instance may serve concurrent pipelines
- * whenever the supplied {@link TextEmbedder} is safe for concurrent use.</p>
+ * <p>Instances are immutable, so one instance may serve concurrent pipelines whenever the
+ * supplied {@link TextEmbedder} is safe for concurrent use.</p>
  *
  * @since 3.0.0
  */
@@ -62,12 +61,18 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
    *
    * @param embedder The embedder to delegate to. Must not be {@code null}.
    * @param source The layer whose annotations are embedded, for example the token or
-   *               sentence layer. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   *               sentence layer. Must not be {@code null} and must be
+   *               {@link LayerKey.Scope#POSITIONAL positional}, because every annotation
+   *               is embedded by its span.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or if
+   *         {@code source} is not positional.
    */
   public EmbeddingAnnotator(TextEmbedder embedder, LayerKey<String> source) {
     if (embedder == null || source == null) {
       throw new IllegalArgumentException("embedder and source must not be null");
+    }
+    if (source.scope() != LayerKey.Scope.POSITIONAL) {
+      throw new IllegalArgumentException("source must be a positional layer: " + source);
     }
     this.embedder = embedder;
     this.source = source;
@@ -87,30 +92,31 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
    * Embeds the covered text of every annotation of the source layer and returns a new
    * document that additionally carries the resulting vectors under {@link #layer()}.
    *
-   * <p>A document without the source layer reads as an empty source layer, so the
-   * returned document then carries the provided layer with no annotations. Every vector
-   * is stored exactly as the embedder returned it; no dimension check is applied.</p>
+   * <p>The source layer must be present, but it may be empty: a document with an empty
+   * source layer yields a present-but-empty vector layer. Every vector is stored exactly
+   * as the embedder returned it; no dimension check is applied.</p>
    *
-   * @param document The document to annotate. Must not be {@code null} and must not
-   *                 already carry the provided layer.
+   * @param document The document to annotate. Must not be {@code null}, must carry the
+   *                 source layer, and must not already carry the provided layer.
    * @return A new {@link Document} with the vector layer added to the input layers.
    *         Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, if it
-   *         already carries the provided layer, or if the embedder returns {@code null}
-   *         for an annotation's covered text.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, if the
+   *         source layer is absent, if the document already carries the provided layer,
+   *         or if the embedder returns {@code null} for an annotation's covered text.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    if (!document.layers().contains(source)) {
+      throw new IllegalArgumentException("document lacks the required layer " + source);
+    }
     final CharSequence text = document.text();
     final List<Annotation<String>> annotations = document.get(source);
     final List<Annotation<float[]>> vectors = new ArrayList<>(annotations.size());
     for (final Annotation<String> annotation : annotations) {
-      // Embed the covered text taken from the original document text by the span; the
-      // annotation's stored value is deliberately not used, so the vector always
-      // reflects the exact characters the span points at.
+      // The covered text of the span, never the annotation's stored value.
       vectors.add(new Annotation<>(annotation.span(), embedder.embed(
           text.subSequence(annotation.span().getStart(), annotation.span().getEnd()))));
     }
@@ -118,8 +124,9 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * @return The single-element set holding the source layer this annotator reads.
-   *         Never {@code null}.
+   * {@inheritDoc}
+   *
+   * <p>The single-element set holding the source layer given at construction.</p>
    */
   @Override
   public Set<LayerKey<?>> requires() {
@@ -127,8 +134,9 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * @return The single-element set holding the vector layer this annotator adds, equal
-   *         to {@link #layer()}. Never {@code null}.
+   * {@inheritDoc}
+   *
+   * <p>The single-element set holding {@link #layer()}.</p>
    */
   @Override
   public Set<LayerKey<?>> provides() {
