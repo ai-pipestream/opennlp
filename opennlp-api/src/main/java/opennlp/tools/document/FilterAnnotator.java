@@ -27,9 +27,6 @@ import java.util.function.Predicate;
  * source layer stays untouched, so a pipeline keeps both the raw and the filtered view
  * and every consumer states which one it reads.
  *
- * <p>The predicate is plain, so any expression engine can compile into it without this
- * toolkit depending on one.</p>
- *
  * <p>This annotator is safe for concurrent use when its predicate is.</p>
  *
  * @param <T> The value type of the filtered layer.
@@ -37,6 +34,9 @@ import java.util.function.Predicate;
  * @since 3.0.0
  */
 public final class FilterAnnotator<T> implements DocumentAnnotator {
+
+  /** The message prefix of every absent-required-layer rejection in this wrapper. */
+  private static final String MISSING_LAYER = "document lacks the required layer ";
 
   private final LayerKey<T> source;
   private final LayerKey<T> target;
@@ -56,8 +56,11 @@ public final class FilterAnnotator<T> implements DocumentAnnotator {
    */
   public FilterAnnotator(LayerKey<T> source, LayerKey<T> target,
       Predicate<Annotation<T>> keep) {
-    if (source == null || target == null) {
-      throw new IllegalArgumentException("source and target must not be null");
+    if (source == null) {
+      throw new IllegalArgumentException("source must not be null");
+    }
+    if (target == null) {
+      throw new IllegalArgumentException("target must not be null");
     }
     if (source.equals(target)) {
       throw new IllegalArgumentException("target must differ from source");
@@ -70,10 +73,24 @@ public final class FilterAnnotator<T> implements DocumentAnnotator {
     this.keep = keep;
   }
 
+  /**
+   * Reads the source layer and adds the target layer holding the annotations that pass
+   * the predicate, in their source order. The source layer must be present, but it may
+   * be empty: an empty source yields a present-but-empty target.
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the source layer.
+   * @return A new {@link Document} with the target layer added. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
+   *         source layer is absent.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    if (!document.layers().contains(source)) {
+      throw new IllegalArgumentException(MISSING_LAYER + source);
     }
     final List<Annotation<T>> survivors = new ArrayList<>();
     for (final Annotation<T> annotation : document.get(source)) {
