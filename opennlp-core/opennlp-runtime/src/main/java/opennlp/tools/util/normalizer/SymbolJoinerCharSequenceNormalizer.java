@@ -26,11 +26,20 @@ import java.util.Map;
  * are folded and stemmed — the ampersand token and the word "and" must collapse
  * onto the same term before that can happen.
  *
- * <p>Only a text consisting of exactly the symbol is rewritten; an ampersand
- * embedded in a larger token ("R&amp;D", "AT&amp;T") is left unchanged, because
- * expanding it inside the token would invent a word that appears in neither the
- * document nor the query. The table is deliberately one entry deep: add a
- * symbol only when a corpus shows the mismatch.</p>
+ * <p>The table covers the symbols that appear as standalone tokens in running
+ * prose and have an unambiguous spelled-out English form: the joiners
+ * ({@code &}, {@code +}, {@code @}), the unit and reference marks of legal and
+ * technical writing ({@code %} percent, {@code §} section, {@code ¶} paragraph,
+ * {@code °} degree), and the IP marks ({@code ©} copyright, {@code ®}
+ * registered, {@code ™} trademark). Currency symbols are deliberately absent:
+ * their words differ by locale and they almost never appear as standalone
+ * tokens.</p>
+ *
+ * <p>Only a text consisting of exactly the symbol is rewritten; a symbol
+ * embedded in a larger token ("R&amp;D", "AT&amp;T", "TSR®") is left unchanged,
+ * because expanding it inside the token would invent a word that appears in
+ * neither the document nor the query. Comparison is by whole-string equality,
+ * so it is exact under UTF-16 and needs no pattern machinery.</p>
  *
  * <p>Texts that are not a known symbol are returned without copying, like the
  * sibling normalizers.</p>
@@ -41,7 +50,17 @@ public class SymbolJoinerCharSequenceNormalizer implements CharSequenceNormalize
 
   private static final long serialVersionUID = -3081219175592047788L;
 
-  private static final Map<String, String> WORD_BY_SYMBOL = Map.of("&", "and");
+  private static final Map<String, String> WORD_BY_SYMBOL = Map.of(
+      "&", "and",
+      "+", "plus",
+      "@", "at",
+      "%", "percent",
+      "§", "section",
+      "¶", "paragraph",
+      "°", "degree",
+      "©", "copyright",
+      "®", "registered",
+      "™", "trademark");
 
   private static final SymbolJoinerCharSequenceNormalizer INSTANCE =
       new SymbolJoinerCharSequenceNormalizer();
