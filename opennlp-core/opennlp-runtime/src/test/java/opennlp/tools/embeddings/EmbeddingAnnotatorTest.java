@@ -238,6 +238,139 @@ public class EmbeddingAnnotatorTest {
   }
 
   /**
+   * Asserts the batched contract: the embedder is invoked once per document through
+   * {@link TextEmbedder#embedAll(List)} over the distinct covered texts in
+   * first-appearance order, never through {@link TextEmbedder#embed(CharSequence)}, and
+   * two spans covering the same text share the one vector the batch returned for it.
+   */
+  @Test
+  void testDistinctCoveredTextsEmbedInOneBatch() {
+    final Document base = Document.of("Dogs chase Dogs").with(Layers.TOKENS, List.of(
+        new Annotation<>(new Span(0, 4), "Dogs"),
+        new Annotation<>(new Span(5, 10), "chase"),
+        new Annotation<>(new Span(11, 15), "Dogs")));
+    final RecordingEmbedder embedder = new RecordingEmbedder();
+    final EmbeddingAnnotator annotator = new EmbeddingAnnotator(embedder, Layers.TOKENS);
+    final List<Annotation<float[]>> vectors = annotator.annotate(base).get(annotator.layer());
+
+    Assertions.assertEquals(1, embedder.batchCalls);
+    Assertions.assertEquals(0, embedder.singleCalls);
+    Assertions.assertEquals(List.of("Dogs", "chase"), embedder.seen);
+
+    Assertions.assertEquals(3, vectors.size());
+    Assertions.assertEquals(new Span(0, 4), vectors.get(0).span());
+    Assertions.assertEquals(new Span(5, 10), vectors.get(1).span());
+    Assertions.assertEquals(new Span(11, 15), vectors.get(2).span());
+    Assertions.assertArrayEquals(new float[] {0, 4}, vectors.get(0).value());
+    Assertions.assertArrayEquals(new float[] {1, 5}, vectors.get(1).value());
+    Assertions.assertSame(vectors.get(0).value(), vectors.get(2).value());
+  }
+
+  /**
+   * Asserts that an embedder whose batch does not hold exactly one vector per distinct
+   * input text fails loudly instead of misaligning vectors against spans.
+   */
+  @Test
+  void testShortBatchFromEmbedderFailsLoud() {
+    final Document base = Document.of("ab cd").with(Layers.TOKENS, List.of(
+        new Annotation<>(new Span(0, 2), "ab"),
+        new Annotation<>(new Span(3, 5), "cd")));
+    final EmbeddingAnnotator annotator =
+        new EmbeddingAnnotator(new ShortBatchEmbedder(), Layers.TOKENS);
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class, () -> annotator.annotate(base));
+    Assertions.assertEquals("embedder returned 1 vectors for 2 texts; embedAll must "
+        + "return one vector per input, in input order", e.getMessage());
+  }
+
+  /**
+   * A {@link TextEmbedder} that records how it was driven: {@code embedAll} invocations,
+   * {@code embed} invocations, and the texts of the most recent batch. Each batch vector
+   * encodes the text's batch position and length so tests can verify alignment.
+   */
+  private static final class RecordingEmbedder implements TextEmbedder {
+
+    private int batchCalls;
+    private int singleCalls;
+    private List<String> seen = List.of();
+
+    /**
+     * Embeds a text as {@code [position in batch, text length]} and records the call.
+     *
+     * @param texts The texts to embed. Must not be {@code null}.
+     * @return One vector per input, in input order.
+     */
+    @Override
+    public float[][] embedAll(List<? extends CharSequence> texts) {
+      batchCalls++;
+      final List<String> copy = new ArrayList<>(texts.size());
+      final float[][] vectors = new float[texts.size()][];
+      for (int i = 0; i < texts.size(); i++) {
+        copy.add(texts.get(i).toString());
+        vectors[i] = new float[] {i, texts.get(i).length()};
+      }
+      seen = copy;
+      return vectors;
+    }
+
+    /**
+     * Records a single-text call; the batched annotator is expected never to make one.
+     *
+     * @param text The text to embed. Must not be {@code null}.
+     * @return A two-component zero vector.
+     */
+    @Override
+    public float[] embed(CharSequence text) {
+      singleCalls++;
+      return new float[2];
+    }
+
+    /**
+     * @return The constant vector length two.
+     */
+    @Override
+    public int dimension() {
+      return 2;
+    }
+  }
+
+  /**
+   * A misbehaving {@link TextEmbedder} whose batch holds one vector fewer than requested.
+   * It exists to observe how the annotator reacts to an embedder violating the
+   * one-vector-per-input contract.
+   */
+  private static final class ShortBatchEmbedder implements TextEmbedder {
+
+    /**
+     * Violates the batch contract on purpose.
+     *
+     * @param texts The texts to embed.
+     * @return One vector fewer than requested.
+     */
+    @Override
+    public float[][] embedAll(List<? extends CharSequence> texts) {
+      return new float[texts.size() - 1][];
+    }
+
+    /**
+     * @param text The text to embed; ignored.
+     * @return A two-component zero vector.
+     */
+    @Override
+    public float[] embed(CharSequence text) {
+      return new float[2];
+    }
+
+    /**
+     * @return The constant vector length two.
+     */
+    @Override
+    public int dimension() {
+      return 2;
+    }
+  }
+
+  /**
    * A misbehaving {@link TextEmbedder} whose vector length equals the input text length
    * instead of the two dimensions it declares, with every component set to one. It
    * exists to observe how the annotator treats vectors of inconsistent dimensions.

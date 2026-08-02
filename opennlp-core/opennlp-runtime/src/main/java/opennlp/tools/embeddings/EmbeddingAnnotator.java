@@ -18,13 +18,16 @@
 package opennlp.tools.embeddings;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
+import opennlp.tools.util.Span;
 
 /**
  * Adds dense vectors to the document graph: every annotation of a source layer is
@@ -96,13 +99,20 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
    * source layer yields a present-but-empty vector layer. Every vector is stored exactly
    * as the embedder returned it; no dimension check is applied.</p>
    *
+   * <p>The embedder is invoked once per document through
+   * {@link TextEmbedder#embedAll(List)} over the <em>distinct</em> covered texts, so an
+   * embedder with a batched execution path batches, and spans that cover the same text
+   * (common on a token layer) share one vector instance rather than embedding twice.
+   * Sharing is safe because the stored vectors are treated as read-only values.</p>
+   *
    * @param document The document to annotate. Must not be {@code null}, must carry the
    *                 source layer, and must not already carry the provided layer.
    * @return A new {@link Document} with the vector layer added to the input layers.
    *         Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, if the
    *         source layer is absent, if the document already carries the provided layer,
-   *         or if the embedder returns {@code null} for an annotation's covered text.
+   *         if the embedder returns {@code null} for an annotation's covered text, or if
+   *         the batch does not hold exactly one vector per distinct text.
    */
   @Override
   public Document annotate(Document document) {
@@ -114,11 +124,37 @@ public class EmbeddingAnnotator implements DocumentAnnotator {
     }
     final CharSequence text = document.text();
     final List<Annotation<String>> annotations = document.get(source);
-    final List<Annotation<float[]>> vectors = new ArrayList<>(annotations.size());
-    for (final Annotation<String> annotation : annotations) {
+    if (annotations.isEmpty()) {
+      return document.with(layer, List.of());
+    }
+    // One batch call over the distinct covered texts: an embedder with a real batch
+    // path executes it once per document, and a covered text that repeats across spans
+    // (common on a token layer) is embedded once and its vector shared by every span
+    // that covers it.
+    final Map<String, Integer> distinctIndex = new HashMap<>();
+    final List<String> distinct = new ArrayList<>();
+    final int[] route = new int[annotations.size()];
+    for (int i = 0; i < annotations.size(); i++) {
+      final Span span = annotations.get(i).span();
       // The covered text of the span, never the annotation's stored value.
-      vectors.add(new Annotation<>(annotation.span(), embedder.embed(
-          text.subSequence(annotation.span().getStart(), annotation.span().getEnd()))));
+      final String covered = text.subSequence(span.getStart(), span.getEnd()).toString();
+      final Integer seen = distinctIndex.putIfAbsent(covered, distinct.size());
+      if (seen == null) {
+        distinct.add(covered);
+        route[i] = distinct.size() - 1;
+      } else {
+        route[i] = seen;
+      }
+    }
+    final float[][] embedded = embedder.embedAll(distinct);
+    if (embedded.length != distinct.size()) {
+      throw new IllegalArgumentException("embedder returned " + embedded.length
+          + " vectors for " + distinct.size() + " texts; embedAll must return one vector "
+          + "per input, in input order");
+    }
+    final List<Annotation<float[]>> vectors = new ArrayList<>(annotations.size());
+    for (int i = 0; i < annotations.size(); i++) {
+      vectors.add(new Annotation<>(annotations.get(i).span(), embedded[route[i]]));
     }
     return document.with(layer, vectors);
   }
