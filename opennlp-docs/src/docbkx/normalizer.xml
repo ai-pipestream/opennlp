@@ -115,6 +115,13 @@
 							on raw markdown with lists or code blocks.</entry>
 					</row>
 					<row>
+						<entry><code>DehyphenationCharSequenceNormalizer</code></entry>
+						<entry>Undoes line-break hyphenation: a letter, a hyphen (<code>U+002D</code> or
+							the soft hyphen <code>U+00AD</code>), a line break, optional horizontal
+							whitespace, and a letter join into one word (<code>"litiga-\ntion"</code>
+							to <code>"litigation"</code>); see below.</entry>
+					</row>
+					<row>
 						<entry><code>DashCharSequenceNormalizer</code></entry>
 						<entry>Maps every Unicode dash to the ASCII hyphen-minus. The mathematical
 							minus signs and the soft hyphen are not affected.</entry>
@@ -281,6 +288,47 @@ Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized tex
 			not hold. The per-stage maps and their composition use the <code>Alignment</code> machinery
 			described in <xref linkend="tools.normalizer.charclass"/>.
 		</para>
+	</section>
+
+	<section xml:id="tools.normalizer.dehyphenation">
+		<title>De-hyphenation and re-tokenizing term vectors</title>
+		<para>
+			Text extracted from PDFs and other typeset sources breaks long words at the right
+			margin with a hyphen and a line break. <code>DehyphenationCharSequenceNormalizer</code>
+			undoes that: a letter followed by a hyphen (<code>U+002D</code> or the soft hyphen
+			<code>U+00AD</code>), a line break (<code>U+000A</code>, <code>U+000D U+000A</code>,
+			<code>U+000D</code>, <code>U+0085</code>, <code>U+2028</code>, or
+			<code>U+2029</code>), optional horizontal whitespace, and another letter join into one
+			word, so a document writing <code>"litiga-\ntion"</code> and a query writing
+			<code>"litigation"</code> agree on term identity. The hyphen is always deleted when the
+			pattern matches; a genuinely hyphenated compound split at its hyphen
+			(<code>"well-\nknown"</code>) joins too, because telling the two apart needs a
+			dictionary, which is deliberately out of scope. The normalizer is offset-aware, so it
+			composes into <code>buildAligned()</code> and every edit maps back to the original
+			text.
+		</para>
+		<para>
+			The join changes the token count of the text, which the plain
+			<code>TermVectorAnnotator</code> cannot express: it maps the existing token layer
+			forward through the alignment, so the two original tokens <code>litiga-</code> and
+			<code>tion</code> can never fuse into one term. The
+			<code>opennlp.tools.termvector.RetokenizingTermVectorAnnotator</code> closes that gap.
+			It normalizes the whole document text, tokenizes the <emphasis>normalized</emphasis>
+			form with its own tokenizer, and groups occurrences by the covered normalized text;
+			each occurrence span is then mapped back through the alignment, so the joined term
+			reports one span covering both halves and the deleted break in the original. Terms
+			are in normalized-form identity; spans are always original-text offsets.
+		</para>
+		<programlisting language="java">
+<![CDATA[OffsetAwareNormalizer pipeline = TextNormalizer.builder()
+    .with(DehyphenationCharSequenceNormalizer.getInstance())
+    .fullCaseFold()
+    .buildAligned();
+
+Document annotated = new RetokenizingTermVectorAnnotator(
+    pipeline, WhitespaceTokenizer.INSTANCE).annotate(Document.of("word litiga-\ntion word"));
+// term "litigation", frequency 1, one span covering "litiga-\ntion" in the original]]>
+		</programlisting>
 	</section>
 
 	<section xml:id="tools.normalizer.dl">
