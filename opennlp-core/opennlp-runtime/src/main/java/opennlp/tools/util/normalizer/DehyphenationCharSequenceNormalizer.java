@@ -46,7 +46,7 @@ import opennlp.tools.util.StringUtil;
  * compound that happens to be split at its hyphen ({@code "well-\nknown"}) joins to
  * {@code "wellknown"}. Telling the two apart needs a dictionary of valid compounds, which is
  * deliberately out of scope for this normalizer; callers that need it must disambiguate
- * before this rung.</p>
+ * before this step.</p>
  *
  * <p>Because the edit changes the token count of the surrounding text, offset consumers that
  * roll tokens up to terms cannot map the two original tokens forward onto the joined word;
