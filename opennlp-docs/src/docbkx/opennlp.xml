@@ -108,6 +108,9 @@ under the License.
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./sentiment.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./postagger.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./lemmatizer.xml" />
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./document.xml" />
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./assets.xml" />
+	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./noise.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./stemmer.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./wordnet.xml" />
 	<xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="./document.xml" />
