@@ -1,0 +1,375 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package opennlp.tools.geo;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
+import opennlp.tools.document.Annotation;
+import opennlp.tools.document.Document;
+import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Tests the edges of the region ballot: the deterministic order of tied countries, the
+ * country-name vote when the geocoder is never consulted, the empty ballot of a document
+ * without location entities, and the confidence weighting that lets one strong mention
+ * outvote several weak ones.
+ */
+public class DocumentRegionBallotEdgeCaseTest {
+
+  /**
+   * One geocoding outcome of the table geocoder: the country a mention resolves to and
+   * the confidence of that resolution.
+   *
+   * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
+   * @param confidence The resolution confidence, in {@code [0, 1]}.
+   */
+  private record ScoredCountry(String countryCode, double confidence) {
+  }
+
+  /**
+   * Builds a geocoder that resolves each known mention text to a fixed country with a
+   * fixed per-mention confidence, and leaves unknown mentions unresolved.
+   *
+   * @param outcomes Maps a mention text to its resolution outcome. Must not be
+   *                 {@code null}.
+   * @return A {@link Geocoder} over the table. Never {@code null}.
+   */
+  private static Geocoder tableGeocoder(Map<String, ScoredCountry> outcomes) {
+    return (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        final String name =
+            text.subSequence(mention.getStart(), mention.getEnd()).toString();
+        final ScoredCountry outcome = outcomes.get(name);
+        if (outcome != null) {
+          resolutions.add(new GeoResolution(mention,
+              entry(name, outcome.countryCode()), outcome.confidence()));
+        }
+      }
+      return resolutions;
+    };
+  }
+
+  /**
+   * Builds a minimal city entry for a country; only the country code matters for the
+   * region ballot.
+   *
+   * @param name The city name. Must not be {@code null}.
+   * @param countryCode The ISO 3166-1 alpha-2 country code, or {@code null} when the
+   *                    source assigns the place no country.
+   * @return A {@link GazetteerEntry} for the city. Never {@code null}.
+   */
+  private static GazetteerEntry entry(String name, String countryCode) {
+    return new GazetteerEntry("test", name, name, List.of(), new GeoPoint(0.0, 0.0),
+        countryCode, List.of(), 1000, GazetteerEntry.FEATURE_CLASS_CITY, Map.of());
+  }
+
+  /**
+   * Builds a document whose entity layer marks each given mention as a location.
+   *
+   * @param text The document text. Must not be {@code null}.
+   * @param mentions The mention texts to mark. Each must occur in {@code text}.
+   * @return A {@link Document} with an entity layer. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if a mention does not occur in the text.
+   */
+  private static Document withLocations(String text, String... mentions) {
+    final List<Annotation<String>> entities = new ArrayList<>();
+    for (final String mention : mentions) {
+      final int start = text.indexOf(mention);
+      if (start < 0) {
+        throw new IllegalArgumentException("mention not in the text: " + mention);
+      }
+      entities.add(new Annotation<>(new Span(start, start + mention.length()), "location"));
+    }
+    return Document.of(text).with(Layers.ENTITIES, entities);
+  }
+
+  /**
+   * Verifies the ranking rule for a tie: two countries with equal weight split the
+   * ballot evenly, and the tie breaks by ascending country code, so {@code FR} ranks
+   * ahead of {@code GB} regardless of mention order in the text.
+   */
+  @Test
+  void testTieBreaksByAscendingCountryCode() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "London", new ScoredCountry("GB", 0.8),
+        "Paris", new ScoredCountry("FR", 0.8)));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("trains between London and Paris", "London", "Paris")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(2, ballot.size());
+    assertEquals("FR", ballot.get(0).value().countryCode());
+    assertEquals(0.5, ballot.get(0).value().share(), 0.0);
+    assertEquals("GB", ballot.get(1).value().countryCode());
+    assertEquals(0.5, ballot.get(1).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies that country-name mentions carry a ballot on their own: with a geocoder
+   * that resolves nothing, both names stay unresolved in the locations layer and still
+   * vote with the fixed country-name weight, tie evenly, and rank by ascending country
+   * code.
+   */
+  @Test
+  void testCountryNamesAloneFillTheBallotWhenNothingResolves() {
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(tableGeocoder(Map.of()))
+            .annotate(withLocations("trade between Mexico and New Zealand grew",
+                "Mexico", "New Zealand")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(2, ballot.size());
+    assertEquals("MX", ballot.get(0).value().countryCode());
+    assertEquals(0.5, ballot.get(0).value().share(), 0.0);
+    assertEquals("NZ", ballot.get(1).value().countryCode());
+    assertEquals(0.5, ballot.get(1).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies the empty case: a document that ran the full pipeline but holds no location
+   * entity, and therefore nothing to geocode, produces a present but empty region layer.
+   * The required layers are present and empty, which is a document without evidence, not
+   * a broken pipeline.
+   */
+  @Test
+  void testNoLocationEntitiesYieldAnEmptyPresentLayer() {
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(tableGeocoder(Map.of()))
+            .annotate(withLocations("nothing to locate here")));
+
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  }
+
+  /**
+   * Verifies that confidence weights the vote rather than the mention count: two French
+   * mentions at low confidence lose to one US mention at high confidence, and the
+   * shares are the exact confidence sums over the ballot total.
+   */
+  @Test
+  void testOneConfidentMentionOutvotesTwoWeakOnes() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Nice", new ScoredCountry("FR", 0.3),
+        "Nancy", new ScoredCountry("FR", 0.3),
+        "Chicago", new ScoredCountry("US", 0.7)));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("flights from Nice and Nancy to Chicago",
+                "Nice", "Nancy", "Chicago")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(2, ballot.size());
+    assertEquals("US", ballot.get(0).value().countryCode());
+    assertEquals(0.7 / (0.7 + 0.6), ballot.get(0).value().share(), 0.0);
+    assertEquals("FR", ballot.get(1).value().countryCode());
+    assertEquals(0.6 / (0.7 + 0.6), ballot.get(1).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies that a resolution at confidence {@code 0.0}, which the {@link GeoResolution}
+   * contract allows, carries no evidence and therefore casts no vote: the sole mention of
+   * the document resolves at zero confidence, so the region layer is present and empty
+   * rather than the annotator failing on a share of {@code 0.0 / 0.0}.
+   */
+  @Test
+  void testZeroConfidenceResolutionCastsNoVote() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Bilbao", new ScoredCountry("ES", 0.0)));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("a dispatch from Bilbao", "Bilbao")));
+
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  }
+
+  /**
+   * Verifies that a zero-confidence resolution neither dilutes nor blocks the ballot: a
+   * mention resolving at confidence {@code 0.0} shares the document with a mention
+   * resolving at {@code 0.8}, so the ballot holds exactly one row, the confident country
+   * at the full share.
+   */
+  @Test
+  void testZeroConfidenceResolutionDoesNotDiluteTheBallot() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Bilbao", new ScoredCountry("ES", 0.0),
+        "Sydney", new ScoredCountry("AU", 0.8)));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies that a best candidate without a country code casts no vote through the
+   * resolution path: the mention is no country name, so nothing short-circuits ahead of
+   * the resolution lookup, and the countryless entry leaves the ballot empty rather
+   * than voting for a null key or failing.
+   */
+  @Test
+  void testBestCandidateWithoutCountryCodeCastsNoVote() {
+    final Geocoder geocoder = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(mention, entry("Springfield", null), 0.9));
+      }
+      return resolutions;
+    };
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("dateline Springfield", "Springfield")));
+
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+  }
+
+  /**
+   * Verifies that a {@code null} document is rejected with a clear exception before any
+   * layer is touched.
+   */
+  @Test
+  void testNullDocumentIsRejected() {
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
+    assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
+  }
+
+  /**
+   * Verifies that the best-ranked candidate casts a multi-candidate mention's vote: the
+   * geocoder ranks Springfield as {@code US} at {@code 0.6} ahead of {@code CA} at
+   * {@code 0.3}, so the ballot names {@code US} with the winning candidate's confidence,
+   * and the trailing candidate neither overwrites it nor adds a vote of its own.
+   */
+  @Test
+  void testBestRankedCandidateCastsTheMentionVote() {
+    final Geocoder geocoder = (text, mentions) -> {
+      final List<GeoResolution> ranked = new ArrayList<>();
+      for (final Span mention : mentions) {
+        ranked.add(new GeoResolution(mention, entry("Springfield", "US"), 0.6));
+        ranked.add(new GeoResolution(mention, entry("Springfield", "CA"), 0.3));
+      }
+      return ranked;
+    };
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("meet in Springfield today", "Springfield")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("US", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies that a resolution carrying no country code cannot silence its mention: the
+   * gazetteer resolves {@code Australia} to an entry whose country code is {@code null},
+   * which can cast no vote of its own, so the English country-name evidence still fills
+   * the ballot with {@code AU}.
+   */
+  @Test
+  void testResolutionWithoutACountryCodeStillVotesAsACountryName() {
+    final Geocoder geocoder = (text, mentions) -> {
+      final List<GeoResolution> resolutions = new ArrayList<>();
+      for (final Span mention : mentions) {
+        resolutions.add(new GeoResolution(mention, entry("Australia", null), 0.8));
+      }
+      return resolutions;
+    };
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("mining exports from Australia rose", "Australia")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies the evidence precedence: {@code Georgia} is both an English country name and
+   * a place the gazetteer resolves to the {@code US} state at {@code 0.6}. The exact
+   * country name is the stronger evidence, so the mention votes {@code GE} at the
+   * country-name weight and the resolution casts no competing vote.
+   */
+  @Test
+  void testCountryNameOutranksAGazetteerResolutionForTheSameMention() {
+    final Geocoder geocoder = tableGeocoder(Map.of(
+        "Georgia", new ScoredCountry("US", 0.6)));
+    final Document document = new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder)
+            .annotate(withLocations("the delegation left Georgia on Tuesday", "Georgia")));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("GE", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies that a missing geocoding stage fails loud instead of silently dropping every
+   * geocoded vote: the locations layer is declared in {@link
+   * DocumentRegionAnnotator#requires()}, so a document that never passed through the
+   * {@link GeocodeAnnotator} is rejected.
+   */
+  @Test
+  void testAbsentLocationsLayerIsRejected() {
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
+    final Document document = withLocations("flights from Sydney", "Sydney");
+
+    final IllegalArgumentException thrown =
+        assertThrows(IllegalArgumentException.class, () -> annotator.annotate(document));
+    assertTrue(thrown.getMessage().contains("locations"), thrown.getMessage());
+  }
+
+  /**
+   * Verifies that a missing entity stage fails loud for the same reason: the entity layer
+   * is declared required, so its absence is a pipeline error, not an evidence-free
+   * document.
+   */
+  @Test
+  void testAbsentEntityLayerIsRejected() {
+    final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
+    final Document document = Document.of("nothing to locate here")
+        .with(GeocodeAnnotator.LOCATIONS, List.of());
+
+    final IllegalArgumentException thrown =
+        assertThrows(IllegalArgumentException.class, () -> annotator.annotate(document));
+    assertTrue(thrown.getMessage().contains("entities"), thrown.getMessage());
+  }
+}
