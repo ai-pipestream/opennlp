@@ -38,18 +38,17 @@ import opennlp.tools.util.StringUtil;
  * and previous tags, one hidden layer with cube activation, and a tag output layer,
  * stored in a plain versioned binary format with no serialization framework involved.
  *
- * <p>The network is executed with ordinary array arithmetic, so tagging needs no native
- * runtime. Unknown words and suffixes fall back to learned unknown symbols; words are
- * matched case-insensitively, with capitalization carried by the shape features instead.
- * The weight arrays are mutated in place by {@link FeedforwardPOSTrainer} while training
- * runs and never afterwards, so a model handed back by the trainer or read by
- * {@link #load(InputStream)} can be shared between threads.</p>
+ * <p>This is the pure-Java neural tier for tagging: the network is executed with
+ * ordinary array arithmetic, so tagging needs no native runtime. Unknown words and
+ * suffixes fall back to learned unknown symbols; words are matched case-insensitively,
+ * with capitalization carried by the shape features instead. Instances are immutable
+ * and safe to share between threads.</p>
  *
  * <p>A model trained with pretrained word vectors additionally carries a frozen vector
  * block: the vectors of the words seen in training are stored inside the model, so
  * inference needs no embedding component, and a word without a stored vector scores as
- * zeros. Such a model is written under its own format marker, so a model without the
- * block stays readable by readers that predate the block.</p>
+ * zeros. Such a model is written as {@code ONLP-FFPT-2}; one without the block is
+ * written as {@code ONLP-FFPT-1}, and both layouts stay readable.</p>
  *
  * @see FeedforwardPOSTagger
  * @see FeedforwardPOSTrainer
@@ -57,7 +56,6 @@ import opennlp.tools.util.StringUtil;
  */
 public class FeedforwardPOSModel {
 
-  /** The format of models carrying only the learned embeddings. */
   private static final String MAGIC = "ONLP-FFPT-1";
 
   /** The format of models carrying the optional pretrained word-vector block. */
@@ -66,10 +64,7 @@ public class FeedforwardPOSModel {
   /** The row marker of a word without a stored pretrained vector; scores as zeros. */
   static final int NO_VECTOR = -1;
 
-  /** The symbol every vocabulary maps a value outside it to. */
   static final String UNKNOWN = "*UNK*";
-
-  /** The symbol every vocabulary maps a position outside the sentence to. */
   static final String ABSENT = "*NULL*";
 
   /** The lazy scoring cache; {@code null} until {@link #enableScoringCache()}. */
@@ -157,8 +152,7 @@ public class FeedforwardPOSModel {
    *                 {@link #featureIds(String[])}. Must not be {@code null}.
    * @return One unnormalized score per tag, indexed like {@link #tags()}. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code features} is {@code null} or this
-   *         model carries pretrained vectors.
+   * @throws IllegalArgumentException Thrown if this model carries pretrained vectors.
    */
   public double[] score(int[] features) {
     return score(features, null);
@@ -176,23 +170,14 @@ public class FeedforwardPOSModel {
    *                       without the block.
    * @return One unnormalized score per tag, indexed like {@link #tags()}. Never
    *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code features} is {@code null}, if
-   *         this model carries pretrained vectors and {@code pretrainedRows} is
-   *         {@code null} or the other way round, or if {@code pretrainedRows} does not
-   *         hold {@link FeedforwardPOSContext#PRETRAINED_SLOTS} rows.
+   * @throws IllegalArgumentException Thrown if this model carries pretrained vectors
+   *         and {@code pretrainedRows} is {@code null}, or the other way round.
    */
   public double[] score(int[] features, int[] pretrainedRows) {
-    if (features == null) {
-      throw new IllegalArgumentException("features must not be null");
-    }
     if ((pretrainedSize > 0) != (pretrainedRows != null)) {
       throw new IllegalArgumentException(pretrainedSize > 0
           ? "this model was trained with word vectors and needs their rows to score"
           : "this model was trained without word vectors and cannot score vector rows");
-    }
-    if (pretrainedSize > 0 && pretrainedRows.length != FeedforwardPOSContext.PRETRAINED_SLOTS) {
-      throw new IllegalArgumentException("the vector window has "
-          + FeedforwardPOSContext.PRETRAINED_SLOTS + " slots, got: " + pretrainedRows.length);
     }
     final int hidden = hiddenBias.length;
     final double[] h = new double[hidden];
@@ -221,6 +206,11 @@ public class FeedforwardPOSModel {
       }
     }
     if (pretrainedSize > 0) {
+      if (pretrainedRows.length != FeedforwardPOSContext.PRETRAINED_SLOTS) {
+        throw new IllegalArgumentException("the vector window has "
+            + FeedforwardPOSContext.PRETRAINED_SLOTS + " slots, got: "
+            + pretrainedRows.length);
+      }
       final int base = FeedforwardPOSContext.SLOTS * embeddingSize;
       for (int p = 0; p < pretrainedRows.length; p++) {
         final int row = pretrainedRows[p];
@@ -256,14 +246,18 @@ public class FeedforwardPOSModel {
 
   /**
    * Turns on the scoring cache: the hidden-layer contribution of a (template slot,
-   * embedding row) pair is fixed once the weights are, so it is computed on first sight
-   * and afterwards added instead of being re-derived from the embedding on every token.
-   * This is the adaptive form of the precomputation described for this architecture in
-   * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>.
+   * embedding row) pair is a fixed vector for a frozen model, so it is computed once
+   * on first sight and afterwards added instead of being re-derived from the
+   * embedding on every token. Suffix, shape, and tag rows, whose inventories are
+   * small, are fully cached almost immediately; word rows follow their frequency,
+   * which is the adaptive form of the precomputation described for this architecture
+   * by Chen and Manning (2014).
    *
-   * <p>Only call this on a model whose weights no longer change. Cached contributions
-   * are rounded to floats once, so scores may differ from the uncached path in the last
-   * bits.</p>
+   * <p>Cached contributions are rounded to floats once, so scores may differ from the
+   * uncached path in the last bits; tag decisions are unaffected at any realistic
+   * margin. The cache is bounded, safe for concurrent readers, and only valid on a
+   * model whose weights no longer change: the trainer works on models it never
+   * exposes until frozen.</p>
    */
   void enableScoringCache() {
     if (cache == null) {
@@ -280,7 +274,9 @@ public class FeedforwardPOSModel {
    */
   private static final class ContributionCache {
 
-    /** The most (slot, row) pairs the cache will hold. */
+    /** The most (slot, row) pairs the cache will hold; typical models stay far below
+     * the cap because the non-word inventories are small and word usage is
+     * Zipf-shaped. */
     private static final int MAX_PAIRS = 65536;
 
     private final AtomicReferenceArray<float[]>[] bySlot;
@@ -337,21 +333,10 @@ public class FeedforwardPOSModel {
   /**
    * Maps the symbolic features of the tagger template onto embedding rows.
    *
-   * @param symbols The symbolic features, as produced by
-   *                {@link FeedforwardPOSContext#extract(String[], int, String, String)}.
-   *                Must not be {@code null}.
+   * @param symbols The symbolic features. Must not be {@code null}.
    * @return The embedding row per feature. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code symbols} is {@code null} or does
-   *         not hold {@link FeedforwardPOSContext#SLOTS} symbols.
    */
   public int[] featureIds(String[] symbols) {
-    if (symbols == null) {
-      throw new IllegalArgumentException("symbols must not be null");
-    }
-    if (symbols.length != FeedforwardPOSContext.SLOTS) {
-      throw new IllegalArgumentException("the feature template has "
-          + FeedforwardPOSContext.SLOTS + " slots, got: " + symbols.length);
-    }
     final int[] ids = new int[symbols.length];
     int slot = 0;
     for (int i = 0; i < FeedforwardPOSContext.WORD_SLOTS; i++, slot++) {
@@ -386,26 +371,22 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * Maps the vector window of a position onto stored vector rows, spanning the same
-   * words as the word window and normalizing each like the word vocabulary. A position
-   * outside the sentence and a word without a stored vector map to {@link #NO_VECTOR},
-   * which scores as zeros.
+   * Maps the vector window of a position onto stored vector rows: two words left, the
+   * word itself, and two words right, each normalized like the word vocabulary. A
+   * position outside the sentence and a word without a stored vector map to
+   * {@link #NO_VECTOR}, which scores as zeros.
    *
    * @param sentence The sentence tokens. Must not be {@code null}.
    * @param index The position to tag.
    * @return One row per window slot, or {@code null} on a model without the block.
-   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
    */
   public int[] pretrainedRows(String[] sentence, int index) {
-    if (sentence == null) {
-      throw new IllegalArgumentException("sentence must not be null");
-    }
     if (pretrainedSize == 0) {
       return null;
     }
     final int[] rows = new int[FeedforwardPOSContext.PRETRAINED_SLOTS];
     for (int p = 0; p < rows.length; p++) {
-      final int position = index + p - FeedforwardPOSContext.WINDOW_RADIUS;
+      final int position = index + p - 2;
       if (position < 0 || position >= sentence.length) {
         rows[p] = NO_VECTOR;
       } else {
@@ -452,7 +433,6 @@ public class FeedforwardPOSModel {
    *
    * @param out The stream to write to. Must not be {@code null}. Not closed.
    * @throws IOException Thrown if writing fails.
-   * @throws IllegalArgumentException Thrown if {@code out} is {@code null}.
    */
   public void serialize(OutputStream out) throws IOException {
     if (out == null) {
@@ -488,7 +468,6 @@ public class FeedforwardPOSModel {
    * @param in The stream to read from. Must not be {@code null}. Not closed.
    * @return The loaded model. Never {@code null}.
    * @throws IOException Thrown if reading fails or the content is not this format.
-   * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    */
   public static FeedforwardPOSModel load(InputStream in) throws IOException {
     if (in == null) {
@@ -530,7 +509,6 @@ public class FeedforwardPOSModel {
    * @param path The file to read. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
    * @throws IOException Thrown if reading fails or the content is not this format.
-   * @throws IllegalArgumentException Thrown if {@code path} is {@code null}.
    */
   public static FeedforwardPOSModel load(Path path) throws IOException {
     if (path == null) {
@@ -607,7 +585,7 @@ public class FeedforwardPOSModel {
   private static Map<String, Integer> readVocabulary(DataInputStream data)
       throws IOException {
     final int size = data.readInt();
-    final Map<String, Integer> ids = LinkedHashMap.newLinkedHashMap(size);
+    final Map<String, Integer> ids = new LinkedHashMap<>(size * 2);
     for (int i = 0; i < size; i++) {
       final String key = data.readUTF();
       ids.put(key, data.readInt());

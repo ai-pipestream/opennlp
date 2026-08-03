@@ -28,11 +28,8 @@ import opennlp.tools.util.StringUtil;
  */
 final class FeedforwardPOSContext {
 
-  /** How many words to either side of the position the window reaches. */
-  static final int WINDOW_RADIUS = 2;
-
-  /** Word window positions: {@link #WINDOW_RADIUS} left, the word itself, as many right. */
-  static final int WORD_SLOTS = 2 * WINDOW_RADIUS + 1;
+  /** Word window positions: two left, the word itself, two right. */
+  static final int WORD_SLOTS = 5;
 
   /** Suffix slots: the last two and last three characters of the word. */
   static final int SUFFIX_SLOTS = 2;
@@ -47,39 +44,33 @@ final class FeedforwardPOSContext {
   static final int SLOTS = WORD_SLOTS + SUFFIX_SLOTS + SHAPE_SLOTS + TAG_SLOTS;
 
   /**
-   * Pretrained-vector window positions, spanning the same window as the word slots.
-   * Only models trained with word vectors carry this block; it follows the learned
-   * slots in the input layer.
+   * Pretrained-vector window positions: two left, the word itself, two right, matching
+   * the word window. Only models trained with word vectors carry this block; it follows
+   * the learned slots in the input layer.
    */
-  static final int PRETRAINED_SLOTS = WORD_SLOTS;
-
-  /** The length of the shorter of the two suffix features. */
-  static final int SHORT_SUFFIX_LENGTH = 2;
-
-  /** The length of the longer of the two suffix features. */
-  static final int LONG_SUFFIX_LENGTH = 3;
-
-  /** The shape of a word written entirely in lowercase letters. */
-  static final String SHAPE_LOWER = "*lower*";
-
-  /** The shape of a word whose first character is an uppercase letter. */
-  static final String SHAPE_CAP = "*cap*";
-
-  /** The shape of a word whose letters are all uppercase. */
-  static final String SHAPE_ALLCAPS = "*allcaps*";
-
-  /** The shape of a word holding digits but no letter. */
-  static final String SHAPE_DIGIT = "*digit*";
+  static final int PRETRAINED_SLOTS = 5;
 
   /** The shape of a word holding both letters and digits. */
-  static final String SHAPE_ALNUM = "*alnum*";
+  static final String SHAPE_ALPHANUMERIC = "*alnum*";
+
+  /** The shape of a word holding digits and no letter. */
+  static final String SHAPE_DIGIT = "*digit*";
 
   /** The shape of a word holding neither a letter nor a digit. */
   static final String SHAPE_OTHER = "*other*";
 
-  /** Every shape {@link #shape(String)} can return, in a fixed order. */
-  static final List<String> SHAPES = List.of(SHAPE_LOWER, SHAPE_CAP, SHAPE_ALLCAPS,
-      SHAPE_DIGIT, SHAPE_ALNUM, SHAPE_OTHER);
+  /** The shape of an all-uppercase word. */
+  static final String SHAPE_ALL_CAPS = "*allcaps*";
+
+  /** The shape of a word whose first character is uppercase. */
+  static final String SHAPE_CAPITALIZED = "*cap*";
+
+  /** The shape of every other word. */
+  static final String SHAPE_LOWER = "*lower*";
+
+  /** Every symbol {@link #shape(String)} can return, in embedding-row order. */
+  static final List<String> SHAPES = List.of(SHAPE_LOWER, SHAPE_CAPITALIZED,
+      SHAPE_ALL_CAPS, SHAPE_DIGIT, SHAPE_ALPHANUMERIC, SHAPE_OTHER);
 
   private FeedforwardPOSContext() {
     // This class only describes the feature template and is never instantiated.
@@ -100,14 +91,14 @@ final class FeedforwardPOSContext {
       String beforePreviousTag) {
     final String[] symbols = new String[SLOTS];
     int slot = 0;
-    for (int offset = -WINDOW_RADIUS; offset <= WINDOW_RADIUS; offset++) {
+    for (int offset = -2; offset <= 2; offset++) {
       final int position = index + offset;
       symbols[slot++] =
           position >= 0 && position < sentence.length ? sentence[position] : null;
     }
     final String word = StringUtil.toLowerCase(sentence[index]);
-    symbols[slot++] = suffix(word, SHORT_SUFFIX_LENGTH);
-    symbols[slot++] = suffix(word, LONG_SUFFIX_LENGTH);
+    symbols[slot++] = suffix(word, 2);
+    symbols[slot++] = suffix(word, 3);
     symbols[slot++] = index > 0 ? shape(sentence[index - 1]) : null;
     symbols[slot++] = shape(sentence[index]);
     symbols[slot++] = index + 1 < sentence.length ? shape(sentence[index + 1]) : null;
@@ -131,7 +122,7 @@ final class FeedforwardPOSContext {
    * Classifies a word's surface shape.
    *
    * @param word The word.
-   * @return One of {@link #SHAPES}. Never {@code null}.
+   * @return One of the fixed shape symbols. Never {@code null}.
    */
   static String shape(String word) {
     boolean letter = false;
@@ -152,7 +143,7 @@ final class FeedforwardPOSContext {
       }
     }
     if (letter && digit) {
-      return SHAPE_ALNUM;
+      return SHAPE_ALPHANUMERIC;
     }
     if (digit) {
       return SHAPE_DIGIT;
@@ -161,10 +152,10 @@ final class FeedforwardPOSContext {
       return SHAPE_OTHER;
     }
     if (upper && !lower) {
-      return SHAPE_ALLCAPS;
+      return SHAPE_ALL_CAPS;
     }
     if (Character.isUpperCase(word.charAt(0))) {
-      return SHAPE_CAP;
+      return SHAPE_CAPITALIZED;
     }
     return SHAPE_LOWER;
   }
