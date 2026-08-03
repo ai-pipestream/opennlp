@@ -41,19 +41,25 @@ import opennlp.tools.util.StringUtil;
  * {@code word\tpostag\tlemma}, and a single row per {@code (word, postag)} key with alternative
  * lemmas joined by {@code #}. This reader performs that adaptation: it re-orders the columns and
  * merges every lemma seen for the same form and tag into one entry, preserving first-seen order.
- * The bundled dictionary data itself is never shipped; callers supply it.</p>
+ * Dictionary data is supplied by the caller; none is bundled with OpenNLP.</p>
  *
  * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
  * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
  * unreachable. Tags are kept verbatim and must match the tags the caller's tagger emits.</p>
+ *
+ * <p>This class is stateless, so its methods may be called concurrently.</p>
  */
 public final class PoliMorfDictionaryReader {
 
+  /** Separates the columns of both the source table and the text {@link DictionaryLemmatizer} reads. */
   private static final String FIELD_SEPARATOR = "\t";
+
+  /** Separates alternative lemmas of one word and postag. */
   private static final String LEMMA_SEPARATOR = "#";
+
+  /** The number of columns a non-blank row must carry. */
   private static final int MIN_FIELDS = 3;
 
-  /** Not instantiable. */
   private PoliMorfDictionaryReader() {
   }
 
@@ -63,7 +69,7 @@ public final class PoliMorfDictionaryReader {
    * @param dictionary The dictionary referenced by an open {@link InputStream}. Must not be
    *                   {@code null}.
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
-   * @throws IllegalArgumentException Thrown if {@code dictionary} is {@code null}.
+   * @throws IllegalArgumentException if {@code dictionary} is {@code null}.
    * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
    *                     fewer than three tab-separated fields.
    */
@@ -78,8 +84,7 @@ public final class PoliMorfDictionaryReader {
    *                   {@code null}.
    * @param charset    The character encoding of the dictionary. Must not be {@code null}.
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
-   * @throws IllegalArgumentException Thrown if {@code dictionary} or {@code charset} is
-   *                                  {@code null}.
+   * @throws IllegalArgumentException if {@code dictionary} or {@code charset} is {@code null}.
    * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
    *                     fewer than three tab-separated fields.
    */
@@ -92,14 +97,15 @@ public final class PoliMorfDictionaryReader {
       throw new IllegalArgumentException("charset must not be null");
     }
 
-    // key "form\ttag" -> alternative lemmas, both maps ordered so the output is deterministic.
+    // Maps "form<TAB>tag" to its alternative lemmas. Map and set both keep insertion order, so
+    // the adapted dictionary comes out the same for the same input.
     final Map<String, LinkedHashSet<String>> entries = new LinkedHashMap<>();
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(dictionary, charset))) {
       String line;
       int lineNumber = 0;
       while ((line = reader.readLine()) != null) {
         lineNumber++;
-        if (StringUtil.isBlank(line)) {
+        if (isBlank(line)) {
           continue;
         }
         final String[] fields = line.split(FIELD_SEPARATOR, -1);
@@ -125,5 +131,25 @@ public final class PoliMorfDictionaryReader {
 
     final byte[] bytes = adapted.toString().getBytes(StandardCharsets.UTF_8);
     return new DictionaryLemmatizer(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
+  }
+
+  /**
+   * Determines whether a line carries no content: empty, or made up entirely of code
+   * points the toolkit treats as whitespace. This follows {@link StringUtil#isWhitespace(int)}
+   * rather than {@link String#isBlank()}, which leaves out the no-break spaces, so a line
+   * spelled entirely from them is skipped rather than parsed as an entry.
+   *
+   * @param line The line to examine. Must not be {@code null}.
+   * @return {@code true} if {@code line} is empty or all whitespace.
+   */
+  private static boolean isBlank(CharSequence line) {
+    for (int i = 0; i < line.length(); ) {
+      final int codePoint = Character.codePointAt(line, i);
+      if (!StringUtil.isWhitespace(codePoint)) {
+        return false;
+      }
+      i += Character.charCount(codePoint);
+    }
+    return true;
   }
 }

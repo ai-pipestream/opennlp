@@ -27,16 +27,20 @@ import java.util.Arrays;
  */
 final class GrowableByteSequence {
 
-  private byte[] data = new byte[64];
+  private static final int INITIAL_CAPACITY = 64;
+
+  private byte[] data = new byte[INITIAL_CAPACITY];
   private int length;
 
-  /** {@return the number of bytes currently on the stack} */
+  /**
+   * @return The number of bytes currently on the stack.
+   */
   int length() {
     return length;
   }
 
   /**
-   * Appends one byte, growing the buffer when it is full.
+   * Appends {@code value}, doubling the backing array if it is full.
    *
    * @param value The byte to append.
    */
@@ -47,12 +51,16 @@ final class GrowableByteSequence {
     data[length++] = value;
   }
 
-  /** Drops the last byte. The caller must not pop more bytes than it pushed. */
+  /**
+   * Drops the last byte. Every call must be matched by an earlier {@link #push(byte)}.
+   */
   void pop() {
     length--;
   }
 
-  /** {@return a copy of the bytes currently on the stack} */
+  /**
+   * @return A copy of the bytes currently on the stack, owned by the caller.
+   */
   byte[] toByteArray() {
     return Arrays.copyOf(data, length);
   }
