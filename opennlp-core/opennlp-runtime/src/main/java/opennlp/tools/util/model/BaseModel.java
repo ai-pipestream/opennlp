@@ -462,8 +462,11 @@ public abstract class BaseModel implements ArtifactProvider, Serializable {
 
       // Version check is only performed if current version is not the dev/debug version
       if (!Version.currentVersion().equals(Version.DEV_VERSION)) {
-        // Support OpenNLP 1.x models.
-        if (!Version.between(version.getMajor(), 1, 3)) {
+        // Support OpenNLP 1.x models. Major 0 is additionally accepted because the
+        // ai.pipestream preview line versions itself 0.x (e.g. 0.1.0-alpha2): a model
+        // trained by this runtime is stamped with that 0.x version and must load back.
+        // Apache OpenNLP never released a 0.x, so no foreign model is let in by this.
+        if (!Version.between(version.getMajor(), 0, 3)) {
           throw new InvalidFormatException("Model version " + version + " is not supported by this ("
               + Version.currentVersion() + ") version of OpenNLP!");
         }
