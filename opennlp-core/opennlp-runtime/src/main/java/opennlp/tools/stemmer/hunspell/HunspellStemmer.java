@@ -42,12 +42,16 @@ import opennlp.tools.util.StringUtil;
  * parts ({@code ONLYINCOMPOUND}), or forbidden words ({@code FORBIDDENWORD}) never
  * count as standalone analyses, matching how hunspell reads those flags.</p>
  *
- * <p>The {@link Stemmer} interface leaves thread safety to the implementation. This
+ * <p>Compound part search is capped at {@value #PART_CHECK_BUDGET} part-licensing
+ * attempts per input word; beyond that budget further compound analyses are skipped.
+ * The {@link Stemmer} interface leaves thread safety to the implementation. This
  * implementation reads only the immutable dictionary state, so a single instance is
  * safe to share between threads.</p>
+ *
+ * @since 3.0.0
  */
 @ThreadSafe
-public class HunspellStemmer implements Stemmer {
+public final class HunspellStemmer implements Stemmer {
 
   /**
    * The most part-licensing attempts one decomposition search may spend. Compounding
@@ -144,13 +148,14 @@ public class HunspellStemmer implements Stemmer {
     if (own != null && dictionary.validStandalone(own)) {
       analyses.add(word);
     }
-    for (final Affix suffix : dictionary.suffixesEndingWith(word.charAt(word.length() - 1))) {
+    for (final Affix suffix : dictionary.suffixesEndingWith(
+        word.codePointBefore(word.length()))) {
       undoSuffix(word, suffix, analyses);
     }
     for (final Affix suffix : dictionary.suffixesWithoutMaterial()) {
       undoSuffix(word, suffix, analyses);
     }
-    for (final Affix prefix : dictionary.prefixesStartingWith(word.charAt(0))) {
+    for (final Affix prefix : dictionary.prefixesStartingWith(word.codePointAt(0))) {
       undoPrefix(word, prefix, analyses);
     }
     for (final Affix prefix : dictionary.prefixesWithoutMaterial()) {
@@ -346,13 +351,14 @@ public class HunspellStemmer implements Stemmer {
     if (own != null && dictionary.mayStand(own, position)) {
       stems.add(part);
     }
-    for (final Affix suffix : dictionary.suffixesEndingWith(part.charAt(part.length() - 1))) {
+    for (final Affix suffix : dictionary.suffixesEndingWith(
+        part.codePointBefore(part.length()))) {
       collectAffixedPartStem(part, suffix, true, position, last, stems);
     }
     for (final Affix suffix : dictionary.suffixesWithoutMaterial()) {
       collectAffixedPartStem(part, suffix, true, position, last, stems);
     }
-    for (final Affix prefix : dictionary.prefixesStartingWith(part.charAt(0))) {
+    for (final Affix prefix : dictionary.prefixesStartingWith(part.codePointAt(0))) {
       collectAffixedPartStem(part, prefix, false, position, first, stems);
     }
     for (final Affix prefix : dictionary.prefixesWithoutMaterial()) {
@@ -435,7 +441,8 @@ public class HunspellStemmer implements Stemmer {
         analyses.add(stem);
       }
     }
-    for (final Affix inner : dictionary.suffixesEndingWith(stem.charAt(stem.length() - 1))) {
+    for (final Affix inner : dictionary.suffixesEndingWith(
+        stem.codePointBefore(stem.length()))) {
       undoInnerSuffix(stem, suffix, inner, analyses);
     }
     for (final Affix inner : dictionary.suffixesWithoutMaterial()) {
@@ -497,7 +504,8 @@ public class HunspellStemmer implements Stemmer {
     if (!prefix.crossProduct()) {
       return;
     }
-    for (final Affix suffix : dictionary.suffixesEndingWith(stem.charAt(stem.length() - 1))) {
+    for (final Affix suffix : dictionary.suffixesEndingWith(
+        stem.codePointBefore(stem.length()))) {
       undoCrossProductSuffix(stem, prefix, suffix, analyses);
     }
     for (final Affix suffix : dictionary.suffixesWithoutMaterial()) {

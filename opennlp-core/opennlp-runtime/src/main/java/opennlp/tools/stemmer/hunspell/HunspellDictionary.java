@@ -56,17 +56,26 @@ import opennlp.tools.util.StringUtil;
  * {@code ONLYINCOMPOUND}, and {@code FORBIDDENWORD}, which suppress analyses the
  * dictionary marks as virtual stems, compound-only parts, or forbidden words; and
  * {@code CIRCUMFIX}, which binds marked prefix and suffix halves to one another.
- * Conversion tables and the remaining compound machinery are not interpreted in this
- * version; rules using them simply do not fire, so unsupported analyses are missed
- * rather than invented.</p>
+ * Directives that would change stems when ignored ({@code ICONV}, {@code OCONV},
+ * {@code COMPLEXPREFIXES}) are rejected at load time. Cosmetic tables such as
+ * {@code REP}, {@code MAP}, and {@code KEY} are skipped, so analyses that would need
+ * them are missed rather than invented.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
  * @see HunspellStemmer
  * @see HunspellStemmerFactory
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class HunspellDictionary {
+
+  /**
+   * Inclusive upper bound on bytes buffered from one affix or dictionary stream
+   * during {@link #load(InputStream, InputStream)}. Larger streams fail with
+   * {@link IOException}.
+   */
+  static final int MAX_STREAM_BYTES = 64 * 1024 * 1024;
 
   /**
    * One parsed affix rule of a {@code PFX} or {@code SFX} block.
@@ -120,9 +129,9 @@ public final class HunspellDictionary {
   private static final String NO_MATERIAL = "0";
 
   private final Map<String, List<int[]>> entries;
-  private final Map<Character, List<Affix>> suffixesByLast;
+  private final Map<Integer, List<Affix>> suffixesByLast;
   private final List<Affix> suffixesWithoutMaterial;
-  private final Map<Character, List<Affix>> prefixesByFirst;
+  private final Map<Integer, List<Affix>> prefixesByFirst;
   private final List<Affix> prefixesWithoutMaterial;
   private final int compoundFlag;
   private final int compoundBegin;
@@ -173,25 +182,26 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Buckets affix rules by the boundary character of their affix material, the last
-   * character for a suffix rule and the first for a prefix rule.
+   * Buckets affix rules by the boundary code point of their affix material, the last
+   * code point for a suffix rule and the first for a prefix rule.
    *
    * @param rules The rules of one kind, in file order.
    * @param suffix Whether the rules are suffix rules.
    * @param withoutMaterial Collects the rules with empty affix material, which no
-   *                        boundary character keys.
-   * @return The rules keyed by their boundary character. Never {@code null}.
+   *                        boundary code point keys.
+   * @return The rules keyed by their boundary code point. Never {@code null}.
    */
-  private static Map<Character, List<Affix>> bucketByBoundary(List<Affix> rules,
+  private static Map<Integer, List<Affix>> bucketByBoundary(List<Affix> rules,
       boolean suffix, List<Affix> withoutMaterial) {
-    final Map<Character, List<Affix>> byBoundary = new HashMap<>();
+    final Map<Integer, List<Affix>> byBoundary = new HashMap<>();
     for (final Affix rule : rules) {
       final String material = rule.affix();
       if (material.isEmpty()) {
         withoutMaterial.add(rule);
       } else {
-        final char boundary =
-            suffix ? material.charAt(material.length() - 1) : material.charAt(0);
+        final int boundary = suffix
+            ? material.codePointBefore(material.length())
+            : material.codePointAt(0);
         byBoundary.computeIfAbsent(boundary, key -> new ArrayList<>()).add(rule);
       }
     }
@@ -222,14 +232,16 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Loads a dictionary from its two streams.
+   * Loads a dictionary from its two streams. Each stream is buffered up to
+   * {@link #MAX_STREAM_BYTES} bytes; a larger stream fails with {@link IOException}.
    *
    * @param affixStream The {@code .aff} affix content. Must not be {@code null}. Not
    *                    closed.
    * @param dictionaryStream The {@code .dic} word list content. Must not be
    *                         {@code null}. Not closed.
    * @return The loaded dictionary. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is malformed.
+   * @throws IOException Thrown if reading fails, a stream exceeds
+   *     {@link #MAX_STREAM_BYTES}, or the content is malformed.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
   public static HunspellDictionary load(InputStream affixStream,
@@ -240,13 +252,43 @@ public final class HunspellDictionary {
     if (dictionaryStream == null) {
       throw new IllegalArgumentException("dictionaryStream must not be null");
     }
-    final byte[] affixBytes = affixStream.readAllBytes();
+    final byte[] affixBytes = readBounded(affixStream, MAX_STREAM_BYTES, "affix stream");
     final Charset charset = declaredCharset(affixBytes);
     final AffixFile affix = parseAffix(new String(affixBytes, charset));
     final Map<String, List<int[]>> entries = parseWordList(
-        new String(dictionaryStream.readAllBytes(), charset), affix.flagMode,
-        affix.flagAliases);
+        new String(readBounded(dictionaryStream, MAX_STREAM_BYTES, "dictionary stream"),
+            charset),
+        affix.flagMode, affix.flagAliases);
     return new HunspellDictionary(entries, affix);
+  }
+
+  /**
+   * Reads an input stream into a byte array, failing when more than {@code maxBytes}
+   * arrive.
+   *
+   * @param in The stream to read. Not closed.
+   * @param maxBytes The inclusive upper bound on buffered bytes.
+   * @param label The stream name used in the error message.
+   * @return The buffered bytes. Never {@code null}.
+   * @throws IOException Thrown if reading fails or the stream exceeds {@code maxBytes}.
+   */
+  static byte[] readBounded(InputStream in, int maxBytes, String label)
+      throws IOException {
+    final byte[] chunk = new byte[8192];
+    byte[] buffer = new byte[Math.min(8192, maxBytes)];
+    int size = 0;
+    int n;
+    while ((n = in.read(chunk)) >= 0) {
+      if (size + n > maxBytes) {
+        throw new IOException(label + " size exceeds safe limit of " + maxBytes);
+      }
+      if (size + n > buffer.length) {
+        buffer = Arrays.copyOf(buffer, Math.min(maxBytes, Math.max(buffer.length * 2, size + n)));
+      }
+      System.arraycopy(chunk, 0, buffer, size, n);
+      size += n;
+    }
+    return size == buffer.length ? buffer : Arrays.copyOf(buffer, size);
   }
 
   /**
@@ -256,17 +298,25 @@ public final class HunspellDictionary {
    * @return The flag sets of all matching entries, or {@code null} when absent.
    */
   List<int[]> lookup(String word) {
-    return entries.get(word);
+    final List<int[]> found = entries.get(word);
+    if (found == null) {
+      return null;
+    }
+    final List<int[]> copy = new ArrayList<>(found.size());
+    for (final int[] flags : found) {
+      copy.add(flags.clone());
+    }
+    return copy;
   }
 
   /**
-   * The suffix rules whose affix material ends in the given character, which are the
+   * The suffix rules whose affix material ends in the given code point, which are the
    * only material-bearing rules that can be undone from a word ending in it.
    *
-   * @param last The word's last character.
+   * @param last The word's last code point.
    * @return The bucket, possibly empty. Never {@code null}.
    */
-  List<Affix> suffixesEndingWith(char last) {
+  List<Affix> suffixesEndingWith(int last) {
     return suffixesByLast.getOrDefault(last, NO_AFFIXES);
   }
 
@@ -276,13 +326,13 @@ public final class HunspellDictionary {
   }
 
   /**
-   * The prefix rules whose affix material starts with the given character, which are
+   * The prefix rules whose affix material starts with the given code point, which are
    * the only material-bearing rules that can be undone from a word starting with it.
    *
-   * @param first The word's first character.
+   * @param first The word's first code point.
    * @return The bucket, possibly empty. Never {@code null}.
    */
-  List<Affix> prefixesStartingWith(char first) {
+  List<Affix> prefixesStartingWith(int first) {
     return prefixesByFirst.getOrDefault(first, NO_AFFIXES);
   }
 
@@ -633,13 +683,13 @@ public final class HunspellDictionary {
   /**
    * Parses the affix file: the {@code FLAG} declaration, the {@code AF} flag alias
    * table, the compound and blocking flag declarations, and the {@code PFX} and
-   * {@code SFX} blocks. Directives outside the supported set (conversion tables,
-   * suggestion options, the remaining compound machinery, ...) are skipped, so their
-   * rules never fire and unsupported analyses are missed rather than invented.
+   * {@code SFX} blocks. Result-altering unsupported directives fail loud;
+   * cosmetic ones are skipped.
    *
    * @param content The decoded affix file content.
    * @return The parsed rules and flag mode. Never {@code null}.
-   * @throws IOException Thrown if a supported directive is malformed.
+   * @throws IOException Thrown if a supported directive is malformed, or if
+   *     {@code ICONV}, {@code OCONV}, or {@code COMPLEXPREFIXES} appears.
    */
   private static AffixFile parseAffix(String content) throws IOException {
     final AffixFile result = new AffixFile();
@@ -733,6 +783,11 @@ public final class HunspellDictionary {
         case SUFFIX_TAG:
           i = parseAffixBlock(lines, i, fields, result);
           break;
+        case "ICONV":
+        case "OCONV":
+        case "COMPLEXPREFIXES":
+          throw new IOException("unsupported affix directive '" + fields[0]
+              + "' at line " + (i + 1));
         default:
           i++;
           break;
