@@ -1,0 +1,215 @@
+h2. Summary
+
+Make OpenNLP DL text preprocessing Unicode-aware for two character classes: whitespace and dashes. Drive both off explicit, standards-sourced code point sets that the user can extend from an input file, do all the work with cursor based scanning instead of regex, and add a real set of helpers (split, normalize, squish, trim, normalize-dashes) instead of scattering {{\\s+}} regexes around the code.
+
+h2. Why
+
+Java's default {{\\s}} only matches 6 ASCII characters: space, tab, LF, VT, FF, CR. Real input has a lot more, especially anything pasted from the web, PDFs, Office docs, or non-English sources. NBSP and friends look like spaces to a human but are invisible to {{\\s+}}, so we get wrong token boundaries, failed span lookups, and inconsistent model inputs depending on where the text came from.
+
+Same story with dashes. There are many dash code points (en dash, em dash, figure dash, non-breaking hyphen, fullwidth hyphen, minus sign, and more) and we only ever recognize the ASCII hyphen. Normalizing them to a single ASCII hyphen, and optionally treating any dash as a token delimiter, would let users tokenize ideas more consistently no matter where the text came from.
+
+We also do this whitespace work in more than one place, each slightly differently, so a fix in one spot does not help the others. Current offenders:
+* {{NameFinderDL}} line ~619: {{text.split("\\s+")}} for chunking
+* {{NameFinderDL}} line ~583: {{Pattern.quote(span).replace(" ", "\\E\\s*\\Q")}} for matching a reconstructed span back to the source
+* {{DocumentCategorizerDL}} line ~337: {{text.split("\\s+")}} for chunking
+
+The real goal is to pin down what "whitespace" and "dash" actually mean per published standards, make those choices explicit and configurable, and implement them in a way that is cheap on memory and predictable.
+
+h2. Hard requirements
+
+These are not negotiable for this work:
+
+* *Do not use Java's built-in character assumptions.* No {{Character.isWhitespace}}, no {{Character.isSpaceChar}}, no {{String.trim}}/{{String.strip}}, no {{\\s}}/{{\\p{Pd}}}/{{\\p{IsWhite_Space}}} as the source of truth. They disagree with each other and with the standards (details below).
+* *No regex.* All splitting, matching, and normalization is done with cursor based scanning over code points, single pass, one output buffer. Regex is error prone here and costs us {{Pattern}}/{{Matcher}} allocation, backtracking, and intermediate arrays we do not need.
+* *Standards-sourced, explicit lists.* Default sets come from the Unicode Character Database ({{PropList.txt}}: {{White_Space}} and {{Dash}} properties), checked in as explicit code point lists, cross-checked against POSIX / IEEE Std 1003.1, W3C, XML, and JSON. Users can extend or override via an input file.
+
+h2. Research: whitespace across standards
+
+There is no single definition and they do not agree. We anchor on the Unicode {{White_Space}} property and treat the rest as references.
+
+||Standard / source||What counts||Notes||
+|Unicode {{White_Space}} (UCD {{PropList.txt}}, UAX #44)|25 code points|Our anchor. Includes NBSP (U+00A0), narrow NBSP (U+202F), ideographic space (U+3000), NEL (U+0085), line/paragraph separators. Does NOT include zero-width space (U+200B) or U+180E.|
+|POSIX / IEEE Std 1003.1 {{[:space:]}}|tab, LF, VT, FF, CR, space (6)|The classic ASCII set in the C locale. Subset of Unicode.|
+|W3C HTML "ASCII whitespace"|TAB, LF, FF, CR, SPACE (5)|No VT.|
+|XML 1.0 {{S}} production|space, tab, CR, LF (4)|Narrow.|
+|JSON (RFC 8259)|space, tab, LF, CR (4)|Narrow.|
+
+Why we do NOT use Java's APIs as the definition:
+* {{Character.isWhitespace(int)}}: EXCLUDES the non-breaking spaces (U+00A0, U+2007, U+202F) and NEL (U+0085), but INCLUDES the FS/GS/RS/US controls (U+001C-U+001F). That is not the Unicode list and not any other standard.
+* {{Character.isSpaceChar(int)}}: only Zs/Zl/Zp separators, so it EXCLUDES tab, newline, CR, FF, VT. Opposite trade-off.
+* {{String.trim()}} strips code points <= U+0020 only. {{String.strip()}} inherits the {{isWhitespace}} quirks.
+* Regex {{\\s}} default is the 6 ASCII chars; {{\\s}} with {{UNICODE_CHARACTER_CLASS}} maps to the Unicode property but still drags in regex machinery we are avoiding.
+
+Default whitespace set (the 25, all in the BMP):
+* {{U+0009}} TAB, {{U+000A}} LF, {{U+000B}} VT, {{U+000C}} FF, {{U+000D}} CR
+* {{U+0020}} SPACE
+* {{U+0085}} NEXT LINE
+* {{U+00A0}} NO-BREAK SPACE
+* {{U+1680}} OGHAM SPACE MARK
+* {{U+2000}}-{{U+200A}} typographic spaces
+* {{U+2028}} LINE SEPARATOR, {{U+2029}} PARAGRAPH SEPARATOR
+* {{U+202F}} NARROW NO-BREAK SPACE
+* {{U+205F}} MEDIUM MATHEMATICAL SPACE
+* {{U+3000}} IDEOGRAPHIC SPACE
+
+Not whitespace, must not be removed or treated as space by default (zero-width / invisible format chars): {{U+200B}} ZWSP, {{U+200C}} ZWNJ, {{U+200D}} ZWJ, {{U+2060}} WORD JOINER, {{U+FEFF}} BOM.
+
+h2. Research: dashes across standards
+
+Anchor on the Unicode {{Dash}} property (UCD {{PropList.txt}}). Same lesson as whitespace: do not lean on a built-in.
+
+* Java has NO built-in {{Dash}} predicate. There is no {{Character.isDash}}, and {{\\p{IsDash}}} is not a supported Java regex property. The closest is the general category {{\\p{Pd}}} (Dash_Punctuation), which MISSES {{U+2212}} MINUS SIGN (category Sm) and the super/subscript minuses. So an explicit set is required regardless.
+
+Default dash set (normalize to {{U+002D}} HYPHEN-MINUS), representative members:
+* {{U+002D}} HYPHEN-MINUS (the target)
+* {{U+2010}} HYPHEN, {{U+2011}} NON-BREAKING HYPHEN
+* {{U+2012}} FIGURE DASH, {{U+2013}} EN DASH, {{U+2014}} EM DASH, {{U+2015}} HORIZONTAL BAR
+* {{U+2E3A}} TWO-EM DASH, {{U+2E3B}} THREE-EM DASH
+* {{U+FE58}} SMALL EM DASH, {{U+FE63}} SMALL HYPHEN-MINUS, {{U+FF0D}} FULLWIDTH HYPHEN-MINUS
+* script hyphens: {{U+058A}} ARMENIAN HYPHEN, {{U+05BE}} HEBREW MAQAF, {{U+1400}} CANADIAN SYLLABICS HYPHEN, {{U+1806}} MONGOLIAN TODO SOFT HYPHEN, {{U+301C}} WAVE DASH, {{U+3030}} WAVY DASH, {{U+30A0}} KATAKANA-HIRAGANA DOUBLE HYPHEN
+
+Special cases (handle deliberately, not by default):
+* {{U+00AD}} SOFT HYPHEN is a format char (Cf), an invisible line-break hint, NOT a visible dash. Do not convert it to {{-}}. Treat it like the zero-width format chars: leave it or strip it, do not normalize it to a hyphen.
+* {{U+2212}} MINUS SIGN is mathematical (Sm). Flattening it to ASCII {{-}} can change meaning in math/code, so dash normalization for {{U+2212}} (and {{U+207B}}/{{U+208B}} super/subscript minus) is opt-in.
+
+h2. What I want to build
+
+A shared foundation, then two profiles on top of it.
+
+*Shared foundation*
+* {{CodePointSet}}: an explicit code point set with O(1) membership, built from a standards-derived list and optionally extended from a user file.
+* {{CharClass}}: one generic cursor based engine (split, normalize, collapse, trim, remove) configured by a member set plus a canonical ASCII replacement. Whitespace and dashes ship as built-in presets, not separate hand-written classes, so a new character class later is just a new preset with no new engine code. Class-specific quirks (whitespace line-break preservation, dash soft-hyphen/math-minus exclusions) live in the preset config, not the engine.
+
+*Whitespace profile*
+* Split text on the whitespace set (replaces the {{split("\\s+")}} sites).
+* Cursor based source matching for {{NameFinderDL}} span lookup (replaces the {{\\E\\s*\\Q}} regex).
+* Normalize: collapse any run of whitespace to a single ASCII space.
+* Squish: collapse runs but keep structure. {{\n\n\n\n\t\t\n}} becomes a single {{\n}} when the run contains a line break, otherwise a single space.
+* Trim leading/trailing whitespace, and remove-all.
+
+*Dash profile*
+* Normalize all dashes in the set to {{U+002D}} (1:1 replacement).
+* Optional dash delimiter: treat any dash in the set as a token boundary for tokenization.
+
+h2. Implementation approach: cursors, no regex
+
+*Set representation.* Back the set with a bitmap over the BMP (U+0000-U+FFFF) for O(1) {{contains}}, plus a tiny overflow structure (sorted {{int[]}} + binary search) for any supplementary code points. Whitespace is entirely BMP; dashes are almost entirely BMP, so the overflow path is rarely touched.
+
+*Scanning.* Every operation is a single forward pass with an index cursor: read {{cp = Character.codePointAt(text, i)}}, test membership, act, advance {{i += Character.charCount(cp)}}. Examples:
+* split: walk the text, mark token start, on a whitespace code point close the current token (if non-empty), skip the run, continue. Return offset spans so callers keep character offsets.
+* normalize/squish: copy non-members straight through; per run of members emit one space (normalize) or one {{\n}}/space depending on whether the run held a line break (squish).
+* trim: cursor in from each end to the first/last non-member, then substring.
+* normalize-dashes: copy non-members, emit {{-}} for each in-set dash.
+* {{NameFinderDL}} match: a two-cursor matcher walking source and reconstructed span together, treating an in-set whitespace code point as flexible (zero or more), returning {{[start, end)}}. No {{Pattern}}, no {{quote}}, no {{\\E\\s*\\Q}}.
+
+*Why this is better here.* One O(n) pass, one output buffer, no Pattern/Matcher allocation, no backtracking, no intermediate arrays from {{String.split}}, and membership is a bitmap hit. It is also correct and configurable because it uses our set, not a JDK assumption.
+
+h2. User-defined input file
+
+Users extend or override either set from a simple file. Default with no file = the standards-derived sets above.
+
+* one code point per line, hex form, e.g. {{U+00A0}} or {{0x00A0}}
+* ranges allowed, e.g. {{U+2000-U+200A}}
+* {{#}} starts a comment
+* a section header selects which class the entries extend
+
+{code}
+[whitespace]
+U+00A0          # no-break space
+U+2028          # line separator
+
+[dash]
+U+2E5D          # oblique hyphen (example)
+U+2212          # opt in to flattening the math minus
+{code}
+
+h2. API sketch
+
+{code:java}
+// shared foundation: the member set
+public final class CodePointSet {
+  public static CodePointSet of(int... codePoints);
+  public static CodePointSet fromFile(File definitions, String section) throws IOException;
+  public CodePointSet union(CodePointSet other);
+  public boolean contains(int codePoint);   // O(1) BMP bitmap + small overflow
+}
+
+// shared foundation: one generic cursor engine, configured by (members, replacement)
+public final class CharClass {
+  public static CharClass of(CodePointSet members, int replacement);
+
+  // standards-sourced presets
+  public static CharClass whitespace();   // Unicode White_Space -> U+0020
+  public static CharClass dashes();       // Unicode Dash (curated) -> U+002D
+
+  public boolean contains(int codePoint);
+  public List<Span> splitSpans(CharSequence text);        // members as delimiters, offset-preserving
+  public String normalize(CharSequence text);             // each member -> replacement (1:1)
+  public String collapse(CharSequence text);              // runs of members -> one replacement
+  public String collapsePreserving(CharSequence text, CodePointSet keep, int keepReplacement); // squish
+  public String trim(CharSequence text);
+  public String removeAll(CharSequence text);
+}
+{code}
+
+So whitespace squish is {{CharClass.whitespace().collapsePreserving(text, lineBreaks, '\n')}} and dash flattening is {{CharClass.dashes().normalize(text)}}. A future class is one more {{CharClass.xxx()}} preset.
+
+For DL components, start opt-in so default behavior does not change under anyone:
+{code:java}
+InferenceOptions#setNormalizeWhitespace(boolean)
+InferenceOptions#setNormalizeDashes(boolean)
+{code}
+
+h2. The offsets gotcha
+
+{{NameFinderDL}} resolves spans back to character offsets in the original text, so any transform that changes length before span lookup moves offsets and breaks {{Span.getCoveredText}}.
+* Whitespace normalize/squish collapse runs, so they DO shift offsets. Keep them on model-input prep only, or maintain an original-to-normalized offset map.
+* Dash normalize is 1:1 for BMP dashes (one code point to one {{-}}), so it is length preserving and offset safe. Supplementary dashes (e.g. none common today) would not be 1:1, so guard that path.
+* First cut: limit run-collapsing normalization to input prep, resolve span offsets against the untouched original.
+
+h2. Acceptance criteria
+
+* Shared {{CodePointSet}} with O(1) membership and unit tests, no regex, no JDK whitespace/dash APIs in the hot path.
+* Whitespace default = Unicode {{White_Space}}; dash default = Unicode {{Dash}} (excluding soft hyphen and, by default, math minus). Lists checked in explicitly and traceable to the UCD.
+* Cursor based split, normalize, squish, trim, remove-all, and a cursor based source matcher for {{NameFinderDL}}.
+* Dash normalize-to-hyphen and optional dash delimiter splitting.
+* User file extends/overrides either set, with ranges, comments, and sections.
+* Zero-width / invisible format chars are not whitespace and not removed by default. Soft hyphen is not normalized to a visible hyphen by default.
+* Normalization opt-in is documented; offsets stay correct where spans are produced.
+
+h2. Test plan
+
+* Membership: every default code point in, representative neighbors out, supplementary overflow path.
+* Split/normalize/squish/trim/remove-all over mixed ASCII and Unicode whitespace; squish structure-preservation ({{\n\n\t\t\n}} to {{\n}}).
+* NBSP and narrow NBSP inside entity/document text (most common real-world break).
+* Dash normalize across the full default set to {{-}}; verify soft hyphen and math minus are left alone unless opted in.
+* User-file parsing: single code points, ranges, comments, sections, bad lines.
+* {{NameFinderDL}} span-offset tests proving the cursor matcher and dash normalize do not move offsets.
+* A quick benchmark sanity check that the cursor path beats the regex it replaces on large inputs (no regression).
+
+h2. Delivery / PRs
+
+One JIRA as the design doc. Split delivery by risk, not by feature, since whitespace and dashes share the foundation:
+* PR 1: foundation + helpers. {{CodePointSet}}, the cursor engine, the standards-derived lists, the file loader, and all helpers (whitespace and dash), fully unit tested. Pure addition, no behavior change, nothing else imports it yet.
+* PR 2: integration. Swap the {{split("\\s+")}} sites and the {{NameFinderDL}} matcher to the cursor based helpers, add the {{InferenceOptions}} opt-ins, handle offsets. This is the only behavior-changing part, so it gets the careful review.
+* PR 3 (fallback if PR 2 is large): split the safe correctness fix (Unicode-aware split + matcher) from the new opt-in normalization (whitespace collapse, dash flatten).
+
+h2. Future work (separate tickets, out of scope here)
+
+This ticket is whitespace + dashes only. The generic {{CharClass}} engine makes these cheap follow-ups once it lands. File them as their own JIRAs after this PR merges.
+
+Fits the same set-to-ASCII mechanism (new {{CharClass}} preset):
+* Quotes and apostrophes to ASCII {{'}} and {{"}} (Unicode {{Quotation_Mark}}: smart quotes, guillemets, primes, fullwidth). Highest value for tokenization, e.g. {{don't}} variants.
+* Ellipsis to {{...}} ({{U+2026}} and relatives).
+* Bullets / list markers ({{U+2022}} and friends).
+* Non-ASCII decimal digits to ASCII (Unicode {{Nd}}: Arabic-Indic, Devanagari, fullwidth).
+* Strip invisible format and bidi controls (Unicode {{Default_Ignorable_Code_Point}} plus bidi controls {{U+200E}}/{{U+200F}}/{{U+202A}}-{{U+202E}}/{{U+2066}}-{{U+2069}}). Complements the "leave zero-width alone" rule by offering an explicit cleaner.
+
+Different mechanism, evaluate {{java.text.Normalizer}} (UAX #15) instead of a hand-rolled set:
+* Fullwidth/halfwidth forms, ligatures ({{ﬁ}} to {{fi}}), super/subscripts: NFKC.
+* Accent / diacritic folding ({{café}} to {{cafe}}): NFD then strip combining marks.
+* Confusables / homoglyphs (Cyrillic {{а}} vs Latin {{a}}): UTS #39, larger and security-flavored.
+
+h2. Notes
+
+Keep this separate from the NameFinderDL BIO decoding work. It touches broader preprocessing semantics and can change model inputs, so it lands as its own behavior-focused change with its own review.
