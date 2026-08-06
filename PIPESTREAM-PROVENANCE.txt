@@ -1,7 +1,7 @@
 # ai.pipestream:opennlp-experiment provenance
 # Built from unmerged development branches of Apache OpenNLP.
 # Not an Apache Software Foundation release. Apache OpenNLP is a trademark of the ASF.
-version: 0.0.0-preview-SNAPSHOT
+version: 0.1.0-alpha3
 generated: 2026-08-06T02:12:22Z
 main: fc9824a97
 ref: 397c9ec87  sentencepiece
