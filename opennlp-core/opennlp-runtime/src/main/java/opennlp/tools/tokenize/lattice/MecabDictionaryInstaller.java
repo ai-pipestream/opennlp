@@ -17,6 +17,7 @@
 
 package opennlp.tools.tokenize.lattice;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -26,18 +27,32 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.zip.GZIPInputStream;
 
+import opennlp.tools.util.DictionaryCatalog;
+import opennlp.tools.util.DownloadUtil;
+import opennlp.tools.util.model.UncloseableInputStream;
+
 /**
  * Fetches and unpacks a mecab-format dictionary archive into a local directory, so the
  * dictionary is acquired by the user at install time and never ships with this library.
- * The archive location is user-supplied; no dictionary data is bundled and no download
- * location is built in.
+ * No dictionary data is bundled. Any non-{@code file:} archive is downloaded through
+ * {@link DownloadUtil#download(URI, Path, String)} and requires an expected SHA-512
+ * digest. Built-in catalog URLs are opt-in via {@link #installFromCatalog(String, Path)}.
  *
- * <p>The installer reads gzip-compressed tar archives, the format the common
- * distributions use, and extracts only the dictionary payload: the {@code *.csv}
- * lexicon files and {@code *.def} definition files that a {@link MecabDictionary}
- * reads, plus the {@code dicrc} configuration file distributions ship alongside them.
- * Entries are flattened to their base names, which also means no archive path can
- * escape the target directory.</p>
+ * <p>The installer reads gzip-compressed ustar archives (POSIX.1-1988), the format the
+ * common distributions use. GNU long-name ({@code L}) and PAX ({@code x}/{@code g})
+ * headers are not supported; entry names must fit the 100-byte ustar name field. It
+ * extracts only the dictionary payload: the {@code *.csv} lexicon files and
+ * {@code *.def} definition files that a {@link MecabDictionary} reads, plus the
+ * {@code dicrc} configuration file distributions ship alongside them. Entries are
+ * flattened to their base names, which also means no archive path can escape the target
+ * directory.</p>
+ *
+ * <p>Extraction is bounded: each entry's declared size, the total bytes written, the
+ * number of extracted dictionary files, and the gzip expansion ratio each have an
+ * explicit ceiling so a crafted archive cannot fill the disk. The byte ceilings can be
+ * raised at JVM startup via {@link #MAX_ENTRY_BYTES_PROPERTY} and
+ * {@link #MAX_TOTAL_EXTRACTED_BYTES_PROPERTY} for dictionaries larger than the
+ * defaults, such as UniDic.</p>
  *
  * @since 3.0.0
  */
@@ -49,49 +64,193 @@ public final class MecabDictionaryInstaller {
   private static final int TAR_SIZE_LENGTH = 12;
   private static final int TAR_TYPE_OFFSET = 156;
 
+  /**
+   * System property for overriding {@link #MAX_ENTRY_BYTES}. Set at JVM startup,
+   * e.g. {@code -Dopennlp.install.max.entry.bytes=2147483648} for dictionaries whose
+   * lexicon files exceed the default ceiling. Falls back to the default if absent,
+   * non-numeric, or not positive.
+   */
+  public static final String MAX_ENTRY_BYTES_PROPERTY = "opennlp.install.max.entry.bytes";
+
+  /**
+   * System property for overriding {@link #MAX_TOTAL_EXTRACTED_BYTES}. Set at JVM
+   * startup, e.g. {@code -Dopennlp.install.max.total.bytes=8589934592}. Falls back to
+   * the default if absent, non-numeric, or not positive.
+   */
+  public static final String MAX_TOTAL_EXTRACTED_BYTES_PROPERTY =
+      "opennlp.install.max.total.bytes";
+
+  /**
+   * Inclusive ceiling on one tar entry's declared size, in bytes: 512 MiB unless
+   * overridden via {@link #MAX_ENTRY_BYTES_PROPERTY}.
+   */
+  static final long MAX_ENTRY_BYTES =
+      DownloadUtil.configuredLimit(MAX_ENTRY_BYTES_PROPERTY, 512L * 1024 * 1024);
+
+  /**
+   * Inclusive ceiling on the sum of extracted dictionary file sizes, in bytes: 2 GiB
+   * unless overridden via {@link #MAX_TOTAL_EXTRACTED_BYTES_PROPERTY}.
+   */
+  static final long MAX_TOTAL_EXTRACTED_BYTES =
+      DownloadUtil.configuredLimit(MAX_TOTAL_EXTRACTED_BYTES_PROPERTY,
+          2L * 1024 * 1024 * 1024);
+
+  /** Inclusive ceiling on the number of dictionary files extracted from one archive. */
+  static final int MAX_EXTRACTED_ENTRIES = 10_000;
+
+  /**
+   * Inclusive ceiling on decompressed bytes per compressed byte while reading the
+   * gzip wrapper; higher expansion fails before the payload is written.
+   */
+  static final int MAX_GZIP_EXPANSION_RATIO = 100;
+
   private MecabDictionaryInstaller() {
     // This class exposes only static methods and is never instantiated.
   }
 
   /**
-   * Downloads a dictionary archive and unpacks it.
+   * Unpacks a local {@code file:} archive URI. Any other scheme requires
+   * {@link #install(URI, Path, String)} with an expected SHA-512 digest.
    *
-   * @param archive The archive location, a gzip-compressed tar. Must not be
+   * @param archive The archive location, a gzip-compressed ustar tar. Must not be
    *                {@code null}.
    * @param targetDirectory The directory to unpack into; created when absent. Must not
    *                        be {@code null}.
    * @return The number of dictionary files extracted.
-   * @throws IOException Thrown if fetching, reading, or writing fails, or the archive
-   *         contains no dictionary file.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or
-   *         {@code archive} is not an absolute URI.
+   * @throws IOException Thrown if reading or writing fails, the archive contains no
+   *         dictionary file, or an extraction budget is exceeded.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null},
+   *         {@code archive} is not an absolute URI, or {@code archive} is not a
+   *         {@code file:} URI.
    */
   public static int install(URI archive, Path targetDirectory) throws IOException {
+    return install(archive, targetDirectory, null);
+  }
+
+  /**
+   * Downloads a dictionary archive when needed, verifies its SHA-512 digest through
+   * {@link DownloadUtil#download(URI, Path, String)}, and unpacks it. A {@code file:}
+   * URI may omit the digest and is then opened without verification.
+   *
+   * @param archive The archive location, a gzip-compressed ustar tar. Must not be
+   *                {@code null}.
+   * @param targetDirectory The directory to unpack into; created when absent. Must not
+   *                        be {@code null}.
+   * @param expectedSha512 The expected SHA-512 hex digest. Required for any
+   *                       non-{@code file:} URI; optional for {@code file:} URIs.
+   * @return The number of dictionary files extracted.
+   * @throws IOException Thrown if fetching, verification, reading, or writing fails,
+   *         the archive contains no dictionary file, or an extraction budget is exceeded.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null},
+   *         {@code archive} is not an absolute URI, or a non-{@code file:} URI omits
+   *         the digest.
+   */
+  public static int install(URI archive, Path targetDirectory, String expectedSha512)
+      throws IOException {
     if (archive == null) {
       throw new IllegalArgumentException("archive must not be null");
     }
     if (targetDirectory == null) {
       throw new IllegalArgumentException("targetDirectory must not be null");
     }
-    try (InputStream in = archive.toURL().openStream()) {
-      return extract(in, targetDirectory);
+    if (!archive.isAbsolute()) {
+      throw new IllegalArgumentException("archive must be an absolute URI");
+    }
+    if (expectedSha512 == null) {
+      if (!isLocalFile(archive)) {
+        throw new IllegalArgumentException("a non-file archive requires an expected "
+            + "SHA-512 digest; use install(URI, Path, String)");
+      }
+      try (InputStream in = archive.toURL().openStream()) {
+        return extract(in, targetDirectory);
+      }
+    }
+    final Path downloaded = Files.createTempFile("mecab-dict-", ".tar.gz");
+    try {
+      DownloadUtil.download(archive, downloaded, expectedSha512);
+      try (InputStream in = Files.newInputStream(downloaded)) {
+        return extract(in, targetDirectory);
+      }
+    } finally {
+      Files.deleteIfExists(downloaded);
     }
   }
 
   /**
-   * Unpacks a dictionary archive stream.
+   * Downloads a dictionary named in {@link DictionaryCatalog} and unpacks it. Requires
+   * {@code -Dopennlp.download.remote=true}.
    *
-   * @param archiveStream The gzip-compressed tar content. Must not be {@code null}.
-   *                      Not closed.
+   * @param dictionaryId The catalog id, for example {@code mecab.ipadic} or
+   *                     {@code mecab.ko-dic}. Must not be {@code null}.
    * @param targetDirectory The directory to unpack into; created when absent. Must not
    *                        be {@code null}.
    * @return The number of dictionary files extracted.
-   * @throws IOException Thrown if reading or writing fails, or the archive contains no
-   *         dictionary file.
+   * @throws IOException Thrown if the catalog entry is missing, remote downloads are
+   *         disabled, or install fails.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   */
+  public static int installFromCatalog(String dictionaryId, Path targetDirectory)
+      throws IOException {
+    if (dictionaryId == null) {
+      throw new IllegalArgumentException("dictionaryId must not be null");
+    }
+    if (targetDirectory == null) {
+      throw new IllegalArgumentException("targetDirectory must not be null");
+    }
+    final Path downloaded = Files.createTempFile("mecab-dict-", ".tar.gz");
+    try {
+      DictionaryCatalog.loadDefault().download(dictionaryId, downloaded);
+      return install(downloaded.toUri(), targetDirectory);
+    } finally {
+      Files.deleteIfExists(downloaded);
+    }
+  }
+
+  /**
+   * {@return {@code true} when {@code archive} uses the {@code file} scheme}
+   *
+   * @param archive The absolute archive URI.
+   */
+  private static boolean isLocalFile(URI archive) {
+    return "file".equalsIgnoreCase(archive.getScheme());
+  }
+
+  /**
+   * Unpacks a dictionary archive stream under the production extraction budgets.
+   *
+   * @param archiveStream The gzip-compressed ustar tar content. Must not be
+   *                      {@code null}. Not closed.
+   * @param targetDirectory The directory to unpack into; created when absent. Must not
+   *                        be {@code null}.
+   * @return The number of dictionary files extracted.
+   * @throws IOException Thrown if reading or writing fails, the archive contains no
+   *         dictionary file, or an extraction budget is exceeded.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
   public static int extract(InputStream archiveStream, Path targetDirectory)
       throws IOException {
+    return extract(archiveStream, targetDirectory, MAX_ENTRY_BYTES,
+        MAX_TOTAL_EXTRACTED_BYTES, MAX_EXTRACTED_ENTRIES, MAX_GZIP_EXPANSION_RATIO);
+  }
+
+  /**
+   * Unpacks a dictionary archive stream under caller-supplied budgets.
+   *
+   * @param archiveStream The gzip-compressed ustar tar content. Must not be
+   *                      {@code null}. Not closed.
+   * @param targetDirectory The directory to unpack into; created when absent. Must not
+   *                        be {@code null}.
+   * @param maxEntryBytes Inclusive ceiling on one entry's declared size.
+   * @param maxTotalBytes Inclusive ceiling on total extracted bytes.
+   * @param maxEntries Inclusive ceiling on extracted dictionary file count.
+   * @param maxGzipRatio Inclusive ceiling on decompressed bytes per compressed byte.
+   * @return The number of dictionary files extracted.
+   * @throws IOException Thrown if reading or writing fails, the archive contains no
+   *         dictionary file, or a budget is exceeded.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   */
+  static int extract(InputStream archiveStream, Path targetDirectory, long maxEntryBytes,
+      long maxTotalBytes, int maxEntries, int maxGzipRatio) throws IOException {
     if (archiveStream == null) {
       throw new IllegalArgumentException("archiveStream must not be null");
     }
@@ -99,35 +258,54 @@ public final class MecabDictionaryInstaller {
       throw new IllegalArgumentException("targetDirectory must not be null");
     }
     Files.createDirectories(targetDirectory);
-    final InputStream tar = new GZIPInputStream(archiveStream);
-    final byte[] header = new byte[TAR_BLOCK];
-    int extracted = 0;
-    while (readBlock(tar, header)) {
-      if (isEndBlock(header)) {
-        break;
-      }
-      final String name = headerName(header);
-      final long size = headerSize(header);
-      final char type = (char) header[TAR_TYPE_OFFSET];
-      final String baseName = baseName(name);
-      final boolean wanted = (type == '0' || type == 0)
-          && (baseName.endsWith(".csv") || baseName.endsWith(".def")
-              || "dicrc".equals(baseName));
-      if (wanted) {
-        final Path file = targetDirectory.resolve(baseName);
-        try (InputStream entry = boundedStream(tar, size)) {
-          Files.copy(entry, file, StandardCopyOption.REPLACE_EXISTING);
+    final CountingInputStream compressed = new CountingInputStream(archiveStream);
+    try (GZIPInputStream gzip = new GZIPInputStream(
+        new UncloseableInputStream(compressed))) {
+      final BudgetedInputStream tar =
+          new BudgetedInputStream(gzip, compressed, maxGzipRatio);
+      final byte[] header = new byte[TAR_BLOCK];
+      int extracted = 0;
+      long totalExtracted = 0;
+      while (readBlock(tar, header)) {
+        if (isEndBlock(header)) {
+          break;
         }
-        extracted++;
-        skip(tar, padding(size));
-      } else {
-        skip(tar, size + padding(size));
+        final String name = headerName(header);
+        final long size = headerSize(header);
+        if (size > maxEntryBytes) {
+          throw new IOException(
+              "tar entry size exceeds safe limit of " + maxEntryBytes);
+        }
+        final char type = (char) header[TAR_TYPE_OFFSET];
+        final String baseName = baseName(name);
+        final boolean wanted = (type == '0' || type == 0)
+            && (baseName.endsWith(".csv") || baseName.endsWith(".def")
+                || "dicrc".equals(baseName));
+        if (wanted) {
+          if (extracted >= maxEntries) {
+            throw new IOException(
+                "extracted entry count exceeds safe limit of " + maxEntries);
+          }
+          if (totalExtracted + size > maxTotalBytes) {
+            throw new IOException(
+                "extracted archive size exceeds safe limit of " + maxTotalBytes);
+          }
+          final Path file = targetDirectory.resolve(baseName);
+          try (InputStream entry = boundedStream(tar, size)) {
+            Files.copy(entry, file, StandardCopyOption.REPLACE_EXISTING);
+          }
+          extracted++;
+          totalExtracted += size;
+          skip(tar, padding(size));
+        } else {
+          skip(tar, size + padding(size));
+        }
       }
+      if (extracted == 0) {
+        throw new IOException("the archive contains no dictionary file");
+      }
+      return extracted;
     }
-    if (extracted == 0) {
-      throw new IOException("the archive contains no dictionary file");
-    }
-    return extracted;
   }
 
   /**
@@ -285,5 +463,85 @@ public final class MecabDictionaryInstaller {
         return read;
       }
     };
+  }
+
+  /**
+   * Counts bytes read from a delegate stream.
+   */
+  private static final class CountingInputStream extends FilterInputStream {
+
+    private long count;
+
+    private CountingInputStream(InputStream in) {
+      super(in);
+    }
+
+    private long count() {
+      return count;
+    }
+
+    @Override
+    public int read() throws IOException {
+      final int b = super.read();
+      if (b >= 0) {
+        count++;
+      }
+      return b;
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      final int read = super.read(buffer, offset, length);
+      if (read > 0) {
+        count += read;
+      }
+      return read;
+    }
+  }
+
+  /**
+   * Counts decompressed bytes and rejects a gzip expansion above the supplied ratio.
+   */
+  private static final class BudgetedInputStream extends FilterInputStream {
+
+    private final CountingInputStream compressed;
+    private final int maxGzipRatio;
+    private long decompressed;
+
+    private BudgetedInputStream(InputStream in, CountingInputStream compressed,
+        int maxGzipRatio) {
+      super(in);
+      this.compressed = compressed;
+      this.maxGzipRatio = maxGzipRatio;
+    }
+
+    @Override
+    public int read() throws IOException {
+      final int b = super.read();
+      if (b >= 0) {
+        decompressed++;
+        checkRatio();
+      }
+      return b;
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      final int read = super.read(buffer, offset, length);
+      if (read > 0) {
+        decompressed += read;
+        checkRatio();
+      }
+      return read;
+    }
+
+    private void checkRatio() throws IOException {
+      final long compressedBytes = compressed.count();
+      if (compressedBytes > 0
+          && decompressed > (long) maxGzipRatio * compressedBytes) {
+        throw new IOException(
+            "gzip expansion ratio exceeds safe limit of " + maxGzipRatio);
+      }
+    }
   }
 }
