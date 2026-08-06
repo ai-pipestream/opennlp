@@ -164,4 +164,23 @@ for(ClassPathModelEntry entry : models) {
 
     </para>
   </section>
+
+  <section xml:id="tools.model.resource-installer">
+    <title>Installing archived resources</title>
+    <para>
+      <code>ResourceInstaller</code> fetches a third-party resource, such as a training corpus or a
+      lexicon, into a target directory. An optional SHA-256 checksum is verified before anything is
+      unpacked, and archive entries that would escape the target directory are rejected. The content
+      format is detected from the bytes, not from the name: gzip-compressed tar archives and zip
+      archives are unpacked with their relative structure, plain gzip files are decompressed, and
+      anything else is stored as a file under its source name.
+
+      <programlisting language="java">
+<![CDATA[Path result = ResourceInstaller.install(
+    corpusTarGz.toUri(), targetDirectory, expectedSha256);
+// result is targetDirectory; the archived files appear under their archive paths]]>
+      </programlisting>
+
+    </para>
+  </section>
 </chapter>
