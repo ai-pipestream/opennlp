@@ -12,10 +12,10 @@ ref: ff681b393  light-stemmers
 ref: af1996291  wordnet-expansion
 ref: d8cc10e29  OPENNLP-1893-hunspell
 ref: 7a98076c8  OPENNLP-1894-lattice-cjk
-ref: 7a2fbce64  OPENNLP-1903-NameFinder-Threading
+ref: e9429a0e9  OPENNLP-1903-NameFinder-Threading
 ref: 6cc0d3d41  OPENNLP-1904
 ref: ab35e2e57  OPENNLP-1905
-ref: 96c569aad  OPENNLP-1906
+ref: 986247a62  OPENNLP-1906
 ref: e9062250b  OPENNLP-1888-DocumentShape
 ref: a544495f6  OPENNLP-1897-term-vectors
 ref: df0a1235c  OPENNLP-XXXX-text-artifacts
