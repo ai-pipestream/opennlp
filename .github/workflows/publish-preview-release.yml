@@ -1,0 +1,112 @@
+name: publish-preview-release
+
+# Cuts a REAL (non-snapshot) preview release of the kristian-3.x-features research
+# branch to Maven Central as ai.pipestream:opennlp-*:<version>. The reactor rename is
+# the same as publish-preview.yml's snapshot jobs (versions:set for the version, sed
+# for the group; the branch itself keeps org.apache.opennlp coordinates). What a
+# release adds on top: the Central Portal enforces the full publication rules, so the
+# build injects the metadata Central requires but Apache poms leave to Apache's own
+# release tooling (description, developers), attaches source jars, GPG-signs
+# everything, and uploads through central-publishing-maven-plugin — the Maven
+# counterpart of the nmcp Gradle plugin pipestream-platform releases with.
+#
+# Central releases are immutable: manual dispatch only, the version is an explicit
+# input, and the released commit is tagged preview-v<version> with the provenance
+# manifest attached to the release record.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, no -SNAPSHOT (e.g. 0.1.0-alpha.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # pushes the preview-v* tag and creates the prerelease record
+
+jobs:
+  release-central:
+    # Central credentials and the GPG key are github.com org secrets; the Forgejo
+    # mirror publishes snapshots only.
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: kristian-3.x-features
+          fetch-tags: true
+
+      - name: Validate the requested version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          case "$VERSION" in
+            ''|*-SNAPSHOT|*[!A-Za-z0-9.-]*)
+              echo "::error::'$VERSION' is not a valid release version (no -SNAPSHOT, characters [A-Za-z0-9.-] only)"
+              exit 1 ;;
+          esac
+          if git rev-parse -q --verify "refs/tags/preview-v$VERSION" >/dev/null; then
+            echo "::error::preview-v$VERSION already exists — Central releases are immutable, pick a new version"
+            exit 1
+          fi
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Rename the reactor to ai.pipestream
+        run: |
+          ./mvnw -q -B versions:set -DnewVersion="$PREVIEW_VERSION" -DprocessAllModules=true -DgenerateBackupPoms=false
+          grep -rl '<groupId>org.apache.opennlp</groupId>' --include=pom.xml . \
+            | xargs sed -i 's|<groupId>org.apache.opennlp</groupId>|<groupId>ai.pipestream</groupId>|g'
+          # The pre-trained model artifacts are external Apache releases, not reactor modules.
+          perl -0777 -pi -e 's|<groupId>ai\.pipestream</groupId>(\s*)<artifactId>(opennlp-models-)|<groupId>org.apache.opennlp</groupId>$1<artifactId>$2|g' \
+            opennlp-core/opennlp-model-resolver/pom.xml
+
+      - name: Add the release metadata and publishing plugins to the root pom
+        run: |
+          # description + developers: required by Central release validation, inherited
+          # by every module from the root.
+          perl -0777 -pi -e 's|(\t<name>Apache OpenNLP</name>)|$1\n\n\t<description>Experimental ai.pipestream preview build of unmerged Apache OpenNLP development branches. Not an Apache Software Foundation release; see README-PREVIEW.md and PIPESTREAM-PROVENANCE.txt in the repository.</description>\n\n\t<developers>\n\t\t<developer>\n\t\t\t<id>krickert</id>\n\t\t\t<name>Kristian Rickert</name>\n\t\t\t<email>krickert\@gmail.com</email>\n\t\t</developer>\n\t</developers>|' pom.xml
+          # source jars + signatures (plugin versions come from the org.apache:apache
+          # parent's pluginManagement), and central-publishing-maven-plugin, which
+          # replaces maven-deploy-plugin (extensions=true) and uploads the staged
+          # bundle to the Central Portal.
+          perl -0777 -pi -e 's|(</pluginManagement>\s*\n\t\t<plugins>)|$1\n\t\t\t<plugin>\n\t\t\t\t<groupId>org.apache.maven.plugins</groupId>\n\t\t\t\t<artifactId>maven-source-plugin</artifactId>\n\t\t\t\t<executions>\n\t\t\t\t\t<execution>\n\t\t\t\t\t\t<id>preview-attach-sources</id>\n\t\t\t\t\t\t<phase>package</phase>\n\t\t\t\t\t\t<goals>\n\t\t\t\t\t\t\t<goal>jar-no-fork</goal>\n\t\t\t\t\t\t</goals>\n\t\t\t\t\t</execution>\n\t\t\t\t</executions>\n\t\t\t</plugin>\n\t\t\t<plugin>\n\t\t\t\t<groupId>org.apache.maven.plugins</groupId>\n\t\t\t\t<artifactId>maven-gpg-plugin</artifactId>\n\t\t\t\t<executions>\n\t\t\t\t\t<execution>\n\t\t\t\t\t\t<id>preview-sign</id>\n\t\t\t\t\t\t<phase>verify</phase>\n\t\t\t\t\t\t<goals>\n\t\t\t\t\t\t\t<goal>sign</goal>\n\t\t\t\t\t\t</goals>\n\t\t\t\t\t</execution>\n\t\t\t\t</executions>\n\t\t\t</plugin>\n\t\t\t<plugin>\n\t\t\t\t<groupId>org.sonatype.central</groupId>\n\t\t\t\t<artifactId>central-publishing-maven-plugin</artifactId>\n\t\t\t\t<version>0.11.0</version>\n\t\t\t\t<extensions>true</extensions>\n\t\t\t\t<configuration>\n\t\t\t\t\t<publishingServerId>central</publishingServerId>\n\t\t\t\t\t<autoPublish>true</autoPublish>\n\t\t\t\t\t<waitUntil>published</waitUntil>\n\t\t\t\t</configuration>\n\t\t\t</plugin>|' pom.xml
+          grep -q '<description>' pom.xml && grep -q central-publishing-maven-plugin pom.xml
+          ./mvnw -q -B -N validate
+
+      - name: Build, sign, and publish ai.pipestream:opennlp-* to Maven Central
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: >
+          ./mvnw -B deploy -DskipTests -Denforcer.skip=true -Drat.skip=true
+
+      - name: Tag the released commit and record the provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "preview-v$PREVIEW_VERSION" -m "ai.pipestream:opennlp-* $PREVIEW_VERSION preview release"
+          git push origin "preview-v$PREVIEW_VERSION"
+          { echo "Published to Maven Central as \`ai.pipestream:opennlp-*:$PREVIEW_VERSION\`."
+            echo
+            echo '```'
+            cat PIPESTREAM-PROVENANCE.txt
+            echo '```'
+          } > /tmp/release-notes.md
+          gh release create "preview-v$PREVIEW_VERSION" --prerelease \
+            --title "ai.pipestream:opennlp-* $PREVIEW_VERSION (preview)" \
+            --notes-file /tmp/release-notes.md
