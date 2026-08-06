@@ -29,12 +29,18 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
 
 /**
- * Runs the manual's PoliMorf reader examples (docbkx {@code lemmatizer.xml}) verbatim over a
- * small illustrative dictionary in PoliMorf's {@code surfaceForm\tlemma\ttag} format. It is a
+ * Runs the manual's PoliMorf reader examples (docbkx {@code lemmatizer.xml}) over a small
+ * illustrative dictionary in PoliMorf's {@code surfaceForm\tlemma\ttag} format. It is a
  * hand-built fixture, not the PoliMorf distribution; every value the chapter states is asserted
  * here, so a change breaking this test breaks the manual.
  */
 public class PoliMorfDictionaryReaderUsageExampleTest {
+
+  /** U+00A0, whitespace under Unicode but not under {@link String#isBlank()}. */
+  private static final String NO_BREAK_SPACE = "\u00A0";
+
+  /** U+202F, likewise whitespace under Unicode but not under {@link String#isBlank()}. */
+  private static final String NARROW_NO_BREAK_SPACE = "\u202F";
 
   private static final String[] ROWS = {
       "pies\tpies\tsubst:sg:nom:m2",
@@ -97,6 +103,19 @@ public class PoliMorfDictionaryReaderUsageExampleTest {
         lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"subst:sg:gen:m2"}));
   }
 
+  /**
+   * A line spelled entirely from no-break spaces counts as blank too, which is what separates the
+   * reader's whitespace test from {@link String#isBlank()}.
+   */
+  @Test
+  void testNoBreakSpaceOnlyLineIsSkipped() throws IOException {
+    final DictionaryLemmatizer lemmatizer = PoliMorfDictionaryReader.read(
+        dictionary(NO_BREAK_SPACE + NARROW_NO_BREAK_SPACE + "\npsa\tpies\tsubst:sg:gen:m2\n"));
+
+    Assertions.assertArrayEquals(new String[] {"pies"},
+        lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"subst:sg:gen:m2"}));
+  }
+
   /** A non-blank line with fewer than three fields fails loudly. */
   @Test
   void testTooFewFieldsThrows() {
@@ -104,10 +123,28 @@ public class PoliMorfDictionaryReaderUsageExampleTest {
         () -> PoliMorfDictionaryReader.read(dictionary("psa\tpies\n")));
   }
 
-  /** A null dictionary stream is rejected at the boundary. */
+  /** A dictionary in a charset other than UTF-8 is read under the charset the caller names. */
   @Test
-  void testNullDictionaryRejected() {
+  void testReadsUnderExplicitCharset() throws IOException {
+    // "caf\u00e9" is one byte per character in ISO-8859-1 and two in UTF-8, so reading it
+    // under the wrong charset would not round-trip.
+    final String row = "caf\u00e9\tcaf\u00e9\tsubst:sg:nom:m2\n";
+    final DictionaryLemmatizer lemmatizer = PoliMorfDictionaryReader.read(
+        new ByteArrayInputStream(row.getBytes(StandardCharsets.ISO_8859_1)),
+        StandardCharsets.ISO_8859_1);
+
+    Assertions.assertArrayEquals(new String[] {"caf\u00e9"},
+        lemmatizer.lemmatize(new String[] {"caf\u00e9"}, new String[] {"subst:sg:nom:m2"}));
+  }
+
+  /** Null arguments are rejected at the boundary. */
+  @Test
+  void testNullArgumentsRejected() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> PoliMorfDictionaryReader.read(null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> PoliMorfDictionaryReader.read(null, StandardCharsets.UTF_8));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> PoliMorfDictionaryReader.read(dictionary("psa\tpies\tsubst\n"), null));
   }
 }

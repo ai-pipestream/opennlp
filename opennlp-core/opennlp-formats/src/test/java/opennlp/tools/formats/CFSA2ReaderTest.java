@@ -28,17 +28,21 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Validates the clean-room {@link CFSA2Reader} against a ground-truth automaton. The fixture below
- * was generated once by morfologik's {@code CFSA2Serializer} from the words
- * {@code {cat, cats, do, dog, dogs}} and committed as the expected encoding; the reader must
- * recover exactly those sequences.
+ * Validates {@link CFSA2Reader} against a ground-truth automaton. The fixture below was generated
+ * once by morfologik's {@code CFSA2Serializer} from the words {@code {cat, cats, do, dog, dogs}}
+ * and committed as the expected encoding; the reader must recover exactly those sequences.
  */
 public class CFSA2ReaderTest {
 
   private static final String FIXTURE_BASE64 = "XGZzYcYABwgAdHNvZ2RjYUBeAwYKxePkYgDHYQg=";
 
-  private static List<String> sequences(byte[] cfsa2) throws IOException {
-    final CFSA2Reader reader = CFSA2Reader.read(new ByteArrayInputStream(cfsa2));
+  private static final List<String> EXPECTED = List.of("cat", "cats", "do", "dog", "dogs");
+
+  private static ByteArrayInputStream fixture() {
+    return new ByteArrayInputStream(Base64.getDecoder().decode(FIXTURE_BASE64));
+  }
+
+  private static List<String> sequences(FsaSequenceReader reader) {
     final List<String> out = new ArrayList<>();
     reader.forEachSequence(bytes -> out.add(new String(bytes, StandardCharsets.UTF_8)));
     return out;
@@ -47,8 +51,13 @@ public class CFSA2ReaderTest {
   /** Every accepted sequence is recovered, in the automaton's stored lexicographic order. */
   @Test
   void testEnumeratesAllAcceptedSequences() throws IOException {
-    Assertions.assertEquals(List.of("cat", "cats", "do", "dog", "dogs"),
-        sequences(Base64.getDecoder().decode(FIXTURE_BASE64)));
+    Assertions.assertEquals(EXPECTED, sequences(CFSA2Reader.read(fixture())));
+  }
+
+  /** The format-agnostic dispatcher recognizes and reads CFSA2 by its version byte. */
+  @Test
+  void testDispatcherReadsCfsa2() throws IOException {
+    Assertions.assertEquals(EXPECTED, sequences(FsaSequenceReader.read(fixture())));
   }
 
   /** A stream that is not an FSA automaton fails loudly. */
@@ -71,5 +80,12 @@ public class CFSA2ReaderTest {
   @Test
   void testNullStreamRejected() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> CFSA2Reader.read(null));
+  }
+
+  /** A null action is rejected at the boundary. */
+  @Test
+  void testNullActionRejected() throws IOException {
+    final CFSA2Reader reader = CFSA2Reader.read(fixture());
+    Assertions.assertThrows(IllegalArgumentException.class, () -> reader.forEachSequence(null));
   }
 }

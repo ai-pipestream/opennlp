@@ -346,7 +346,6 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 				</programlisting>
 			</para>
 		</section>
-
 		<section xml:id="tools.lemmatizer.morfologik">
 			<title>Reading morfologik dictionaries</title>
 			<para>

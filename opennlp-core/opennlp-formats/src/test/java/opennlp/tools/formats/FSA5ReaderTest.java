@@ -28,12 +28,20 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Validates the clean-room {@link FSA5Reader} against a ground-truth automaton generated once by
- * morfologik's {@code FSA5Serializer} from the words {@code {cat, cats, do, dog, dogs}}.
+ * Validates {@link FSA5Reader} against a ground-truth automaton generated once by morfologik's
+ * {@code FSA5Serializer} from the words {@code {cat, cats, do, dog, dogs}}. Also covers the
+ * {@link FsaSequenceReader#read(java.io.InputStream)} dispatcher, which has no test class of its
+ * own.
  */
 public class FSA5ReaderTest {
 
   private static final String FIXTURE_BASE64 = "XGZzYQVfKwEAAF4GY3BkBm8HZwdzA2EGdGM=";
+
+  private static final List<String> EXPECTED = List.of("cat", "cats", "do", "dog", "dogs");
+
+  private static ByteArrayInputStream fixture() {
+    return new ByteArrayInputStream(Base64.getDecoder().decode(FIXTURE_BASE64));
+  }
 
   private static List<String> sequences(FsaSequenceReader reader) {
     final List<String> out = new ArrayList<>();
@@ -44,17 +52,13 @@ public class FSA5ReaderTest {
   /** Every accepted sequence is recovered, in stored lexicographic order. */
   @Test
   void testEnumeratesAllAcceptedSequences() throws IOException {
-    final FSA5Reader reader = FSA5Reader.read(
-        new ByteArrayInputStream(Base64.getDecoder().decode(FIXTURE_BASE64)));
-    Assertions.assertEquals(List.of("cat", "cats", "do", "dog", "dogs"), sequences(reader));
+    Assertions.assertEquals(EXPECTED, sequences(FSA5Reader.read(fixture())));
   }
 
   /** The format-agnostic dispatcher recognizes and reads FSA5 by its version byte. */
   @Test
   void testDispatcherReadsFsa5() throws IOException {
-    final FsaSequenceReader reader = FsaSequenceReader.read(
-        new ByteArrayInputStream(Base64.getDecoder().decode(FIXTURE_BASE64)));
-    Assertions.assertEquals(List.of("cat", "cats", "do", "dog", "dogs"), sequences(reader));
+    Assertions.assertEquals(EXPECTED, sequences(FsaSequenceReader.read(fixture())));
   }
 
   /** A different FSA version fails loudly rather than misreading. */
@@ -66,9 +70,33 @@ public class FSA5ReaderTest {
         () -> FSA5Reader.read(new ByteArrayInputStream(altered)));
   }
 
-  /** A null stream is rejected at the boundary. */
+  /** The dispatcher rejects a version it cannot read rather than guessing a format. */
+  @Test
+  void testDispatcherRejectsUnsupportedVersion() {
+    final byte[] altered = Base64.getDecoder().decode(FIXTURE_BASE64);
+    altered[4] = (byte) 0x99;
+    Assertions.assertThrows(IOException.class,
+        () -> FsaSequenceReader.read(new ByteArrayInputStream(altered)));
+  }
+
+  /** The dispatcher rejects a stream that is not an FSA automaton at all. */
+  @Test
+  void testDispatcherRejectsNonFsaMagic() {
+    Assertions.assertThrows(IOException.class, () -> FsaSequenceReader.read(
+        new ByteArrayInputStream("not an fsa header".getBytes(StandardCharsets.UTF_8))));
+  }
+
+  /** A null stream is rejected at the boundary, by the reader and by the dispatcher alike. */
   @Test
   void testNullStreamRejected() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> FSA5Reader.read(null));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> FsaSequenceReader.read(null));
+  }
+
+  /** A null action is rejected at the boundary. */
+  @Test
+  void testNullActionRejected() throws IOException {
+    final FSA5Reader reader = FSA5Reader.read(fixture());
+    Assertions.assertThrows(IllegalArgumentException.class, () -> reader.forEachSequence(null));
   }
 }
