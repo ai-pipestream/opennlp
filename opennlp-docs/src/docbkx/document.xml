@@ -207,6 +207,35 @@ int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 		</para>
 	</section>
 
+	<section xml:id="tools.document.coref">
+		<title>Document-layer coreference</title>
+		<para>
+			<code>CorefAnnotator</code> clusters entity and pronoun mentions on the
+			document container. It requires sentence, token, POS-tag, and entity layers
+			and provides <code>CorefAnnotator.CHAINS</code>: each annotation carries a
+			<code>CorefMention</code> with a chain id, a kind (entity or pronoun), and
+			an optional entity index. Name containment links a bare surname to a full
+			name; the pronoun sieve attaches a gendered or neutral pronoun to the nearest
+			preceding compatible entity mention in the same or the directly preceding
+			sentence. <code>CorefPipelineExampleTest</code> asserts the behavior shown
+			here.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+Document document = DocumentAnalyzer.builder()
+    .add(sentenceAnnotator)
+    .add(tokenAndPosAnnotator)
+    .add(entityAnnotator)
+    .add(new CorefAnnotator())
+    .build()
+    .analyze("Ada Lovelace advised Orion Labs. Lovelace saw its potential. She was right.");
+
+List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+// chain 0: Ada Lovelace, Lovelace, She
+// chain 1: Orion Labs, its]]>
+		</programlisting>
+	</section>
+
 	<section xml:id="tools.document.predicates">
 		<title>Predicate-driven annotators</title>
 		<para>
@@ -249,32 +278,30 @@ DocumentAnnotator filter =
 		</para>
 	</section>
 
-	<section xml:id="tools.document.coref">
-		<title>Document-layer coreference</title>
+	<section xml:id="tools.document.region-currency">
+		<title>Region ballot and currency signs</title>
 		<para>
-			<code>CorefAnnotator</code> clusters entity and pronoun mentions on the
-			document container. It requires sentence, token, POS-tag, and entity layers
-			and provides <code>CorefAnnotator.CHAINS</code>: each annotation carries a
-			<code>CorefMention</code> with a chain id, a kind (entity or pronoun), and
-			an optional entity index. Name containment links a bare surname to a full
-			name; the pronoun sieve attaches a gendered or neutral pronoun to the nearest
-			preceding compatible entity mention in the same or the directly preceding
-			sentence. <code>CorefPipelineExampleTest</code> asserts the behavior shown
-			here.
+			<code>DocumentRegionAnnotator</code> turns geocoded location entities into a
+			document-scoped region ballot: countries ranked by confidence-weighted share.
+			<code>RegionAwareMoneyAnnotator</code> then reads that ballot and resolves
+			ambiguous currency signs such as <code>$</code> from the winning country, so a
+			document that speaks from Mexico reads <code>$</code> as the Mexican peso:
 		</para>
 		<programlisting language="java">
 				<![CDATA[
-Document document = DocumentAnalyzer.builder()
-    .add(sentenceAnnotator)
-    .add(tokenAndPosAnnotator)
-    .add(entityAnnotator)
-    .add(new CorefAnnotator())
-    .build()
-    .analyze("Ada Lovelace advised Orion Labs. Lovelace saw its potential. She was right.");
+Document withEntities = Document.of(
+    "Guadalajara outsells Boston this quarter, and lunch there costs $8.")
+    .with(Layers.ENTITIES, locationEntities);
 
-List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
-// chain 0: Ada Lovelace, Lovelace, She
-// chain 1: Orion Labs, its]]>
+Document document = new RegionAwareMoneyAnnotator().annotate(
+    new DocumentRegionAnnotator(geocoder).annotate(withEntities));
+
+List<Annotation<RegionVote>> ballot =
+    document.get(DocumentRegionAnnotator.REGIONS);
+// MX ahead of US by confidence share; ballot rows are span-less
+
+List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
+// "$8" -> 8 MXN because Mexico wins the ballot]]>
 		</programlisting>
 	</section>
 </chapter>
