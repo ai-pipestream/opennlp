@@ -32,6 +32,7 @@ import opennlp.tools.util.Span;
  * @param value The normalized calendar value. Must not be {@code null} or blank.
  * @param granularity The granularity of the value. Must not be {@code null}.
  *
+ * @see <a href="https://www.iso.org/iso-8601-date-and-time-format.html">ISO 8601</a>
  * @since 3.0.0
  */
 public record TemporalExpression(Span span, String value, Granularity granularity) {

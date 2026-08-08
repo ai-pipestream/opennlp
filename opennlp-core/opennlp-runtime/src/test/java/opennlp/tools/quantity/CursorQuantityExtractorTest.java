@@ -55,6 +55,7 @@ public class CursorQuantityExtractorTest {
       "3.5 %; 3.5; %",
       "50 percent; 50; %",
       "-2%; -2; %",
+      "0%; 0; %",
       "2.5km; 2.5; km",
       "80 kg; 80; kg",
       "1,250 GB; 1250; GB",
@@ -142,6 +143,20 @@ public class CursorQuantityExtractorTest {
         () -> new CursorQuantityExtractor(Set.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorQuantityExtractor(Set.of("toolongunit")));
+  }
+
+  /**
+   * Verifies the scan around a supplementary-plane neighbor: the code point before the
+   * number is read whole, so an emoji is an ordinary boundary and the mention span
+   * starts behind its surrogate pair.
+   */
+  @Test
+  void testSupplementaryPlaneNeighborIsABoundary() {
+    // U+1F4E6 (package) takes two chars; the mention span starts behind it
+    final Quantity mention = single("\uD83D\uDCE62.5km");
+    assertEquals(new Span(2, 7), mention.span());
+    assertEquals(0, new BigDecimal("2.5").compareTo(mention.value()));
+    assertEquals("km", mention.unit());
   }
 
   @Test

@@ -49,6 +49,8 @@ import java.util.TreeMap;
  *
  * <p>Instances are immutable after loading and safe to share between threads.</p>
  *
+ * @see <a href="https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html">ECB euro foreign exchange reference rates</a>
+ * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
  */
 public class EcbFxRates implements FxRates {

@@ -83,6 +83,7 @@ public class MoneyAnnotator implements DocumentAnnotator {
     return document.with(MONEY, mentions);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(MONEY);

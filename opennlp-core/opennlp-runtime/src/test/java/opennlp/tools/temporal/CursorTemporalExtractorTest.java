@@ -144,6 +144,20 @@ public class CursorTemporalExtractorTest {
     }
   }
 
+  /**
+   * Verifies the scan around a supplementary-plane neighbor: the code point before a
+   * mention is read whole, so an emoji is an ordinary boundary and the mention span
+   * starts behind its surrogate pair.
+   */
+  @Test
+  void testSupplementaryPlaneNeighborIsABoundary() {
+    // U+1F5D3 (spiral calendar) takes two chars; the mention span starts behind it
+    final TemporalExpression mention = single("\uD83D\uDDD32026-07-14");
+    assertEquals(new Span(2, 12), mention.span());
+    assertEquals("2026-07-14", mention.value());
+    assertEquals(Granularity.DAY, mention.granularity());
+  }
+
   @Test
   void testNullTextThrows() {
     assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));

@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.DocumentAnnotators;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.temporal.DocumentDateAnnotator;
@@ -45,6 +46,7 @@ import opennlp.tools.temporal.DocumentDateAnnotator;
  * usable rate are left out of the converted layer and logged at debug level; the
  * original mention stays in the money layer either way, so nothing is lost.</p>
  *
+ * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
  */
 public class MoneyConversionAnnotator implements DocumentAnnotator {
@@ -58,8 +60,6 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
 
   private static final Logger logger =
       LoggerFactory.getLogger(MoneyConversionAnnotator.class);
-
-  private static final String MISSING_LAYER = "document lacks the required layer ";
 
   private final FxRates rates;
   private final String target;
@@ -138,16 +138,11 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
-    if (!document.layers().contains(MoneyAnnotator.MONEY)) {
-      throw new IllegalArgumentException(MISSING_LAYER + MoneyAnnotator.MONEY);
-    }
-    if (asOf == null
-        && !document.layers().contains(DocumentDateAnnotator.DOCUMENT_DATE)) {
-      throw new IllegalArgumentException(MISSING_LAYER
-          + DocumentDateAnnotator.DOCUMENT_DATE);
+    if (asOf != null) {
+      DocumentAnnotators.requireLayers(document, MoneyAnnotator.MONEY);
+    } else {
+      DocumentAnnotators.requireLayers(document, MoneyAnnotator.MONEY,
+          DocumentDateAnnotator.DOCUMENT_DATE);
     }
     final LocalDate date = asOf != null ? asOf : documentDate(document);
     final List<Annotation<MoneyAmount>> converted = new ArrayList<>();
@@ -178,6 +173,7 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
     return dates.isEmpty() ? null : dates.get(0).value();
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> requires() {
     return asOf != null
@@ -185,6 +181,7 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
         : Set.of(MoneyAnnotator.MONEY, DocumentDateAnnotator.DOCUMENT_DATE);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(CONVERTED_MONEY);

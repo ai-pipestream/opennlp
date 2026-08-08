@@ -18,6 +18,7 @@
 package opennlp.tools.money;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -64,6 +65,7 @@ public class CursorMoneyExtractorTest {
       "1.2 million USD; 1200000.0; USD",
       "-$5; -5; USD",
       "-5 USD; -5; USD",
+      "$0.00; 0.00; USD",
       "CHF 42; 42; CHF"
   })
   void testRecognizedShapesCoverTheFullMention(String text, String amount, String currency) {
@@ -242,6 +244,27 @@ public class CursorMoneyExtractorTest {
     assertThrows(IllegalArgumentException.class, () -> new CursorMoneyExtractor(Map.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(Map.of((int) '$', "DOLLARS")));
+    final Map<Integer, String> nullCodePoint = new HashMap<>();
+    nullCodePoint.put(null, "USD");
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor(nullCodePoint));
+  }
+
+  /**
+   * Verifies the scan around supplementary-plane neighbors: a code point outside the
+   * basic multilingual plane before a mention is an ordinary boundary crossed without
+   * splitting its surrogate pair, while a supplementary-plane digit directly before
+   * the number forbids a match exactly as an ASCII digit would.
+   */
+  @Test
+  void testSupplementaryPlaneNeighbors() {
+    // U+1F4B0 (money bag) takes two chars; the mention span starts behind it
+    final MoneyAmount mention = single("\uD83D\uDCB0$5");
+    assertEquals(new Span(2, 4), mention.span());
+    assertEquals(0, new BigDecimal("5").compareTo(mention.amount()));
+
+    // U+1D7D9 (mathematical double-struck one) is a digit, so no number starts after it
+    assertTrue(extractor.extract("\uD835\uDFD95 USD").isEmpty());
   }
 
   @Test
