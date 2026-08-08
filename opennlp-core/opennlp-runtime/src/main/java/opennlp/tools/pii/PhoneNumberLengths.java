@@ -18,7 +18,8 @@
 package opennlp.tools.pii;
 
 /**
- * Length plausibility of international phone numbers by ITU calling code: for every
+ * Length plausibility of international phone numbers by
+ * <a href="https://www.itu.int/rec/T-REC-E.164">ITU-T E.164</a> calling code: for every
  * assigned calling code, the set of national number lengths any territory under that
  * code assigns.
  *
