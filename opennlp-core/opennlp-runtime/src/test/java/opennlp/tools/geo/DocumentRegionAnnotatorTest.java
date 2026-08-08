@@ -410,6 +410,8 @@ public class DocumentRegionAnnotatorTest {
   void testLocationTypesAreValidated(Set<String> locationTypes) {
     assertThrows(IllegalArgumentException.class,
         () -> new DocumentRegionAnnotator(locationTypes));
+    assertThrows(IllegalArgumentException.class,
+        () -> new GeocodeAnnotator(GeoTestUtil.tableGeocoder(Map.of()), locationTypes));
   }
 
   private static Stream<Arguments> invalidLocationTypes() {
