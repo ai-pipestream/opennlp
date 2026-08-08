@@ -69,7 +69,7 @@ public final class PoliMorfDictionaryReader {
    * @param dictionary The dictionary referenced by an open {@link InputStream}. Must not be
    *                   {@code null}.
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
-   * @throws IllegalArgumentException if {@code dictionary} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code dictionary} is {@code null}.
    * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
    *                     fewer than three tab-separated fields.
    */
@@ -84,7 +84,8 @@ public final class PoliMorfDictionaryReader {
    *                   {@code null}.
    * @param charset    The character encoding of the dictionary. Must not be {@code null}.
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
-   * @throws IllegalArgumentException if {@code dictionary} or {@code charset} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code dictionary} or {@code charset} is
+   *                                  {@code null}.
    * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
    *                     fewer than three tab-separated fields.
    */

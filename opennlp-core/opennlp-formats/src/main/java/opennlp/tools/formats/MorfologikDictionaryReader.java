@@ -50,6 +50,10 @@ import opennlp.tools.util.StringUtil;
  *       {@code K} from the end of the form, then append.</li>
  * </ul>
  *
+ * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
+ * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
+ * unreachable.</p>
+ *
  * <p>Dictionary data is supplied by the caller; none is bundled with OpenNLP. This class is
  * stateless, so its methods may be called concurrently.</p>
  */
@@ -57,7 +61,18 @@ public final class MorfologikDictionaryReader {
 
   /** The base-form encoder declared by a dictionary's {@code fsa.dict.encoder}. */
   public enum BaseFormEncoding {
-    NONE, SUFFIX, PREFIX, INFIX
+
+    /** The encoded bytes are the base form verbatim. */
+    NONE,
+
+    /** The base form drops trailing bytes of the surface form, then appends the encoded rest. */
+    SUFFIX,
+
+    /** As {@link #SUFFIX}, and leading bytes of the surface form are dropped too. */
+    PREFIX,
+
+    /** As {@link #SUFFIX}, and a run of bytes inside the surface form is dropped too. */
+    INFIX
   }
 
   /** Value the encoders add to every control byte so that all of them stay printable. */
@@ -86,8 +101,8 @@ public final class MorfologikDictionaryReader {
    * @param encoding   The base-form encoder. Must not be {@code null}.
    * @param charset    The character encoding of the dictionary bytes. Must not be {@code null}.
    * @return A {@link DictionaryLemmatizer} over the decoded entries.
-   * @throws IllegalArgumentException if {@code dictionary}, {@code encoding}, or {@code charset}
-   *                                  is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code dictionary}, {@code encoding}, or
+   *                                  {@code charset} is {@code null}.
    * @throws IOException Thrown on IO errors, if the stream is not a supported FSA automaton, or
    *                     if an entry cannot be split into a form and encoded base.
    */
@@ -133,8 +148,8 @@ public final class MorfologikDictionaryReader {
    *                   {@code fsa.dict.separator}, {@code fsa.dict.encoding}, and
    *                   {@code fsa.dict.encoder}.
    * @return A {@link DictionaryLemmatizer} over the decoded entries.
-   * @throws IllegalArgumentException if an argument is {@code null} or a required metadata key is
-   *                                  missing or invalid.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a required metadata
+   *                                  key is missing or invalid.
    * @throws IOException Thrown on IO errors or invalid dictionary content.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, InputStream info)
@@ -164,7 +179,7 @@ public final class MorfologikDictionaryReader {
    * @param properties The parsed {@code .info} metadata.
    * @param key        The key to read.
    * @return The declared value.
-   * @throws IllegalArgumentException if {@code key} is not declared.
+   * @throws IllegalArgumentException Thrown if {@code key} is not declared.
    */
   private static String required(Properties properties, String key) {
     final String value = properties.getProperty(key);
@@ -183,7 +198,7 @@ public final class MorfologikDictionaryReader {
    * @param encoding  The base-form encoder the dictionary declares.
    * @param charset   The character encoding of the dictionary bytes.
    * @param entries   Collects the lemmas seen per {@code form + tag} key, in first-seen order.
-   * @throws UncheckedIOException if the sequence has no separator or its encoded base is
+   * @throws UncheckedIOException Thrown if the sequence has no separator or its encoded base is
    *                              malformed; the caller unwraps it, since the automaton walk
    *                              cannot propagate a checked exception.
    */
@@ -210,7 +225,6 @@ public final class MorfologikDictionaryReader {
           "malformed morfologik entry: " + new String(sequence, charset), e));
     }
 
-    // Lower-cased to match DictionaryLemmatizer, which lower-cases the queried token before lookup.
     final String key = new String(form, charset).toLowerCase() + FIELD_SEPARATOR + tag;
     entries.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(new String(base, charset));
   }
@@ -222,8 +236,8 @@ public final class MorfologikDictionaryReader {
    * @param encoded  The encoded base bytes: control bytes followed by literal bytes to append.
    * @param encoding The encoder that produced {@code encoded}.
    * @return The decoded base form bytes.
-   * @throws IllegalArgumentException if {@code encoded} is too short for the encoder or the control
-   *                                  bytes address positions outside {@code form}.
+   * @throws IllegalArgumentException Thrown if {@code encoded} is too short for the encoder or the
+   *                                  control bytes address positions outside {@code form}.
    */
   static byte[] decodeBaseForm(byte[] form, byte[] encoded, BaseFormEncoding encoding) {
     switch (encoding) {
@@ -266,7 +280,7 @@ public final class MorfologikDictionaryReader {
    * @param encoded     The encoded base bytes.
    * @param prefixBytes The number of leading control bytes {@code encoding} requires.
    * @param encoding    The encoder that produced {@code encoded}.
-   * @throws IllegalArgumentException if {@code encoded} is shorter than {@code prefixBytes}.
+   * @throws IllegalArgumentException Thrown if {@code encoded} is shorter than {@code prefixBytes}.
    */
   private static void require(byte[] encoded, int prefixBytes, BaseFormEncoding encoding) {
     if (encoded.length < prefixBytes) {
@@ -281,7 +295,7 @@ public final class MorfologikDictionaryReader {
    * @param index The position a control byte resolved to.
    * @param form  The surface form the position must fall in.
    * @return {@code index}, unchanged.
-   * @throws IllegalArgumentException if {@code index} lies outside {@code form}.
+   * @throws IllegalArgumentException Thrown if {@code index} lies outside {@code form}.
    */
   private static int bounded(int index, byte[] form) {
     if (index < 0 || index > form.length) {

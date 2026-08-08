@@ -53,6 +53,13 @@ public final class FSA5Reader implements FsaSequenceReader {
   private final int nodeDataLength;
   private final int rootNode;
 
+  /**
+   * Initializes the reader over the automaton's arc block.
+   *
+   * @param arcs           The arc block, the automaton bytes after the header.
+   * @param gotoLength     The width in bytes of an arc's flags and goto address field.
+   * @param nodeDataLength The width in bytes of the optional data preceding a node's arcs.
+   */
   private FSA5Reader(byte[] arcs, int gotoLength, int nodeDataLength) {
     this.arcs = arcs;
     this.gotoLength = gotoLength;
@@ -69,7 +76,7 @@ public final class FSA5Reader implements FsaSequenceReader {
    * @param in The automaton bytes, referenced by an open {@link InputStream}. Must not be
    *           {@code null}.
    * @return A reader over the automaton.
-   * @throws IllegalArgumentException if {@code in} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    * @throws IOException Thrown on IO errors, or if the stream is not an FSA5 automaton.
    */
   public static FSA5Reader read(InputStream in) throws IOException {
@@ -84,14 +91,13 @@ public final class FSA5Reader implements FsaSequenceReader {
    *
    * @param bytes The whole automaton, magic header included.
    * @return A reader over the automaton.
-   * @throws IOException Thrown if {@code bytes} is not an FSA5 automaton or declares a goto
-   *                     address width of zero.
+   * @throws IOException Thrown if {@code bytes} is not an FSA5 automaton, its header is
+   *                     truncated, or it declares a goto address width of zero.
    */
   static FSA5Reader fromBytes(byte[] bytes) throws IOException {
-    if (bytes.length < HEADER_SIZE
-        || bytes[0] != MAGIC[0] || bytes[1] != MAGIC[1]
-        || bytes[2] != MAGIC[2] || bytes[3] != MAGIC[3]) {
-      throw new IOException("not an FSA automaton: bad magic header");
+    FsaSequenceReader.requireFsaHeader(bytes);
+    if (bytes.length < HEADER_SIZE) {
+      throw new IOException("truncated FSA5 header: fewer than " + HEADER_SIZE + " bytes");
     }
     if ((bytes[4] & 0xff) != VERSION_FSA5) {
       throw new IOException("unsupported FSA version 0x"
@@ -114,8 +120,8 @@ public final class FSA5Reader implements FsaSequenceReader {
    *
    * <p>Sequences are produced in the automaton's stored, lexicographic order.</p>
    *
-   * @throws IllegalStateException if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes, which
-   *                               indicates a malformed automaton.
+   * @throws IllegalStateException Thrown if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes,
+   *                               which indicates a malformed automaton.
    */
   @Override
   public void forEachSequence(Consumer<byte[]> action) {
@@ -131,7 +137,8 @@ public final class FSA5Reader implements FsaSequenceReader {
    * @param node   The offset of the node to descend into.
    * @param path   The labels collected on the way down; pushed and popped in place.
    * @param action The action to run for each accepted sequence.
-   * @throws IllegalStateException if the path grows past {@value #MAX_SEQUENCE_LENGTH} bytes.
+   * @throws IllegalStateException Thrown if the path grows past {@value #MAX_SEQUENCE_LENGTH}
+   *                               bytes.
    */
   private void enumerate(int node, GrowableByteSequence path, Consumer<byte[]> action) {
     if (path.length() > MAX_SEQUENCE_LENGTH) {
@@ -172,7 +179,7 @@ public final class FSA5Reader implements FsaSequenceReader {
    * @param arc The offset of an arc.
    * @return The offset of the node the arc points at, which is either the node laid out directly
    *         after the arc or the goto address stored in the arc, whose low three bits carry the
-   *         arc flags.
+   *         arc flags; {@value #TERMINAL_NODE} if the arc ends a word without continuing.
    */
   private int destinationNode(int arc) {
     if ((arcs[arc + ADDRESS_OFFSET] & BIT_TARGET_NEXT) != 0) {

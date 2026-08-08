@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -59,6 +60,15 @@ public class FSA5ReaderTest {
   @Test
   void testDispatcherReadsFsa5() throws IOException {
     Assertions.assertEquals(EXPECTED, sequences(FsaSequenceReader.read(fixture())));
+  }
+
+  /** A block cut short after a valid magic and version is reported as truncated. */
+  @Test
+  void testRejectsTruncatedHeader() {
+    final byte[] truncated = Arrays.copyOf(Base64.getDecoder().decode(FIXTURE_BASE64), 6);
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> FSA5Reader.read(new ByteArrayInputStream(truncated)));
+    Assertions.assertTrue(e.getMessage().startsWith("truncated FSA5 header"), e.getMessage());
   }
 
   /** A different FSA version fails loudly rather than misreading. */
