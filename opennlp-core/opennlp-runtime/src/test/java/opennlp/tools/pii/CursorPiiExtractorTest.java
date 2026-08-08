@@ -385,6 +385,27 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies that a separator directly before or after a number candidate stays outside
+   * the reported span: a leading hyphen does not join the mention, and a trailing
+   * hyphen neither extends nor suppresses it.
+   *
+   * @param text The text to scan.
+   * @param covered The exact text the single reported span must cover.
+   */
+  @ParameterizedTest
+  @CsvSource({
+      "call -555-123-4567 now, 555-123-4567",
+      "call 555-123-4567- now, 555-123-4567",
+      "card 4111 1111 1111 1111- end, 4111 1111 1111 1111"})
+  void testSeparatorNeighborsStayOutsideTheSpan(String text, String covered) {
+    final List<PiiMention> mentions = extractor.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(covered, text.substring(
+        mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
+  }
+
+  /**
    * Verifies the multi-boundary backoff path on a card that itself contains
    * separators: the greedy candidate ends in a trailing three-digit group, forming a
    * nineteen-digit candidate that is in range but fails the Luhn check, and the scan

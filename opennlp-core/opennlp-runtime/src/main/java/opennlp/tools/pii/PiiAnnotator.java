@@ -37,7 +37,7 @@ import opennlp.tools.document.Layers;
  *
  * @since 3.0.0
  */
-public class PiiAnnotator implements DocumentAnnotator {
+public final class PiiAnnotator implements DocumentAnnotator {
 
   /**
    * PII mentions; each annotation covers one mention and carries its {@link PiiMention}.
@@ -82,6 +82,7 @@ public class PiiAnnotator implements DocumentAnnotator {
     return document.with(PII, mentions);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(PII);

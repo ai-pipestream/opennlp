@@ -43,10 +43,12 @@ import opennlp.tools.util.Span;
  *   keeps decimal numbers out.</li>
  *   <li>IBAN: two uppercase letters, two check digits, and 11 to 30 more uppercase
  *   letters or digits, 15 to 34 characters in total, optionally in space-separated
- *   groups, validated with the mod-97 check. Country-specific length tables are not
- *   applied.</li>
+ *   groups, validated with the
+ *   <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
+ *   mod-97 check. Country-specific length tables are not applied.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
- *   validated with the Luhn check and required to start with a digit between 2 and 6,
+ *   validated with the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a>
+ *   check and required to start with a digit between 2 and 6,
  *   the range that covers the major card networks. When the full run fails the check,
  *   shorter separator-delimited prefixes are tried longest first, so a trailing
  *   separated digit group, such as an expiry date, does not hide the card before
@@ -145,8 +147,7 @@ public class CursorPiiExtractor implements PiiExtractor {
       if (end == i + 1
           || !validDomain(text.subSequence(i + 1, end).toString())
           || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
-          || (end < text.length()
-              && Character.isLetterOrDigit(Character.codePointAt(text, end)))) {
+          || !onEndBoundary(text, end)) {
         continue;
       }
       final String normalized =
@@ -250,8 +251,7 @@ public class CursorPiiExtractor implements PiiExtractor {
         final int textEnd = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < IBAN_MIN_LENGTH || length > IBAN_MAX_LENGTH
-            || (textEnd < text.length()
-                && Character.isLetterOrDigit(Character.codePointAt(text, textEnd)))) {
+            || !onEndBoundary(text, textEnd)) {
           continue;
         }
         if (mod97(compact, length) == 1) {
@@ -306,8 +306,7 @@ public class CursorPiiExtractor implements PiiExtractor {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
-            || (end < text.length()
-                && Character.isLetterOrDigit(Character.codePointAt(text, end)))
+            || !onEndBoundary(text, end)
             || !luhnValid(digits, length)) {
           continue;
         }
@@ -393,8 +392,7 @@ public class CursorPiiExtractor implements PiiExtractor {
             : count >= PHONE_DOMESTIC_MIN_DIGITS && count <= PHONE_DOMESTIC_MAX_DIGITS
                 && visiblySeparated;
         if (!lengthOk
-            || (end < text.length()
-                && Character.isLetterOrDigit(Character.codePointAt(text, end)))
+            || !onEndBoundary(text, end)
             || (end + 1 < text.length() && text.charAt(end) == '.'
                 && isAsciiDigit(text.charAt(end + 1)))) {
           continue;
@@ -429,6 +427,19 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
+   * Checks that a candidate ending at {@code end} does not continue into a letter or
+   * digit, judged on the full code point to the right.
+   *
+   * @param text The text being scanned.
+   * @param end The candidate end, exclusive.
+   * @return {@code true} if the candidate may end here.
+   */
+  private boolean onEndBoundary(CharSequence text, int end) {
+    return end >= text.length()
+        || !Character.isLetterOrDigit(Character.codePointAt(text, end));
+  }
+
+  /**
    * Resolves overlapping candidates: leftmost first, then longest, then the more
    * specific type.
    *
@@ -457,8 +468,10 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Computes the IBAN mod-97 remainder of a compact candidate. The four leading
-   * characters are read last, which is the rearrangement the check prescribes.
+   * Computes the mod-97 remainder that
+   * <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
+   * prescribes for a compact IBAN candidate. The four leading characters are read last,
+   * which is the rearrangement the check prescribes.
    *
    * @param compact The candidate characters without spaces, uppercase letters and digits
    *                only.
@@ -480,7 +493,8 @@ public class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Applies the Luhn check to a digit sequence.
+   * Applies the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a> check
+   * to a digit sequence.
    *
    * @param digits The digits to check.
    * @param length The number of leading digits that form the candidate.
