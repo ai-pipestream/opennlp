@@ -36,7 +36,7 @@ import opennlp.tools.document.Layers;
  *
  * @since 3.0.0
  */
-public class GlossaryAnnotator implements DocumentAnnotator {
+public final class GlossaryAnnotator implements DocumentAnnotator {
 
   /**
    * Glossary hits; each annotation covers one hit and carries its {@link GlossaryMatch}.
@@ -85,6 +85,7 @@ public class GlossaryAnnotator implements DocumentAnnotator {
     return document.with(GLOSSARY, hits);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(GLOSSARY);
