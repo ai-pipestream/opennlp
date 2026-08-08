@@ -86,6 +86,7 @@ public class TemporalAnnotator implements DocumentAnnotator {
     return document.with(TEMPORALS, mentions);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(TEMPORALS);

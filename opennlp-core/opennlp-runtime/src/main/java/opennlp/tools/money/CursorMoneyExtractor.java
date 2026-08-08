@@ -54,6 +54,7 @@ import opennlp.tools.util.Span;
  * decimal commas. The extractor holds no per-call state and is safe to share between
  * threads.</p>
  *
+ * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
  */
 public class CursorMoneyExtractor implements MoneyExtractor {
@@ -73,34 +74,49 @@ public class CursorMoneyExtractor implements MoneyExtractor {
 
   private static final Set<String> ISO_CODES = isoCodes();
 
-  private final Map<Integer, String> symbols;
+  /**
+   * The symbol table flattened into parallel arrays: the code point at an index denotes
+   * the currency code at the same index. The scan looks a symbol up at every text
+   * position, and the primitive form keeps that lookup free of boxing.
+   */
+  private final int[] symbolCodePoints;
+  private final String[] currencyCodes;
 
   /**
    * Initializes the extractor with the default symbol table.
    */
   public CursorMoneyExtractor() {
-    this.symbols = DEFAULT_SYMBOLS;
+    this(DEFAULT_SYMBOLS);
   }
 
   /**
    * Initializes the extractor with a custom symbol table.
    *
    * @param symbolCurrencies Maps a currency symbol code point to the ISO 4217 code it
-   *                         denotes. Must not be {@code null} or empty, and every value
-   *                         must be a known ISO 4217 code.
-   * @throws IllegalArgumentException Thrown if the map is {@code null}, empty, or names
-   *         an unknown currency code.
+   *                         denotes. Must not be {@code null} or empty, no key may be
+   *                         {@code null}, and every value must be a known ISO 4217 code.
+   * @throws IllegalArgumentException Thrown if the map is {@code null} or empty, maps a
+   *         {@code null} code point, or names an unknown currency code.
    */
   public CursorMoneyExtractor(Map<Integer, String> symbolCurrencies) {
     if (symbolCurrencies == null || symbolCurrencies.isEmpty()) {
       throw new IllegalArgumentException("symbolCurrencies must not be null or empty");
     }
-    for (final String code : symbolCurrencies.values()) {
+    this.symbolCodePoints = new int[symbolCurrencies.size()];
+    this.currencyCodes = new String[symbolCurrencies.size()];
+    int i = 0;
+    for (final Map.Entry<Integer, String> symbol : symbolCurrencies.entrySet()) {
+      if (symbol.getKey() == null) {
+        throw new IllegalArgumentException("symbolCurrencies must not map a null code point");
+      }
+      final String code = symbol.getValue();
       if (code == null || !ISO_CODES.contains(code)) {
         throw new IllegalArgumentException("not an ISO 4217 currency code: " + code);
       }
+      symbolCodePoints[i] = symbol.getKey();
+      currencyCodes[i] = code;
+      i++;
     }
-    this.symbols = Map.copyOf(symbolCurrencies);
   }
 
   /**
@@ -186,9 +202,10 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       i++;
     }
     final int cp = NumberScan.codePointAt(text, i);
-    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)
+    final String symbolCurrency = currencyFor(cp);
+    if (symbolCurrency != null
         && (!negative || NumberScan.signBoundaryBefore(text, start))) {
-      return symbolFirst(text, start, i, negative);
+      return symbolFirst(text, start, i, symbolCurrency, negative);
     }
     if (!negative && isUpperAscii(cp) && NumberScan.boundaryBefore(text, i)) {
       final MoneyAmount isoFirst = isoFirst(text, start, i);
@@ -210,12 +227,12 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * @param text The text being scanned.
    * @param start The offset the mention starts at, the minus sign included.
    * @param symbolIndex The offset of the currency symbol.
+   * @param currency The ISO 4217 code the symbol denotes.
    * @param negative {@code true} if a minus sign opens the mention.
    * @return The mention, or {@code null} when no number follows the symbol.
    */
   private MoneyAmount symbolFirst(CharSequence text, int start, int symbolIndex,
-      boolean negative) {
-    final String currency = symbols.get(NumberScan.codePointAt(text, symbolIndex));
+      String currency, boolean negative) {
     int i = symbolIndex + Character.charCount(NumberScan.codePointAt(text, symbolIndex));
     if (NumberScan.charAt(text, i) == ' ') {
       i++;
@@ -255,10 +272,11 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       return null;
     }
     final int cp = NumberScan.codePointAt(text, number.end());
-    if (cp != NumberScan.NO_CODE_POINT && symbols.containsKey(cp)) {
+    final String currency = currencyFor(cp);
+    if (currency != null) {
       final NumberScan.Result extended = new NumberScan.Result(number.value(),
           number.end() + Character.charCount(cp));
-      return mention(text, start, extended, symbols.get(cp), negative);
+      return mention(text, start, extended, currency, negative);
     }
     if (cp == ' ') {
       final String code = isoCodeAt(text, number.end() + 1);
@@ -312,6 +330,23 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     }
     final String code = text.subSequence(start, start + 3).toString();
     return ISO_CODES.contains(code) ? code : null;
+  }
+
+  /**
+   * Resolves the currency a symbol code point denotes.
+   *
+   * @param cp The code point to look up; {@link NumberScan#NO_CODE_POINT} matches no
+   *           symbol.
+   * @return The ISO 4217 code the symbol denotes, or {@code null} when {@code cp} is no
+   *         known currency symbol.
+   */
+  private String currencyFor(int cp) {
+    for (int i = 0; i < symbolCodePoints.length; i++) {
+      if (symbolCodePoints[i] == cp) {
+        return currencyCodes[i];
+      }
+    }
+    return null;
   }
 
   /**

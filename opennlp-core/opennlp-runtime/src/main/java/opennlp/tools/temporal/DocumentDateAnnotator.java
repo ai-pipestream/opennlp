@@ -25,6 +25,7 @@ import java.util.Set;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.DocumentAnnotators;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
@@ -40,6 +41,7 @@ import opennlp.tools.document.Layers;
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
+ * @see <a href="https://www.iso.org/iso-8601-date-and-time-format.html">ISO 8601</a>
  * @since 3.0.0
  */
 public class DocumentDateAnnotator implements DocumentAnnotator {
@@ -50,8 +52,6 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
    */
   public static final LayerKey<LocalDate> DOCUMENT_DATE =
       Layers.key("document.date", LocalDate.class);
-
-  private static final String MISSING_LAYER = "document lacks the required layer ";
 
   /**
    * Elects the document date from the first day-granularity temporal mention.
@@ -69,12 +69,7 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
    */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
-    if (!document.layers().contains(TemporalAnnotator.TEMPORALS)) {
-      throw new IllegalArgumentException(MISSING_LAYER + TemporalAnnotator.TEMPORALS);
-    }
+    DocumentAnnotators.requireLayers(document, TemporalAnnotator.TEMPORALS);
     for (final Annotation<TemporalExpression> mention
         : document.get(TemporalAnnotator.TEMPORALS)) {
       if (mention.value().granularity() == TemporalExpression.Granularity.DAY) {
@@ -92,11 +87,13 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
     return document.with(DOCUMENT_DATE, List.of());
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> requires() {
     return Set.of(TemporalAnnotator.TEMPORALS);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(DOCUMENT_DATE);

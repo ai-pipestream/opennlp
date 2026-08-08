@@ -35,6 +35,7 @@ import opennlp.tools.util.Span;
  * @param currency The ISO 4217 alphabetic currency code, for example {@code USD}. Must
  *                 not be {@code null} or blank.
  *
+ * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
  */
 public record MoneyAmount(Span span, BigDecimal amount, String currency) {

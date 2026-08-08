@@ -84,6 +84,7 @@ public class QuantityAnnotator implements DocumentAnnotator {
     return document.with(QUANTITIES, mentions);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(QUANTITIES);

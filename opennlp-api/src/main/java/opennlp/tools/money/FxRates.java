@@ -31,6 +31,7 @@ import java.util.Optional;
  * document speaks from, which callers can take from document metadata or from a
  * temporal mention in the text.</p>
  *
+ * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
  */
 public interface FxRates {
