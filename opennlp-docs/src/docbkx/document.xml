@@ -395,7 +395,8 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 	<section xml:id="tools.document.region-currency">
 		<title>Region ballot and currency signs</title>
 		<para>
-			<code>DocumentRegionAnnotator</code> turns geocoded location entities into a
+			<code>GeocodeAnnotator</code> resolves location entities into a locations
+			layer, <code>DocumentRegionAnnotator</code> turns those resolutions into a
 			document-scoped region ballot: countries ranked by confidence-weighted share.
 			<code>RegionAwareMoneyAnnotator</code> then reads that ballot and resolves
 			ambiguous currency signs such as <code>$</code> from the winning country, so a
@@ -408,7 +409,8 @@ Document withEntities = Document.of(
     .with(Layers.ENTITIES, locationEntities);
 
 Document document = new RegionAwareMoneyAnnotator().annotate(
-    new DocumentRegionAnnotator(geocoder).annotate(withEntities));
+    new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder).annotate(withEntities)));
 
 List<Annotation<RegionVote>> ballot =
     document.get(DocumentRegionAnnotator.REGIONS);
