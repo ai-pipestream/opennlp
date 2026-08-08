@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -65,6 +66,15 @@ public class CFSA2ReaderTest {
   void testRejectsNonFsaMagic() {
     Assertions.assertThrows(IOException.class, () -> CFSA2Reader.read(
         new ByteArrayInputStream("not an fsa header".getBytes(StandardCharsets.UTF_8))));
+  }
+
+  /** A block cut short after a valid magic and version is reported as truncated. */
+  @Test
+  void testRejectsTruncatedHeader() {
+    final byte[] truncated = Arrays.copyOf(Base64.getDecoder().decode(FIXTURE_BASE64), 6);
+    final IOException e = Assertions.assertThrows(IOException.class,
+        () -> CFSA2Reader.read(new ByteArrayInputStream(truncated)));
+    Assertions.assertTrue(e.getMessage().startsWith("truncated CFSA2 header"), e.getMessage());
   }
 
   /** An FSA of a different version than CFSA2 fails loudly rather than misreading. */

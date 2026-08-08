@@ -57,6 +57,13 @@ public final class CFSA2Reader implements FsaSequenceReader {
   private final boolean hasNumbers;
   private final int rootNode;
 
+  /**
+   * Initializes the reader over the automaton's arc block.
+   *
+   * @param arcs         The arc block, the automaton bytes after the header and label table.
+   * @param labelMapping The label table indexed by an arc's label index.
+   * @param hasNumbers   Whether each node is prefixed with a perfect-hash number to skip.
+   */
   private CFSA2Reader(byte[] arcs, byte[] labelMapping, boolean hasNumbers) {
     this.arcs = arcs;
     this.labelMapping = labelMapping;
@@ -70,7 +77,7 @@ public final class CFSA2Reader implements FsaSequenceReader {
    * @param in The automaton bytes, referenced by an open {@link InputStream}. Must not be
    *           {@code null}.
    * @return A reader over the automaton.
-   * @throws IllegalArgumentException if {@code in} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    * @throws IOException Thrown on IO errors, or if the stream is not a CFSA2 automaton.
    */
   public static CFSA2Reader read(InputStream in) throws IOException {
@@ -89,10 +96,9 @@ public final class CFSA2Reader implements FsaSequenceReader {
    *                     truncated.
    */
   static CFSA2Reader fromBytes(byte[] bytes) throws IOException {
-    if (bytes.length < HEADER_SIZE
-        || bytes[0] != MAGIC[0] || bytes[1] != MAGIC[1]
-        || bytes[2] != MAGIC[2] || bytes[3] != MAGIC[3]) {
-      throw new IOException("not an FSA automaton: bad magic header");
+    FsaSequenceReader.requireFsaHeader(bytes);
+    if (bytes.length < HEADER_SIZE) {
+      throw new IOException("truncated CFSA2 header: fewer than " + HEADER_SIZE + " bytes");
     }
     if ((bytes[4] & 0xff) != VERSION_CFSA2) {
       throw new IOException("unsupported FSA version 0x"
@@ -114,8 +120,8 @@ public final class CFSA2Reader implements FsaSequenceReader {
    *
    * <p>Sequences are produced in the automaton's stored, lexicographic order.</p>
    *
-   * @throws IllegalStateException if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes, which
-   *                               indicates a malformed automaton.
+   * @throws IllegalStateException Thrown if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes,
+   *                               which indicates a malformed automaton.
    */
   @Override
   public void forEachSequence(Consumer<byte[]> action) {
@@ -131,7 +137,8 @@ public final class CFSA2Reader implements FsaSequenceReader {
    * @param node   The offset of the node to descend into.
    * @param path   The labels collected on the way down; pushed and popped in place.
    * @param action The action to run for each accepted sequence.
-   * @throws IllegalStateException if the path grows past {@value #MAX_SEQUENCE_LENGTH} bytes.
+   * @throws IllegalStateException Thrown if the path grows past {@value #MAX_SEQUENCE_LENGTH}
+   *                               bytes.
    */
   private void enumerate(int node, GrowableByteSequence path, Consumer<byte[]> action) {
     if (path.length() > MAX_SEQUENCE_LENGTH) {
@@ -182,7 +189,8 @@ public final class CFSA2Reader implements FsaSequenceReader {
   /**
    * @param arc The offset of an arc.
    * @return The offset of the node the arc points at, which is either the node laid out directly
-   *         after the arc's own node or an explicit variable-length address.
+   *         after the arc's own node or an explicit variable-length address;
+   *         {@value #TERMINAL_NODE} if the arc ends a word without continuing.
    */
   private int destinationNode(int arc) {
     if ((arcs[arc] & BIT_TARGET_NEXT) != 0) {
