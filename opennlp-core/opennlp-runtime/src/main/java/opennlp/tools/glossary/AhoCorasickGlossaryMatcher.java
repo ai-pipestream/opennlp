@@ -50,6 +50,8 @@ import opennlp.tools.util.Span;
  * <p>The automaton is built once in the constructor; matching holds no per-call state
  * and is safe to share between threads.</p>
  *
+ * @see <a href="https://doi.org/10.1145/360825.360855">Aho, Corasick (1975): Efficient
+ *      string matching: An aid to bibliographic search</a>
  * @since 3.0.0
  */
 public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
