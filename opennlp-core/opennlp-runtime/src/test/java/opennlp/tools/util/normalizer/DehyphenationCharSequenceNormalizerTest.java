@@ -17,6 +17,8 @@
 package opennlp.tools.util.normalizer;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
 
@@ -50,11 +52,10 @@ public class DehyphenationCharSequenceNormalizerTest {
     assertEquals("complete", NORMALIZER.normalize("com-\rplete").toString());
   }
 
-  @Test
-  void testJoinAcrossNextLineAndUnicodeSeparators() {
-    assertEquals("litigation", NORMALIZER.normalize("litiga-\u0085tion").toString());
-    assertEquals("litigation", NORMALIZER.normalize("litiga-\u2028tion").toString());
-    assertEquals("litigation", NORMALIZER.normalize("litiga-\u2029tion").toString());
+  @ParameterizedTest
+  @ValueSource(strings = {"litiga-\u0085tion", "litiga-\u2028tion", "litiga-\u2029tion"})
+  void testJoinAcrossNextLineAndUnicodeSeparators(String text) {
+    assertEquals("litigation", NORMALIZER.normalize(text).toString());
   }
 
   @Test
@@ -62,11 +63,10 @@ public class DehyphenationCharSequenceNormalizerTest {
     assertEquals("litigation", NORMALIZER.normalize("litiga\u00AD\ntion").toString());
   }
 
-  @Test
-  void testJoinConsumesContinuationLineIndentation() {
-    assertEquals("complete", NORMALIZER.normalize("com-\r\n  plete").toString());
-    assertEquals("complete", NORMALIZER.normalize("com-\n\t\tplete").toString());
-    assertEquals("complete", NORMALIZER.normalize("com-\n \u00A0plete").toString());
+  @ParameterizedTest
+  @ValueSource(strings = {"com-\r\n  plete", "com-\n\t\tplete", "com-\n \u00A0plete"})
+  void testJoinConsumesContinuationLineIndentation(String text) {
+    assertEquals("complete", NORMALIZER.normalize(text).toString());
   }
 
   @Test
@@ -81,11 +81,11 @@ public class DehyphenationCharSequenceNormalizerTest {
     assertEquals("well-known", NORMALIZER.normalize("well-known").toString());
   }
 
-  @Test
-  void testHyphenBreakBeforeNonLetterIsLeftAlone() {
+  @ParameterizedTest
+  @ValueSource(strings = {"ver-\n3", "end-\n."})
+  void testHyphenBreakBeforeNonLetterIsLeftAlone(String text) {
     // A break after the hyphen is not enough; the continuation must start with a letter.
-    assertEquals("ver-\n3", NORMALIZER.normalize("ver-\n3").toString());
-    assertEquals("end-\n.", NORMALIZER.normalize("end-\n.").toString());
+    assertEquals(text, NORMALIZER.normalize(text).toString());
   }
 
   @Test
