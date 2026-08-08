@@ -61,7 +61,7 @@ import opennlp.tools.util.StringUtil;
  */
 public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalizer {
 
-  private static final long serialVersionUID = 4683159051097208073L;
+  private static final long serialVersionUID = 3659585484250150798L;
 
   private static final char HYPHEN_MINUS = '-';
   private static final char SOFT_HYPHEN = '\u00AD';
