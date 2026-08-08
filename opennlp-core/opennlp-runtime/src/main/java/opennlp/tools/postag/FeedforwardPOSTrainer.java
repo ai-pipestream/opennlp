@@ -55,6 +55,10 @@ public final class FeedforwardPOSTrainer {
 
   private static final double ADAGRAD_EPSILON = 1e-6;
 
+  /** The special symbols heading every vocabulary: the unknown and the padding symbol. */
+  private static final List<String> SPECIAL_SYMBOLS =
+      List.of(FeedforwardPOSModel.UNKNOWN, FeedforwardPOSModel.ABSENT);
+
   private FeedforwardPOSTrainer() {
     // This class only exposes static training methods and is never instantiated.
   }
@@ -293,8 +297,7 @@ public final class FeedforwardPOSTrainer {
 
     int row = 0;
     final Map<String, Integer> wordIds = new LinkedHashMap<>();
-    for (final String special : List.of(FeedforwardPOSModel.UNKNOWN,
-        FeedforwardPOSModel.ABSENT)) {
+    for (final String special : SPECIAL_SYMBOLS) {
       wordIds.put(special, row++);
     }
     for (final Map.Entry<String, Integer> entry : wordCounts.entrySet()) {
@@ -303,8 +306,7 @@ public final class FeedforwardPOSTrainer {
       }
     }
     final Map<String, Integer> suffixIds = new LinkedHashMap<>();
-    for (final String special : List.of(FeedforwardPOSModel.UNKNOWN,
-        FeedforwardPOSModel.ABSENT)) {
+    for (final String special : SPECIAL_SYMBOLS) {
       suffixIds.put(special, row++);
     }
     for (final Map.Entry<String, Integer> entry : suffixCounts.entrySet()) {
@@ -314,16 +316,14 @@ public final class FeedforwardPOSTrainer {
       }
     }
     final Map<String, Integer> shapeIds = new LinkedHashMap<>();
-    for (final String special : List.of(FeedforwardPOSModel.UNKNOWN,
-        FeedforwardPOSModel.ABSENT)) {
+    for (final String special : SPECIAL_SYMBOLS) {
       shapeIds.put(special, row++);
     }
     for (final String shape : FeedforwardPOSContext.SHAPES) {
       shapeIds.put(shape, row++);
     }
     final Map<String, Integer> tagIds = new LinkedHashMap<>();
-    for (final String special : List.of(FeedforwardPOSModel.UNKNOWN,
-        FeedforwardPOSModel.ABSENT)) {
+    for (final String special : SPECIAL_SYMBOLS) {
       tagIds.put(special, row++);
     }
     final String[] tags = new String[tagSet.size()];

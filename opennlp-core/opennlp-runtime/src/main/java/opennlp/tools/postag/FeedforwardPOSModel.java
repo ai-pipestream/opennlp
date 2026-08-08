@@ -439,7 +439,7 @@ public class FeedforwardPOSModel {
    * @param symbol The symbol, or {@code null} for an absent position.
    * @return The embedding row index.
    */
-  private static int lookup(Map<String, Integer> ids, String symbol) {
+  private int lookup(Map<String, Integer> ids, String symbol) {
     Integer id = ids.get(symbol == null ? ABSENT : symbol);
     if (id == null) {
       id = ids.get(UNKNOWN);

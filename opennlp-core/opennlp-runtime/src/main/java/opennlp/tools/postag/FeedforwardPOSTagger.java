@@ -163,7 +163,7 @@ public class FeedforwardPOSTagger implements POSTagger {
    *         trained model produces; returning it would violate the documented range and
    *         silently corrupt every score-ordered collection downstream.
    */
-  private static double probability(double[] scores, int best) {
+  private double probability(double[] scores, int best) {
     double total = 0.0;
     for (final double score : scores) {
       total += StrictMath.exp(score - scores[best]);
