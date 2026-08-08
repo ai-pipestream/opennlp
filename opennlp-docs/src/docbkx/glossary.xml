@@ -36,9 +36,10 @@
 			The annotator requires no other layer, so it can sit anywhere in a
 			<code>DocumentAnalyzer</code>. The example below builds a three-entry
 			glossary, runs it after a model-free tokenizer, and reads
-			<code>GlossaryAnnotator.GLOSSARY</code> back with exact spans. Case
-			folding is on, so a registered lowercase term still covers a mixed-case
-			mention while the span points at the original characters.
+			<code>GlossaryAnnotator.GLOSSARY</code> back with exact spans.
+			Case-insensitive matching is on, so a registered lowercase term still
+			covers a mixed-case mention while the span points at the original
+			characters.
 			<code>GlossaryUsageExampleTest</code> asserts the behavior shown here.
 		</para>
 		<programlisting language="java">
@@ -60,8 +61,8 @@ List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
 // three hits: "Apache OpenNLP", "Maximum Entropy model", "perceptron model"]]>
 		</programlisting>
 		<para>
-			A document that never saw a glossary annotator reads an empty glossary
-			layer, and the key is absent from <code>layers()</code>.
+			A document that never saw a glossary annotator reads as an empty
+			glossary layer, and the key is absent from <code>layers()</code>.
 		</para>
 	</section>
 </chapter>
