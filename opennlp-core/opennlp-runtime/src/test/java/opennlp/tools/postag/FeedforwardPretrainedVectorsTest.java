@@ -84,6 +84,8 @@ public class FeedforwardPretrainedVectorsTest {
    * Asserts the discriminating pair. Without vectors every example presents the same
    * input, so the model necessarily assigns every word one and the same tag. With
    * vectors the same corpus and hyperparameters separate perfectly.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails.
    */
   @Test
   void testVectorsSeparateWhatDiscreteFeaturesCannot() throws IOException {
@@ -117,6 +119,8 @@ public class FeedforwardPretrainedVectorsTest {
    * Asserts the format versioning: a model without the block keeps the original magic,
    * one with the block carries the versioned magic, and a serialize/load round trip
    * preserves every tagging decision, including over words without a stored vector.
+   *
+   * @throws IOException Thrown if the in-memory serialization round trip fails.
    */
   @Test
   void testRoundTripPreservesFormatAndTagging() throws IOException {
@@ -149,6 +153,8 @@ public class FeedforwardPretrainedVectorsTest {
    * vectors stored through the lexicon, so tagging separates them by vector class,
    * while the same words on a model trained without the lexicon present identical
    * inputs and provably tag identically.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails.
    */
   @Test
   void testLexiconExtendsCoverageBeyondTrainingWords() throws IOException {
@@ -167,7 +173,11 @@ public class FeedforwardPretrainedVectorsTest {
         "without the lexicon both words score the block as zeros and must tag alike");
   }
 
-  /** A lexicon word the source has no vector for is skipped, not an error. */
+  /**
+   * A lexicon word the source has no vector for is skipped, not an error.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails.
+   */
   @Test
   void testLexiconWordsWithoutAVectorAreSkipped() throws IOException {
     final Function<CharSequence, float[]> partial =
@@ -179,6 +189,7 @@ public class FeedforwardPretrainedVectorsTest {
     assertEquals("A", new FeedforwardPOSTagger(model).tag(new String[] {"aazqy"})[0]);
   }
 
+  /** The lexicon overload must reject a {@code null} lexicon and a contained {@code null}. */
   @Test
   void testLexiconRejectsContractViolations() {
     assertThrows(IllegalArgumentException.class, () -> FeedforwardPOSTrainer.train(
@@ -190,7 +201,11 @@ public class FeedforwardPretrainedVectorsTest {
         "a lexicon containing null must fail loud");
   }
 
-  /** A word the model never saw scores the vector block as zeros and still tags. */
+  /**
+   * A word the model never saw scores the vector block as zeros and still tags.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails.
+   */
   @Test
   void testWordsWithoutAStoredVectorStillTag() throws IOException {
     final FeedforwardPOSModel model = FeedforwardPOSTrainer.train(
@@ -200,6 +215,13 @@ public class FeedforwardPretrainedVectorsTest {
     assertTrue("A".equals(tags[0]) || "B".equals(tags[0]));
   }
 
+  /**
+   * Asserts the fail-loud contract of the vector option: a {@code null} or degenerate
+   * vector source is rejected at training time, and scoring must refuse both a plain
+   * model given vector rows and a vectored model given none.
+   *
+   * @throws IOException Thrown if training the two models for the scoring checks fails.
+   */
   @Test
   void testRejectsContractViolations() throws IOException {
     assertThrows(IllegalArgumentException.class, () -> FeedforwardPOSTrainer.train(

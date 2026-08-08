@@ -20,6 +20,7 @@ package opennlp.tools.postag;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -50,6 +51,13 @@ public class FeedforwardPOSTaggerTest {
   private static FeedforwardPOSModel model;
   private static FeedforwardPOSTagger tagger;
 
+  /**
+   * Builds the tiny in-memory training corpus. Each distinct sentence is repeated so
+   * that the network sees every word often enough to learn stable tag decisions, and
+   * every word clears the frequency cutoff for its own embedding.
+   *
+   * @return The training samples. Never {@code null} and never empty.
+   */
   private static List<POSSample> corpus() {
     final List<POSSample> distinct = List.of(
         new POSSample(new String[] {"the", "dog", "barks"},
@@ -64,9 +72,15 @@ public class FeedforwardPOSTaggerTest {
     return corpus;
   }
 
+  /**
+   * Trains the shared model once for all tests in this class. Dropout is disabled and
+   * the seed is fixed so that the tiny training run is fully deterministic.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails, which
+   *         does not happen in practice.
+   */
   @BeforeAll
   static void trainTagger() throws IOException {
-    // dropout off so the tiny network memorizes deterministically
     final FeedforwardPOSTrainer.Settings settings = new FeedforwardPOSTrainer.Settings(
         16, 32, 80, 32, 0.05, 0.0, 0.0, 1, 1, 17L);
     model = FeedforwardPOSTrainer.train(
@@ -74,6 +88,7 @@ public class FeedforwardPOSTaggerTest {
     tagger = new FeedforwardPOSTagger(model);
   }
 
+  /** Sentences from the training corpus must come back with their gold tags. */
   @Test
   void testMemorizesTrainingSentences() {
     assertArrayEquals(new String[] {"DT", "NN", "VBZ"},
@@ -82,6 +97,7 @@ public class FeedforwardPOSTaggerTest {
         tagger.tag(new String[] {"she", "eats", "fish"}));
   }
 
+  /** A sentence with an unknown word must still get tags from the model's inventory. */
   @Test
   void testUnknownWordsStillGetTagsFromTheInventory() {
     final String[] assigned = tagger.tag(new String[] {"the", "cat", "sleeps"});
@@ -92,6 +108,11 @@ public class FeedforwardPOSTaggerTest {
     }
   }
 
+  /**
+   * A serialize/load round trip must preserve tagging behavior.
+   *
+   * @throws IOException Thrown if the in-memory round trip fails.
+   */
   @Test
   void testModelRoundTripThroughSerialization() throws IOException {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -102,12 +123,14 @@ public class FeedforwardPOSTaggerTest {
         new FeedforwardPOSTagger(reloaded).tag(new String[] {"the", "dog", "barks"}));
   }
 
+  /** Content that is not a model must be rejected with an {@link IOException}. */
   @Test
   void testCorruptModelFailsLoud() {
     assertThrows(IOException.class, () -> FeedforwardPOSModel.load(
-        new ByteArrayInputStream("not a model".getBytes())));
+        new ByteArrayInputStream("not a model".getBytes(StandardCharsets.UTF_8))));
   }
 
+  /** Pins every shape class {@link FeedforwardPOSContext#shape(String)} can return. */
   @ParameterizedTest
   @CsvSource({
       "Paris, *cap*",
@@ -120,15 +143,21 @@ public class FeedforwardPOSTaggerTest {
     assertEquals(expected, FeedforwardPOSContext.shape(word));
   }
 
+  /** Pins the suffix extraction on words longer than, equal to, and shorter than it. */
   @ParameterizedTest
   @CsvSource({
       "dog, 2, og",
       "dog, 3, dog",
+      "a, 2, a",
       "running, 3, ing"})
   void testSuffixes(String word, int length, String expected) {
     assertEquals(expected, FeedforwardPOSContext.suffix(word, length));
   }
 
+  /**
+   * The returned array must hold exactly the greedy tagging, with per-token
+   * probabilities in {@code (0, 1]} whose logs sum to the sequence score.
+   */
   @Test
   void testTopKSequencesReturnsTheGreedyTaggingWithRealProbabilities() {
     final String[] sentence = {"the", "dog", "barks"};
@@ -225,6 +254,7 @@ public class FeedforwardPOSTaggerTest {
         () -> tagger.topKSequences(null, new Object[0]));
   }
 
+  /** The {@code additionalContext} overload must decide exactly like the plain one. */
   @Test
   void testTopKSequencesIgnoresAdditionalContext() {
     final String[] sentence = {"she", "eats", "fish"};
@@ -253,34 +283,57 @@ public class FeedforwardPOSTaggerTest {
    */
   private static final class TagOnlyParser extends AbstractBottomUpParser {
 
+    /**
+     * Initializes the parser around the tagger under test; no chunker is needed.
+     *
+     * @param tagger The tagger driving the tagging stage.
+     */
     TagOnlyParser(POSTagger tagger) {
       super(tagger, null, new NoPunctuationHeadRules(), defaultBeamSize,
           defaultAdvancePercentage);
     }
 
+    /**
+     * Opens the protected {@code advanceTags} to the test.
+     *
+     * @param p The tokens to tag.
+     * @return The tagged parses.
+     */
     Parse[] advanceTagsOf(Parse p) {
       return advanceTags(p);
     }
 
+    /**
+     * {@inheritDoc} Never advances a parse; tagging is the only stage under test.
+     */
     @Override
     protected Parse[] advanceParses(Parse p, double probMass) {
       return new Parse[0];
     }
 
+    /**
+     * {@inheritDoc} Does nothing; tagging is the only stage under test.
+     */
     @Override
     protected void advanceTop(Parse p) {
-      // Tagging is the only stage under test, so there is no top stage to advance.
+      // There is no top stage to advance.
     }
   }
 
   /** Head rules that model no punctuation, which is all the tagging stage consults. */
   private static final class NoPunctuationHeadRules implements HeadRules {
 
+    /**
+     * {@inheritDoc} Always {@code null}; the tagging stage never asks for a head.
+     */
     @Override
     public Parse getHead(Parse[] constituents, String type) {
       return null;
     }
 
+    /**
+     * {@inheritDoc} Always empty, modeling no punctuation.
+     */
     @Override
     public Set<String> getPunctuationTags() {
       return Set.of();
