@@ -21,10 +21,10 @@ import java.util.Map;
 /**
  * A {@link CharSequenceNormalizer} that spells out a symbol-joiner token as its
  * word: a text consisting of exactly an ampersand ({@code "&"}) normalizes to
- * {@code "and"}. This is what lets a document writing "Dungeons &amp; Dragons"
- * and a query writing "dungeons and dragons" agree on term identity once terms
- * are folded and stemmed — the ampersand token and the word "and" must collapse
- * onto the same term before that can happen.
+ * {@code "and"}. A document writing "Dungeons &amp; Dragons" and a query writing
+ * "dungeons and dragons" then agree on term identity once terms are folded and
+ * stemmed, because the ampersand token and the word "and" collapse onto the same
+ * term.
  *
  * <p>The table covers the symbols that appear as standalone tokens in running
  * prose and have an unambiguous spelled-out English form: the joiners
@@ -48,7 +48,7 @@ import java.util.Map;
  */
 public class SymbolJoinerCharSequenceNormalizer implements CharSequenceNormalizer {
 
-  private static final long serialVersionUID = -3081219175592047788L;
+  private static final long serialVersionUID = -6772513786580257420L;
 
   private static final Map<String, String> WORD_BY_SYMBOL = Map.of(
       "&", "and",
@@ -78,6 +78,7 @@ public class SymbolJoinerCharSequenceNormalizer implements CharSequenceNormalize
     if (text == null) {
       throw new IllegalArgumentException("The text must not be null.");
     }
-    return WORD_BY_SYMBOL.getOrDefault(text.toString(), text.toString());
+    final String word = WORD_BY_SYMBOL.get(text.toString());
+    return word != null ? word : text;
   }
 }

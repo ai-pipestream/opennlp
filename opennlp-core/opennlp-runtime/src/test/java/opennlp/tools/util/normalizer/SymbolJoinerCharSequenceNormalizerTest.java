@@ -17,64 +17,49 @@
 package opennlp.tools.util.normalizer;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class SymbolJoinerCharSequenceNormalizerTest {
 
-  @Test
-  void testWholeTokenAmpersandSpellsOut() {
-    assertEquals("and",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("&").toString());
+  private static final SymbolJoinerCharSequenceNormalizer NORMALIZER =
+      SymbolJoinerCharSequenceNormalizer.getInstance();
+
+  @ParameterizedTest
+  @CsvSource({
+      "&, and",
+      "+, plus",
+      "@, at",
+      "%, percent",
+      "§, section",
+      "¶, paragraph",
+      "°, degree",
+      "©, copyright",
+      "®, registered",
+      "™, trademark"})
+  void testWholeTokenSymbolsSpellOut(String symbol, String word) {
+    assertEquals(word, NORMALIZER.normalize(symbol).toString());
   }
 
-  @Test
-  void testTheJoinerAndReferenceMarksSpellOut() {
-    assertEquals("plus",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("+").toString());
-    assertEquals("at",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("@").toString());
-    assertEquals("percent",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("%").toString());
-    // The legal reference marks: "§ 1983" meets a query typing "section 1983".
-    assertEquals("section",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("§").toString());
-    assertEquals("paragraph",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("¶").toString());
-    assertEquals("degree",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("°").toString());
-    assertEquals("copyright",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("©").toString());
-    assertEquals("registered",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("®").toString());
-    assertEquals("trademark",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("™").toString());
+  @ParameterizedTest
+  @ValueSource(strings = {"R&D", "AT&T", "TSR®", "&&", "& ", " &"})
+  void testEmbeddedSymbolsAreLeftAlone(String token) {
+    assertEquals(token, NORMALIZER.normalize(token).toString());
   }
 
-  @Test
-  void testEmbeddedAmpersandsAreLeftAlone() {
-    // Expanding inside a token would invent a word that appears in neither
-    // the document nor the query.
-    assertEquals("R&D",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("R&D").toString());
-    assertEquals("AT&T",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("AT&T").toString());
-    assertEquals("TSR®",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("TSR®").toString());
-  }
-
-  @Test
-  void testOrdinaryWordsPassThrough() {
-    assertEquals("and",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("and").toString());
-    assertEquals("court",
-        SymbolJoinerCharSequenceNormalizer.getInstance().normalize("court").toString());
+  @ParameterizedTest
+  @ValueSource(strings = {"and", "court", "", "😀"})
+  void testNonSymbolTextsReturnUnchangedWithoutCopying(String text) {
+    assertSame(text, NORMALIZER.normalize(text));
   }
 
   @Test
   void testNullIsRejected() {
-    assertThrows(IllegalArgumentException.class,
-        () -> SymbolJoinerCharSequenceNormalizer.getInstance().normalize(null));
+    assertThrows(IllegalArgumentException.class, () -> NORMALIZER.normalize(null));
   }
 }
