@@ -40,7 +40,9 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>Words and suffixes below their frequency cutoffs share learned unknown embeddings;
  * positions outside the sentence share a learned padding embedding. Training is
- * deterministic for a fixed {@link Settings#seed()}.</p>
+ * deterministic for a fixed {@link Settings#seed()} on a given platform and JVM: the
+ * optimization computes through {@link Math}, whose {@code exp}, {@code sqrt}, and
+ * {@code log} may differ in the last ulp between platforms.</p>
  *
  * <p>Pretrained word vectors are an opt-in through
  * {@link #train(ObjectStream, Settings, Function)}: the vectors of the words seen in
@@ -77,7 +79,7 @@ public final class FeedforwardPOSTrainer {
    *                   not be negative.
    * @param suffixCutoff The minimum frequency for a suffix to get its own embedding.
    *                     Must not be negative.
-   * @param seed The random seed making a run reproducible.
+   * @param seed The random seed making a run reproducible on a given platform and JVM.
    */
   public record Settings(int embeddingSize, int hiddenSize, int epochs, int batchSize,
       double learningRate, double l2, double dropout, int wordCutoff, int suffixCutoff,
@@ -400,7 +402,8 @@ public final class FeedforwardPOSTrainer {
    * Trains the model weights in place with minibatch AdaGrad over a softmax
    * cross-entropy loss, using the cube activation on the hidden layer and inverted
    * dropout during training. Each epoch shuffles the example order with the seeded
-   * random generator, so the whole optimization is reproducible for a fixed seed.
+   * random generator, so the whole optimization is reproducible for a fixed seed on a
+   * given platform and JVM.
    *
    * @param model The freshly initialized model whose weight arrays are updated.
    * @param featureList The embedding row indices of every training example.
