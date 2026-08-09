@@ -43,7 +43,7 @@ public class MoneyAnnotator implements DocumentAnnotator {
    * Monetary mentions; each annotation covers one mention and carries the normalized
    * {@link MoneyAmount}.
    */
-  public static final LayerKey<MoneyAmount> MONEY = Layers.key("money", MoneyAmount.class);
+  public static final LayerKey<MoneyAmount> MONEY = Layers.key("money-amounts", MoneyAmount.class);
 
   private final MoneyExtractor extractor;
 
