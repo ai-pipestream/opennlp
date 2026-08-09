@@ -68,7 +68,7 @@ import opennlp.tools.util.Span;
  *
  * @since 3.0.0
  */
-public class CursorPiiExtractor implements PiiExtractor {
+public final class CursorPiiExtractor implements PiiExtractor {
 
   private static final int PRIORITY_EMAIL = 0;
   private static final int PRIORITY_IBAN = 1;
