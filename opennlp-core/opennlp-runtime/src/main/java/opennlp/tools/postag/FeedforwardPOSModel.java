@@ -167,7 +167,7 @@ public class FeedforwardPOSModel {
    * @throws IllegalArgumentException Thrown if {@code features} is {@code null} or this
    *         model carries pretrained vectors.
    */
-  public double[] score(int[] features) {
+  double[] score(int[] features) {
     return score(features, null);
   }
 
@@ -188,7 +188,7 @@ public class FeedforwardPOSModel {
    *         {@code null} or the other way round, or if {@code pretrainedRows} does not
    *         hold {@link FeedforwardPOSContext#PRETRAINED_SLOTS} rows.
    */
-  public double[] score(int[] features, int[] pretrainedRows) {
+  double[] score(int[] features, int[] pretrainedRows) {
     if (features == null) {
       throw new IllegalArgumentException("features must not be null");
     }
@@ -351,7 +351,7 @@ public class FeedforwardPOSModel {
    * @throws IllegalArgumentException Thrown if {@code symbols} is {@code null} or does
    *         not hold {@link FeedforwardPOSContext#SLOTS} symbols.
    */
-  public int[] featureIds(String[] symbols) {
+  int[] featureIds(String[] symbols) {
     if (symbols == null) {
       throw new IllegalArgumentException("symbols must not be null");
     }
@@ -385,8 +385,8 @@ public class FeedforwardPOSModel {
 
   /**
    * {@return {@code true} if this model was trained with pretrained word vectors}
-   * Such a model scores through {@link #score(int[], int[])} with the rows of
-   * {@link #pretrainedRows(String[], int)}.
+   * Such a model stores the vectors of its training words inside itself and scores a
+   * word without a stored vector as zeros.
    */
   public boolean usesPretrainedVectors() {
     return pretrainedSize > 0;
@@ -403,7 +403,7 @@ public class FeedforwardPOSModel {
    * @return One row per window slot, or {@code null} on a model without the block.
    * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
    */
-  public int[] pretrainedRows(String[] sentence, int index) {
+  int[] pretrainedRows(String[] sentence, int index) {
     if (sentence == null) {
       throw new IllegalArgumentException("sentence must not be null");
     }

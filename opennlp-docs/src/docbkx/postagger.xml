@@ -350,7 +350,7 @@ Arrays.stream(tags).forEach(k -> System.out.print(k + " "));]]>
 		and call <code>tag</code>. The hyperparameters are passed as a
 		<code>FeedforwardPOSTrainer.Settings</code> record in the order shown below;
 		<code>Settings.defaults()</code> supplies a usable starting point. Training is
-		deterministic for a fixed seed.
+		deterministic for a fixed seed on a given platform and JVM.
 		<programlisting language="java">
 <![CDATA[// embeddingSize, hiddenSize, epochs, batchSize, learningRate,
 // l2, dropout, wordCutoff, suffixCutoff, seed
@@ -361,6 +361,30 @@ FeedforwardPOSModel model = FeedforwardPOSTrainer.train(sampleStream, settings);
 FeedforwardPOSTagger tagger = new FeedforwardPOSTagger(model);
 
 String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
+		</programlisting>
+		</para>
+		<!-- FeedforwardPretrainedVectorsTest asserts the vector and lexicon behavior shown here. -->
+		<para>
+		Pretrained word vectors are an opt-in: an overload of <code>train</code> takes a
+		<code>java.util.function.Function</code> that is asked once per distinct
+		lowercased training word and returns its vector, or <code>null</code> for a word
+		without one. The vectors of the training words extend the input layer and are
+		stored inside the model, so tagging needs no separate embedding source and a
+		word without a stored vector scores that block as zeros. A further overload also
+		takes a coverage lexicon, extra words whose vectors are stored besides the
+		training words; the lexicon does not change training itself, it only widens
+		tagging-time coverage to words never seen in training. Without these opt-ins the
+		two-argument <code>train</code> call above behaves exactly as before.
+		<programlisting language="java">
+<![CDATA[// Return one vector per word the source knows, null for a word without one.
+Function<CharSequence, float[]> wordVectors = word -> lookupVector(word);
+
+FeedforwardPOSModel vectored =
+    FeedforwardPOSTrainer.train(sampleStream, settings, wordVectors);
+
+// Additionally store vectors for words never seen in training:
+FeedforwardPOSModel withLexicon =
+    FeedforwardPOSTrainer.train(sampleStream, settings, wordVectors, lexiconWords);]]>
 		</programlisting>
 		</para>
 		</section>
