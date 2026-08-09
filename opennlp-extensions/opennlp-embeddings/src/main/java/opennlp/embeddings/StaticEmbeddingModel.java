@@ -285,15 +285,15 @@ public final class StaticEmbeddingModel implements TextEmbedder {
    * @param modelDirectory The model directory.
    * @return the {@code model.quantized} file when it is the directory's only matrix file, or
    *     {@code null} when the directory presents only a {@code model.safetensors}.
-   * @throws IllegalArgumentException Thrown if the directory holds both matrix files.
+   * @throws InvalidFormatException Thrown if the directory holds both matrix files.
    */
-  private static Path quantizedMatrixFileOrNull(Path modelDirectory) {
+  private static Path quantizedMatrixFileOrNull(Path modelDirectory) throws InvalidFormatException {
     final Path quantizedFile = modelDirectory.resolve(ModelFileNames.QUANTIZED);
     if (!Files.isRegularFile(quantizedFile)) {
       return null;
     }
     if (Files.isRegularFile(modelDirectory.resolve(ModelFileNames.SAFETENSORS))) {
-      throw new IllegalArgumentException("Model directory " + modelDirectory + " has both "
+      throw new InvalidFormatException("Model directory " + modelDirectory + " has both "
           + ModelFileNames.QUANTIZED + " and " + ModelFileNames.SAFETENSORS + "; delete one so "
           + "the matrix source is unambiguous (keep " + ModelFileNames.QUANTIZED + " for a "
           + "quantized deployment, or " + ModelFileNames.SAFETENSORS + " for the float matrix)");
