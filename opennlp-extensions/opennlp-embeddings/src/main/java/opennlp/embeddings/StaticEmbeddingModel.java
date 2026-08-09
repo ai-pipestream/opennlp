@@ -145,7 +145,7 @@ public final class StaticEmbeddingModel implements TextEmbedder {
    * @param vocabulary           The matrix row vocabulary.
    * @param vocabularySourceName The vocabulary's source, for error messages.
    * @return The table and the pooling weights the file carries, if any.
-   * @throws IllegalArgumentException Thrown if the row count disagrees with the vocabulary.
+   * @throws InvalidFormatException Thrown if the row count disagrees with the vocabulary.
    * @throws IOException Thrown if reading the file fails.
    */
   private static TableAndWeights readQuantizedTable(Path quantizedFile,
@@ -154,7 +154,7 @@ public final class StaticEmbeddingModel implements TextEmbedder {
       throws IOException {
     final QuantizedEmbeddingMatrix matrix = QuantizedEmbeddingMatrix.read(quantizedFile);
     if (matrix.rowCount() != vocabulary.size()) {
-      throw new IllegalArgumentException("Vocabulary " + vocabularySourceName + " has "
+      throw new InvalidFormatException("Vocabulary " + vocabularySourceName + " has "
           + vocabulary.size() + " tokens but quantized matrix " + quantizedFile + " has "
           + matrix.rowCount() + " rows; these files do not belong to the same model");
     }
@@ -406,13 +406,14 @@ public final class StaticEmbeddingModel implements TextEmbedder {
    * @param normalization        The pooling normalization.
    * @param vocabularySourceName The vocabulary's source, for error messages.
    * @return The loaded model.
-   * @throws IllegalArgumentException Thrown if the vocabulary has no unknown token.
+   * @throws InvalidFormatException Thrown if the vocabulary has no unknown token.
    */
   private static StaticEmbeddingModel createWordpiece(EmbeddingVocabulary vocabulary,
                                                       TableAndWeights tableAndWeights,
                                                       Casing casing,
                                                       Normalization normalization,
-                                                      String vocabularySourceName) {
+                                                      String vocabularySourceName)
+      throws InvalidFormatException {
     final int unknownId = vocabulary.id(WordpieceTokenizer.BERT_UNK_TOKEN);
     if (unknownId < 0) {
       throw new InvalidFormatException("Vocabulary " + vocabularySourceName + " has no "
