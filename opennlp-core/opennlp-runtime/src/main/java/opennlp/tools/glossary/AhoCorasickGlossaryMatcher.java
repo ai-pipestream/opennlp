@@ -54,7 +54,7 @@ import opennlp.tools.util.Span;
  *      string matching: An aid to bibliographic search</a>
  * @since 3.0.0
  */
-public class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
+public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
 
   /** The index of the automaton's root state, from which every scan starts. */
   private static final int ROOT = 0;
