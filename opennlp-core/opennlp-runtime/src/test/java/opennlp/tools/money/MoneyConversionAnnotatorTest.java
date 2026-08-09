@@ -181,7 +181,7 @@ public class MoneyConversionAnnotatorTest {
     final IllegalArgumentException missingMoney = assertThrows(
         IllegalArgumentException.class,
         () -> new MoneyConversionAnnotator(rates, "USD", REFERENCE_DATE).annotate(text));
-    assertEquals("document lacks the required layer opennlp:money<MoneyAmount>",
+    assertEquals("document lacks the required layer opennlp:money-amounts<MoneyAmount>",
         missingMoney.getMessage());
 
     final Document withMoney = new MoneyAnnotator(new CursorMoneyExtractor()).annotate(text);
