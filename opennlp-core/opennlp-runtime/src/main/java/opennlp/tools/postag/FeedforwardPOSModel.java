@@ -63,6 +63,13 @@ public class FeedforwardPOSModel {
   /** The format of models carrying the optional pretrained word-vector block. */
   private static final String MAGIC_PRETRAINED = "ONLP-FFPT-2";
 
+  /**
+   * The most entries or values a single length field of the binary format may claim.
+   * A length beyond it cannot come from a sanely sized model, so the loader treats it
+   * as corruption and fails with an {@link IOException} instead of allocating it.
+   */
+  private static final int MAX_LENGTH = 1 << 30;
+
   /** The row marker of a word without a stored pretrained vector; scores as zeros. */
   static final int NO_VECTOR = -1;
 
@@ -487,7 +494,8 @@ public class FeedforwardPOSModel {
    *
    * @param in The stream to read from. Must not be {@code null}. Not closed.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is not this format.
+   * @throws IOException Thrown if reading fails, the content is not this format, or a
+   *         length field is negative or implausibly large for a model.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    */
   public static FeedforwardPOSModel load(InputStream in) throws IOException {
@@ -500,28 +508,29 @@ public class FeedforwardPOSModel {
     if (!pretrained && !MAGIC.equals(magic)) {
       throw new IOException("not a feedforward tagger model: " + magic);
     }
-    final Map<String, Integer> wordIds = readVocabulary(data);
-    final Map<String, Integer> suffixIds = readVocabulary(data);
-    final Map<String, Integer> shapeIds = readVocabulary(data);
-    final Map<String, Integer> tagIds = readVocabulary(data);
-    final String[] tags = new String[data.readInt()];
+    final Map<String, Integer> wordIds = readVocabulary(data, "word vocabulary size");
+    final Map<String, Integer> suffixIds = readVocabulary(data, "suffix vocabulary size");
+    final Map<String, Integer> shapeIds = readVocabulary(data, "shape vocabulary size");
+    final Map<String, Integer> tagIds = readVocabulary(data, "tag vocabulary size");
+    final String[] tags = new String[readLength(data, "tag count")];
     for (int i = 0; i < tags.length; i++) {
       tags[i] = data.readUTF();
     }
-    final int embeddingSize = data.readInt();
-    final float[][] embeddings = readMatrix(data);
-    final float[][] hiddenWeights = readMatrix(data);
-    final float[] hiddenBias = readVector(data);
-    final float[][] outputWeights = readMatrix(data);
-    final float[] outputBias = readVector(data);
+    final int embeddingSize = readLength(data, "embedding size");
+    final float[][] embeddings = readMatrix(data, "embedding matrix");
+    final float[][] hiddenWeights = readMatrix(data, "hidden weight matrix");
+    final float[] hiddenBias = readVector(data, "hidden bias");
+    final float[][] outputWeights = readMatrix(data, "output weight matrix");
+    final float[] outputBias = readVector(data, "output bias");
     if (!pretrained) {
       return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
           embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias);
     }
-    final int pretrainedSize = data.readInt();
+    final int pretrainedSize = readLength(data, "pretrained vector size");
     return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
         embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias,
-        pretrainedSize, readVocabulary(data), readMatrix(data));
+        pretrainedSize, readVocabulary(data, "pretrained vocabulary size"),
+        readMatrix(data, "pretrained vector matrix"));
   }
 
   /**
@@ -598,15 +607,35 @@ public class FeedforwardPOSModel {
   }
 
   /**
+   * Reads and validates a length field of the binary format, so corrupt bytes after a
+   * valid format marker fail as a named format error instead of reaching an array
+   * allocation as a negative or absurdly large size.
+   *
+   * @param data The stream to read from.
+   * @param field The name of the field, used in the error message.
+   * @return The validated length, in {@code [0, MAX_LENGTH]}.
+   * @throws IOException Thrown if reading fails or the length is negative or larger
+   *         than {@link #MAX_LENGTH}.
+   */
+  private static int readLength(DataInputStream data, String field) throws IOException {
+    final int length = data.readInt();
+    if (length < 0 || length > MAX_LENGTH) {
+      throw new IOException("implausible " + field + ": " + length);
+    }
+    return length;
+  }
+
+  /**
    * Reads a vocabulary written by {@link #writeVocabulary}, preserving entry order.
    *
    * @param data The stream to read from.
+   * @param field The name of the size field, used in the error message.
    * @return The restored vocabulary. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
+   * @throws IOException Thrown if reading fails or the size field is implausible.
    */
-  private static Map<String, Integer> readVocabulary(DataInputStream data)
+  private static Map<String, Integer> readVocabulary(DataInputStream data, String field)
       throws IOException {
-    final int size = data.readInt();
+    final int size = readLength(data, field);
     final Map<String, Integer> ids = LinkedHashMap.newLinkedHashMap(size);
     for (int i = 0; i < size; i++) {
       final String key = data.readUTF();
@@ -637,12 +666,19 @@ public class FeedforwardPOSModel {
    * Reads a matrix written by {@link #writeMatrix}.
    *
    * @param data The stream to read from.
+   * @param field The name of the matrix, used in the error message.
    * @return The restored matrix. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
+   * @throws IOException Thrown if reading fails or a dimension or the resulting
+   *         element count is implausible.
    */
-  private static float[][] readMatrix(DataInputStream data) throws IOException {
-    final int rows = data.readInt();
-    final int columns = data.readInt();
+  private static float[][] readMatrix(DataInputStream data, String field)
+      throws IOException {
+    final int rows = readLength(data, field + " rows");
+    final int columns = readLength(data, field + " columns");
+    if ((long) rows * columns > MAX_LENGTH) {
+      throw new IOException(
+          "implausible " + field + " element count: " + rows + " x " + columns);
+    }
     final float[][] matrix = new float[rows][columns];
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < columns; c++) {
@@ -671,11 +707,13 @@ public class FeedforwardPOSModel {
    * Reads a vector written by {@link #writeVector}.
    *
    * @param data The stream to read from.
+   * @param field The name of the vector, used in the error message.
    * @return The restored vector. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
+   * @throws IOException Thrown if reading fails or the length field is implausible.
    */
-  private static float[] readVector(DataInputStream data) throws IOException {
-    final float[] vector = new float[data.readInt()];
+  private static float[] readVector(DataInputStream data, String field)
+      throws IOException {
+    final float[] vector = new float[readLength(data, field + " length")];
     for (int i = 0; i < vector.length; i++) {
       vector[i] = data.readFloat();
     }
