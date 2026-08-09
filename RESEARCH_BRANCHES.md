@@ -1,6 +1,6 @@
 # Research branch map
 
-This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-08-08, measured against apache main `fc9824a97` (five commits past `014c0182a`: dependency bumps, a NOTICE regeneration, and the OPENNLP-1900 security-model documentation). Every admitted tip was cascaded onto that head on 2026-08-08 with true parent stacking (carried copies refreshed to current parent content), followed by a fleet-wide review pass to the krickert-review standard.
+This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-08-09, measured against apache main `fc9824a97` (five commits past `014c0182a`: dependency bumps, a NOTICE regeneration, and the OPENNLP-1900 security-model documentation). Every admitted tip was cascaded onto that head on 2026-08-08 with true parent stacking (carried copies refreshed to current parent content), followed by a fleet-wide review pass to the krickert-review standard; the refreshed heads were pushed on 2026-08-08.
 
 ## Merge strategy
 
@@ -8,7 +8,7 @@ Solid arrows are the verified git base of each branch. Dashed arrows are commits
 
 ```mermaid
 flowchart LR
-  main(["apache main 014c0182a · +1898/1899 after M5 cut"])
+  main(["apache main fc9824a97 · +1898/1899/1900 after M5 cut"])
 
   merged["MERGED upstream 2026-07: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1870 emoji annotations · OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers<br/>OPENNLP-1878 hot-path performance · OPENNLP-1883 stemmer factory<br/>OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile<br/>OPENNLP-1898 1876 review follow-ups · OPENNLP-1899 SymSpell deser harden"]
   main --- merged
@@ -17,14 +17,19 @@ flowchart LR
   main --> p1182["#1182 · OPENNLP-1888 · document container · FOUNDATION"]
   main --> d1154["#1154 · OPENNLP-1879 · gazetteer + geocoder + user overlay"]
   main --> d1155["#1155 · OPENNLP-1880 · wordnet knowledge base"]
-  main --> d1167["#1167 · OPENNLP-1887 · lexical expansion"]
-  d1155 -. seam commit copied .-> d1167
+  d1155 --> d1167["#1167 · OPENNLP-1887 · lexical expansion"]
   p1182 -. isBlank copied .-> d1167
   main --> d1166["#1166 · OPENNLP-1886 · light stemmers"]
   main --> d1165["#1165 · OPENNLP-1885 · SentencePiece"]
   d1165 --> d1152["#1152 · OPENNLP-1877 · static embeddings"]
   main --> huns["#1190 · OPENNLP-1893 · hunspell stemmer"]
   main --> cjk["#1191 · OPENNLP-1894 · CJK lattice tokenization"]
+
+  %% ---- open fix pull requests against apache/opennlp ----
+  main --> p1205["#1205 · OPENNLP-1903 · BeamSearch chain nodes"]
+  main --> p1206["#1206 · OPENNLP-1904 · locale-safe lemmatizers + CLI"]
+  main --> p1207["#1207 · OPENNLP-1905 · locale-safe Morfologik lookups"]
+  main --> p1208["#1208 · OPENNLP-1906 · linear abbreviation veto"]
 
   %% ---- filed upstream, pull request deliberately held ----
   d1152 --> tq["OPENNLP-1895 · quantized embedding tables · PR held"]
@@ -36,6 +41,8 @@ flowchart LR
   main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> inst["resource-installer"]
   main --> morf["morfologik-fsa · CFSA2/FSA5 readers + PoliMorf lemmatizer"]
+  main --> sjoin["symbol-joiner · symbol spell-out normalizer"]
+  tv --> dehyp["dehyphenation · line-break rejoin + retokenizing term vectors"]
   d1154 --> prof["place-profiles"]
 
   %% ---- staged annotators over the document container ----
@@ -70,41 +77,45 @@ flowchart LR
   classDef cut fill:#e8f0e8,stroke:#555,color:#000;
 
   class merged mergedC;
-  class d1165,huns,cjk ready;
+  class d1165,huns,cjk,p1205,p1206,p1207,p1208 ready;
   class d1152,d1154,d1155,d1166,d1167 draft;
   class p1182 foundation;
   class tq,tv filed;
-  class depp,fftag,bilstm,inst,morf,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
+  class depp,fftag,bilstm,inst,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
 ```
 
-Green nodes are pull requests marked ready for review upstream, amber are drafts, blue is the document container every annotator needs (open as a draft), purple is filed in JIRA with the pull request deliberately held, and pale green is staged in this fork only. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carries as copies drop by patch id on its next rebase.
+Green nodes are pull requests marked ready for review upstream, amber are drafts, blue is the document container every annotator needs (now marked ready for review), purple is filed in JIRA with the pull request deliberately held, and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade.
 
 ## Open pull requests against apache/opennlp
 
-Every head below was rebased onto `014c0182a` on 2026-07-31 (cascading OPENNLP-1898 and OPENNLP-1899) and force-pushed; status notes below still describe the pre-cascade review posture unless otherwise updated. Status records the GitHub draft flag, which is the upstream project's review-queue signal and not a statement about whether the code is finished.
+Every head below was cascaded onto `fc9824a97` on 2026-08-08, given a fleet-wide review pass, and force-pushed. Status records the GitHub draft flag, which is the upstream project's review-queue signal and not a statement about whether the code is finished.
 
 | PR | JIRA | What it offers | Status | Notes |
 |---|---|---|---|---|
-| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Draft. The branch is review-ready; it sits as a draft because the upstream queue is not ready to take it, not because the work is unfinished. Rebased onto `014c0182a`, mergeable | The foundation every staged annotator below builds on |
-| [#1166](https://github.com/apache/opennlp/pull/1166) | OPENNLP-1886 | Sixteen UniNE light/minimal stemmer tiers | Draft; rebased onto `014c0182a`, mergeable. That rebase dropped the 13 OPENNLP-1883 commits it used to carry, now that #1163 is upstream as one squash, leaving 3 commits of its own | Parity fixtures regenerated from the original implementations. Manual cites `LightStemmerUsageExampleTest` |
-| [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft; rebased onto `014c0182a`, mergeable | Manual: `wordnet.xml`, pinned by `WordNetUsageExampleTest` |
-| [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, based on main and not on #1155: it carries the #1155 seam commit and #1182's `StringUtil.isBlank` as drop-on-rebase copies. Rebased onto `014c0182a` (via the 2026-07-31 cascade); earlier rebase onto `a8642301f` cleared the conflict it was reporting; mergeable | Manual expansion section cites `LexicalExpansionUsageExampleTest`. On 2026-08-08 it was restacked onto the `wordnet-api` branch proper and its five carried morfologik `formats:`/`lemmatizer:` commits were dropped; their unique review improvements were reconciled into `morfologik-fsa` first |
-| [#1165](https://github.com/apache/opennlp/pull/1165) | OPENNLP-1885 | Pure-Java SentencePiece inference with exact original-text spans, plus a WordPiece encoder | Ready for review; rebased onto `014c0182a`, mergeable | 6.47M pieces/s single-thread on the T5-small vocabulary, 1.42x the C++ reference measured through its Python binding. Tokenizer manual cites `SentencePieceUsageExampleTest` |
+| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Ready for review; cascaded onto `fc9824a97`, mergeable | The foundation every staged annotator below builds on |
+| [#1166](https://github.com/apache/opennlp/pull/1166) | OPENNLP-1886 | Sixteen UniNE light/minimal stemmer tiers | Draft; cascaded onto `fc9824a97`, mergeable. That rebase dropped the 13 OPENNLP-1883 commits it used to carry, now that #1163 is upstream as one squash, leaving 3 commits of its own | Parity fixtures regenerated from the original implementations. Manual cites `LightStemmerUsageExampleTest` |
+| [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft; cascaded onto `fc9824a97`, mergeable | Manual: `wordnet.xml`, pinned by `WordNetUsageExampleTest` |
+| [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, stacked on #1155 since the 2026-08-08 restack; it still carries #1182's `StringUtil.isBlank` as a drop-on-rebase copy. Mergeable | Manual expansion section cites `LexicalExpansionUsageExampleTest`. On 2026-08-08 it was restacked onto the `wordnet-api` branch proper and its five carried morfologik `formats:`/`lemmatizer:` commits were dropped; their unique review improvements were reconciled into `morfologik-fsa` first |
+| [#1165](https://github.com/apache/opennlp/pull/1165) | OPENNLP-1885 | Pure-Java SentencePiece inference with exact original-text spans, plus a WordPiece encoder | Ready for review; cascaded onto `fc9824a97`, mergeable | 6.47M pieces/s single-thread on the T5-small vocabulary, 1.42x the C++ reference measured through its Python binding. Tokenizer manual cites `SentencePieceUsageExampleTest` |
 | [#1152](https://github.com/apache/opennlp/pull/1152) | OPENNLP-1877 | Static text embeddings, pure JVM | Draft, stacked on #1165. Its base is the apache-hosted `sentencepiece` branch, which had diverged from the refreshed head and made the pull request read as conflicting; that base now tracks the head, so the diff is the 30 commits this change actually owns and it reports mergeable | 12.9x single-thread and about 7x peak throughput of the Python reference at 0.22x the memory (potion-base-8M, output parity asserted first). Manual cites `StaticEmbeddingUsageExampleTest` |
-| [#1154](https://github.com/apache/opennlp/pull/1154) | OPENNLP-1879 | Gazetteer and geocoder seam, bundled Natural Earth table, GeoNames and Overture loaders, place hierarchy, user-supplied overlay (additions, suppressions, bounding boxes) | Draft; rebased onto `014c0182a`, mergeable | Bring-your-own-gazetteer reference in test sources. Geocoder section cites `GeocoderUsageExampleTest` |
-| [#1190](https://github.com/apache/opennlp/pull/1190) | [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893) | Hunspell `.dic`/`.aff` affix stemmer over user-supplied dictionaries, regex-free, fail-closed | Ready for review 2026-07-24; rebased onto `014c0182a`, mergeable | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, compound positioning incl. German linking forms. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest`. Review pass `872272560` added `{@inheritDoc}` to the stemmer overrides |
-| [#1191](https://github.com/apache/opennlp/pull/1191) | [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | Viterbi lattice tokenization over user-supplied MeCab-format dictionaries (Japanese, Korean) plus a Chinese unigram segmenter | Ready for review 2026-07-24; rebased onto `014c0182a`, mergeable | About 5M chars/s on real IPADIC; 392k entries load in under a second; segmentation matches the reference implementation on the cost-sensitive test sentences. Manual pinned by `LatticeUsageExampleTest`. Review pass `65579e9cd` fixed lexicon lines edged with Unicode whitespace, which previously failed to load when a line started with an ideographic space |
+| [#1154](https://github.com/apache/opennlp/pull/1154) | OPENNLP-1879 | Gazetteer and geocoder seam, bundled Natural Earth table, GeoNames and Overture loaders, place hierarchy, user-supplied overlay (additions, suppressions, bounding boxes) | Draft; cascaded onto `fc9824a97`, mergeable | Bring-your-own-gazetteer reference in test sources. Geocoder section cites `GeocoderUsageExampleTest` |
+| [#1190](https://github.com/apache/opennlp/pull/1190) | [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893) | Hunspell `.dic`/`.aff` affix stemmer over user-supplied dictionaries, regex-free, fail-closed | Ready for review 2026-07-24; cascaded onto `fc9824a97`, mergeable | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, compound positioning incl. German linking forms. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest`. Review pass `872272560` added `{@inheritDoc}` to the stemmer overrides |
+| [#1191](https://github.com/apache/opennlp/pull/1191) | [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | Viterbi lattice tokenization over user-supplied MeCab-format dictionaries (Japanese, Korean) plus a Chinese unigram segmenter | Ready for review 2026-07-24; cascaded onto `fc9824a97`, mergeable | About 5M chars/s on real IPADIC; 392k entries load in under a second; segmentation matches the reference implementation on the cost-sensitive test sentences. Manual pinned by `LatticeUsageExampleTest`. Review pass `65579e9cd` fixed lexicon lines edged with Unicode whitespace, which previously failed to load when a line started with an ideographic space |
+| [#1205](https://github.com/apache/opennlp/pull/1205) | [OPENNLP-1903](https://issues.apache.org/jira/browse/OPENNLP-1903) | `BeamSearch` keeps candidate histories as shared chain nodes instead of copying each `Sequence` per candidate, removing quadratic copying from beam decoding | Ready for review; based on `fc9824a97`, mergeable | JMH benchmark for long sequences included; machine-specific numbers kept out of `BENCHMARKS.md` |
+| [#1206](https://github.com/apache/opennlp/pull/1206) | [OPENNLP-1904](https://issues.apache.org/jira/browse/OPENNLP-1904) | Locale-independent case folding in the lemmatizers and locale-independent CLI parameter parsing and report formatting, so models behave the same under any default locale | Ready for review; based on `fc9824a97`, mergeable | |
+| [#1207](https://github.com/apache/opennlp/pull/1207) | [OPENNLP-1905](https://issues.apache.org/jira/browse/OPENNLP-1905) | Locale-independent case folding in the Morfologik dictionary lookups | Ready for review; based on `fc9824a97`, mergeable | Ships `dictionaryLocaleSafety.info` documenting the dictionary-side contract |
+| [#1208](https://github.com/apache/opennlp/pull/1208) | [OPENNLP-1906](https://issues.apache.org/jira/browse/OPENNLP-1906) | Sentence-detector abbreviation veto made linear in document length with an abbreviation index (was quadratic) | Ready for review; based on `fc9824a97`, mergeable | |
 
 ## Filed upstream, pull request deliberately held
 
 | JIRA | Branch | What it offers | Status |
 |---|---|---|---|
-| [OPENNLP-1895](https://issues.apache.org/jira/browse/OPENNLP-1895) | `OPENNLP-1895-turboquant` | Quantized static embedding tables at 2 to 4 bits per dimension: a seeded randomized Hadamard rotation, per-bit Lloyd-Max grids solved at build time, packed codes with a self-describing on-disk format, pooling and scoring that stay in rotated space, and a `QuantizeModel` command-line converter that verifies by re-reading from disk | Filed 2026-07-23 as a New Feature, still Open, announced on dev@. Four commits on `static-embeddings`, rebased with that stack onto `014c0182a` on 2026-07-31, tests green, pushed to the fork only. No pull request is open: it waits until #1165 and #1152 move, as promised in that dev@ note; throughput numbers against the Rust reference are still outstanding |
+| [OPENNLP-1895](https://issues.apache.org/jira/browse/OPENNLP-1895) | `OPENNLP-1895-turboquant` | Quantized static embedding tables at 2 to 4 bits per dimension: a seeded randomized Hadamard rotation, per-bit Lloyd-Max grids solved at build time, packed codes with a self-describing on-disk format, pooling and scoring that stay in rotated space, and a `QuantizeModel` command-line converter that verifies by re-reading from disk | Filed 2026-07-23 as a New Feature, still Open, announced on dev@. Four commits on `static-embeddings`, cascaded with that stack onto `fc9824a97` on 2026-08-08, tests green, pushed to the fork only. No pull request is open: it waits until #1165 and #1152 move, as promised in that dev@ note; throughput numbers against the Rust reference are still outstanding |
 | [OPENNLP-1897](https://issues.apache.org/jira/browse/OPENNLP-1897) | `OPENNLP-1897-term-vectors` | A term-vector layer for the document container: an immutable `TermVector` payload (normalized term, frequency, occurrence spans in original-text coordinates) and a `TermVectorAnnotator` that rolls the token layer up into per-term statistics, with optional `OffsetAwareNormalizer` grouping and a scoring-only mode that never allocates offsets | Filed 2026-07-26 as a New Feature, still Open. One commit on `OPENNLP-1888-DocumentShape`, 22 tests including the ticket's normalization-shifted offset-fidelity cases (whitespace collapse, eszett fold), module build green, pushed to the fork only. No pull request is open: it is an additive layer over #1182 and waits for the container to move first |
 
 ## Staged feature branches (this fork only, not yet proposed upstream)
 
-All staged branches are based on a recent apache main (each rebases fully before any promotion), tested at their tips, and cascaded onto `014c0182a` with the pull-request heads on 2026-07-31, and carry `OPENNLP-XXXX-` names until their JIRA tickets are filed. The annotator branches require the #1182 document container and carry it as dropped-on-merge copies where noted in the diagram. Feature manuals cite a `*UsageExampleTest` or `*ManualExampleTest` that pins the printed programlisting; those tests are the cookbook link for each surface.
+All staged branches are based on a recent apache main (each rebases fully before any promotion), tested at their tips, and cascaded onto `fc9824a97` with the pull-request heads on 2026-08-08, and carry `OPENNLP-XXXX-` names until their JIRA tickets are filed. The annotator branches require the #1182 document container and carry it as dropped-on-merge copies where noted in the diagram. Feature manuals cite a `*UsageExampleTest` or `*ManualExampleTest` that pins the printed programlisting; those tests are the cookbook link for each surface.
 
 | Branch | What it offers | Status | Notes |
 |---|---|---|---|
@@ -123,7 +134,7 @@ All staged branches are based on a recent apache main (each rebases fully before
 | `noise` | Severity-tiered structural noise scoring as a document layer, excluding spans already explained as embedded assets | Staged, on `embedded-assets` | `noise.xml` cites `NoiseManualExampleTest` |
 | `predicate-annotators` | Conditional and filtering annotator combinators for predicate-gated pipelines | Staged, needs #1182 | Document predicates section cites `PredicateManualExampleTest` |
 | `region-vote` | Document-scoped region ballot: location mentions, country names, and flag emoji vote on where a document speaks from | Staged, on `numeric` | Document section cites `RegionCurrencyResolutionExampleTest` |
-| `geocode-annotator` | Gazetteer-backed geocoding of location entities into a document layer | Staged, on `region-vote` | `geo.xml` pipeline cites `LocationPipelineExampleTest`. Its EmojiFlags copies drop on the next rebase now that #1177 has merged |
+| `geocode-annotator` | Gazetteer-backed geocoding of location entities into a document layer | Staged, on `region-vote` | `geo.xml` pipeline cites `LocationPipelineExampleTest`. Its EmojiFlags copies dropped in the 2026-08-08 cascade now that #1177 is upstream |
 | `hierarchy-annotator` | Administrative containment chains for resolved locations | Staged, on `geocode-annotator` | `geo.xml` cites `HierarchyPipelineExampleTest` |
 | `depparse-annotator` | Per-sentence dependency parses as a document layer | Staged, on `depparse` | `dependency.xml` cites `DependencyAnnotatorPipelineTest` |
 | `relation` | Predicate-driven relation mentions over dependency parses | Staged, on `depparse-annotator` | `relation.xml` cites `RelationExtractionExampleTest` |
