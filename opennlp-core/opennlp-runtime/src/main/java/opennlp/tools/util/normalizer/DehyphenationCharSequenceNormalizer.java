@@ -29,11 +29,15 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>Recognized hyphens are {@code U+002D HYPHEN-MINUS} and {@code U+00AD SOFT HYPHEN}, the
  * two forms typesetters and PDF extractors actually emit at a break. Recognized line breaks
- * are {@code U+000A}, {@code U+000D U+000A}, {@code U+000D}, {@code U+0085 NEXT LINE},
+ * are the forced-break members of {@link UnicodeWhitespace#lineBreaks()}:
+ * {@code U+000A LINE FEED} (also as {@code U+000D U+000A}), {@code U+000B VERTICAL TAB},
+ * {@code U+000C FORM FEED}, {@code U+000D CARRIAGE RETURN}, {@code U+0085 NEXT LINE},
  * {@code U+2028 LINE SEPARATOR}, and {@code U+2029 PARAGRAPH SEPARATOR}. The whitespace run
  * after the break covers every character for which {@link StringUtil#isUnicodeWhitespace(char)}
  * holds and that is not itself one of those line breaks, so an indented continuation line
- * ({@code "com-\r\n  plete"}) joins to {@code "complete"}.</p>
+ * ({@code "com-\r\n  plete"}) joins to {@code "complete"}, while a second break, such as the
+ * form feed of a page break ({@code "litiga-\n\fPage 3\ntion"}), stops the join instead of
+ * fusing the word with the page header.</p>
  *
  * <p>The letter test on both sides of the break is supplementary-aware
  * ({@link Character#codePointBefore(CharSequence, int)} /
@@ -65,6 +69,16 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
 
   private static final char HYPHEN_MINUS = '-';
   private static final char SOFT_HYPHEN = '\u00AD';
+
+  /**
+   * The forced line-break characters, derived from the authoritative
+   * {@link UnicodeWhitespace#lineBreaks()} table: line feed, vertical tab, form feed,
+   * carriage return, next line, line separator, and paragraph separator.
+   */
+  private static final CodePointSet LINE_BREAKS = CodePointSet.of(
+      UnicodeWhitespace.lineBreaks().stream()
+          .mapToInt(UnicodeWhitespace.WhitespaceCharacter::codePoint)
+          .toArray());
 
   private static final DehyphenationCharSequenceNormalizer INSTANCE =
       new DehyphenationCharSequenceNormalizer();
@@ -162,15 +176,12 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
       return -1;
     }
     final char breakStart = text.charAt(end);
-    if (breakStart == '\r') {
-      end++;
-      if (end < length && text.charAt(end) == '\n') {
-        end++;
-      }
-    } else if (isLineBreak(breakStart)) {
-      end++;
-    } else {
+    if (!isLineBreak(breakStart)) {
       return -1;
+    }
+    end++;
+    if (breakStart == '\r' && end < length && text.charAt(end) == '\n') {
+      end++;  // CRLF is one break, not two
     }
     while (end < length && isHorizontalWhitespace(text.charAt(end))) {
       end++;
@@ -182,20 +193,20 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
   }
 
   /**
-   * Determines whether {@code c} is a recognized line break on its own; a carriage return
-   * is handled by the caller so that a following line feed is consumed with it.
+   * Determines whether {@code c} is a forced line break per {@link #LINE_BREAKS}; the caller
+   * consumes a line feed following a carriage return together with it as one break.
    */
   private static boolean isLineBreak(char c) {
-    return c == '\n' || c == '\u0085' || c == '\u2028' || c == '\u2029';
+    return LINE_BREAKS.contains(c);
   }
 
   /**
    * Determines whether {@code c} is horizontal whitespace: a Unicode {@code White_Space}
-   * character that is not itself a line break, so the indentation of a continuation line is
-   * consumed but a second line break is not.
+   * character that is not itself one of the {@link #LINE_BREAKS forced line breaks}, so the
+   * indentation of a continuation line is consumed but a second line break, such as the form
+   * feed of a page break, is not.
    */
   private static boolean isHorizontalWhitespace(char c) {
-    return StringUtil.isUnicodeWhitespace(c) && c != '\n' && c != '\r'
-        && c != '\u0085' && c != '\u2028' && c != '\u2029';
+    return StringUtil.isUnicodeWhitespace(c) && !isLineBreak(c);
   }
 }
