@@ -95,6 +95,7 @@ if [[ "$MODE" == "--check" ]]; then
   fi
   echo "IANA TLD snapshot is current"
 else
+  chmod --reference="$OUT" "$TMP_OUT"
   mv "$TMP_OUT" "$OUT"
   echo "Regenerated $OUT"
 fi
