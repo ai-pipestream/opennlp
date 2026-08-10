@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 
@@ -52,7 +53,9 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
  * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
- * unreachable.</p>
+ * unreachable. The fold uses {@link Locale#ROOT} so that the keys come out the same on every
+ * JVM; the default locale of, for example, a Turkish JVM would fold {@code 'I'} to the dotless
+ * {@code 'ı'} and store keys no lookup can reach.</p>
  *
  * <p>Dictionary data is supplied by the caller; none is bundled with OpenNLP. This class is
  * stateless, so its methods may be called concurrently.</p>
@@ -190,7 +193,9 @@ public final class MorfologikDictionaryReader {
   }
 
   /**
-   * Decodes one accepted automaton sequence and records it under its form and tag.
+   * Decodes one accepted automaton sequence and records it under its form and tag. The form is
+   * folded to lower case with {@link Locale#ROOT}, matching the locale-independent fold
+   * {@link DictionaryLemmatizer} applies to the queried token.
    *
    * @param sequence  The accepted bytes: form, separator, encoded base, separator, tag. A missing
    *                  trailing separator is read as an empty tag.
@@ -225,7 +230,7 @@ public final class MorfologikDictionaryReader {
           "malformed morfologik entry: " + new String(sequence, charset), e));
     }
 
-    final String key = new String(form, charset).toLowerCase() + FIELD_SEPARATOR + tag;
+    final String key = new String(form, charset).toLowerCase(Locale.ROOT) + FIELD_SEPARATOR + tag;
     entries.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(new String(base, charset));
   }
 
