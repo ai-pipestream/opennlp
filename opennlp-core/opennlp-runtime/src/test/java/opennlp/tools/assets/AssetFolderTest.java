@@ -39,22 +39,49 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class AssetFolderTest {
 
   /**
+   * Builds the leading bytes of a PNG declaring the given dimensions, padded so the
+   * encoded payload is long enough for bare-run detection.
+   *
+   * @param width The declared width.
+   * @param height The declared height.
+   * @return The leading bytes of a PNG file, 45 in total.
+   */
+  private static byte[] png(int width, int height) {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    out.writeBytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
+    out.writeBytes(new byte[] {0, 0, 0, 13});
+    out.writeBytes(new byte[] {'I', 'H', 'D', 'R'});
+    out.writeBytes(new byte[] {(byte) (width >>> 24), (byte) (width >>> 16),
+        (byte) (width >>> 8), (byte) width});
+    out.writeBytes(new byte[] {(byte) (height >>> 24), (byte) (height >>> 16),
+        (byte) (height >>> 8), (byte) height});
+    out.writeBytes(new byte[] {8, 6, 0, 0, 0});
+    out.writeBytes(new byte[16]);
+    return out.toByteArray();
+  }
+
+  /**
    * Builds a document whose text embeds one real PNG payload between two sentences,
    * annotated by the real detector.
    *
    * @return The annotated document.
    */
   private static Document annotated() {
-    final ByteArrayOutputStream png = new ByteArrayOutputStream();
-    png.writeBytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
-    png.writeBytes(new byte[] {0, 0, 0, 13});
-    png.writeBytes(new byte[] {'I', 'H', 'D', 'R'});
-    png.writeBytes(new byte[] {0, 0, 0, 5, 0, 0, 0, 7});
-    png.writeBytes(new byte[] {8, 6, 0, 0, 0});
-    png.writeBytes(new byte[16]);
-    final String encoded = Base64.getEncoder().encodeToString(png.toByteArray());
+    final String encoded = Base64.getEncoder().encodeToString(png(5, 7));
     return new AssetAnnotator().annotate(
         Document.of("Before the image. " + encoded + " After the image."));
+  }
+
+  /**
+   * Builds a text embedding two distinct PNG payloads, so a fold has to advance its
+   * cursor across more than one asset.
+   *
+   * @return The text with a 5x7 and a 2x3 PNG payload between words.
+   */
+  private static String twoAssetText() {
+    final String first = Base64.getEncoder().encodeToString(png(5, 7));
+    final String second = Base64.getEncoder().encodeToString(png(2, 3));
+    return "One " + first + " two " + second + " three.";
   }
 
   @Test
@@ -104,6 +131,47 @@ public class AssetFolderTest {
     final AlignedText folded = AssetFolder.fold(document, AssetFolder.caption());
     assertEquals("clean text", folded.normalizedString());
     assertEquals(List.of(), document.get(AssetAnnotator.ASSETS));
+  }
+
+  @Test
+  void testTwoAssetFoldKeepsInterveningTextAndMapsBothSpans() {
+    final String text = twoAssetText();
+    final Document document = new AssetAnnotator().annotate(Document.of(text));
+    final AlignedText folded = AssetFolder.fold(document, AssetFolder.caption());
+    final String result = folded.normalizedString();
+    assertEquals("One [png 5x7, 45 bytes] two [png 2x3, 45 bytes] three.", result);
+
+    // Each folded caption maps back to its own asset's exact original span.
+    final List<Annotation<EmbeddedAsset>> assets = document.get(AssetAnnotator.ASSETS);
+    assertEquals(2, assets.size());
+    final int firstStart = result.indexOf('[');
+    final int firstEnd = result.indexOf(']') + 1;
+    final Span firstOriginal = folded.toOriginalSpan(firstStart, firstEnd);
+    assertEquals(assets.get(0).span().getStart(), firstOriginal.getStart());
+    assertEquals(assets.get(0).span().getEnd(), firstOriginal.getEnd());
+    final int secondStart = result.indexOf('[', firstEnd);
+    final int secondEnd = result.indexOf(']', secondStart) + 1;
+    final Span secondOriginal = folded.toOriginalSpan(secondStart, secondEnd);
+    assertEquals(assets.get(1).span().getStart(), secondOriginal.getStart());
+    assertEquals(assets.get(1).span().getEnd(), secondOriginal.getEnd());
+
+    // Text behind the second fold still maps back to itself.
+    final int tailStart = result.indexOf("three");
+    final Span tail = folded.toOriginalSpan(tailStart, tailStart + 5);
+    assertEquals("three", tail.getCoveredText(text).toString());
+  }
+
+  @Test
+  void testOutOfOrderAssetSpansAreRejected() {
+    final String text = twoAssetText();
+    final List<EmbeddedAsset> detected = new CursorAssetDetector().detect(text);
+    assertEquals(2, detected.size());
+    final Document document = Document.of(text).with(AssetAnnotator.ASSETS,
+        List.of(new Annotation<>(detected.get(1).span(), detected.get(1)),
+            new Annotation<>(detected.get(0).span(), detected.get(0))));
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AssetFolder.fold(document, AssetFolder.caption()));
+    assertEquals("asset spans must be in order and free of overlap", e.getMessage());
   }
 
   @Test
