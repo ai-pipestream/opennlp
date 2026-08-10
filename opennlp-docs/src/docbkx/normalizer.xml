@@ -116,8 +116,9 @@
 					</row>
 					<row>
 						<entry><code>DehyphenationCharSequenceNormalizer</code></entry>
-						<entry>Undoes line-break hyphenation: a letter, a hyphen (<code>U+002D</code> or
-							the soft hyphen <code>U+00AD</code>), a line break, optional horizontal
+						<entry>Undoes line-break hyphenation: a letter, a hyphen (<code>U+002D</code>,
+							the soft hyphen <code>U+00AD</code>, or the typeset hyphen
+							<code>U+2010</code>), a line break, optional horizontal
 							whitespace, and a letter join into one word (<code>"litiga-\ntion"</code>
 							to <code>"litigation"</code>); see below.</entry>
 					</row>
@@ -295,8 +296,10 @@ Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized tex
 		<para>
 			Text extracted from PDFs and other typeset sources breaks long words at the right
 			margin with a hyphen and a line break. <code>DehyphenationCharSequenceNormalizer</code>
-			undoes that: a letter followed by a hyphen (<code>U+002D</code> or the soft hyphen
-			<code>U+00AD</code>), a forced line break (the <code>UnicodeWhitespace.lineBreaks()</code>
+			undoes that: a letter followed by a hyphen (<code>U+002D</code>, the soft hyphen
+			<code>U+00AD</code>, or the typeset hyphen <code>U+2010</code> that PDF extractors
+			such as Poppler and PDFBox emit; the non-breaking hyphen <code>U+2011</code> is
+			excluded because it asserts the word was not broken there), a forced line break (the <code>UnicodeWhitespace.lineBreaks()</code>
 			set: <code>U+000A</code>, also as <code>U+000D U+000A</code>, <code>U+000B</code>,
 			<code>U+000C</code>, <code>U+000D</code>, <code>U+0085</code>, <code>U+2028</code>, or
 			<code>U+2029</code>), optional horizontal whitespace, and another letter join into one

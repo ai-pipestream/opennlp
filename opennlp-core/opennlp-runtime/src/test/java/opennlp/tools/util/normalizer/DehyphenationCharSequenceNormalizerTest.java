@@ -65,6 +65,26 @@ public class DehyphenationCharSequenceNormalizerTest {
     assertEquals("litigation", NORMALIZER.normalize("litiga\u00AD\ntion").toString());
   }
 
+  @Test
+  void testJoinAcrossTypesetHyphen() {
+    // PDF extractors such as Poppler and PDFBox emit U+2010 HYPHEN for typeset hyphens.
+    assertEquals("wellknown", NORMALIZER.normalize("well\u2010\nknown").toString());
+  }
+
+  @Test
+  void testNonBreakingHyphenIsLeftAlone() {
+    // U+2011 NON-BREAKING HYPHEN asserts the word was NOT broken at this hyphen, so a
+    // line break after it is not a hyphenation break and must not join.
+    assertEquals("well\u2011\nknown", NORMALIZER.normalize("well\u2011\nknown").toString());
+  }
+
+  @Test
+  void testHyphenatedCompoundSplitAtItsBreakJoinsAsDocumented() {
+    // The documented dictionary-free trade-off: a genuine compound split at its own hyphen
+    // joins too, "well-\nknown" to "wellknown".
+    assertEquals("wellknown", NORMALIZER.normalize("well-\nknown").toString());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"com-\r\n  plete", "com-\n\t\tplete", "com-\n \u00A0plete"})
   void testJoinConsumesContinuationLineIndentation(String text) {
