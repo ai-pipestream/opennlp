@@ -20,6 +20,7 @@ package opennlp.tools.pii;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import opennlp.tools.util.Span;
 
@@ -41,11 +42,12 @@ import opennlp.tools.util.Span;
  *   evidence, at least one space, hyphen, or parenthesis between the digits. A bare
  *   digit run is never a phone number. Dots are not accepted as separators, which
  *   keeps decimal numbers out.</li>
- *   <li>IBAN: two uppercase letters, two check digits, and 11 to 30 more uppercase
- *   letters or digits, 15 to 34 characters in total, optionally in space-separated
- *   groups, validated with the
+ *   <li>IBAN: two uppercase letters, two check digits, and more uppercase letters or
+ *   digits, optionally in space-separated groups, validated with the
  *   <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
- *   mod-97 check. Country-specific length tables are not applied.</li>
+ *   mod-97 check. The country code must be in the ISO 13616 registry and the candidate
+ *   must have exactly the length that registry entry assigns, so a checksum-passing run
+ *   with an unregistered country or a wrong length is rejected.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
  *   validated with the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a>
  *   check and required to start with a digit between 2 and 6,
@@ -64,18 +66,23 @@ import opennlp.tools.util.Span;
  * letters and digits with separators removed, and phone and card numbers keep digits
  * only, with a leading {@code +} preserved for phone numbers.</p>
  *
+ * <p>All four types are reported by default; the {@link #CursorPiiExtractor(Set)}
+ * constructor limits extraction to a subset.</p>
+ *
  * <p>The extractor holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
 public final class CursorPiiExtractor implements PiiExtractor {
 
+  private static final Set<String> ALL_TYPES = Set.of(PiiMention.TYPE_EMAIL,
+      PiiMention.TYPE_PHONE, PiiMention.TYPE_IBAN, PiiMention.TYPE_CARD);
+
   private static final int PRIORITY_EMAIL = 0;
   private static final int PRIORITY_IBAN = 1;
   private static final int PRIORITY_CARD = 2;
   private static final int PRIORITY_PHONE = 3;
 
-  private static final int IBAN_MIN_LENGTH = 15;
   private static final int IBAN_MAX_LENGTH = 34;
   private static final int IBAN_MODULUS = 97;
   private static final int IBAN_ROTATION = 4;
@@ -100,11 +107,42 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private record Hit(int start, int end, int priority, PiiMention mention) {
   }
 
+  private final Set<String> types;
+
+  /**
+   * Initializes an extractor that reports all four types.
+   */
+  public CursorPiiExtractor() {
+    this.types = ALL_TYPES;
+  }
+
+  /**
+   * Initializes an extractor limited to a subset of the types, for a caller that wants
+   * only payment data masked, for example, without flagging every email address.
+   *
+   * @param types The types to report, drawn from the {@code TYPE_*} constants on
+   *              {@link PiiMention}. Must not be {@code null} or empty and must not
+   *              contain a type this extractor does not recognize.
+   * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty,
+   *         or contains an unrecognized type.
+   */
+  public CursorPiiExtractor(Set<String> types) {
+    if (types == null || types.isEmpty()) {
+      throw new IllegalArgumentException("types must not be null or empty");
+    }
+    for (final String type : types) {
+      if (!ALL_TYPES.contains(type)) {
+        throw new IllegalArgumentException("types contains an unrecognized type: " + type);
+      }
+    }
+    this.types = Set.copyOf(types);
+  }
+
   /**
    * {@inheritDoc}
    *
-   * <p>Each type is scanned for independently; overlapping candidates are then reduced
-   * to the non-overlapping set this class describes.</p>
+   * <p>Each enabled type is scanned for independently; overlapping candidates are then
+   * reduced to the non-overlapping set this class describes.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -112,10 +150,18 @@ public final class CursorPiiExtractor implements PiiExtractor {
       throw new IllegalArgumentException("text must not be null");
     }
     final List<Hit> hits = new ArrayList<>();
-    scanEmails(text, hits);
-    scanIbans(text, hits);
-    scanCards(text, hits);
-    scanPhones(text, hits);
+    if (types.contains(PiiMention.TYPE_EMAIL)) {
+      scanEmails(text, hits);
+    }
+    if (types.contains(PiiMention.TYPE_IBAN)) {
+      scanIbans(text, hits);
+    }
+    if (types.contains(PiiMention.TYPE_CARD)) {
+      scanCards(text, hits);
+    }
+    if (types.contains(PiiMention.TYPE_PHONE)) {
+      scanPhones(text, hits);
+    }
     return resolveOverlaps(hits);
   }
 
@@ -215,7 +261,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
 
   /**
    * Finds IBANs: a run of uppercase letters and digits in optional space-separated
-   * groups, tried longest first at group boundaries until the mod-97 check passes.
+   * groups, accepted at the group boundary whose length equals the country's
+   * {@link IbanLengths registry entry} and whose mod-97 check passes.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -247,11 +294,12 @@ public final class CursorPiiExtractor implements PiiExtractor {
         }
       }
       groupEnds.add(new int[] {p, compact.length()});
+      final int registeredLength =
+          IbanLengths.registeredLength(text.charAt(i), text.charAt(i + 1));
       for (int g = groupEnds.size() - 1; g >= 0; g--) {
         final int textEnd = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
-        if (length < IBAN_MIN_LENGTH || length > IBAN_MAX_LENGTH
-            || !onEndBoundary(text, textEnd)) {
+        if (length != registeredLength || !onEndBoundary(text, textEnd)) {
           continue;
         }
         if (mod97(compact, length) == 1) {
