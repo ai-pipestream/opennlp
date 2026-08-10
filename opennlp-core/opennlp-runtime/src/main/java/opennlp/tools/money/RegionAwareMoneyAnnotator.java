@@ -40,8 +40,9 @@ import opennlp.tools.geo.RegionVote;
  * a document that speaks from Australia {@code $} is identified as {@code AUD}.
  *
  * <p>Extractors are built through {@link CursorMoneyExtractor#forRegion(Locale)} and
- * cached per country. A document with an empty ballot, or a winning country without a
- * suitable locale or single currency-sign symbol, falls back to the default table.</p>
+ * cached per country. A document with an empty ballot, a ballot whose lead is below
+ * the configured minimum margin, or a winning country without a suitable locale or
+ * single currency-sign symbol, falls back to the default table.</p>
  *
  * <p>The annotator is safe to share between threads: the per-country cache is a
  * concurrent map and the extractors themselves hold no per-call state.</p>
@@ -50,14 +51,42 @@ import opennlp.tools.geo.RegionVote;
  */
 public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
 
+  /**
+   * The minimum margin of the no-argument constructor: every non-empty ballot is
+   * decisive, so the top row always picks the symbol table, exact ties included.
+   */
+  private static final double DEFAULT_MINIMUM_MARGIN = 0.0;
+
   private final CursorMoneyExtractor defaultExtractor = new CursorMoneyExtractor();
   private final Map<String, CursorMoneyExtractor> byCountry = new ConcurrentHashMap<>();
+  private final double minimumMargin;
 
   /**
-   * Initializes the annotator. There is nothing to configure: the symbol table for
-   * each document is derived from that document's region ballot at annotation time.
+   * Initializes the annotator without a decisiveness requirement: the top row of every
+   * non-empty ballot picks the symbol table, exact ties included.
    */
   public RegionAwareMoneyAnnotator() {
+    this(DEFAULT_MINIMUM_MARGIN);
+  }
+
+  /**
+   * Initializes the annotator with a decisiveness requirement: the ballot winner picks
+   * the symbol table only when its share exceeds the runner-up's share by at least
+   * {@code minimumMargin}, as decided by
+   * {@link DocumentRegionAnnotator#winner(List, double)}; an indecisive ballot falls
+   * back to the default table exactly like an empty one.
+   *
+   * @param minimumMargin The minimum lead of the top share over the runner-up share.
+   *                      Must be in {@code [0, 1]}.
+   * @throws IllegalArgumentException Thrown if {@code minimumMargin} is not in
+   *         {@code [0, 1]}, including {@code NaN}.
+   */
+  public RegionAwareMoneyAnnotator(double minimumMargin) {
+    if (!(minimumMargin >= 0.0 && minimumMargin <= 1.0)) {
+      throw new IllegalArgumentException(
+          "minimumMargin must be in [0, 1], got: " + minimumMargin);
+    }
+    this.minimumMargin = minimumMargin;
   }
 
   @Override
@@ -67,9 +96,10 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
     }
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
-    final CursorMoneyExtractor extractor = ballot.isEmpty()
-        ? defaultExtractor
-        : extractorFor(ballot.get(0).value().countryCode());
+    final CursorMoneyExtractor extractor =
+        DocumentRegionAnnotator.winner(ballot, minimumMargin)
+            .map(vote -> extractorFor(vote.countryCode()))
+            .orElse(defaultExtractor);
     final List<Annotation<MoneyAmount>> mentions = new ArrayList<>();
     for (final MoneyAmount amount : extractor.extract(document.text())) {
       mentions.add(new Annotation<>(amount.span(), amount));

@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import opennlp.tools.document.Annotation;
@@ -210,6 +211,39 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       votes.add(Annotation.of(new RegionVote(entry.getKey(), entry.getValue() / total)));
     }
     return votes;
+  }
+
+  /**
+   * Elects a ballot's winner only when the election is decisive: the top row wins when
+   * its share exceeds the runner-up's share by at least {@code minMargin}. A one-row
+   * ballot has a runner-up share of zero. An empty ballot, or a lead below the margin,
+   * yields no winner, so a caller can fall back instead of acting on what is
+   * effectively a coin flip between near-tied countries.
+   *
+   * @param ballot The ballot rows ordered by descending share, as provided under
+   *               {@link #REGIONS}. Must not be {@code null}.
+   * @param minMargin The minimum lead of the top share over the runner-up share. Must
+   *                  be in {@code [0, 1]}; {@code 0.0} always elects the top row of a
+   *                  non-empty ballot, including on an exact tie.
+   * @return The winning vote, or an empty {@link Optional} if the ballot is empty or
+   *         the lead is below the margin. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code ballot} is {@code null}, or
+   *         {@code minMargin} is not in {@code [0, 1]}, including {@code NaN}.
+   */
+  public static Optional<RegionVote> winner(List<Annotation<RegionVote>> ballot,
+      double minMargin) {
+    if (ballot == null) {
+      throw new IllegalArgumentException("ballot must not be null");
+    }
+    if (!(minMargin >= 0.0 && minMargin <= 1.0)) {
+      throw new IllegalArgumentException("minMargin must be in [0, 1], got: " + minMargin);
+    }
+    if (ballot.isEmpty()) {
+      return Optional.empty();
+    }
+    final RegionVote top = ballot.get(0).value();
+    final double runnerUp = ballot.size() > 1 ? ballot.get(1).value().share() : 0.0;
+    return top.share() - runnerUp >= minMargin ? Optional.of(top) : Optional.empty();
   }
 
   @Override
