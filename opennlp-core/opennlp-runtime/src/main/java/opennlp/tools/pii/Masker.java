@@ -101,8 +101,9 @@ public final class Masker {
   /**
    * Masks the spans of several layers at once under a policy.
    *
-   * <p>Each span's replacement is computed from the original document text, so
-   * overlapping spans mask deterministically regardless of layer order.</p>
+   * <p>Each span's replacement is computed from the text as already masked, so a span
+   * can only mask further and never restores what an overlapping span redacted;
+   * overlapping spans therefore mask deterministically regardless of layer order.</p>
    *
    * @param document The document to redact. Must not be {@code null}.
    * @param layers The layers whose spans are masked. Must not be {@code null} or empty,
@@ -140,7 +141,7 @@ public final class Masker {
       for (final Annotation<?> annotation : document.get(layer)) {
         final int start = annotation.span().getStart();
         final int end = annotation.span().getEnd();
-        masked.replace(start, end, policy.apply(text.substring(start, end)));
+        masked.replace(start, end, policy.apply(masked.substring(start, end)));
       }
     }
     return masked.toString();

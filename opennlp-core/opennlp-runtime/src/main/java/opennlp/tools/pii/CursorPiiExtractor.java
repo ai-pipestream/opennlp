@@ -306,7 +306,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
           final String candidate = compact.substring(0, length);
           hits.add(new Hit(i, textEnd, PRIORITY_IBAN,
               new PiiMention(new Span(i, textEnd), PiiMention.TYPE_IBAN, candidate)));
-          i = textEnd;
+          // The loop increment resumes the scan at the exclusive match end.
+          i = textEnd - 1;
           break;
         }
       }
@@ -361,7 +362,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
         final String candidate = digits.substring(0, length);
         hits.add(new Hit(i, end, PRIORITY_CARD,
             new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, candidate)));
-        i = end;
+        // The loop increment resumes the scan at the exclusive match end.
+        i = end - 1;
         break;
       }
     }
@@ -380,10 +382,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @param hits The candidate collector.
    */
   private void scanPhones(CharSequence text, List<Hit> hits) {
+    int lastEnd = -1;
     for (int i = 0; i < text.length(); i++) {
       final char c = text.charAt(i);
       final boolean plus = c == '+';
-      if ((!plus && !isAsciiDigit(c) && c != '(') || !onNumberStartBoundary(text, i)
+      // A position where a reported phone just ended is a fresh start boundary even
+      // though the character before it is a digit of that phone.
+      if ((!plus && !isAsciiDigit(c) && c != '(')
+          || (i != lastEnd && !onNumberStartBoundary(text, i))
           || (i > 0 && text.charAt(i - 1) == '+')) {
         continue;
       }
@@ -448,7 +454,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
         hits.add(new Hit(i, end, PRIORITY_PHONE,
             new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE,
                 plus ? "+" + candidate : candidate)));
-        i = end;
+        lastEnd = end;
+        // The loop increment resumes the scan at the exclusive match end.
+        i = end - 1;
         break;
       }
     }
