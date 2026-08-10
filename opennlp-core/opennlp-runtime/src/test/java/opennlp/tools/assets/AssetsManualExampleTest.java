@@ -37,6 +37,11 @@ public class AssetsManualExampleTest {
       + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
       + " follows.";
 
+  /** The chapter's bare-run example text: the same payload pasted without a URI. */
+  private static final String BARE = "A report pastes "
+      + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
+      + " into the body.";
+
   @Test
   void testDetectionExampleStatesTheAssetExactly() {
     final EmbeddedAsset asset = new CursorAssetDetector().detect(TEXT).get(0);
@@ -47,6 +52,17 @@ public class AssetsManualExampleTest {
     assertEquals(45, asset.decodedLength());
     assertEquals(45, asset.decode(TEXT).length);
     assertEquals((byte) 0x89, asset.decode(TEXT)[0]);
+  }
+
+  @Test
+  void testBareRunExampleStatesTheAssetExactly() {
+    final EmbeddedAsset found = new CursorAssetDetector().detect(BARE).get(0);
+    assertEquals("png", found.format());
+    assertEquals("image/png", found.mediaType());
+    assertEquals(5, found.width());
+    assertEquals(7, found.height());
+    assertEquals(45, found.decodedLength());
+    assertEquals(found.payload(), found.span());
   }
 
   @Test

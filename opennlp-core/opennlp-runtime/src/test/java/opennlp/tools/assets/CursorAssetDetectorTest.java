@@ -345,6 +345,76 @@ public class CursorAssetDetectorTest {
     assertTrue(assets.get(0).decode(truncated).length > 0);
   }
 
+  /**
+   * A data URI declaring GIF but carrying a PNG payload: the sniffed format wins over
+   * the declaration, while the media type stays as declared.
+   */
+  @Test
+  void testDeclaredGifWithPngPayloadSniffsPng() {
+    final byte[] bytes = png(9, 4);
+    final String uri = "data:image/gif;base64," + Base64.getEncoder().encodeToString(bytes);
+    final List<EmbeddedAsset> assets = detector.detect(embed(uri));
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals(EmbeddedAsset.FORMAT_PNG, asset.format());
+    assertEquals("image/gif", asset.mediaType());
+    // The dimensions are read the sniffed format's way, from the PNG header.
+    assertEquals(9, asset.width());
+    assertEquals(4, asset.height());
+  }
+
+  /** A bare payload starting at the very first character of the text. */
+  @Test
+  void testPayloadStartingAtIndexZero() {
+    final String encoded = Base64.getEncoder().encodeToString(png(1, 1));
+    final String text = encoded + " trails";
+    final List<EmbeddedAsset> assets = detector.detect(text);
+    assertEquals(1, assets.size());
+    assertEquals(0, assets.get(0).span().getStart());
+    assertEquals(encoded.length(), assets.get(0).span().getEnd());
+  }
+
+  /** A data URI whose payload runs to the very last character of the text. */
+  @Test
+  void testDataUriEndingAtTheEndOfTheText() {
+    final String text = "logo: data:image/png;base64,"
+        + Base64.getEncoder().encodeToString(png(1, 1));
+    final List<EmbeddedAsset> assets = detector.detect(text);
+    assertEquals(1, assets.size());
+    assertEquals(6, assets.get(0).span().getStart());
+    assertEquals(text.length(), assets.get(0).span().getEnd());
+  }
+
+  /** The empty text yields the empty result, not an exception. */
+  @Test
+  void testEmptyTextYieldsNothing() {
+    assertEquals(List.of(), detector.detect(""));
+  }
+
+  /**
+   * Two data URIs back to back with no separator: the first payload's padding ends its
+   * run, so both are detected with abutting spans.
+   */
+  @Test
+  void testAdjacentDataUrisAreBothDetected() {
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    bytes.writeBytes(png(1, 1));
+    // One trailing byte makes the length 1 mod 3, so the base64 form ends in padding.
+    bytes.write(0);
+    final String uri = "data:image/png;base64,"
+        + Base64.getEncoder().encodeToString(bytes.toByteArray());
+    assertTrue(uri.endsWith("=="));
+    final String text = uri + uri;
+    final List<EmbeddedAsset> assets = detector.detect(text);
+    assertEquals(2, assets.size());
+    assertEquals(0, assets.get(0).span().getStart());
+    assertEquals(uri.length(), assets.get(0).span().getEnd());
+    assertEquals(uri.length(), assets.get(1).span().getStart());
+    assertEquals(text.length(), assets.get(1).span().getEnd());
+    assertArrayEquals(bytes.toByteArray(), assets.get(0).decode(text));
+    assertArrayEquals(bytes.toByteArray(), assets.get(1).decode(text));
+  }
+
   @Test
   void testRejectsNull() {
     assertThrows(IllegalArgumentException.class, () -> detector.detect(null));
