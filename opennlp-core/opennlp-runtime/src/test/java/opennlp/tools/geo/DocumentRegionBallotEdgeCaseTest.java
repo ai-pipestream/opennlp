@@ -17,16 +17,16 @@
 
 package opennlp.tools.geo;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
-import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -41,96 +41,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class DocumentRegionBallotEdgeCaseTest {
 
   /**
-   * One geocoding outcome of the table geocoder: the country a mention resolves to and
-   * the confidence of that resolution.
+   * Asserts the ballot invariant: the shares of all rows sum to one, so a ballot is a
+   * probability distribution over its countries.
    *
-   * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
-   * @param confidence The resolution confidence, in {@code [0, 1]}.
+   * @param ballot The ballot rows to check. Must not be {@code null}.
    */
-  private record ScoredCountry(String countryCode, double confidence) {
-  }
-
-  /**
-   * Builds a geocoder that resolves each known mention text to a fixed country with a
-   * fixed per-mention confidence, and leaves unknown mentions unresolved.
-   *
-   * @param outcomes Maps a mention text to its resolution outcome. Must not be
-   *                 {@code null}.
-   * @return A {@link Geocoder} over the table. Never {@code null}.
-   */
-  private static Geocoder tableGeocoder(Map<String, ScoredCountry> outcomes) {
-    return (text, mentions) -> {
-      final List<GeoResolution> resolutions = new ArrayList<>();
-      for (final Span mention : mentions) {
-        final String name =
-            text.subSequence(mention.getStart(), mention.getEnd()).toString();
-        final ScoredCountry outcome = outcomes.get(name);
-        if (outcome != null) {
-          resolutions.add(new GeoResolution(mention,
-              entry(name, outcome.countryCode()), outcome.confidence()));
-        }
-      }
-      return resolutions;
-    };
-  }
-
-  /**
-   * Builds a geocoder that must never be consulted: any call fails the test loudly.
-   * Passing it proves a code path resolves all of its evidence without the gazetteer.
-   *
-   * @return A {@link Geocoder} that rejects every call. Never {@code null}.
-   */
-  private static Geocoder unreachableGeocoder() {
-    return (text, mentions) -> {
-      throw new IllegalStateException("the geocoder must not be consulted");
-    };
-  }
-
-  /**
-   * Builds a minimal city entry for a country; only the country code matters for the
-   * region ballot.
-   *
-   * @param name The city name. Must not be {@code null}.
-   * @param countryCode The ISO 3166-1 alpha-2 country code. Must not be {@code null}.
-   * @return A {@link GazetteerEntry} for the city. Never {@code null}.
-   */
-  private static GazetteerEntry entry(String name, String countryCode) {
-    return new GazetteerEntry("test", name, name, List.of(), new GeoPoint(0.0, 0.0),
-        countryCode, List.of(), 1000, GazetteerEntry.FEATURE_CLASS_CITY, Map.of());
-  }
-
-  /**
-   * Builds a document whose entity layer marks each given mention as a location.
-   *
-   * @param text The document text. Must not be {@code null}.
-   * @param mentions The mention texts to mark. Each must occur in {@code text}.
-   * @return A {@link Document} with an entity layer. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if a mention does not occur in the text.
-   */
-  private static Document withLocations(String text, String... mentions) {
-    final List<Annotation<String>> entities = new ArrayList<>();
-    for (final String mention : mentions) {
-      final int start = text.indexOf(mention);
-      if (start < 0) {
-        throw new IllegalArgumentException("mention not in the text: " + mention);
-      }
-      entities.add(new Annotation<>(new Span(start, start + mention.length()), "location"));
+  private static void assertSharesSumToOne(List<Annotation<RegionVote>> ballot) {
+    double sum = 0.0;
+    for (final Annotation<RegionVote> row : ballot) {
+      sum += row.value().share();
     }
-    return Document.of(text).with(Layers.ENTITIES, entities);
+    assertEquals(1.0, sum, 1e-9);
   }
 
   /**
    * Verifies the ranking rule for a tie: two countries with equal weight split the
    * ballot evenly, and the tie breaks by ascending country code, so {@code FR} ranks
    * ahead of {@code GB} regardless of mention order in the text.
+   *
+   * @param text The document text, mentioning the two cities in either order.
    */
-  @Test
-  void testTieBreaksByAscendingCountryCode() {
-    final Geocoder geocoder = tableGeocoder(Map.of(
-        "London", new ScoredCountry("GB", 0.8),
-        "Paris", new ScoredCountry("FR", 0.8)));
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "trains between London and Paris",
+      "trains between Paris and London"
+  })
+  void testTieBreaksByAscendingCountryCode(String text) {
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "London", new GeoTestUtil.ScoredCountry("GB", 0.8),
+        "Paris", new GeoTestUtil.ScoredCountry("FR", 0.8)));
     final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("trains between London and Paris", "London", "Paris"));
+        .annotate(GeoTestUtil.withLocations(text, "London", "Paris"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -148,8 +89,8 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testCountryNamesAloneFillTheBallotWithoutGeocoderEvidence() {
-    final Document document = new DocumentRegionAnnotator(tableGeocoder(Map.of()))
-        .annotate(withLocations("trade between Mexico and New Zealand grew",
+    final Document document = new DocumentRegionAnnotator(GeoTestUtil.tableGeocoder(Map.of()))
+        .annotate(GeoTestUtil.withLocations("trade between Mexico and New Zealand grew",
             "Mexico", "New Zealand"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -170,7 +111,7 @@ public class DocumentRegionBallotEdgeCaseTest {
   @Test
   void testMissingEntityLayerIsRejectedNamingTheLayer() {
     final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(unreachableGeocoder());
+        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder());
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(Document.of("nothing to locate here")));
     assertEquals("document lacks the required layer opennlp:entities<String>",
@@ -184,12 +125,12 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testOneConfidentMentionOutvotesTwoWeakOnes() {
-    final Geocoder geocoder = tableGeocoder(Map.of(
-        "Nice", new ScoredCountry("FR", 0.3),
-        "Nancy", new ScoredCountry("FR", 0.3),
-        "Chicago", new ScoredCountry("US", 0.7)));
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "Nice", new GeoTestUtil.ScoredCountry("FR", 0.3),
+        "Nancy", new GeoTestUtil.ScoredCountry("FR", 0.3),
+        "Chicago", new GeoTestUtil.ScoredCountry("US", 0.7)));
     final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("flights from Nice and Nancy to Chicago",
+        .annotate(GeoTestUtil.withLocations("flights from Nice and Nancy to Chicago",
             "Nice", "Nancy", "Chicago"));
 
     final List<Annotation<RegionVote>> ballot =
@@ -209,10 +150,10 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testZeroConfidenceResolutionCastsNoVote() {
-    final Geocoder geocoder = tableGeocoder(Map.of(
-        "Bilbao", new ScoredCountry("ES", 0.0)));
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "Bilbao", new GeoTestUtil.ScoredCountry("ES", 0.0)));
     final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("a dispatch from Bilbao", "Bilbao"));
+        .annotate(GeoTestUtil.withLocations("a dispatch from Bilbao", "Bilbao"));
 
     assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
     assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
@@ -226,11 +167,91 @@ public class DocumentRegionBallotEdgeCaseTest {
    */
   @Test
   void testZeroConfidenceResolutionDoesNotDiluteTheBallot() {
-    final Geocoder geocoder = tableGeocoder(Map.of(
-        "Bilbao", new ScoredCountry("ES", 0.0),
-        "Sydney", new ScoredCountry("AU", 0.8)));
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "Bilbao", new GeoTestUtil.ScoredCountry("ES", 0.0),
+        "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8)));
     final Document document = new DocumentRegionAnnotator(geocoder)
-        .annotate(withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
+        .annotate(GeoTestUtil.withLocations("flights from Bilbao to Sydney", "Bilbao", "Sydney"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
+  }
+
+  /**
+   * Verifies the share-sum invariant on a three-way ballot: three mentions resolving
+   * to three countries with different confidences produce three rows whose shares sum
+   * to one, ranked by descending confidence.
+   */
+  @Test
+  void testThreeWayBallotSharesSumToOne() {
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8),
+        "Auckland", new GeoTestUtil.ScoredCountry("NZ", 0.7),
+        "London", new GeoTestUtil.ScoredCountry("GB", 0.5)));
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(GeoTestUtil.withLocations("flights from Sydney and Auckland to London",
+            "Sydney", "Auckland", "London"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(3, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals("NZ", ballot.get(1).value().countryCode());
+    assertEquals("GB", ballot.get(2).value().countryCode());
+    assertSharesSumToOne(ballot);
+  }
+
+  /**
+   * Verifies the degenerate texts: an empty and a whitespace-only document, each with
+   * a present but empty entity layer, produce a present and empty ballot without
+   * consulting the geocoder.
+   *
+   * @param text The degenerate document text.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"", "   "})
+  void testEmptyAndWhitespaceOnlyTextsYieldAnEmptyBallot(String text) {
+    final Document document =
+        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder())
+            .annotate(Document.of(text).with(Layers.ENTITIES, List.of()));
+
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  }
+
+  /**
+   * Verifies that a present but empty entity layer is the graceful case, distinct from
+   * the absent layer that is rejected: the document passes and gets a present, empty
+   * ballot, and the geocoder is never consulted for it.
+   */
+  @Test
+  void testPresentButEmptyEntityLayerYieldsAnEmptyPresentBallot() {
+    final Document document =
+        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder())
+            .annotate(Document.of("nothing to locate here")
+                .with(Layers.ENTITIES, List.of()));
+
+    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
+    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  }
+
+  /**
+   * Verifies the country-less gazetteer entry branch: a resolution whose entry carries
+   * no country code, as an ocean or a disputed territory may, casts no vote, so the
+   * remaining mention holds the full share and the country-less entry neither dilutes
+   * nor blocks the ballot.
+   */
+  @Test
+  void testNullCountryCodeResolutionCastsNoVote() {
+    final Geocoder geocoder = GeoTestUtil.tableGeocoder(Map.of(
+        "Pacific", new GeoTestUtil.ScoredCountry(null, 0.9),
+        "Sydney", new GeoTestUtil.ScoredCountry("AU", 0.8)));
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(GeoTestUtil.withLocations("across the Pacific to Sydney",
+            "Pacific", "Sydney"));
 
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
@@ -246,7 +267,7 @@ public class DocumentRegionBallotEdgeCaseTest {
   @Test
   void testNullDocumentIsRejected() {
     final DocumentRegionAnnotator annotator =
-        new DocumentRegionAnnotator(unreachableGeocoder());
+        new DocumentRegionAnnotator(GeoTestUtil.unreachableGeocoder());
     assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 }
