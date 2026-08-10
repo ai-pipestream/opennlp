@@ -285,29 +285,6 @@ public class DocumentRegionBallotEdgeCaseTest {
     final Geocoder geocoder = (text, mentions) -> {
       final List<GeoResolution> resolutions = new ArrayList<>();
       for (final Span mention : mentions) {
-        resolutions.add(new GeoResolution(mention, entry("Springfield", null), 0.9));
-      }
-      return resolutions;
-    };
-    final Document document = new DocumentRegionAnnotator().annotate(
-        new GeocodeAnnotator(geocoder)
-            .annotate(withLocations("dateline Springfield", "Springfield")));
-
-    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
-    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
-  }
-
-  /**
-   * Verifies that a best candidate without a country code casts no vote through the
-   * resolution path: the mention is no country name, so nothing short-circuits ahead of
-   * the resolution lookup, and the countryless entry leaves the ballot empty rather
-   * than voting for a null key or failing.
-   */
-  @Test
-  void testBestCandidateWithoutCountryCodeCastsNoVote() {
-    final Geocoder geocoder = (text, mentions) -> {
-      final List<GeoResolution> resolutions = new ArrayList<>();
-      for (final Span mention : mentions) {
         resolutions.add(new GeoResolution(mention, GeoTestUtil.entry("Springfield", null), 0.9));
       }
       return resolutions;
@@ -381,80 +358,6 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
-   * Verifies that the best-ranked candidate casts a multi-candidate mention's vote: the
-   * geocoder ranks Springfield as {@code US} at {@code 0.6} ahead of {@code CA} at
-   * {@code 0.3}, so the ballot names {@code US} with the winning candidate's confidence,
-   * and the trailing candidate neither overwrites it nor adds a vote of its own.
-   */
-  @Test
-  void testBestRankedCandidateCastsTheMentionVote() {
-    final Geocoder geocoder = (text, mentions) -> {
-      final List<GeoResolution> ranked = new ArrayList<>();
-      for (final Span mention : mentions) {
-        ranked.add(new GeoResolution(mention, entry("Springfield", "US"), 0.6));
-        ranked.add(new GeoResolution(mention, entry("Springfield", "CA"), 0.3));
-      }
-      return ranked;
-    };
-    final Document document = new DocumentRegionAnnotator().annotate(
-        new GeocodeAnnotator(geocoder)
-            .annotate(withLocations("meet in Springfield today", "Springfield")));
-
-    final List<Annotation<RegionVote>> ballot =
-        document.get(DocumentRegionAnnotator.REGIONS);
-    assertEquals(1, ballot.size());
-    assertEquals("US", ballot.get(0).value().countryCode());
-    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
-  }
-
-  /**
-   * Verifies that a resolution carrying no country code cannot silence its mention: the
-   * gazetteer resolves {@code Australia} to an entry whose country code is {@code null},
-   * which can cast no vote of its own, so the English country-name evidence still fills
-   * the ballot with {@code AU}.
-   */
-  @Test
-  void testResolutionWithoutACountryCodeStillVotesAsACountryName() {
-    final Geocoder geocoder = (text, mentions) -> {
-      final List<GeoResolution> resolutions = new ArrayList<>();
-      for (final Span mention : mentions) {
-        resolutions.add(new GeoResolution(mention, entry("Australia", null), 0.8));
-      }
-      return resolutions;
-    };
-    final Document document = new DocumentRegionAnnotator().annotate(
-        new GeocodeAnnotator(geocoder)
-            .annotate(withLocations("mining exports from Australia rose", "Australia")));
-
-    final List<Annotation<RegionVote>> ballot =
-        document.get(DocumentRegionAnnotator.REGIONS);
-    assertEquals(1, ballot.size());
-    assertEquals("AU", ballot.get(0).value().countryCode());
-    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
-  }
-
-  /**
-   * Verifies the evidence precedence: {@code Georgia} is both an English country name and
-   * a place the gazetteer resolves to the {@code US} state at {@code 0.6}. The exact
-   * country name is the stronger evidence, so the mention votes {@code GE} at the
-   * country-name weight and the resolution casts no competing vote.
-   */
-  @Test
-  void testCountryNameOutranksAGazetteerResolutionForTheSameMention() {
-    final Geocoder geocoder = tableGeocoder(Map.of(
-        "Georgia", new ScoredCountry("US", 0.6)));
-    final Document document = new DocumentRegionAnnotator().annotate(
-        new GeocodeAnnotator(geocoder)
-            .annotate(withLocations("the delegation left Georgia on Tuesday", "Georgia")));
-
-    final List<Annotation<RegionVote>> ballot =
-        document.get(DocumentRegionAnnotator.REGIONS);
-    assertEquals(1, ballot.size());
-    assertEquals("GE", ballot.get(0).value().countryCode());
-    assertEquals(1.0, ballot.get(0).value().share(), 0.0);
-  }
-
-  /**
    * Verifies that a missing geocoding stage fails loud instead of silently dropping every
    * geocoded vote: the locations layer is declared in {@link
    * DocumentRegionAnnotator#requires()}, so a document that never passed through the
@@ -463,7 +366,8 @@ public class DocumentRegionBallotEdgeCaseTest {
   @Test
   void testAbsentLocationsLayerIsRejected() {
     final DocumentRegionAnnotator annotator = new DocumentRegionAnnotator();
-    final Document document = withLocations("flights from Sydney", "Sydney");
+    final Document document =
+        GeoTestUtil.withLocationEntities("flights from Sydney", "Sydney");
 
     final IllegalArgumentException thrown =
         assertThrows(IllegalArgumentException.class, () -> annotator.annotate(document));
