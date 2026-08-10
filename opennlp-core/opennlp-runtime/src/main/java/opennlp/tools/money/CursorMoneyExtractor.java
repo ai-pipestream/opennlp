@@ -40,8 +40,11 @@ import opennlp.tools.util.Span;
  * {@code 100 USD}), an optional leading minus ({@code -$5}), and scale markers, either
  * an immediate suffix ({@code $1.2M}, {@code \u00A32.5k}, {@code $3bn}) or a following word
  * ({@code $3 billion}). Digit grouping is validated: once a comma appears, every further
- * group must have exactly three digits, and the match ends at the last valid position.
- * A bare number without a currency marker is never money.</p>
+ * group must have exactly three digits. An amount grouped in a convention the scanner
+ * cannot parse, for example the Indian-grouped {@code 1,00,000}, is rejected entirely
+ * rather than truncated to a wrong value, and the comma-adjoined tail of such a number
+ * never seeds a mention of its own. A bare number without a currency marker is never
+ * money.</p>
  *
  * <p>Currency symbols are inherently ambiguous; the default table maps each symbol to
  * the ISO code it most commonly denotes, for example {@code $} to {@code USD}. Callers
@@ -188,7 +191,9 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * Tries the three mention shapes at one position: symbol first, ISO code first,
    * number first. A leading {@code -} counts as a minus sign only at a left boundary,
    * on the symbol-first path exactly as on the number-first path, so the hyphen in a
-   * range such as {@code $100-$200} never negates the second amount.
+   * range such as {@code $100-$200} never negates the second amount. A digit that
+   * continues a comma-grouped number the scanner rejected never starts a number-first
+   * mention, so the tail {@code 000} of {@code 1,00,000 USD} is not read as 0 USD.
    *
    * @param text The text being scanned.
    * @param start The offset the candidate mention would start at.
@@ -214,6 +219,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       }
     }
     if (NumberScan.isAsciiDigit(cp)
+        && !NumberScan.continuesGroupedNumber(text, i)
         && (negative ? NumberScan.signBoundaryBefore(text, start)
             : NumberScan.boundaryBefore(text, i))) {
       return numberFirst(text, start, i, negative);
