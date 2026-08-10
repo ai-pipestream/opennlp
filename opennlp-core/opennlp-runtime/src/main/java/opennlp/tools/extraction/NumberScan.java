@@ -27,8 +27,11 @@ import opennlp.tools.commons.Internal;
  * optionally scale markers.
  *
  * <p>Grouping is strict: once a comma appears, the leading group must have at most three
- * digits and every further group exactly three; the scan ends at the last valid
- * position. With scaling enabled, an immediate suffix ({@code k}, {@code m}, {@code b},
+ * digits and every further group exactly three. A scan that stops at a comma directly
+ * followed by a digit fails entirely instead of truncating, because the text continues
+ * a grouped number this scanner cannot parse, for example the Indian-grouped
+ * {@code 1,00,000}; any other stop ends the scan at the last valid position. With
+ * scaling enabled, an immediate suffix ({@code k}, {@code m}, {@code b},
  * {@code bn}) or a following word ({@code thousand} to {@code trillion}) multiplies the
  * value, and an immediate letter that is no scale marker invalidates the scan
  * entirely.</p>
@@ -64,7 +67,8 @@ public final class NumberScan {
    *                   immediate letter that is no scale marker fails the scan;
    *                   {@code false} to stop after the decimal part.
    * @return The scanned {@link Result}, or {@code null} when no number starts at
-   *         {@code start} or an immediate letter suffix is not a scale marker.
+   *         {@code start}, the scan stops at a comma directly followed by a digit,
+   *         or an immediate letter suffix is not a scale marker.
    */
   public static Result parse(CharSequence text, int start, boolean applyScale) {
     int i = start;
@@ -92,8 +96,29 @@ public final class NumberScan {
         i++;
       }
     }
+    if (charAt(text, i) == ',' && isAsciiDigit(charAt(text, i + 1))) {
+      // The text continues a comma-grouped number this scanner cannot parse, for
+      // example the Indian-grouped 1,00,000. Truncating here would silently report
+      // a wildly wrong value, so the whole candidate is rejected.
+      return null;
+    }
     final BigDecimal value = new BigDecimal(normalized.toString());
     return applyScale ? parseScale(text, i, value) : new Result(value, i);
+  }
+
+  /**
+   * Checks whether the position is the tail of a comma-grouped number the scanner
+   * rejected: it is directly preceded by a comma that is itself directly preceded by
+   * a digit. Such a tail, for example the final {@code 000} of {@code 1,00,000}, must
+   * not seed a mention of its own.
+   *
+   * @param text The text. Must not be {@code null}.
+   * @param index The candidate start offset.
+   * @return {@code true} if a number starting at {@code index} would continue a
+   *         grouped number.
+   */
+  public static boolean continuesGroupedNumber(CharSequence text, int index) {
+    return charAt(text, index - 1) == ',' && isAsciiDigit(charAt(text, index - 2));
   }
 
   /**
