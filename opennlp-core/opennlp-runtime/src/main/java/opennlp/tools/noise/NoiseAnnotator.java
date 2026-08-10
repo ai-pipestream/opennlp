@@ -25,6 +25,7 @@ import opennlp.tools.assets.AssetAnnotator;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.DocumentAnnotators;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
@@ -35,9 +36,10 @@ import opennlp.tools.util.Span;
  *
  * <p>In its default mode this annotator requires {@link AssetAnnotator#ASSETS} and
  * excludes those spans from scoring, so an embedded binary another detector already
- * explained is never reported a second time as noise. The standalone mode skips that
- * requirement and scores the whole text; what this annotator requires therefore
- * depends on the mode it was built with.</p>
+ * explained is never reported a second time as noise; a document without that layer
+ * is rejected loudly. The standalone mode skips that requirement and scores the whole
+ * text; what this annotator requires therefore depends on the mode it was built
+ * with.</p>
  *
  * @since 3.0.0
  */
@@ -77,6 +79,20 @@ public class NoiseAnnotator implements DocumentAnnotator {
     this.excludeAssets = excludeAssets;
   }
 
+  /**
+   * Scores the document text and adds the {@link #NOISE} layer. The asset-excluding
+   * mode enforces {@link #requires()} before scoring, so a pipeline that forgot the
+   * asset detector fails loud instead of silently scoring every embedded payload as
+   * noise.
+   *
+   * @param document The document to annotate. Must not be {@code null}; in the
+   *                 asset-excluding mode it must carry {@link AssetAnnotator#ASSETS}.
+   * @return A new {@link Document} with the {@link #NOISE} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, or
+   *         if the annotator excludes assets and the document lacks
+   *         {@link AssetAnnotator#ASSETS}.
+   */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
@@ -84,6 +100,7 @@ public class NoiseAnnotator implements DocumentAnnotator {
     }
     final List<Span> exclude = new ArrayList<>();
     if (excludeAssets) {
+      DocumentAnnotators.requireLayers(document, AssetAnnotator.ASSETS);
       for (final Annotation<?> asset : document.get(AssetAnnotator.ASSETS)) {
         exclude.add(asset.span());
       }
