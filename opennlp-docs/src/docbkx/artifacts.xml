@@ -84,7 +84,17 @@ List<Annotation<TextArtifact>> artifacts = document.get(ArtifactAnnotator.ARTIFA
 			Because findings are exact spans on a layer, any layer consumer composes with
 			them: masking replaces the covered characters, filtering drops annotations by
 			type, and a cleanup step can rewrite the flagged stretches while recording its
-			edits.
+			edits. Masking, for example, overwrites every covered character in place:
+			<programlisting language="java"><![CDATA[
+StringBuilder masked = new StringBuilder("cafÃ© costs �8");
+for (Annotation<TextArtifact> artifact : artifacts) {
+    for (int i = artifact.span().getStart(); i < artifact.span().getEnd(); i++) {
+        masked.setCharAt(i, '#');
+    }
+}
+// masked.toString(): "caf## costs #8"]]>
+			</programlisting>
+			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
 		</para>
 	</section>
 </chapter>
