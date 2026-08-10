@@ -27,8 +27,11 @@ import opennlp.tools.util.StringUtil;
  * the broken form and a query carrying the whole word ({@code "litigation"}) agree on term
  * identity.
  *
- * <p>Recognized hyphens are {@code U+002D HYPHEN-MINUS} and {@code U+00AD SOFT HYPHEN}, the
- * two forms typesetters and PDF extractors actually emit at a break. Recognized line breaks
+ * <p>Recognized hyphens are {@code U+002D HYPHEN-MINUS}, {@code U+00AD SOFT HYPHEN}, and
+ * {@code U+2010 HYPHEN}, the forms typesetters and PDF extractors (Poppler, PDFBox) actually
+ * emit at a break. {@code U+2011 NON-BREAKING HYPHEN} is deliberately excluded: its whole
+ * meaning is that the word was <em>not</em> broken at that hyphen, so a line break after it
+ * is not a hyphenation break and joining across it would be wrong. Recognized line breaks
  * are the forced-break members of {@link UnicodeWhitespace#lineBreaks()}:
  * {@code U+000A LINE FEED} (also as {@code U+000D U+000A}), {@code U+000B VERTICAL TAB},
  * {@code U+000C FORM FEED}, {@code U+000D CARRIAGE RETURN}, {@code U+0085 NEXT LINE},
@@ -69,6 +72,14 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
 
   private static final char HYPHEN_MINUS = '-';
   private static final char SOFT_HYPHEN = '\u00AD';
+
+  /**
+   * {@code U+2010 HYPHEN}, the dedicated typographic hyphen that PDF extractors such as
+   * Poppler and PDFBox emit for typeset hyphens. {@code U+2011 NON-BREAKING HYPHEN} is
+   * deliberately not a joinable hyphen: its whole meaning is that the word was <em>not</em>
+   * broken at that hyphen, so a line break after it is not a hyphenation break.
+   */
+  private static final char TYPESET_HYPHEN = '\u2010';
 
   /**
    * The forced line-break characters, derived from the authoritative
@@ -153,7 +164,8 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
 
   /**
    * Determines whether {@code text} has a joinable line-break hyphenation starting at
-   * {@code hyphen}: a hyphen-minus or soft hyphen with a letter immediately before it, a
+   * {@code hyphen}: a hyphen-minus, soft hyphen, or typeset hyphen ({@code U+2010}) with a
+   * letter immediately before it, a
    * line break immediately after it, then an optional horizontal-whitespace run, then a
    * letter.
    *
@@ -164,7 +176,7 @@ public class DehyphenationCharSequenceNormalizer implements OffsetAwareNormalize
    */
   private static int joinEditEnd(CharSequence text, int hyphen) {
     final char c = text.charAt(hyphen);
-    if (c != HYPHEN_MINUS && c != SOFT_HYPHEN) {
+    if (c != HYPHEN_MINUS && c != SOFT_HYPHEN && c != TYPESET_HYPHEN) {
       return -1;
     }
     if (hyphen == 0 || !Character.isLetter(Character.codePointBefore(text, hyphen))) {
