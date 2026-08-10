@@ -18,6 +18,7 @@
 package opennlp.tools.geo;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.document.Annotation;
+import opennlp.tools.document.Document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -92,6 +94,28 @@ public class DocumentRegionWinnerTest {
     assertTrue(winner.isPresent());
     assertEquals("MX", winner.get().countryCode());
     assertEquals(0.75, winner.get().share(), 0.0);
+  }
+
+  /**
+   * Verifies the helper against an annotator-produced ballot: a country name voting at
+   * {@code 0.95} leads a geocoded city voting at {@code 0.8} by a share margin of
+   * about {@code 0.086}, so a margin of {@code 0.05} elects New Zealand while a margin
+   * of {@code 0.1} elects nobody.
+   */
+  @Test
+  void testAnnotatorProducedBallotRespectsTheMargin() {
+    final Document document = new DocumentRegionAnnotator(
+        GeoTestUtil.tableGeocoder(Map.of("Sydney", "AU"), 0.8))
+        .annotate(GeoTestUtil.withLocations(
+            "the Sydney office reports to New Zealand headquarters",
+            "Sydney", "New Zealand"));
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+
+    final Optional<RegionVote> decisive = DocumentRegionAnnotator.winner(ballot, 0.05);
+    assertTrue(decisive.isPresent());
+    assertEquals("NZ", decisive.get().countryCode());
+    assertTrue(DocumentRegionAnnotator.winner(ballot, 0.1).isEmpty());
   }
 
   @Test
