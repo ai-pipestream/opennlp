@@ -22,8 +22,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-import opennlp.tools.util.Span;
-
 /**
  * A deterministic {@link PiiExtractor}: forward scans over the text, no regular
  * expressions, recognizing email addresses, phone numbers, IBANs, and payment card
@@ -81,11 +79,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private static final Set<String> ALL_TYPES = Set.of(PiiMention.TYPE_EMAIL,
       PiiMention.TYPE_PHONE, PiiMention.TYPE_IBAN, PiiMention.TYPE_CARD);
 
-  private static final int PRIORITY_EMAIL = 0;
-  private static final int PRIORITY_IBAN = 1;
-  private static final int PRIORITY_CARD = 2;
-  private static final int PRIORITY_PHONE = 3;
-
   private static final int IBAN_MAX_LENGTH = 34;
   private static final int IBAN_MODULUS = 97;
   private static final int IBAN_ROTATION = 4;
@@ -102,19 +95,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * the wire, 253 in presentation form).
    */
   static final int DOMAIN_MAX_LENGTH = 253;
-
-  /**
-   * One candidate found by a scanner, held until overlap resolution decides which
-   * candidates survive.
-   *
-   * @param start The candidate start offset in the scanned text, inclusive.
-   * @param end The candidate end offset in the scanned text, exclusive.
-   * @param priority The type priority that breaks exact-span ties; a lower value is the
-   *                 more specific type.
-   * @param mention The mention to report if this candidate survives.
-   */
-  private record Hit(int start, int end, int priority, PiiMention mention) {
-  }
 
   private final Set<String> types;
 
@@ -158,7 +138,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
-    final List<Hit> hits = new ArrayList<>();
+    final List<Hits.Hit> hits = new ArrayList<>();
     if (types.contains(PiiMention.TYPE_EMAIL)) {
       scanEmails(text, hits);
     }
@@ -171,7 +151,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
     if (types.contains(PiiMention.TYPE_PHONE)) {
       scanPhones(text, hits);
     }
-    return resolveOverlaps(hits);
+    return Hits.resolve(hits);
   }
 
   /**
@@ -180,7 +160,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private void scanEmails(CharSequence text, List<Hit> hits) {
+  private void scanEmails(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       if (text.charAt(i) != '@') {
         continue;
@@ -207,8 +187,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
       }
       final String normalized =
           text.subSequence(start, end).toString().toLowerCase(Locale.ROOT);
-      hits.add(new Hit(start, end, PRIORITY_EMAIL,
-          new PiiMention(new Span(start, end), PiiMention.TYPE_EMAIL, normalized)));
+      Hits.add(hits, start, end, PiiMention.TYPE_EMAIL, normalized);
     }
   }
 
@@ -272,7 +251,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private void scanIbans(CharSequence text, List<Hit> hits) {
+  private void scanIbans(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       if (!Ascii.isUpper(text.charAt(i))
           || (i > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, i)))
@@ -309,8 +288,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
         }
         if (mod97(compact, length) == 1) {
           final String candidate = compact.substring(0, length);
-          hits.add(new Hit(i, textEnd, PRIORITY_IBAN,
-              new PiiMention(new Span(i, textEnd), PiiMention.TYPE_IBAN, candidate)));
+          Hits.add(hits, i, textEnd, PiiMention.TYPE_IBAN, candidate);
           // The loop increment resumes the scan at the exclusive match end.
           i = textEnd - 1;
           break;
@@ -329,7 +307,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private void scanCards(CharSequence text, List<Hit> hits) {
+  private void scanCards(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char first = text.charAt(i);
       if (first < '2' || first > '6' || !Boundaries.onNumberStart(text, i)) {
@@ -365,8 +343,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
           continue;
         }
         final String candidate = digits.substring(0, length);
-        hits.add(new Hit(i, end, PRIORITY_CARD,
-            new PiiMention(new Span(i, end), PiiMention.TYPE_CARD, candidate)));
+        Hits.add(hits, i, end, PiiMention.TYPE_CARD, candidate);
         // The loop increment resumes the scan at the exclusive match end.
         i = end - 1;
         break;
@@ -386,7 +363,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @param text The text to scan.
    * @param hits The candidate collector.
    */
-  private void scanPhones(CharSequence text, List<Hit> hits) {
+  private void scanPhones(CharSequence text, List<Hits.Hit> hits) {
     int lastEnd = -1;
     for (int i = 0; i < text.length(); i++) {
       final char c = text.charAt(i);
@@ -456,43 +433,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
                 && Ascii.isDigit(text.charAt(end + 1)))) {
           continue;
         }
-        hits.add(new Hit(i, end, PRIORITY_PHONE,
-            new PiiMention(new Span(i, end), PiiMention.TYPE_PHONE,
-                plus ? "+" + candidate : candidate)));
+        Hits.add(hits, i, end, PiiMention.TYPE_PHONE,
+            plus ? "+" + candidate : candidate);
         lastEnd = end;
         // The loop increment resumes the scan at the exclusive match end.
         i = end - 1;
         break;
       }
     }
-  }
-
-  /**
-   * Resolves overlapping candidates: leftmost first, then longest, then the more
-   * specific type.
-   *
-   * @param hits The raw candidates.
-   * @return The surviving mentions in text order. Never {@code null}.
-   */
-  private List<PiiMention> resolveOverlaps(List<Hit> hits) {
-    hits.sort((a, b) -> {
-      if (a.start() != b.start()) {
-        return Integer.compare(a.start(), b.start());
-      }
-      if (a.end() != b.end()) {
-        return Integer.compare(b.end(), a.end());
-      }
-      return Integer.compare(a.priority(), b.priority());
-    });
-    final List<PiiMention> mentions = new ArrayList<>();
-    int lastEnd = 0;
-    for (final Hit hit : hits) {
-      if (hit.start() >= lastEnd) {
-        mentions.add(hit.mention());
-        lastEnd = hit.end();
-      }
-    }
-    return mentions;
   }
 
   /**
