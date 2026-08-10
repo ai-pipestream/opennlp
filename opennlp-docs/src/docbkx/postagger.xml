@@ -442,6 +442,31 @@ BilstmPOSTagger tagger = new BilstmPOSTagger(model);
 String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
+		<para>
+		Closing the accuracy gap: the <code>Settings</code> record switches on the
+		optional parts that lift accuracy on real corpora. A linear-chain CRF output
+		layer (<code>crf</code>) decodes whole tag sequences with Viterbi instead of
+		per-position argmax, a second stacked encoder layer
+		(<code>encoderLayers</code>) deepens the sentence encoder, pretrained word
+		vectors passed to an overload of <code>train</code> can enter through a
+		learned adapter projection (<code>pretrainedAdapter</code>) or be fine-tuned
+		at a fraction of the base learning rate (<code>pretrainedTuning</code>), and
+		<code>trainMultiTask</code> regularizes the shared encoder with auxiliary
+		tagging heads weighted by <code>auxLossWeight</code>. The variant below
+		switches on CRF decoding and the second encoder layer.
+		<code>BilstmPOSTaggerUsageTest</code> asserts the behavior shown here.
+		<programlisting language="java">
+<![CDATA[// Identical to the settings above except for CRF decoding and encoderLayers=2.
+BilstmPOSTrainer.Settings accurate = new BilstmPOSTrainer.Settings(
+    16, 8, 8, 16, 60, 8, 0.05, 5.0, 0.0, 1, 16, 17L, 1, 0.0, 0, true, 2,
+    0.0, 0.0, 1.0, 0.0, false);
+
+BilstmPOSTagger tagger = new BilstmPOSTagger(
+    BilstmPOSTrainer.train(sampleStream, accurate));
+
+String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
+		</programlisting>
+		</para>
 		</section>
 
 		<section xml:id="tools.postagger.eval">
