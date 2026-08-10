@@ -296,11 +296,14 @@ Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized tex
 			Text extracted from PDFs and other typeset sources breaks long words at the right
 			margin with a hyphen and a line break. <code>DehyphenationCharSequenceNormalizer</code>
 			undoes that: a letter followed by a hyphen (<code>U+002D</code> or the soft hyphen
-			<code>U+00AD</code>), a line break (<code>U+000A</code>, <code>U+000D U+000A</code>,
-			<code>U+000D</code>, <code>U+0085</code>, <code>U+2028</code>, or
+			<code>U+00AD</code>), a forced line break (the <code>UnicodeWhitespace.lineBreaks()</code>
+			set: <code>U+000A</code>, also as <code>U+000D U+000A</code>, <code>U+000B</code>,
+			<code>U+000C</code>, <code>U+000D</code>, <code>U+0085</code>, <code>U+2028</code>, or
 			<code>U+2029</code>), optional horizontal whitespace, and another letter join into one
 			word, so a document writing <code>"litiga-\ntion"</code> and a query writing
-			<code>"litigation"</code> agree on term identity. The hyphen is always deleted when the
+			<code>"litigation"</code> agree on term identity. A second break inside the whitespace
+			run stops the join, so a form-feed page break (<code>"litiga-\n\fPage 3\ntion"</code>)
+			does not fuse the word with the page header. The hyphen is always deleted when the
 			pattern matches; a genuinely hyphenated compound split at its hyphen
 			(<code>"well-\nknown"</code>) joins too, because telling the two apart needs a
 			dictionary, which is deliberately out of scope. The normalizer is offset-aware, so it

@@ -37,25 +37,27 @@ public class DehyphenationCharSequenceNormalizerTest {
   private static final DehyphenationCharSequenceNormalizer NORMALIZER =
       DehyphenationCharSequenceNormalizer.getInstance();
 
-  @Test
-  void testJoinAcrossLineFeed() {
-    assertEquals("litigation", NORMALIZER.normalize("litiga-\ntion").toString());
-  }
-
-  @Test
-  void testJoinAcrossCarriageReturnLineFeed() {
-    assertEquals("complete", NORMALIZER.normalize("com-\r\nplete").toString());
-  }
-
-  @Test
-  void testJoinAcrossCarriageReturnAlone() {
-    assertEquals("complete", NORMALIZER.normalize("com-\rplete").toString());
-  }
-
   @ParameterizedTest
-  @ValueSource(strings = {"litiga-\u0085tion", "litiga-\u2028tion", "litiga-\u2029tion"})
-  void testJoinAcrossNextLineAndUnicodeSeparators(String text) {
+  @ValueSource(strings = {
+      "litiga-\ntion",       // U+000A line feed
+      "litiga-\u000Btion",   // U+000B vertical tab
+      "litiga-\ftion",       // U+000C form feed
+      "litiga-\rtion",       // U+000D carriage return
+      "litiga-\r\ntion",     // U+000D U+000A carriage return + line feed, one break
+      "litiga-\u0085tion",   // U+0085 next line
+      "litiga-\u2028tion",   // U+2028 line separator
+      "litiga-\u2029tion"})  // U+2029 paragraph separator
+  void testJoinAcrossEveryLineBreakForm(String text) {
     assertEquals("litigation", NORMALIZER.normalize(text).toString());
+  }
+
+  @Test
+  void testFormFeedPageBreakDoesNotJoinAcrossThePage() {
+    // The form feed after the line break is a second line break (a page break), not
+    // continuation-line indentation, so the join must stop: swallowing it would fuse the
+    // word with the page header, corrupting "litiga-" into "litigaPage".
+    final String text = "litiga-\n\fPage 3\ntion";
+    assertEquals(text, NORMALIZER.normalize(text).toString());
   }
 
   @Test
