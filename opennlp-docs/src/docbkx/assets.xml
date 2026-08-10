@@ -72,6 +72,25 @@ byte[] bytes = asset.decode(text);  // the original 45 bytes]]>
 			original text.
 			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
 		</para>
+		<para>
+			Detection needs no <code>data:</code> URI: the same payload pasted bare into
+			prose is found by its magic prefix and verified against its decoded header:
+			<programlisting language="java"><![CDATA[
+String bare = "A report pastes "
+    + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
+    + " into the body.";
+
+EmbeddedAsset found = new CursorAssetDetector().detect(bare).get(0);
+// found.format()        = "png", sniffed from the decoded header
+// found.mediaType()     = "image/png", derived from the format
+// found.width()         = 5
+// found.height()        = 7
+// found.decodedLength() = 45]]>
+			</programlisting>
+			A bare run carries no URI around its payload, so the asset's span and its
+			payload span cover the same characters.
+			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
+		</para>
 	</section>
 
 	<section xml:id="tools.assets.fold">
