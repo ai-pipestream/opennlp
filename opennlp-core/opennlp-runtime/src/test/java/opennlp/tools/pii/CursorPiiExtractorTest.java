@@ -330,6 +330,20 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies that a phone mention that ends exactly where the next phone begins does not
+   * skip the second candidate: the scan must resume at the exclusive end of the first
+   * match, not one character past it.
+   */
+  @Test
+  void testAdjacentPhonesAreBothReported() {
+    final List<PiiMention> mentions =
+        extractor.extract("(555) 123-4567(555) 123-4568");
+    Assertions.assertEquals(2, mentions.size());
+    Assertions.assertEquals("5551234567", mentions.get(0).normalized());
+    Assertions.assertEquals("5551234568", mentions.get(1).normalized());
+  }
+
+  /**
    * Verifies rejected phone-like forms: bare digit runs without any formatting, a
    * separated run with only nine digits, decimal and grouped numbers, and international
    * candidates whose digits admit no split into an assigned calling code and a plausible
