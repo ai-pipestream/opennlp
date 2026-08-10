@@ -351,6 +351,7 @@ Arrays.stream(tags).forEach(k -> System.out.print(k + " "));]]>
 		<code>FeedforwardPOSTrainer.Settings</code> record in the order shown below;
 		<code>Settings.defaults()</code> supplies a usable starting point. Training is
 		deterministic for a fixed seed on a given platform and JVM.
+		<code>FeedforwardPOSTaggerUsageTest</code> asserts the behavior shown here.
 		<programlisting language="java">
 <![CDATA[// embeddingSize, hiddenSize, epochs, batchSize, learningRate,
 // l2, dropout, wordCutoff, suffixCutoff, seed
@@ -363,7 +364,6 @@ FeedforwardPOSTagger tagger = new FeedforwardPOSTagger(model);
 String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
-		<!-- FeedforwardPretrainedVectorsTest asserts the vector and lexicon behavior shown here. -->
 		<para>
 		Pretrained word vectors are an opt-in: an overload of <code>train</code> takes a
 		<code>java.util.function.Function</code> that is asked once per distinct
@@ -375,6 +375,7 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		training words; the lexicon does not change training itself, it only widens
 		tagging-time coverage to words never seen in training. Without these opt-ins the
 		two-argument <code>train</code> call above behaves exactly as before.
+		<code>FeedforwardPretrainedVectorsTest</code> asserts the behavior shown here.
 		<programlisting language="java">
 <![CDATA[// Return one vector per word the source knows, null for a word without one.
 Function<CharSequence, float[]> wordVectors = word -> lookupVector(word);
@@ -385,6 +386,37 @@ FeedforwardPOSModel vectored =
 // Additionally store vectors for words never seen in training:
 FeedforwardPOSModel withLexicon =
     FeedforwardPOSTrainer.train(sampleStream, settings, wordVectors, lexiconWords);]]>
+		</programlisting>
+		</para>
+		<para>
+		How confident was the tagger? <code>topKSequences</code> returns the greedy
+		tagging as a single scored <code>Sequence</code>: <code>getProbs()</code>
+		holds the model's probability for each assigned tag, one per token and each
+		in the interval (0, 1], and <code>getScore()</code> is the sum of the logs
+		of those probabilities.
+		<code>FeedforwardPOSTaggerUsageTest</code> asserts the behavior shown here.
+		<programlisting language="java">
+<![CDATA[Sequence[] sequences = tagger.topKSequences(new String[] {"the", "cat", "barks"});
+Sequence best = sequences[0];
+
+// One probability per token, each in (0, 1]:
+double[] probs = best.getProbs();]]>
+		</programlisting>
+		</para>
+		<para>
+		A trained model serializes to a stream and loads back with identical tagging
+		behavior, so models train once and deploy as files.
+		<code>FeedforwardPOSTaggerEdgeCaseTest</code> asserts the behavior shown
+		here.
+		<programlisting language="java">
+<![CDATA[ByteArrayOutputStream out = new ByteArrayOutputStream();
+model.serialize(out);
+
+FeedforwardPOSTagger reloaded = new FeedforwardPOSTagger(
+    FeedforwardPOSModel.load(new ByteArrayInputStream(out.toByteArray())));
+
+// The reloaded tagger decides exactly like the original.
+String[] tags = reloaded.tag(new String[] {"she", "eats", "fish"});]]>
 		</programlisting>
 		</para>
 		</section>

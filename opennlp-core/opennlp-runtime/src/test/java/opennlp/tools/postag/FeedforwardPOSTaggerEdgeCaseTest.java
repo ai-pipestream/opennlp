@@ -33,6 +33,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import opennlp.tools.util.ObjectStreamUtils;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -124,6 +126,25 @@ public class FeedforwardPOSTaggerEdgeCaseTest {
   void testAllUnknownWordsStillTagged() {
     assertArrayEquals(new String[] {"NNS", "VBZ"},
         tagger.tag(new String[] {"blorp", "quexination"}));
+  }
+
+  /**
+   * Tokens outside the training script must still tag, one tag per token: the
+   * Turkish dotted capital I lowercases to a combining-dot form on its way to the
+   * unknown embedding, and an emoji token reaches inference as a surrogate pair.
+   * Both are pinned only as not throwing and producing a tag per token; repeating
+   * the call pins that inference on the frozen model is stable.
+   */
+  @Test
+  void testUnicodeTokensStillTag() {
+    final String[] sentence = {"İstanbul", "🐕"};
+    final String[] tags = tagger.tag(sentence);
+    assertEquals(sentence.length, tags.length);
+    for (final String tag : tags) {
+      assertNotNull(tag);
+    }
+    assertArrayEquals(tags, tagger.tag(sentence),
+        "repeated inference on the frozen model must be stable");
   }
 
   /**
