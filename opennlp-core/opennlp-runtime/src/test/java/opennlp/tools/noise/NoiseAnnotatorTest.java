@@ -30,6 +30,7 @@ import opennlp.tools.document.Document;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the document adapter and the hand-off between the asset detector and the noise
@@ -76,6 +77,19 @@ public class NoiseAnnotatorTest {
     final List<Annotation<NoiseSpan>> noise = document.get(NoiseAnnotator.NOISE);
     assertEquals(1, noise.size());
     assertEquals(NoiseSpan.SEVERITY_BINARYISH, noise.get(0).value().severity());
+  }
+
+  /**
+   * The default mode enforces its {@link NoiseAnnotator#requires()} contract: a
+   * pipeline that forgot the asset detector fails loud, naming the missing layer,
+   * instead of silently scoring every embedded payload as noise.
+   */
+  @Test
+  void testDefaultModeRejectsADocumentWithoutTheAssetLayer() {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new NoiseAnnotator().annotate(Document.of("plain text")));
+    assertTrue(e.getMessage().contains(AssetAnnotator.ASSETS.id()),
+        "the message must name the missing layer");
   }
 
   @Test
