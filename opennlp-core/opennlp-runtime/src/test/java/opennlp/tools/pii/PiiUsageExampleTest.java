@@ -17,6 +17,7 @@
 
 package opennlp.tools.pii;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -94,6 +95,72 @@ public class PiiUsageExampleTest {
     Assertions.assertEquals(
         "Contact ****@******e.com, call (***) ***-4567, or charge card **** **** **** 1111.",
         masked);
+  }
+
+  /**
+   * Masks the same document with the type-aware defaults, which choose a policy per
+   * mention: the card keeps the last four digits a receipt needs while the address and the
+   * phone number keep only their shape.
+   */
+  @Test
+  void testMaskWithTypeAwareDefaults() {
+    final Document document = annotator.annotate(Document.of(TEXT));
+
+    final String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
+
+    Assertions.assertEquals(TEXT.length(), masked.length());
+    Assertions.assertEquals(
+        "Contact ****@*******.***, call (***) ***-****, or charge card **** **** **** 1111.",
+        masked);
+  }
+
+  /**
+   * Turns on a detector that is off by default. The opt-in packs are composed with the
+   * default extractor, and the result reports every type in one pass.
+   */
+  @Test
+  void testOptInPackFindsWhatTheDefaultExtractorDoesNot() {
+    final String text = "Deploy from 10.0.0.7 using AKIAIOSFODNN7EXAMPLE, ask jane@example.com.";
+
+    final List<PiiMention> mentions = PiiPacks.allStructured().extract(text);
+
+    Assertions.assertEquals(List.of(PiiMention.TYPE_IPV4, PiiMention.TYPE_AWS_ACCESS_KEY,
+        PiiMention.TYPE_EMAIL), mentions.stream().map(PiiMention::type).toList());
+    Assertions.assertEquals(List.of(), new CursorPiiExtractor().extract(text).stream()
+        .map(PiiMention::type).filter(type -> !PiiMention.TYPE_EMAIL.equals(type)).toList());
+  }
+
+  /**
+   * Replaces the mentions with numbered labels instead of masking them. The text stays
+   * readable and the repeated address keeps one label, which masking would hide.
+   */
+  @Test
+  void testPseudonymizeKeepsTheTextReadable() {
+    final String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+
+    final PiiRewrite rewrite = new Pseudonymizer()
+        .rewrite(text, new CursorPiiExtractor().extract(text));
+
+    Assertions.assertEquals("Contact EMAIL-1; EMAIL-1 replied to EMAIL-2.", rewrite.text());
+    Assertions.assertEquals(rewrite.text().indexOf("EMAIL-2"),
+        rewrite.mapOffset(text.indexOf("bob@example.com")));
+  }
+
+  /**
+   * Reports on a scan without holding any of the values, the artefact a review can be given.
+   */
+  @Test
+  void testAuditReportCountsWithoutRevealing() {
+    final HmacTokenizer tokenizer = new HmacTokenizer(
+        "keep this key out of the report".getBytes(StandardCharsets.UTF_8));
+    final Document document = annotator.annotate(Document.of(TEXT));
+
+    final PiiAuditReport report = PiiAuditReport.of(document, tokenizer);
+
+    Assertions.assertEquals(3, report.total());
+    Assertions.assertEquals(1, report.counts().get(PiiMention.TYPE_CARD));
+    Assertions.assertFalse(report.toString().contains("jane"));
+    Assertions.assertFalse(report.toString().contains("4111"));
   }
 
   /**
