@@ -92,4 +92,29 @@ public class BilstmPOSTaggerUsageTest {
     assertArrayEquals(new String[] {"NNS", "VBP"},
         tagger.tag(new String[] {"dogs", "bark"}));
   }
+
+  /**
+   * Mirrors the "Closing the accuracy gap" listing of the user manual: the same tiny
+   * corpus trained with the CRF output layer and the two-layer encoder switched on
+   * must tag the same sentences correctly. The seed is fixed and dropout disabled, so
+   * the asserted tag sequences are the exact output of a reproducible training run.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails, which
+   *         does not happen in practice.
+   */
+  @Test
+  void testTrainThenTagWithCrfAndSecondEncoderLayer() throws IOException {
+    // Identical to the settings above except for CRF decoding and encoderLayers=2.
+    final BilstmPOSTrainer.Settings accurate = new BilstmPOSTrainer.Settings(
+        16, 8, 8, 16, 60, 8, 0.05d, 5.0d, 0.0d, 1, 16, 17L, 1, 0.0d, 0, true, 2,
+        0.0d, 0.0d, 1.0d, 0.0d, false);
+
+    final BilstmPOSTagger tagger = new BilstmPOSTagger(BilstmPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), accurate));
+
+    assertArrayEquals(new String[] {"DT", "NN", "VBZ"},
+        tagger.tag(new String[] {"the", "cat", "barks"}));
+    assertArrayEquals(new String[] {"NNS", "VBP"},
+        tagger.tag(new String[] {"dogs", "bark"}));
+  }
 }
