@@ -31,14 +31,18 @@ import opennlp.morfologik.builder.MorfologikDictionaryBuilder;
 public abstract class AbstractMorfologikTest {
 
   protected static Path createMorfologikDictionary() throws Exception {
+    return createMorfologikDictionary("dictionaryWithLemma");
+  }
+
+  protected static Path createMorfologikDictionary(String baseName) throws Exception {
     Path tabFilePath = File.createTempFile(AbstractMorfologikTest.class.getName(), ".txt").toPath();
     tabFilePath.toFile().deleteOnExit();
     Path infoFilePath = DictionaryMetadata.getExpectedMetadataLocation(tabFilePath);
     infoFilePath.toFile().deleteOnExit();
 
-    Files.copy(getResourceStream("/dictionaryWithLemma.txt"), tabFilePath,
+    Files.copy(getResourceStream("/" + baseName + ".txt"), tabFilePath,
             StandardCopyOption.REPLACE_EXISTING);
-    Files.copy(getResourceStream("/dictionaryWithLemma.info"), infoFilePath,
+    Files.copy(getResourceStream("/" + baseName + ".info"), infoFilePath,
             StandardCopyOption.REPLACE_EXISTING);
 
     MorfologikDictionaryBuilder builder = new MorfologikDictionaryBuilder();
