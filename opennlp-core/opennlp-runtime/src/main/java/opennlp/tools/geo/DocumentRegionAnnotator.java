@@ -19,6 +19,7 @@ package opennlp.tools.geo;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -75,6 +76,12 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
 
   /** The entity type label treated as a location unless the caller names others. */
   private static final String DEFAULT_LOCATION_TYPE = "location";
+
+  /**
+   * The right single quotation mark (U+2019), which CLDR display names use where real
+   * text often writes the ASCII apostrophe; lookups fold it to the apostrophe.
+   */
+  private static final char RIGHT_SINGLE_QUOTATION_MARK = '’';
 
   private static final Map<String, String> COUNTRY_NAMES = countryNames();
 
@@ -139,7 +146,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       }
       final Span span = entity.span();
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
-      final String countryCode = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
+      final String countryCode = countryCodeOf(mention);
       if (countryCode != null) {
         nameVotes.put(span, countryCode);
       }
@@ -216,10 +223,64 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Builds the country-name lookup from JDK locale data. Codes for which the JDK has no
-   * distinct display name are skipped rather than mapped to themselves.
+   * Looks up the country a mention names, tolerating the spellings real text uses: the
+   * mention is normalized like the table keys, and when the normalized form does not
+   * match, a diacritic-stripped variant is tried, so both {@code Côte d'Ivoire} and
+   * {@code Cote d'Ivoire} match {@code CI} and {@code México} matches {@code MX}.
+   * Aliases such as {@code USA} or {@code UK} are out of scope for this lookup and do
+   * not match.
    *
-   * @return Lowercased English country display names mapped to their ISO 3166-1 alpha-2
+   * @param mention The mention text. Must not be {@code null}.
+   * @return The ISO 3166-1 alpha-2 code of the named country, or {@code null} if the
+   *         mention names no country.
+   */
+  private static String countryCodeOf(String mention) {
+    final String normalized = normalize(mention);
+    final String code = COUNTRY_NAMES.get(normalized);
+    return code != null ? code : COUNTRY_NAMES.get(stripDiacritics(normalized));
+  }
+
+  /**
+   * Normalizes a country name for the lookup: NFKC composition, folding the right
+   * single quotation mark to the ASCII apostrophe, and lowercasing.
+   *
+   * @param name The name to normalize. Must not be {@code null}.
+   * @return The normalized name. Never {@code null}.
+   */
+  private static String normalize(String name) {
+    return Normalizer.normalize(name, Normalizer.Form.NFKC)
+        .replace(RIGHT_SINGLE_QUOTATION_MARK, '\'')
+        .toLowerCase(Locale.ROOT);
+  }
+
+  /**
+   * Strips combining diacritical marks from a normalized name by NFD decomposition and
+   * removal of non-spacing marks, so {@code côte d'ivoire} becomes
+   * {@code cote d'ivoire}.
+   *
+   * @param name The normalized name. Must not be {@code null}.
+   * @return The name without diacritics. Never {@code null}.
+   */
+  private static String stripDiacritics(String name) {
+    final String decomposed = Normalizer.normalize(name, Normalizer.Form.NFD);
+    final StringBuilder stripped = new StringBuilder(decomposed.length());
+    for (int i = 0; i < decomposed.length(); i++) {
+      final char c = decomposed.charAt(i);
+      if (Character.getType(c) != Character.NON_SPACING_MARK) {
+        stripped.append(c);
+      }
+    }
+    return stripped.toString();
+  }
+
+  /**
+   * Builds the country-name lookup from JDK locale data. Codes for which the JDK has no
+   * distinct display name are skipped rather than mapped to themselves. Each name is
+   * indexed under its {@link #normalize(String) normalized} form and additionally under
+   * its {@link #stripDiacritics(String) diacritic-stripped} variant; a stripped variant
+   * never displaces another name's exact normalized form.
+   *
+   * @return Normalized English country display names mapped to their ISO 3166-1 alpha-2
    *         codes. Never {@code null}.
    */
   private static Map<String, String> countryNames() {
@@ -227,7 +288,13 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     for (final String code : Locale.getISOCountries()) {
       final String name = Locale.of("", code).getDisplayCountry(Locale.ENGLISH);
       if (!name.isEmpty() && !name.equals(code)) {
-        names.put(name.toLowerCase(Locale.ROOT), code);
+        names.put(normalize(name), code);
+      }
+    }
+    for (final String code : Locale.getISOCountries()) {
+      final String name = Locale.of("", code).getDisplayCountry(Locale.ENGLISH);
+      if (!name.isEmpty() && !name.equals(code)) {
+        names.putIfAbsent(stripDiacritics(normalize(name)), code);
       }
     }
     return Map.copyOf(names);
