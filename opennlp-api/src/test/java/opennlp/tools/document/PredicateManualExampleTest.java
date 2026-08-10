@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -80,6 +81,18 @@ public class PredicateManualExampleTest {
     assertEquals(List.of(6, 5),
         document.get(longOnes).stream().map(Annotation::value).toList());
     assertEquals(5, document.get(TOKEN_LENGTHS).size());
+  }
+
+  /** The fail-loud example: a document without the source layer is rejected by name. */
+  @Test
+  void testMissingLayerExampleStatesTheExactMessage() {
+    final LayerKey<Integer> longOnes = LayerKey.of("token-lengths-long", Integer.class);
+    final DocumentAnnotator filter =
+        new FilterAnnotator<>(TOKEN_LENGTHS, longOnes, a -> a.value() >= 5);
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> filter.annotate(Document.of(TEXT)));
+    assertEquals("document lacks the required layer token-lengths<Integer>",
+        e.getMessage());
   }
 
   /** The conditional example: a short document passes with the layer empty. */

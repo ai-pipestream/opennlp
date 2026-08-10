@@ -427,10 +427,17 @@ DocumentAnnotator filter =
 			<code>IllegalArgumentException</code> naming the layer: the filter needs its
 			source layer, and the conditional needs every layer its delegate requires,
 			whether or not the condition holds, so a skipped stage cannot hide an assembly
-			error.
+			error. For the filter above, handed a fresh document that carries no
+			token-length layer yet, that rejection reads:
 		</para>
+		<programlisting language="java">
+				<![CDATA[
+filter.annotate(Document.of("The dog barks. It naps."));
+// IllegalArgumentException: document lacks the required layer token-lengths<Integer>]]>
+		</programlisting>
 		<para>
-			<code>PredicateManualExampleTest</code> asserts the values shown above.
+			<code>PredicateManualExampleTest</code> asserts the values and the rejection
+			shown above.
 		</para>
 	</section>
 </chapter>
