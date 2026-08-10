@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.document.Annotation;
@@ -189,6 +190,35 @@ public class DocumentRegionAnnotatorTest {
     assertEquals("NZ", ballot.get(1).value().countryCode());
     assertEquals(TABLE_CONFIDENCE / (0.95 + TABLE_CONFIDENCE),
         ballot.get(1).value().share(), SHARE_DELTA);
+  }
+
+  /**
+   * Verifies that country-name matching tolerates the spellings real text uses: the
+   * CLDR display name's apostrophe (U+2019) and the ASCII apostrophe, the accented and
+   * the plain spelling of a name with diacritics, and any letter case. The geocoder
+   * resolves nothing, so each match is proven by the resulting one-row ballot.
+   *
+   * @param mention The country mention as it appears in the text.
+   * @param expectedCountry The ISO 3166-1 alpha-2 code the mention must elect.
+   */
+  @ParameterizedTest
+  @CsvSource(quoteCharacter = '"', value = {
+      "Côte d’Ivoire, CI",
+      "Côte d'Ivoire, CI",
+      "Cote d'Ivoire, CI",
+      "México, MX",
+      "AUSTRALIA, AU",
+      "australia, AU"
+  })
+  void testCountryNameSpellingVariantsMatch(String mention, String expectedCountry) {
+    final Document document = new DocumentRegionAnnotator(tableGeocoder(Map.of()))
+        .annotate(withEntities("new offices in " + mention + " opened", mention));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals(expectedCountry, ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), SHARE_DELTA);
   }
 
   @Test
