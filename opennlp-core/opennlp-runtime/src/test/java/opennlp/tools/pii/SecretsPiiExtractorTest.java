@@ -128,10 +128,34 @@ public class SecretsPiiExtractorTest {
     Assertions.assertEquals(token, mentions.get(0).normalized());
   }
 
+  /**
+   * GitHub explicitly reserves the right to change token lengths and asks scanners to
+   * accept the documented alphabet up to 255 characters.
+   */
+  @Test
+  void testAcceptsVariableLengthGithubTokens() {
+    final String legacy = "ghp_" + "a".repeat(36) + "_" + "B".repeat(24);
+    final String fineGrained = "github_pat_" + "a".repeat(82) + "_" + "7".repeat(40);
+
+    Assertions.assertEquals(legacy,
+        extractor.extract(legacy).get(0).normalized());
+    Assertions.assertEquals(fineGrained,
+        extractor.extract(fineGrained).get(0).normalized());
+  }
+
+  @Test
+  void testGithubTokenMaximumLengthBoundary() {
+    final String accepted = "ghp_" + "a".repeat(251);
+    final String rejected = "ghp_" + "a".repeat(252);
+
+    Assertions.assertEquals(255, accepted.length());
+    Assertions.assertEquals(accepted, extractor.extract(accepted).get(0).normalized());
+    Assertions.assertTrue(extractor.extract(rejected).isEmpty());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {
       "ghp_1234567890abcdefghijklmnopqrstuvwxy",
-      "ghp_1234567890abcdefghijklmnopqrstuvwxyza",
       "ghx_1234567890abcdefghijklmnopqrstuvwxyz",
       "GHP_1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
       "ghp1234567890abcdefghijklmnopqrstuvwxyz",

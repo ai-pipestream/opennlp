@@ -52,7 +52,7 @@ public class HmacTokenizerTest {
 
     Assertions.assertTrue(token.startsWith("EMAIL-"), token);
     Assertions.assertFalse(token.contains("jane"), token);
-    Assertions.assertEquals("EMAIL-".length() + 8, token.length(), token);
+    Assertions.assertEquals("EMAIL-".length() + 16, token.length(), token);
   }
 
   @ParameterizedTest
@@ -93,6 +93,17 @@ public class HmacTokenizerTest {
   void testDifferentValuesGiveDifferentTokens() {
     Assertions.assertNotEquals(TOKENIZER.token(PiiMention.TYPE_EMAIL, "a@b.com"),
         TOKENIZER.token(PiiMention.TYPE_EMAIL, "c@d.com"));
+  }
+
+  /**
+   * Pins a real collision in the former eight-hexadecimal-digit default. The default
+   * must preserve these distinct normalized values as distinct audit identities.
+   */
+  @Test
+  void testDefaultDoesNotCollapseKnownThirtyTwoBitCollision() {
+    Assertions.assertNotEquals(
+        TOKENIZER.token(PiiMention.TYPE_EMAIL, "user210255@example.com"),
+        TOKENIZER.token(PiiMention.TYPE_EMAIL, "user217053@example.com"));
   }
 
   @Test

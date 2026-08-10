@@ -108,6 +108,8 @@ public class CryptoPiiExtractorTest {
       "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5",
       "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t",
       "bc1Qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "bc1qqqqsyydq4q",
+      "bc1pqqq3g00lg3",
       "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx",
       "bc1q",
       "bc1",

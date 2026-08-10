@@ -62,6 +62,23 @@ public class CursorPiiExtractorTest {
   }
 
   /**
+   * Verifies the SMTP mailbox length boundaries: 64 ASCII octets in the local part and
+   * 254 characters overall are accepted, while one additional character is rejected.
+   */
+  @Test
+  void testEmailLengthBoundaries() {
+    final String localAtLimit = "a".repeat(64);
+    final String domainForMaximumMailbox = domainOfLength(189, "com");
+    final String maximumMailbox = localAtLimit + "@" + domainForMaximumMailbox;
+
+    Assertions.assertEquals(254, maximumMailbox.length());
+    Assertions.assertEquals(1, extractor.extract(maximumMailbox).size());
+    Assertions.assertTrue(extractor.extract("a".repeat(65) + "@example.com").isEmpty());
+    Assertions.assertTrue(
+        extractor.extract(localAtLimit + "@" + domainOfLength(190, "com")).isEmpty());
+  }
+
+  /**
    * Verifies that well-formed but unregistered final labels are rejected, including
    * invented TLDs and common private-use suffixes that the IANA root zone does not
    * carry.
