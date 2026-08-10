@@ -79,6 +79,24 @@ public class PiiUsageExampleTest {
   }
 
   /**
+   * Masks the same document under a policy that keeps separators visible and leaves
+   * the last four letters or digits of each span readable, the customary receipt
+   * style, and verifies the exact redacted string.
+   */
+  @Test
+  void testMaskWithAReceiptStylePolicy() {
+    final Document document = annotator.annotate(Document.of(TEXT));
+
+    final String masked = Masker.mask(document, PiiAnnotator.PII,
+        MaskPolicy.of('*').keepingFormat().keepingTrailing(4));
+
+    Assertions.assertEquals(TEXT.length(), masked.length());
+    Assertions.assertEquals(
+        "Contact ****@******e.com, call (***) ***-4567, or charge card **** **** **** 1111.",
+        masked);
+  }
+
+  /**
    * Verifies one annotation of the PII layer against its expected span offsets in
    * {@link #TEXT}, the text those offsets cover, and the type and normalized form of
    * the carried {@link PiiMention}. Also verifies that the annotation span and the
