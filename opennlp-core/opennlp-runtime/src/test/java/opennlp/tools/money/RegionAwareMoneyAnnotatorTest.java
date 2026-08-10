@@ -225,4 +225,19 @@ public class RegionAwareMoneyAnnotatorTest {
     assertThrows(IllegalArgumentException.class,
         () -> new RegionAwareMoneyAnnotator().annotate(null));
   }
+
+  /**
+   * Verifies that an absent region layer is rejected as an assembly error: the
+   * annotator requires the region ballot, so a document that never passed through the
+   * region annotator is refused with an exception naming the layer, rather than
+   * silently falling back to the default table.
+   */
+  @Test
+  void testMissingRegionLayerIsRejectedNamingTheLayer() {
+    final RegionAwareMoneyAnnotator annotator = new RegionAwareMoneyAnnotator();
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(Document.of("costs $5")));
+    assertEquals("document lacks the required layer opennlp:regions<RegionVote>",
+        e.getMessage());
+  }
 }

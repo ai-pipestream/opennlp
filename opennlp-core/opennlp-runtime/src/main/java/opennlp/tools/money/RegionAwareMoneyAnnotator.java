@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.DocumentAnnotators;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.geo.DocumentRegionAnnotator;
 import opennlp.tools.geo.RegionVote;
@@ -89,11 +90,19 @@ public class RegionAwareMoneyAnnotator implements DocumentAnnotator {
     this.minimumMargin = minimumMargin;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link DocumentRegionAnnotator#REGIONS} layer.
+   * @return The document with the {@link MoneyAnnotator#MONEY} layer added. Never
+   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
+   *         region layer is absent.
+   */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
+    DocumentAnnotators.requireLayers(document, DocumentRegionAnnotator.REGIONS);
     final List<Annotation<RegionVote>> ballot =
         document.get(DocumentRegionAnnotator.REGIONS);
     final CursorMoneyExtractor extractor =
