@@ -227,6 +227,76 @@ public class CursorArtifactDetectorTest {
         () -> "false positive for " + label + ": <" + text + ">");
   }
 
+  /**
+   * Abutting runs of different classes yield two artifacts meeting at a shared offset:
+   * a control run flushed by the replacement character that immediately follows it.
+   */
+  @Test
+  void testAdjacentDifferentTypeRunsAbut() {
+    final String text = "x" + cp(0x0007, 0xFFFD) + "y";
+    final List<TextArtifact> artifacts = detector.detect(text);
+    assertEquals(2, artifacts.size());
+    assertEquals(TextArtifact.TYPE_CONTROL, artifacts.get(0).type());
+    assertEquals(1, artifacts.get(0).span().getStart());
+    assertEquals(2, artifacts.get(0).span().getEnd());
+    assertEquals(TextArtifact.TYPE_REPLACEMENT, artifacts.get(1).type());
+    assertEquals(2, artifacts.get(1).span().getStart());
+    assertEquals(3, artifacts.get(1).span().getEnd());
+  }
+
+  /** A high surrogate as the very last char has no pair to look ahead to, flagged. */
+  @Test
+  void testUnpairedHighSurrogateAtEndOfText() {
+    final String text = "abc" + (char) 0xD83D;
+    final List<TextArtifact> artifacts = detector.detect(text);
+    assertEquals(1, artifacts.size());
+    assertEquals(TextArtifact.TYPE_UNPAIRED_SURROGATE, artifacts.get(0).type());
+    assertEquals(3, artifacts.get(0).span().getStart());
+    assertEquals(text.length(), artifacts.get(0).span().getEnd());
+  }
+
+  /** A run still open at the end of the text is flushed with its end at the length. */
+  @Test
+  void testRunEndingExactlyAtTextLength() {
+    final String text = "ok" + cp(0xFFFD, 0xFFFD);
+    final List<TextArtifact> artifacts = detector.detect(text);
+    assertEquals(1, artifacts.size());
+    assertEquals(TextArtifact.TYPE_REPLACEMENT, artifacts.get(0).type());
+    assertEquals(2, artifacts.get(0).span().getStart());
+    assertEquals(text.length(), artifacts.get(0).span().getEnd());
+  }
+
+  /**
+   * The javadoc claims the reported spans never overlap: a text mixing a zero-width
+   * run, a control run, mojibake, and two abutting runs yields spans sorted by start
+   * with each span ending no later than the next one begins.
+   */
+  @Test
+  void testSpansAreSortedAndNeverOverlap() {
+    final String text = "a." + cp(0x200B, 0x200B) + "b" + cp(0x0007, 0x001B)
+        + " caf" + cp(0x00C3, 0x00A9) + " d" + cp(0xFFFD, 0xFDD0);
+    final List<TextArtifact> artifacts = detector.detect(text);
+    assertEquals(5, artifacts.size());
+    for (int k = 0; k + 1 < artifacts.size(); k++) {
+      final TextArtifact current = artifacts.get(k);
+      final TextArtifact next = artifacts.get(k + 1);
+      assertTrue(current.span().getStart() < next.span().getStart(),
+          () -> "spans not sorted: " + artifacts);
+      assertTrue(current.span().getEnd() <= next.span().getStart(),
+          () -> "spans overlap: " + artifacts);
+    }
+  }
+
+  /** A non-String character sequence is detected exactly like the equal String. */
+  @Test
+  void testCharSequenceInputMatchesStringInput() {
+    final String text = "a" + cp(0x0007) + " caf" + cp(0x00C3, 0x00A9) + " " + cp(0xFFFD);
+    final List<TextArtifact> fromString = detector.detect(text);
+    final List<TextArtifact> fromBuilder = detector.detect(new StringBuilder(text));
+    assertEquals(3, fromString.size());
+    assertEquals(fromString, fromBuilder);
+  }
+
   @Test
   void testRejectsNull() {
     assertThrows(IllegalArgumentException.class, () -> detector.detect(null));

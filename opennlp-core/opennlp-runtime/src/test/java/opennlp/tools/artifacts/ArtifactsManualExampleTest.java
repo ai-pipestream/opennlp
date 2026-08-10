@@ -63,6 +63,21 @@ public class ArtifactsManualExampleTest {
     assertEquals(List.of(), new CursorArtifactDetector().detect(dejaVu));
   }
 
+  /** The masking example: every covered character is overwritten, nothing else moves. */
+  @Test
+  void testMaskingExampleProducesTheStatedString() {
+    final Document document = new ArtifactAnnotator().annotate(Document.of(TEXT));
+    final List<Annotation<TextArtifact>> artifacts =
+        document.get(ArtifactAnnotator.ARTIFACTS);
+    final StringBuilder masked = new StringBuilder(TEXT);
+    for (Annotation<TextArtifact> artifact : artifacts) {
+      for (int i = artifact.span().getStart(); i < artifact.span().getEnd(); i++) {
+        masked.setCharAt(i, '#');
+      }
+    }
+    assertEquals("caf## costs #8", masked.toString());
+  }
+
   /** The layer example: two annotations, the first covering the damaged word part. */
   @Test
   void testLayerExampleCarriesTheStatedAnnotations() {
