@@ -53,9 +53,11 @@ import opennlp.tools.util.Span;
  * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
  *
  * <p>Not recognized: accounting negatives in parentheses, multi-character symbols such as
- * {@code kr}, spelled-out currency words such as {@code dollars}, and locale-dependent
- * decimal commas. The extractor holds no per-call state and is safe to share between
- * threads.</p>
+ * {@code kr} or {@code HK$}, spelled-out currency words such as {@code dollars}, and
+ * locale-dependent decimal commas. A known symbol directly preceded by an ASCII letter
+ * is read as part of such a longer symbol and rejected, so {@code HK$50} and
+ * {@code US$50} yield no mention rather than a wrong one. The extractor holds no
+ * per-call state and is safe to share between threads.</p>
  *
  * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
@@ -194,6 +196,9 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * range such as {@code $100-$200} never negates the second amount. A digit that
    * continues a comma-grouped number the scanner rejected never starts a number-first
    * mention, so the tail {@code 000} of {@code 1,00,000 USD} is not read as 0 USD.
+   * A known symbol directly preceded by an ASCII letter never starts a symbol-first
+   * mention, since it is the tail of a longer symbol the table does not know, so
+   * {@code HK$50} is not read as 50 USD.
    *
    * @param text The text being scanned.
    * @param start The offset the candidate mention would start at.
@@ -209,6 +214,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     final int cp = NumberScan.codePointAt(text, i);
     final String symbolCurrency = currencyFor(cp);
     if (symbolCurrency != null
+        && !asciiLetterBefore(text, i)
         && (!negative || NumberScan.signBoundaryBefore(text, start))) {
       return symbolFirst(text, start, i, symbolCurrency, negative);
     }
@@ -361,6 +367,23 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    */
   private boolean isUpperAscii(int cp) {
     return cp >= 'A' && cp <= 'Z';
+  }
+
+  /**
+   * Checks whether the code point directly before a position is an ASCII letter. A
+   * known currency symbol in that context is the tail of a multi-character symbol the
+   * table does not know, such as {@code HK$}, and must not match as the bare symbol.
+   *
+   * @param text The text being scanned. Must not be {@code null}.
+   * @param index The offset of the candidate symbol.
+   * @return {@code true} if an ASCII letter directly precedes {@code index}.
+   */
+  private boolean asciiLetterBefore(CharSequence text, int index) {
+    if (index == 0) {
+      return false;
+    }
+    final int cp = Character.codePointBefore(text, index);
+    return isUpperAscii(cp) || (cp >= 'a' && cp <= 'z');
   }
 
   /**
