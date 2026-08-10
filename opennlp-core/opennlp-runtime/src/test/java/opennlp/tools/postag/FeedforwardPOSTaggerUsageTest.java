@@ -24,8 +24,11 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.util.ObjectStreamUtils;
+import opennlp.tools.util.Sequence;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Demonstrates the complete user-facing workflow of the feedforward tagger in one
@@ -91,5 +94,42 @@ public class FeedforwardPOSTaggerUsageTest {
     // A sentence taken verbatim from the training corpus.
     assertArrayEquals(new String[] {"NNS", "VBP"},
         tagger.tag(new String[] {"dogs", "bark"}));
+  }
+
+  /**
+   * Mirrors the confidence-reading listing of the user manual: the greedy tagging
+   * comes back from {@code topKSequences} as a single scored {@link Sequence} whose
+   * probabilities are one per token, each in {@code (0, 1]}, and whose score is
+   * exactly the sum of the logs of those probabilities.
+   *
+   * @throws IOException Thrown if reading the in-memory sample stream fails, which
+   *         does not happen in practice.
+   */
+  @Test
+  void testReadTaggingConfidences() throws IOException {
+    final FeedforwardPOSTrainer.Settings settings = new FeedforwardPOSTrainer.Settings(
+        16, 32, 80, 32, 0.05, 0.0, 0.0, 1, 1, 17L);
+    final FeedforwardPOSModel model = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings);
+    final FeedforwardPOSTagger tagger = new FeedforwardPOSTagger(model);
+
+    final Sequence[] sequences =
+        tagger.topKSequences(new String[] {"the", "cat", "barks"});
+    assertEquals(1, sequences.length,
+        "the greedy decoder returns exactly one sequence");
+    final Sequence best = sequences[0];
+    assertEquals(List.of("DT", "NN", "VBZ"), best.getOutcomes());
+
+    // One probability per token, each in (0, 1]:
+    final double[] probs = best.getProbs();
+    assertEquals(3, probs.length);
+    double logSum = 0.0d;
+    for (final double prob : probs) {
+      assertTrue(prob > 0.0d && prob <= 1.0d,
+          "a tag probability must lie in (0, 1] but was " + prob);
+      logSum += StrictMath.log(prob);
+    }
+    assertEquals(logSum, best.getScore(), 1e-9d,
+        "the sequence score must be the sum of the log probabilities");
   }
 }
