@@ -110,7 +110,7 @@ key ABIAIOSFODNN7EXAMPLE
 
 # GitHub token: the prefix is right, the body length is not.
 token ghp_0123456789abcdefghijklmnopqrstuvwxy
-token ghp_0123456789abcdefghijklmnopqrstuvwxyz0
+token ghx_0123456789abcdefghijklmnopqrstuvwxyz0
 token ghp_
 token gh_0123456789abcdefghijklmnopqrstuvwxyz
 token github_pat_11ABCDEFG0abcdefghij

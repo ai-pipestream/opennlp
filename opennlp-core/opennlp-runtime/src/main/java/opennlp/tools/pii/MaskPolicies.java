@@ -81,6 +81,7 @@ public final class MaskPolicies {
       case PiiMention.TYPE_EMAIL, PiiMention.TYPE_PHONE, PiiMention.TYPE_IPV4,
           PiiMention.TYPE_IPV6, PiiMention.TYPE_MAC, PiiMention.TYPE_US_SSN,
           PiiMention.TYPE_US_ITIN, PiiMention.TYPE_UK_NHS, PiiMention.TYPE_DE_STEUER_ID,
+          PiiMention.TYPE_IMEI, PiiMention.TYPE_CA_SIN,
           PiiMention.TYPE_ABA_ROUTING -> whole.keepingFormat();
       default -> whole;
     };

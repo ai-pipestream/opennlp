@@ -34,6 +34,7 @@ public class PiiTypePriorityTest {
       PiiMention.TYPE_URL_CREDENTIAL,
       PiiMention.TYPE_EMAIL,
       PiiMention.TYPE_IBAN,
+      PiiMention.TYPE_IMEI,
       PiiMention.TYPE_CARD,
       PiiMention.TYPE_BTC_ADDRESS,
       PiiMention.TYPE_ETH_ADDRESS,
@@ -44,6 +45,7 @@ public class PiiTypePriorityTest {
       PiiMention.TYPE_US_ITIN,
       PiiMention.TYPE_UK_NHS,
       PiiMention.TYPE_DE_STEUER_ID,
+      PiiMention.TYPE_CA_SIN,
       PiiMention.TYPE_ABA_ROUTING,
       PiiMention.TYPE_PHONE);
 
