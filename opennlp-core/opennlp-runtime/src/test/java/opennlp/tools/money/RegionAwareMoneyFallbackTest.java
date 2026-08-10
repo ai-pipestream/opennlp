@@ -28,6 +28,7 @@ import opennlp.tools.document.Layers;
 import opennlp.tools.geo.DocumentRegionAnnotator;
 import opennlp.tools.geo.GeoTestUtil;
 import opennlp.tools.geo.GeocodeAnnotator;
+import opennlp.tools.geo.RegionVote;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

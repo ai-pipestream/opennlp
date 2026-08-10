@@ -64,6 +64,22 @@ public class DocumentRegionAnnotatorTest {
    */
   private static final String NO_BREAK_SPACE = "\u00A0";
 
+  /** A geocoder resolving a fixed name-to-country table at {@link #TABLE_CONFIDENCE}. */
+  private static Geocoder tableGeocoder(Map<String, String> countryByName) {
+    return GeoTestUtil.tableGeocoder(countryByName, TABLE_CONFIDENCE);
+  }
+
+  /**
+   * Builds a document whose entity layer marks each given mention as a location.
+   *
+   * @param text The document text. Must not be {@code null}.
+   * @param names The mention texts to mark. Each must occur in {@code text}.
+   * @return A {@link Document} with an entity layer. Never {@code null}.
+   */
+  private static Document withEntities(String text, String... names) {
+    return GeoTestUtil.withLocationEntities(text, names);
+  }
+
   /**
    * Runs the location pipeline: the geocode annotator provides the locations layer and
    * the region annotator derives the ballot from it.
