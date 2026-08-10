@@ -40,12 +40,17 @@ import opennlp.tools.util.StringUtil;
  * {@link #REGIONS}, a document-scoped layer of span-less {@link RegionVote} rows ranked
  * by share.
  *
- * <p>Two kinds of evidence vote. A mention whose text is an English country name, for
- * example {@code Australia}, votes for that country directly through JDK locale data,
- * because place gazetteers often carry no country entries. Every other location mention
- * goes through the {@link Geocoder} and votes for its entry's country weighted by the
- * resolution confidence. A mention that resolves to nothing does not vote, and a
- * document without usable evidence gets an empty layer.</p>
+ * <p>Every location mention goes through the {@link Geocoder} and votes for its
+ * entry's country weighted by the resolution confidence. A mention whose text is an
+ * English country name, for example {@code Australia}, additionally matches a name
+ * table built from JDK locale data, because place gazetteers often carry no country
+ * entries. When the geocoder resolves such a mention to a different country, the
+ * geocoder's resolution wins and the name vote is dropped, so {@code Georgia} next to
+ * {@code Atlanta} counts for the United States rather than the Caucasus republic; when
+ * the geocoder returns nothing for the mention or agrees with the name, the mention
+ * casts the single name-table vote. A mention that resolves to nothing and names no
+ * country does not vote, and a document without usable evidence gets an empty
+ * layer.</p>
  *
  * <p>The annotator holds no per-call state and is as thread-safe as its geocoder.</p>
  *
@@ -126,6 +131,7 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
     }
     final CharSequence text = document.text();
     final Map<String, Double> weights = new HashMap<>();
+    final Map<Span, String> nameVotes = new HashMap<>();
     final List<Span> toGeocode = new ArrayList<>();
     for (final Annotation<String> entity : document.get(Layers.ENTITIES)) {
       if (!locationTypes.contains(entity.value().toLowerCase(Locale.ROOT))) {
@@ -135,10 +141,9 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       final String mention = text.subSequence(span.getStart(), span.getEnd()).toString();
       final String countryCode = COUNTRY_NAMES.get(mention.toLowerCase(Locale.ROOT));
       if (countryCode != null) {
-        weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
-      } else {
-        toGeocode.add(span);
+        nameVotes.put(span, countryCode);
       }
+      toGeocode.add(span);
     }
     if (!toGeocode.isEmpty()) {
       final List<GeoResolution> resolutions;
@@ -149,10 +154,23 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
       }
       for (final GeoResolution resolution : resolutions) {
         final String countryCode = resolution.entry().countryCode();
-        if (countryCode != null) {
+        if (countryCode == null) {
+          continue;
+        }
+        final String namedCountry = nameVotes.get(resolution.mention());
+        if (namedCountry == null) {
+          weights.merge(countryCode, resolution.confidence(), Double::sum);
+        } else if (!countryCode.equals(namedCountry)) {
+          // The geocoder places the mention in another country, for example the US
+          // state of Georgia; its resolution wins and the name vote is dropped.
+          nameVotes.remove(resolution.mention());
           weights.merge(countryCode, resolution.confidence(), Double::sum);
         }
+        // An agreeing resolution changes nothing: the mention casts its name vote once.
       }
+    }
+    for (final String countryCode : nameVotes.values()) {
+      weights.merge(countryCode, COUNTRY_NAME_WEIGHT, Double::sum);
     }
     return document.with(REGIONS, ballot(weights));
   }

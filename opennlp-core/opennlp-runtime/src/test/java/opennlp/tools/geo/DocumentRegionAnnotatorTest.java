@@ -147,6 +147,50 @@ public class DocumentRegionAnnotatorTest {
     assertEquals(1.0, ballot.get(0).value().share(), SHARE_DELTA);
   }
 
+  /**
+   * Verifies that the geocoder can override a country-name mention: {@code Georgia} is
+   * the display name of the country {@code GE}, but the geocoder resolves the mention
+   * to the US state, so the name vote is dropped and the document elects {@code US},
+   * pricing its dollars as USD rather than GEL.
+   */
+  @Test
+  void testGeocoderOverridesADisagreeingCountryNameMention() {
+    final Geocoder geocoder = tableGeocoder(Map.of("Georgia", "US", "Atlanta", "US"));
+    final String text = "Georgia's secretary of state confirmed the recount in Atlanta";
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(withEntities(text, "Georgia", "Atlanta"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(1, ballot.size());
+    assertEquals("US", ballot.get(0).value().countryCode());
+    assertEquals(1.0, ballot.get(0).value().share(), SHARE_DELTA);
+  }
+
+  /**
+   * Verifies that a geocoder agreeing with a country-name mention does not double the
+   * vote: {@code Australia} resolves to {@code AU} both by name and through the
+   * geocoder, so it votes once with the country-name weight and the shares stay the
+   * exact name-weight and confidence quotients.
+   */
+  @Test
+  void testAgreeingGeocoderKeepsTheSingleCountryNameVote() {
+    final Geocoder geocoder = tableGeocoder(Map.of("Australia", "AU", "Auckland", "NZ"));
+    final String text = "exports from Australia to Auckland rose";
+    final Document document = new DocumentRegionAnnotator(geocoder)
+        .annotate(withEntities(text, "Australia", "Auckland"));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    assertEquals(2, ballot.size());
+    assertEquals("AU", ballot.get(0).value().countryCode());
+    assertEquals(0.95 / (0.95 + TABLE_CONFIDENCE), ballot.get(0).value().share(),
+        SHARE_DELTA);
+    assertEquals("NZ", ballot.get(1).value().countryCode());
+    assertEquals(TABLE_CONFIDENCE / (0.95 + TABLE_CONFIDENCE),
+        ballot.get(1).value().share(), SHARE_DELTA);
+  }
+
   @Test
   void testNoEvidenceMeansAnEmptyBallot() {
     final Geocoder geocoder = tableGeocoder(Map.of());
