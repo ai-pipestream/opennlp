@@ -348,7 +348,10 @@ public final class StructuralNoiseScorer implements NoiseScorer {
 
   /**
    * Merges adjacent findings separated by nothing but whitespace into one span of the
-   * worst severity.
+   * worst severity, carrying that severity's own score. Scores of different
+   * severities are not comparable, so the milder neighbor's number is never borrowed;
+   * only when both findings share the surviving severity does the higher of their
+   * scores win.
    *
    * @param findings The per-token findings in order.
    * @param text The text, to check that only whitespace separates neighbors.
@@ -361,10 +364,18 @@ public final class StructuralNoiseScorer implements NoiseScorer {
         final NoiseSpan previous = merged.get(merged.size() - 1);
         if (onlyWhitespaceBetween(text, previous.span().getEnd(),
             finding.span().getStart())) {
+          final String severity = worse(previous.severity(), finding.severity());
+          final double score;
+          if (previous.severity().equals(finding.severity())) {
+            score = Math.max(previous.score(), finding.score());
+          } else if (severity.equals(previous.severity())) {
+            score = previous.score();
+          } else {
+            score = finding.score();
+          }
           merged.set(merged.size() - 1, new NoiseSpan(
               new Span(previous.span().getStart(), finding.span().getEnd()),
-              worse(previous.severity(), finding.severity()),
-              Math.max(previous.score(), finding.score())));
+              severity, score));
           continue;
         }
       }
