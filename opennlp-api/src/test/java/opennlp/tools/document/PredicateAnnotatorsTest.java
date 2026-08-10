@@ -20,6 +20,8 @@ package opennlp.tools.document;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -147,6 +150,70 @@ public class PredicateAnnotatorsTest {
     assertThrows(IllegalArgumentException.class,
         () -> guarded.annotate(Document.of("no words layer")),
         "a skipped delegate's required layers must still be present");
+  }
+
+  @Test
+  void testSkipPathStillCollidesWithAPreExistingProvidedLayer() {
+    final Document withWords = PRODUCER.annotate(Document.of("two words"));
+    final ConditionalAnnotator guarded = new ConditionalAnnotator(d -> false, PRODUCER);
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> guarded.annotate(withWords),
+        "adding the skipped delegate's layer empty must hit the duplicate-layer rejection");
+    assertEquals("layer is already present: test.words<String>", e.getMessage());
+  }
+
+  @Test
+  void testFilterRejectingEveryAnnotationProvidesAnEmptyTarget() {
+    final Document produced = PRODUCER.annotate(Document.of("a lengthy pair of words"));
+    assertEquals(5, produced.get(WORDS).size());
+    final Document filtered = new FilterAnnotator<>(WORDS, LONG_WORDS, a -> false)
+        .annotate(produced);
+    assertTrue(filtered.layers().contains(LONG_WORDS),
+        "an all-rejecting filter must still provide its target layer");
+    assertEquals(List.of(), filtered.get(LONG_WORDS));
+  }
+
+  @Test
+  void testConditionRunsADelegateWithRequirementsWhenItsLayerIsPresent() {
+    final DocumentAnnotator guarded = new ConditionalAnnotator(d -> true,
+        new FilterAnnotator<>(WORDS, LONG_WORDS, a -> a.value().length() > 4));
+    final Document document =
+        guarded.annotate(PRODUCER.annotate(Document.of("a lengthy pair of words")));
+    assertTrue(document.layers().contains(LONG_WORDS), "the delegate must have run");
+    assertEquals(List.of("lengthy", "words"),
+        document.get(LONG_WORDS).stream().map(Annotation::value).toList());
+  }
+
+  @Test
+  void testConditionIsTestedExactlyOnceWithTheAnnotatedDocument() {
+    final AtomicInteger calls = new AtomicInteger();
+    final AtomicReference<Document> seen = new AtomicReference<>();
+    final Document document = Document.of("two words");
+    new ConditionalAnnotator(d -> {
+      calls.incrementAndGet();
+      seen.set(d);
+      return true;
+    }, PRODUCER).annotate(document);
+    assertEquals(1, calls.get(), "the condition must be tested exactly once");
+    assertSame(document, seen.get(),
+        "the condition must see the same document instance handed to annotate");
+  }
+
+  @Test
+  void testFilterKeepsTheSurvivingAnnotationInstances() {
+    final Document produced = PRODUCER.annotate(Document.of("a lengthy pair of words"));
+    final List<Annotation<String>> source = produced.get(WORDS);
+    final Document filtered =
+        new FilterAnnotator<>(WORDS, LONG_WORDS, a -> a.value().length() > 4)
+            .annotate(produced);
+    final List<Annotation<String>> survivors = filtered.get(LONG_WORDS);
+    final List<Annotation<String>> expected =
+        source.stream().filter(a -> a.value().length() > 4).toList();
+    assertEquals(expected.size(), survivors.size());
+    for (int i = 0; i < expected.size(); i++) {
+      assertSame(expected.get(i), survivors.get(i),
+          "a survivor must be the same instance as its source annotation");
+    }
   }
 
   private static Stream<Arguments> contractViolations() {
