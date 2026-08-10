@@ -61,6 +61,168 @@ public class CursorPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "user@example.notatld",
+      "user@example.zz",
+      "user@files.corp.internal",
+      "user@host.local",
+      "user@mail.corp",
+      "user@box.lan",
+      "user@svc.home",
+      "user@node.intranet",
+      "user@dev.testbed",
+      "a@b.ccx",
+      "admin@mail.invalidtld",
+      "root@example.internal",
+      "me@office.localdomain"})
+  void testEmailRejectsUnregisteredAndPrivateUseTlds(String text) {
+    Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {254, 255, 300})
+  void testEmailRejectsDomainLongerThanRfc1035Limit(int domainLength) {
+    final String domain = domainOfLength(domainLength, "com");
+    Assertions.assertEquals(domainLength, domain.length());
+    Assertions.assertTrue(domainLength > 253);
+    Assertions.assertTrue(extractor.extract("user@" + domain).isEmpty());
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+      "user@example.xn--p1ai, user@example.xn--p1ai, 0, 21",
+      "Contact USER@EXAMPLE.XN--P1AI please, user@example.xn--p1ai, 8, 29",
+      "mail@site.xn--node now, mail@site.xn--node, 0, 18",
+      "a@b.xn--j1amh!, a@b.xn--j1amh, 0, 13"
+  })
+  void testEmailAcceptsPunycodeTldsWithExactSpans(String text, String normalized,
+      int start, int end) {
+    final List<PiiMention> mentions = extractor.extract(text);
+    Assertions.assertEquals(1, mentions.size(), text);
+    Assertions.assertEquals(PiiMention.TYPE_EMAIL, mentions.get(0).type());
+    Assertions.assertEquals(normalized, mentions.get(0).normalized());
+    Assertions.assertEquals(start, mentions.get(0).span().getStart());
+    Assertions.assertEquals(end, mentions.get(0).span().getEnd());
+    Assertions.assertEquals(normalized,
+        text.substring(start, end).toLowerCase(java.util.Locale.ROOT));
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+      "user@EXAMPLE.COM, user@example.com",
+      "user@Example.Org, user@example.org",
+      "User@ExAmPle.NeT, user@example.net",
+      "a@B.Io, a@b.io",
+      "x@Y.AI, x@y.ai",
+      "ops@Mail.APP, ops@mail.app",
+      "me@Site.INFO, me@site.info",
+      "dev@Host.DEV, dev@host.dev"
+  })
+  void testEmailAcceptsMixedCaseRegisteredTlds(String text, String normalized) {
+    final List<PiiMention> mentions = extractor.extract(text);
+    Assertions.assertEquals(1, mentions.size(), text);
+    Assertions.assertEquals(normalized, mentions.get(0).normalized());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "a@b.co",
+      "a@b.com",
+      "a@b.org",
+      "a@b.net",
+      "a@b.edu",
+      "a@b.gov",
+      "a@b.mil",
+      "a@b.int",
+      "a@b.io",
+      "a@b.ai",
+      "a@b.app",
+      "a@b.dev",
+      "a@b.xyz",
+      "a@b.museum",
+      "a@b.travel",
+      "a@b.photography",
+      "a@b.accountant",
+      "a@b.americanexpress",
+      "mail@corp.uk",
+      "mail@corp.de",
+      "mail@corp.fr",
+      "mail@corp.jp",
+      "mail@corp.cn",
+      "mail@corp.br",
+      "mail@corp.au",
+      "mail@corp.za",
+      "mail@corp.tw"
+  })
+  void testEmailAcceptsRegisteredAsciiTlds(String text) {
+    final List<PiiMention> mentions = extractor.extract(text);
+    Assertions.assertEquals(1, mentions.size(), text);
+    Assertions.assertEquals(PiiMention.TYPE_EMAIL, mentions.get(0).type());
+    Assertions.assertEquals(text.toLowerCase(java.util.Locale.ROOT),
+        mentions.get(0).normalized());
+  }
+
+  @Test
+  void testEmailAcceptsDomainAtRfc1035Limit() {
+    final String domain = domainOfLength(253, "com");
+    Assertions.assertEquals(253, domain.length());
+    final List<PiiMention> mentions = extractor.extract("user@" + domain);
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals("user@" + domain, mentions.get(0).normalized());
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+      "com, 253, true",
+      "com, 254, false",
+      "museum, 253, true",
+      "museum, 254, false",
+      "xn--p1ai, 253, true",
+      "xn--p1ai, 254, false"
+  })
+  void testEmailDomainLengthBoundaryAroundRfc1035Limit(String tld, int length,
+      boolean accepted) {
+    final String domain = domainOfLength(length, tld);
+    Assertions.assertEquals(length, domain.length());
+    final List<PiiMention> mentions = extractor.extract("u@" + domain);
+    if (accepted) {
+      Assertions.assertEquals(1, mentions.size(), domain);
+      Assertions.assertEquals("u@" + domain, mentions.get(0).normalized());
+    } else {
+      Assertions.assertTrue(mentions.isEmpty(), domain);
+    }
+  }
+
+  private static String domainOfLength(int length, String tld) {
+    if (tld.length() + 2 > length) {
+      throw new IllegalArgumentException("length too small for tld " + tld);
+    }
+    final StringBuilder domain = new StringBuilder(length);
+    int remaining = length - tld.length() - 1;
+    while (remaining > 0) {
+      if (domain.length() > 0) {
+        domain.append('.');
+        remaining--;
+      }
+      int labelLength = Math.min(63, remaining);
+      if (remaining > labelLength && remaining - labelLength == 1) {
+        labelLength--;
+      }
+      if (labelLength < 1) {
+        throw new IllegalArgumentException("cannot build domain of length " + length);
+      }
+      domain.append("a".repeat(labelLength));
+      remaining -= labelLength;
+    }
+    domain.append('.').append(tld);
+    if (domain.length() != length) {
+      throw new IllegalStateException(
+          "built domain length " + domain.length() + " != " + length);
+    }
+    return domain.toString();
+  }
+
   @Test
   void testPhoneInternational() {
     final List<PiiMention> mentions = extractor.extract("Call +44 20 7946 0958 now.");
