@@ -141,4 +141,28 @@ public class RegionCurrencyResolutionExampleTest {
     assertEquals("$8",
         money.get(0).span().getCoveredText(document.text()).toString());
   }
+
+  /**
+   * Mirrors the manual's ballot-reading listing: iterating the ranked rows yields the
+   * country codes and shares in rank order, {@code MX} at {@code 0.6} ahead of
+   * {@code US} at {@code 0.4}.
+   */
+  @Test
+  void testReadingTheRankedBallotRows() {
+    final Document document = new DocumentRegionAnnotator(exampleGeocoder())
+        .annotate(Document.of(TEXT).with(Layers.ENTITIES,
+            List.of(locationEntity("Guadalajara"), locationEntity("Boston"))));
+
+    final List<Annotation<RegionVote>> ballot =
+        document.get(DocumentRegionAnnotator.REGIONS);
+    final List<String> countries = new ArrayList<>();
+    final List<Double> shares = new ArrayList<>();
+    for (final Annotation<RegionVote> row : ballot) {
+      countries.add(row.value().countryCode()); // "MX", then "US"
+      shares.add(row.value().share());          // 0.6, then 0.4
+    }
+    assertEquals(List.of("MX", "US"), countries);
+    assertEquals(0.6, shares.get(0), 1e-9);
+    assertEquals(0.4, shares.get(1), 1e-9);
+  }
 }
