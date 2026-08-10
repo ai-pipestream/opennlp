@@ -158,6 +158,35 @@ public class StructuralNoiseScorerTest {
     assertEquals(text, found.get(0).span().getCoveredText(text).toString());
   }
 
+  /**
+   * A merged span carries the score belonging to the surviving severity. Scores of
+   * different severities are not comparable, so a gibberish finding next to a
+   * misspelled one must not borrow the milder tier's higher number.
+   */
+  @Test
+  void testMergedSpanCarriesTheSurvivingSeveritysScore() {
+    final StructuralNoiseScorer withDictionary =
+        new StructuralNoiseScorer(Set.of("modern")::contains);
+    final String text = "rnodern zxkcvbnmsdfg";
+    final List<NoiseSpan> found = withDictionary.score(text, List.of());
+    assertEquals(1, found.size());
+    assertEquals(NoiseSpan.SEVERITY_GIBBERISH, found.get(0).severity());
+    assertEquals(0.5, found.get(0).score(),
+        "the gibberish tier's own score, not the misspelled 0.9");
+    assertEquals(text, found.get(0).span().getCoveredText(text).toString());
+  }
+
+  /** When both findings share the surviving severity, the higher score wins. */
+  @Test
+  void testMergedSpansOfOneSeverityKeepTheHigherScore() {
+    final String text = "zxkcvbnmsdfg zxkcvbnmsdfgggg";
+    final List<NoiseSpan> found = scorer.score(text, List.of());
+    assertEquals(1, found.size());
+    assertEquals(NoiseSpan.SEVERITY_GIBBERISH, found.get(0).severity());
+    assertEquals(0.75, found.get(0).score(),
+        "three agreeing signals on the worse neighbor");
+  }
+
   /** With a dictionary, one confusion repair reaching a word means misspelled. */
   @Test
   void testConfusionRepairsAreMisspelledWithADictionary() {
