@@ -82,12 +82,33 @@ public class CursorMoneyExtractorTest {
     assertEquals(0, new BigDecimal("1200000").compareTo(mention.amount()));
   }
 
+  /**
+   * Verifies that a known symbol directly preceded by an ASCII letter is read as part
+   * of a longer, multi-character symbol the table does not know and yields no mention:
+   * {@code HK$50} must not report a wrong 50 USD. The table holds single code points
+   * only, so it cannot tell {@code US$}, which happens to denote the default currency
+   * of {@code $}, from {@code HK$}, which does not; {@code US$} is therefore rejected
+   * as well rather than matched by accident.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "HK$50",               // Hong Kong dollar
+      "NZ$50",               // New Zealand dollar
+      "R$50",                // Brazilian real
+      "US$50"                // rejected too: the table knows no multi-character symbols
+  })
+  void testSymbolAfterLetterIsALongerSymbolAndYieldsNoMention(String text) {
+    assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  /**
+   * Verifies that the bare symbol keeps matching at ordinary left contexts while the
+   * letter guard is in place: at the text start and after a space.
+   */
   @Test
-  void testSymbolAfterLetterStillMatches() {
-    // the US$ convention: the symbol match does not demand a boundary before it
-    final MoneyAmount mention = single("US$100");
-    assertEquals(new Span(2, 6), mention.span());
-    assertEquals("USD", mention.currency());
+  void testBareSymbolStillMatchesAtOrdinaryBoundaries() {
+    assertEquals("USD", single("$50").currency());
+    assertEquals(new Span(4, 7), single("pay $50").span());
   }
 
   @Test
