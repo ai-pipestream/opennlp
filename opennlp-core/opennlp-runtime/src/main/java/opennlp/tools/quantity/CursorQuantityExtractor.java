@@ -33,7 +33,10 @@ import opennlp.tools.util.Span;
  * <p>Recognized forms: percentages as {@code 50%}, {@code 3.5 %}, or {@code 50 percent}
  * (all reported with the unit {@code %}); unit quantities with the unit immediately
  * attached ({@code 2.5km}) or separated by one space ({@code 80 kg}); and an optional
- * leading minus. Digit grouping follows the shared strict rule. A bare number without a
+ * leading minus. Digit grouping follows the shared strict rule. A number grouped in a
+ * convention the scanner cannot parse, for example the Indian-grouped {@code 1,00,000},
+ * is rejected entirely rather than truncated to a wrong value, and the comma-adjoined
+ * tail of such a number never seeds a mention of its own. A bare number without a
  * percent marker or unit is never a quantity, which also keeps money mentions such as
  * {@code $3 billion} out of this layer.</p>
  *
@@ -124,7 +127,9 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   }
 
   /**
-   * Matches a number followed by a percent marker or unit token at one position.
+   * Matches a number followed by a percent marker or unit token at one position. A digit
+   * that continues a comma-grouped number the scanner rejected never starts a mention,
+   * so the tail {@code 000} of {@code 1,00,000 kg} is not read as {@code 0 kg}.
    *
    * @param text The text being scanned.
    * @param start The offset the candidate mention would start at.
@@ -138,6 +143,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       i++;
     }
     if (!NumberScan.isAsciiDigit(NumberScan.charAt(text, i))
+        || NumberScan.continuesGroupedNumber(text, i)
         || !(negative ? NumberScan.signBoundaryBefore(text, start)
             : NumberScan.boundaryBefore(text, start))) {
       return null;
