@@ -147,4 +147,18 @@ final class Ascii {
     }
     return folded.toString();
   }
+
+  /**
+   * Folds the ASCII letters of a sequence to uppercase.
+   *
+   * @param value The sequence to fold. Must not be {@code null}.
+   * @return The folded sequence. Never {@code null}.
+   */
+  static String toUpper(CharSequence value) {
+    final StringBuilder folded = new StringBuilder(value.length());
+    for (int i = 0; i < value.length(); i++) {
+      folded.append(toUpper(value.charAt(i)));
+    }
+    return folded.toString();
+  }
 }
