@@ -29,9 +29,11 @@ import opennlp.tools.document.LayerKey;
  * {@link PiiAnnotator#PII}: entities, glossary hits, or custom layers redact the same
  * way.
  *
- * <p>Masking is length preserving: every character inside a masked span is replaced by
- * the mask character and no character is inserted or removed, so the spans of every
- * other layer remain valid for the masked text.</p>
+ * <p>Masking is length preserving under every {@link MaskPolicy}: characters inside a
+ * masked span are replaced in place and none is inserted or removed, so the spans of
+ * every other layer remain valid for the masked text. The plain {@code char} overloads
+ * replace every character of a span; a policy can keep separators visible or leave the
+ * trailing digits readable.</p>
  *
  * @since 3.0.0
  */
@@ -47,17 +49,35 @@ public final class Masker {
    * @param document The document to redact. Must not be {@code null}.
    * @param layer The layer whose spans are masked. Must not be {@code null} and must be
    *              present on the document.
-   * @param mask The replacement character.
+   * @param mask The replacement character. Must not be a surrogate.
    * @return The document text with every annotated span masked. Never {@code null};
    *         always the same length as the document text.
    * @throws IllegalArgumentException Thrown if {@code document} or {@code layer} is
-   *         {@code null}, or the layer is not present on the document.
+   *         {@code null}, {@code mask} is a surrogate, or the layer is not present on
+   *         the document.
    */
   public static String mask(Document document, LayerKey<?> layer, char mask) {
+    return mask(document, layer, MaskPolicy.of(mask));
+  }
+
+  /**
+   * Masks the spans of one layer under a policy.
+   *
+   * @param document The document to redact. Must not be {@code null}.
+   * @param layer The layer whose spans are masked. Must not be {@code null} and must be
+   *              present on the document.
+   * @param policy The masking policy. Must not be {@code null}.
+   * @return The document text with every annotated span masked. Never {@code null};
+   *         always the same length as the document text.
+   * @throws IllegalArgumentException Thrown if {@code document}, {@code layer}, or
+   *         {@code policy} is {@code null}, or the layer is not present on the
+   *         document.
+   */
+  public static String mask(Document document, LayerKey<?> layer, MaskPolicy policy) {
     if (layer == null) {
       throw new IllegalArgumentException("layer must not be null");
     }
-    return mask(document, List.of(layer), mask);
+    return mask(document, List.of(layer), policy);
   }
 
   /**
@@ -67,19 +87,44 @@ public final class Masker {
    * @param layers The layers whose spans are masked. Must not be {@code null} or empty,
    *               no layer may be {@code null}, and every layer must be present on the
    *               document.
-   * @param mask The replacement character.
+   * @param mask The replacement character. Must not be a surrogate.
    * @return The document text with every annotated span masked. Never {@code null};
    *         always the same length as the document text.
    * @throws IllegalArgumentException Thrown if {@code document} or {@code layers} is
-   *         {@code null}, {@code layers} is empty or contains {@code null}, or a layer
-   *         is not present on the document.
+   *         {@code null}, {@code layers} is empty or contains {@code null},
+   *         {@code mask} is a surrogate, or a layer is not present on the document.
    */
   public static String mask(Document document, Collection<LayerKey<?>> layers, char mask) {
+    return mask(document, layers, MaskPolicy.of(mask));
+  }
+
+  /**
+   * Masks the spans of several layers at once under a policy.
+   *
+   * <p>Each span's replacement is computed from the original document text, so
+   * overlapping spans mask deterministically regardless of layer order.</p>
+   *
+   * @param document The document to redact. Must not be {@code null}.
+   * @param layers The layers whose spans are masked. Must not be {@code null} or empty,
+   *               no layer may be {@code null}, and every layer must be present on the
+   *               document.
+   * @param policy The masking policy. Must not be {@code null}.
+   * @return The document text with every annotated span masked. Never {@code null};
+   *         always the same length as the document text.
+   * @throws IllegalArgumentException Thrown if {@code document} or {@code layers} is
+   *         {@code null}, {@code layers} is empty or contains {@code null},
+   *         {@code policy} is {@code null}, or a layer is not present on the document.
+   */
+  public static String mask(Document document, Collection<LayerKey<?>> layers,
+      MaskPolicy policy) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
     if (layers == null || layers.isEmpty()) {
       throw new IllegalArgumentException("layers must not be null or empty");
+    }
+    if (policy == null) {
+      throw new IllegalArgumentException("policy must not be null");
     }
     for (final LayerKey<?> layer : layers) {
       if (layer == null) {
@@ -89,13 +134,13 @@ public final class Masker {
         throw new IllegalArgumentException("layer is not present on the document: " + layer);
       }
     }
-    final StringBuilder masked = new StringBuilder(document.text());
+    final String text = document.text().toString();
+    final StringBuilder masked = new StringBuilder(text);
     for (final LayerKey<?> layer : layers) {
       for (final Annotation<?> annotation : document.get(layer)) {
+        final int start = annotation.span().getStart();
         final int end = annotation.span().getEnd();
-        for (int i = annotation.span().getStart(); i < end; i++) {
-          masked.setCharAt(i, mask);
-        }
+        masked.replace(start, end, policy.apply(text.substring(start, end)));
       }
     }
     return masked.toString();
