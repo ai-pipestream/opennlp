@@ -202,29 +202,28 @@ public class CursorPiiExtractorTest {
   }
 
   /**
-   * Verifies that a domain of exactly {@link CursorPiiExtractor#DOMAIN_MAX_LENGTH}
-   * characters ending in a registered TLD is still accepted.
+   * Verifies that the complete mailbox cap applies before the independent domain cap.
    */
   @Test
-  void testEmailAcceptsDomainAtRfc1035Limit() {
+  void testEmailRejectsDomainAtRfc1035LimitWhenMailboxIsTooLong() {
     final String domain = domainOfLength(CursorPiiExtractor.DOMAIN_MAX_LENGTH, "com");
     Assertions.assertEquals(CursorPiiExtractor.DOMAIN_MAX_LENGTH, domain.length());
-    final List<PiiMention> mentions = extractor.extract("user@" + domain);
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals("user@" + domain, mentions.get(0).normalized());
+    Assertions.assertTrue(extractor.extract("u@" + domain).isEmpty());
   }
 
   /**
-   * Verifies the length boundary from both sides: 253 accepted, 254 rejected, for both
-   * a short TLD and a longer registered TLD so the cap is independent of TLD length.
+   * Verifies the mailbox boundary from both sides for domains near the RFC 1035 cap.
    */
   @ParameterizedTest
   @CsvSource({
-      "com, 253, true",
+      "com, 252, true",
+      "com, 253, false",
       "com, 254, false",
-      "museum, 253, true",
+      "museum, 252, true",
+      "museum, 253, false",
       "museum, 254, false",
-      "xn--p1ai, 253, true",
+      "xn--p1ai, 252, true",
+      "xn--p1ai, 253, false",
       "xn--p1ai, 254, false"
   })
   void testEmailDomainLengthBoundaryAroundRfc1035Limit(String tld, int length,

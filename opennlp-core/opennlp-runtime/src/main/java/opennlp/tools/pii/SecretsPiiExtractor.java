@@ -38,8 +38,9 @@ import java.util.Set;
  *   policy identifier rather than a key are not reported, since those are not
  *   secrets.</li>
  *   <li>GitHub token: the prefixes {@code ghp_}, {@code gho_}, {@code ghu_},
- *   {@code ghs_}, and {@code ghr_} followed by 36 letters and digits, or
- *   {@code github_pat_} followed by 82 letters, digits, and underscores, the
+ *   {@code ghs_}, and {@code ghr_} followed by at least 36 token characters, or
+ *   {@code github_pat_} followed by at least 82 token characters. Both forms accept
+ *   letters, digits, and underscores and are capped at 255 characters, following the
  *   <a href="https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/">
  *   documented token formats</a>. The prefixes are case sensitive.</li>
  *   <li>JSON Web Token: three
@@ -94,6 +95,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final int AWS_BODY_LENGTH = 16;
   private static final int GITHUB_BODY_LENGTH = 36;
   private static final int GITHUB_FINE_GRAINED_BODY_LENGTH = 82;
+  private static final int GITHUB_MAX_LENGTH = 255;
 
   private static final int JWT_SEGMENTS = 3;
   private static final int JWT_HEADER_MIN_LENGTH = 8;
@@ -225,11 +227,11 @@ public final class SecretsPiiExtractor implements PiiExtractor {
       int end = -1;
       if (startsWith(text, i, GITHUB_FINE_GRAINED_PREFIX)) {
         end = tokenEnd(text, i + GITHUB_FINE_GRAINED_PREFIX.length(),
-            GITHUB_FINE_GRAINED_BODY_LENGTH, true);
+            GITHUB_FINE_GRAINED_BODY_LENGTH, i);
       } else {
         for (final String prefix : GITHUB_PREFIXES) {
           if (startsWith(text, i, prefix)) {
-            end = tokenEnd(text, i + prefix.length(), GITHUB_BODY_LENGTH, false);
+            end = tokenEnd(text, i + prefix.length(), GITHUB_BODY_LENGTH, i);
             break;
           }
         }
@@ -244,26 +246,27 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a token body of the expected length follows and that the token ends
-   * there.
+   * Reads a variable-length GitHub token body and checks its bounds.
    *
    * @param text The text being scanned.
    * @param start The first body character.
-   * @param length The number of body characters the form prescribes.
-   * @param underscores Whether the body may contain underscores.
+   * @param minimumLength The minimum number of body characters for this prefix.
+   * @param tokenStart The first character of the prefix.
    * @return The exclusive end offset of the token, or {@code -1} if the body does not
    *         have the prescribed form.
    */
-  private int tokenEnd(CharSequence text, int start, int length, boolean underscores) {
-    final int end = start + length;
-    if (end > text.length() || !onTokenEnd(text, end)) {
-      return -1;
-    }
-    for (int p = start; p < end; p++) {
-      final char c = text.charAt(p);
-      if (!Ascii.isLetterOrDigit(c) && !(underscores && c == '_')) {
-        return -1;
+  private int tokenEnd(CharSequence text, int start, int minimumLength, int tokenStart) {
+    int end = start;
+    while (end < text.length()) {
+      final char c = text.charAt(end);
+      if (!Ascii.isLetterOrDigit(c) && c != '_') {
+        break;
       }
+      end++;
+    }
+    if (end - start < minimumLength || end - tokenStart > GITHUB_MAX_LENGTH
+        || !onTokenEnd(text, end)) {
+      return -1;
     }
     return end;
   }

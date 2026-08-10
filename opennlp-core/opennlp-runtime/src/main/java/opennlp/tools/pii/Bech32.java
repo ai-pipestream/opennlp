@@ -118,9 +118,26 @@ final class Bech32 {
     if (version > MAX_WITNESS_VERSION) {
       return -1;
     }
-    final int programBits = (length - CHECKSUM_LENGTH - 1) * BITS_PER_CHARACTER;
-    final int programBytes = programBits / 8;
+    int accumulator = 0;
+    int bits = 0;
+    int programBytes = 0;
+    for (int i = start + 1; i < end - CHECKSUM_LENGTH; i++) {
+      accumulator = accumulator << BITS_PER_CHARACTER
+          | VALUES[Ascii.toLower(text.charAt(i))];
+      bits += BITS_PER_CHARACTER;
+      while (bits >= Byte.SIZE) {
+        bits -= Byte.SIZE;
+        programBytes++;
+        accumulator &= (1 << bits) - 1;
+      }
+    }
     if (programBytes < MIN_PROGRAM_BYTES || programBytes > MAX_PROGRAM_BYTES) {
+      return -1;
+    }
+    if (bits > BITS_PER_CHARACTER - 1 || accumulator != 0) {
+      return -1;
+    }
+    if (version == 0 && programBytes != 20 && programBytes != 32) {
       return -1;
     }
     final int residue = version == 0 ? BECH32_RESIDUE : BECH32M_RESIDUE;

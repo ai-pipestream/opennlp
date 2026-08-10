@@ -36,7 +36,8 @@ import java.util.Set;
  *   final label is an
  *   <a href="https://data.iana.org/TLD/tlds-alpha-by-domain.txt">IANA-registered</a>
  *   top-level domain, including punycode forms. Private-use suffixes such as
- *   {@code .internal} or {@code .local} are not reported.</li>
+ *   {@code .internal} or {@code .local} are not reported. The ASCII local part is limited
+ *   to 64 characters and the complete mailbox to 254 characters.</li>
  *   <li>Phone: an international form with {@code +} whose digits split into an
  *   assigned calling code and a national number of a length some territory under that
  *   code assigns, or a domestic form with 10 or 11 digits that shows formatting
@@ -88,6 +89,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private static final int PHONE_DOMESTIC_MIN_DIGITS = 10;
   private static final int PHONE_DOMESTIC_MAX_DIGITS = 11;
   private static final int DOMAIN_LABEL_MAX_LENGTH = 63;
+  private static final int EMAIL_LOCAL_PART_MAX_LENGTH = 64;
+  private static final int EMAIL_MAX_LENGTH = 254;
 
   /**
    * Maximum domain length in presentation form
@@ -180,6 +183,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
         end--;
       }
       if (end == i + 1
+          || end - start > EMAIL_MAX_LENGTH
           || !validDomain(text.subSequence(i + 1, end).toString())
           || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
           || !Boundaries.onEnd(text, end)) {
@@ -200,7 +204,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @return {@code true} if the local part is acceptable.
    */
   private boolean validLocalPart(CharSequence text, int start, int at) {
-    if (text.charAt(start) == '.' || text.charAt(at - 1) == '.') {
+    if (at - start > EMAIL_LOCAL_PART_MAX_LENGTH
+        || text.charAt(start) == '.' || text.charAt(at - 1) == '.') {
       return false;
     }
     for (int i = start + 1; i < at; i++) {

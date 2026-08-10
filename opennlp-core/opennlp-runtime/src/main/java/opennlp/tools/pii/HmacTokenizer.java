@@ -32,7 +32,7 @@ import opennlp.tools.document.Document;
  * <p>A token is the type followed by the leading hexadecimal digits of the
  * <a href="https://datatracker.ietf.org/doc/html/rfc2104">HMAC</a>-SHA-256 of the mention's
  * {@link PiiMention#normalized() normalized form} under the key, for example
- * {@code EMAIL-3f2a1c9d}. The same address in a thousand documents tokenizes identically,
+ * {@code EMAIL-3f2a1c9d7e4b6a20}. The same address in a thousand documents tokenizes identically,
  * which {@link Pseudonymizer} deliberately does not do, and two different addresses
  * practically never collide.</p>
  *
@@ -55,7 +55,7 @@ public final class HmacTokenizer {
   private static final String ALGORITHM = "HmacSha256";
 
   /** How many hexadecimal digits of the MAC a token shows unless asked otherwise. */
-  private static final int DEFAULT_LENGTH = 8;
+  private static final int DEFAULT_LENGTH = 16;
 
   /** Hexadecimal digits, lowercase, indexed by value. */
   private static final char[] HEX = "0123456789abcdef".toCharArray();
@@ -64,8 +64,8 @@ public final class HmacTokenizer {
   private final int length;
 
   /**
-   * Initializes a tokenizer producing tokens with eight hexadecimal digits, which keeps
-   * collisions rare in corpora up to roughly a hundred thousand distinct values per type.
+   * Initializes a tokenizer producing tokens with sixteen hexadecimal digits. The 64-bit
+   * token space keeps accidental collisions rare while retaining readable labels.
    *
    * @param key The secret key. Must not be {@code null} or empty. The bytes are copied.
    * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or empty.
@@ -100,7 +100,7 @@ public final class HmacTokenizer {
    * Tokenizes one mention.
    *
    * @param mention The mention. Must not be {@code null}.
-   * @return The token, for example {@code EMAIL-3f2a1c9d}. Never {@code null}.
+   * @return The token, for example {@code EMAIL-3f2a1c9d7e4b6a20}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code mention} is {@code null}.
    */
   public String token(PiiMention mention) {
