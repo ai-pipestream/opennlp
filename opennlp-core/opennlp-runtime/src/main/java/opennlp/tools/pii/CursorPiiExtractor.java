@@ -34,8 +34,11 @@ import opennlp.tools.util.Span;
  * <p>Recognized forms:</p>
  * <ul>
  *   <li>Email: a local part of ASCII letters, digits, and {@code . _ % + -} followed by
- *   {@code @} and a dotted domain whose final label is alphabetic with at least two
- *   letters.</li>
+ *   {@code @} and a dotted domain of at most {@link #DOMAIN_MAX_LENGTH} characters whose
+ *   final label is an
+ *   <a href="https://data.iana.org/TLD/tlds-alpha-by-domain.txt">IANA-registered</a>
+ *   top-level domain, including punycode forms. Private-use suffixes such as
+ *   {@code .internal} or {@code .local} are not reported.</li>
  *   <li>Phone: an international form with {@code +} whose digits split into an
  *   assigned calling code and a national number of a length some territory under that
  *   code assigns, or a domestic form with 10 or 11 digits that shows formatting
@@ -92,7 +95,13 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private static final int PHONE_DOMESTIC_MIN_DIGITS = 10;
   private static final int PHONE_DOMESTIC_MAX_DIGITS = 11;
   private static final int DOMAIN_LABEL_MAX_LENGTH = 63;
-  private static final int TLD_MIN_LENGTH = 2;
+
+  /**
+   * Maximum domain length in presentation form
+   * (<a href="https://datatracker.ietf.org/doc/html/rfc1035">RFC 1035</a>: 255 octets on
+   * the wire, 253 in presentation form).
+   */
+  static final int DOMAIN_MAX_LENGTH = 253;
 
   /**
    * One candidate found by a scanner, held until overlap resolution decides which
@@ -224,13 +233,17 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks a domain: at least two labels, each 1 to 63 characters without a leading or
-   * trailing hyphen, and a final label of at least two ASCII letters.
+   * Checks a domain: at most {@link #DOMAIN_MAX_LENGTH} characters, at least two labels,
+   * each 1 to 63 characters without a leading or trailing hyphen, and a final label that
+   * is an {@link IanaTlds IANA-registered} top-level domain.
    *
    * @param domain The domain without the {@code @}.
    * @return {@code true} if the domain is acceptable.
    */
   private boolean validDomain(String domain) {
+    if (domain.length() > DOMAIN_MAX_LENGTH) {
+      return false;
+    }
     int labels = 0;
     int labelStart = 0;
     for (int i = 0; i <= domain.length(); i++) {
@@ -248,15 +261,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
       return false;
     }
     final int tldStart = domain.lastIndexOf('.') + 1;
-    if (domain.length() - tldStart < TLD_MIN_LENGTH) {
-      return false;
-    }
-    for (int i = tldStart; i < domain.length(); i++) {
-      if (!isAsciiLetter(domain.charAt(i))) {
-        return false;
-      }
-    }
-    return true;
+    return IanaTlds.registered(domain, tldStart, domain.length());
   }
 
   /**

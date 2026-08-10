@@ -29,8 +29,12 @@
 			are checksum validated, and an IBAN candidate must additionally match the
 			ISO 13616 registry: a registered country code and exactly the length that
 			country assigns, so a checksum-passing run with an unknown country or a
-			wrong length is not reported. An extractor limited to a subset of the
-			types, for a caller that wants only payment data found, is built with
+			wrong length is not reported. Email domains must end in an
+			IANA-registered top-level domain (including punycode forms) and stay
+			within the RFC 1035 presentation-length limit, so private-use suffixes
+			such as <code>.internal</code> or <code>.local</code> are not reported.
+			An extractor limited to a subset of the types, for a caller that wants
+			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
 		</para>
 	</section>

@@ -61,6 +61,11 @@ public class CursorPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
+  /**
+   * Verifies that well-formed but unregistered final labels are rejected, including
+   * invented TLDs and common private-use suffixes that the IANA root zone does not
+   * carry.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "user@example.notatld",
@@ -80,15 +85,23 @@ public class CursorPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Verifies that a domain longer than the RFC 1035 presentation limit is rejected even
+   * when every label is well formed and the final label is a registered TLD.
+   */
   @ParameterizedTest
   @ValueSource(ints = {254, 255, 300})
   void testEmailRejectsDomainLongerThanRfc1035Limit(int domainLength) {
     final String domain = domainOfLength(domainLength, "com");
     Assertions.assertEquals(domainLength, domain.length());
-    Assertions.assertTrue(domainLength > 253);
+    Assertions.assertTrue(domainLength > CursorPiiExtractor.DOMAIN_MAX_LENGTH);
     Assertions.assertTrue(extractor.extract("user@" + domain).isEmpty());
   }
 
+  /**
+   * Verifies punycode TLDs from the IANA root zone are accepted with exact spans and
+   * lowercased normalized forms.
+   */
   @ParameterizedTest
   @CsvSource({
       "user@example.xn--p1ai, user@example.xn--p1ai, 0, 21",
@@ -108,6 +121,10 @@ public class CursorPiiExtractorTest {
         text.substring(start, end).toLowerCase(java.util.Locale.ROOT));
   }
 
+  /**
+   * Verifies that uppercase and mixed-case registered TLDs still match and normalize
+   * to lowercase without the caller pre-folding the domain.
+   */
   @ParameterizedTest
   @CsvSource({
       "user@EXAMPLE.COM, user@example.com",
@@ -125,6 +142,10 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals(normalized, mentions.get(0).normalized());
   }
 
+  /**
+   * Verifies a sample of ordinary registered ASCII TLDs across short, long, and brand
+   * labels so the baked table is exercised beyond {@code com}.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "a@b.co",
@@ -163,15 +184,23 @@ public class CursorPiiExtractorTest {
         mentions.get(0).normalized());
   }
 
+  /**
+   * Verifies that a domain of exactly {@link CursorPiiExtractor#DOMAIN_MAX_LENGTH}
+   * characters ending in a registered TLD is still accepted.
+   */
   @Test
   void testEmailAcceptsDomainAtRfc1035Limit() {
-    final String domain = domainOfLength(253, "com");
-    Assertions.assertEquals(253, domain.length());
+    final String domain = domainOfLength(CursorPiiExtractor.DOMAIN_MAX_LENGTH, "com");
+    Assertions.assertEquals(CursorPiiExtractor.DOMAIN_MAX_LENGTH, domain.length());
     final List<PiiMention> mentions = extractor.extract("user@" + domain);
     Assertions.assertEquals(1, mentions.size());
     Assertions.assertEquals("user@" + domain, mentions.get(0).normalized());
   }
 
+  /**
+   * Verifies the length boundary from both sides: 253 accepted, 254 rejected, for both
+   * a short TLD and a longer registered TLD so the cap is independent of TLD length.
+   */
   @ParameterizedTest
   @CsvSource({
       "com, 253, true",
@@ -194,6 +223,74 @@ public class CursorPiiExtractorTest {
     }
   }
 
+  /**
+   * Direct table checks for {@link IanaTlds}: registered labels hit, unregistered and
+   * private-use labels miss, and ASCII case is ignored without requiring a folded copy
+   * from the caller.
+   */
+  @ParameterizedTest
+  @CsvSource({
+      "COM, true",
+      "com, true",
+      "Com, true",
+      "cOm, true",
+      "XN--P1AI, true",
+      "xn--p1ai, true",
+      "Xn--P1Ai, true",
+      "MUSEUM, true",
+      "americanexpress, true",
+      "NOTATLD, false",
+      "zz, false",
+      "internal, false",
+      "local, false",
+      "corp, false",
+      "lan, false",
+      "localhost, false",
+      "COMX, false",
+      "CO, true",
+      "C, false",
+      "AAA, true",
+      "ZW, true"
+  })
+  void testIanaTldsRegisteredLookup(String tld, boolean expected) {
+    Assertions.assertEquals(expected, IanaTlds.registered(tld, 0, tld.length()), tld);
+  }
+
+  /**
+   * Verifies {@link IanaTlds#registered(CharSequence, int, int)} reads a final-label
+   * slice out of a longer domain without requiring the caller to allocate a substring.
+   */
+  @ParameterizedTest
+  @CsvSource({
+      "example.com, 8, 11, true",
+      "EXAMPLE.COM, 8, 11, true",
+      "mail.example.xn--p1ai, 13, 21, true",
+      "files.corp.internal, 11, 19, false",
+      "host.local, 5, 10, false",
+      "a.notatld, 2, 9, false"
+  })
+  void testIanaTldsRegisteredReadsFinalLabelSlice(String domain, int start, int end,
+      boolean expected) {
+    Assertions.assertEquals(expected, IanaTlds.registered(domain, start, end), domain);
+  }
+
+  /**
+   * Verifies out-of-range and empty slices are rejected by the table lookup.
+   */
+  @Test
+  void testIanaTldsRegisteredRejectsInvalidSlices() {
+    Assertions.assertFalse(IanaTlds.registered("com", -1, 3));
+    Assertions.assertFalse(IanaTlds.registered("com", 0, 4));
+    Assertions.assertFalse(IanaTlds.registered("com", 2, 1));
+    Assertions.assertFalse(IanaTlds.registered("com", 0, 0));
+    Assertions.assertFalse(IanaTlds.registered(null, 0, 0));
+  }
+
+  /**
+   * Builds a dotted domain of exactly {@code length} characters ending in {@code tld},
+   * using 63-character labels where needed so every label stays inside the DNS label
+   * limit.
+   */
   private static String domainOfLength(int length, String tld) {
     if (tld.length() + 2 > length) {
       throw new IllegalArgumentException("length too small for tld " + tld);
@@ -206,6 +303,7 @@ public class CursorPiiExtractorTest {
         remaining--;
       }
       int labelLength = Math.min(63, remaining);
+      // Keep at least one character for a following label when a separator will be needed.
       if (remaining > labelLength && remaining - labelLength == 1) {
         labelLength--;
       }
