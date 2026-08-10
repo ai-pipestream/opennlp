@@ -75,6 +75,35 @@ public class CursorTemporalExtractorTest {
     assertEquals(Granularity.valueOf(granularity), mention.granularity(), text);
   }
 
+  /**
+   * Verifies that a full ISO 8601 timestamp is not silently dropped: the date part is
+   * reported as one day mention whose span covers exactly the date, and the time part
+   * is skipped rather than extracted, since sub-day granularities are out of scope.
+   */
+  @Test
+  void testIsoTimestampYieldsTheDateAtDayGranularity() {
+    final String text = "2026-07-14T09:30:00Z";
+    final List<TemporalExpression> mentions = extractor.extract(text);
+    assertEquals(1, mentions.size(), text);
+    assertEquals(new Span(0, 10), mentions.get(0).span());
+    assertEquals("2026-07-14", mentions.get(0).value());
+    assertEquals(Granularity.DAY, mentions.get(0).granularity());
+  }
+
+  /**
+   * Verifies the timestamp handling inside a sentence and with a numeric zone offset
+   * instead of {@code Z}: still exactly one mention, covering only the date part, at
+   * day granularity.
+   */
+  @Test
+  void testIsoTimestampWithOffsetZoneInsideSentence() {
+    final String text = "deployed at 2026-07-14T09:30+05:30 sharp";
+    final TemporalExpression mention = single(text);
+    assertEquals("2026-07-14", mention.span().getCoveredText(text).toString());
+    assertEquals("2026-07-14", mention.value());
+    assertEquals(Granularity.DAY, mention.granularity());
+  }
+
   @Test
   void testMentionInsideSentenceHasExactSpan() {
     final String text = "the release shipped on 2026-07-14 after review";
@@ -106,7 +135,8 @@ public class CursorTemporalExtractorTest {
       "Q5 2024",              // no fifth quarter
       "Q3 24",                // two-digit years are out of scope
       "2026-07",              // ISO month form is out of scope
-      "12026-07-14"           // year is part of a longer digit run
+      "12026-07-14",          // year is part of a longer digit run
+      "2026-07-14Tomorrow"    // a T followed by prose letters is no time of day
   })
   void testRejectedShapes(String text) {
     assertTrue(extractor.extract(text).isEmpty(), text);
