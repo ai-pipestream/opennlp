@@ -110,6 +110,38 @@ public class CursorPiiExtractorTest {
     Assertions.assertTrue(extractor.extract("plain WORDS IN CAPITALS here").isEmpty());
   }
 
+  /**
+   * A candidate can pass the mod-97 check by chance while its length does not match
+   * what the ISO 13616 registry assigns to its country, or while its country code is
+   * not registered at all. Both fixtures below are mod-97 valid by construction:
+   * a 16-character DE candidate where the registry assigns Germany 22, and a
+   * ZZ-prefixed candidate with an unregistered country code.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "wire to DE45500105170123 today",
+      "wire to ZZ591234567890123456 today"})
+  void testIbanRejectsRegistryViolations(String text) {
+    Assertions.assertTrue(extractor.extract(text).stream()
+        .noneMatch(m -> PiiMention.TYPE_IBAN.equals(m.type())));
+  }
+
+  /**
+   * Registry lengths accept the extremes and a letter-bearing middle: Norway is the
+   * shortest registered IBAN at 15 and Malta the longest at 31.
+   */
+  @ParameterizedTest
+  @CsvSource({
+      "wire to NO9386011117947 today, NO9386011117947",
+      "wire to MT84MALT011000012345MTLCAST001S today, MT84MALT011000012345MTLCAST001S",
+      "wire to FR1420041010050500013M02606 today, FR1420041010050500013M02606"})
+  void testIbanRegistryLengthExtremes(String text, String normalized) {
+    final List<PiiMention> mentions = extractor.extract(text);
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(PiiMention.TYPE_IBAN, mentions.get(0).type());
+    Assertions.assertEquals(normalized, mentions.get(0).normalized());
+  }
+
   @Test
   void testCard() {
     final List<PiiMention> mentions =
@@ -166,6 +198,28 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(2).type());
     Assertions.assertTrue(mentions.get(0).span().getEnd() <= mentions.get(1).span().getStart());
     Assertions.assertTrue(mentions.get(1).span().getEnd() <= mentions.get(2).span().getStart());
+  }
+
+  @Test
+  void testTypeSubsetLimitsWhatIsReported() {
+    final String text = "Mail jane@example.com or call (555) 123-4567.";
+    final CursorPiiExtractor emailOnly =
+        new CursorPiiExtractor(java.util.Set.of(PiiMention.TYPE_EMAIL));
+
+    final List<PiiMention> mentions = emailOnly.extract(text);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(PiiMention.TYPE_EMAIL, mentions.get(0).type());
+  }
+
+  @Test
+  void testTypeSubsetValidation() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CursorPiiExtractor(null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CursorPiiExtractor(java.util.Set.of()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CursorPiiExtractor(java.util.Set.of("ssn")));
   }
 
   @Test
