@@ -75,10 +75,18 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final Set<String> ALL_TYPES = Set.of(PiiMention.TYPE_AWS_ACCESS_KEY,
       PiiMention.TYPE_GITHUB_TOKEN, PiiMention.TYPE_JWT, PiiMention.TYPE_URL_CREDENTIAL);
 
-  /** The AWS identifier prefixes that mark an access key rather than a resource. */
+  /**
+   * The AWS identifier prefixes that mark an access key rather than a resource, from the IAM
+   * identifier reference as of 2026-08-10. Unlike a checksum, this table is a record of what
+   * a vendor issues today: a new key prefix means a value this scanner will not report until
+   * the table is updated, so the date matters.
+   */
   private static final String[] AWS_KEY_PREFIXES = {"AKIA", "ASIA"};
 
-  /** The GitHub token prefixes of the 40-character form. */
+  /**
+   * The GitHub token prefixes of the 40-character form, from the token format announcement
+   * as of 2026-08-10. Read the note on {@link #AWS_KEY_PREFIXES} before relying on it.
+   */
   private static final String[] GITHUB_PREFIXES = {"ghp_", "gho_", "ghu_", "ghs_", "ghr_"};
 
   private static final String GITHUB_FINE_GRAINED_PREFIX = "github_pat_";
@@ -98,8 +106,12 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   /** As many header characters as any {@code alg} declaration needs to be visible in. */
   private static final int JWT_HEADER_SCAN_LENGTH = 88;
 
-  /** The header parameter every JWS header must carry. */
-  private static final String JWT_ALGORITHM_PARAMETER = "alg";
+  /**
+   * The header parameter every JWS header must carry, as it is written in the JSON: with
+   * its quotes, so that a longer member name ending in those three letters, {@code notalg}
+   * for instance, is not mistaken for it.
+   */
+  private static final String JWT_ALGORITHM_PARAMETER = "\"alg\"";
 
   private static final String SCHEME_SEPARATOR = "://";
 
@@ -304,6 +316,11 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    * {@code alg} header parameter, which is what tells a token from any other dotted run
    * of base64url characters.
    *
+   * <p>The parameter has to appear as a member name, quoted and followed by its colon.
+   * Looking for the three letters anywhere would accept a header whose only member is
+   * named {@code notalg} or {@code algorithm}, and a base64url segment that happens to
+   * decode to text containing them.</p>
+   *
    * @param text The text being scanned.
    * @param start The first header character.
    * @param end The exclusive end of the header segment.
@@ -320,8 +337,29 @@ public final class SecretsPiiExtractor implements PiiExtractor {
       for (int j = 0; j < JWT_ALGORITHM_PARAMETER.length(); j++) {
         match &= header[i + j] == (byte) JWT_ALGORITHM_PARAMETER.charAt(j);
       }
-      if (match) {
+      if (match && followedByColon(header, i + JWT_ALGORITHM_PARAMETER.length())) {
         return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Tests whether a member name is followed by its colon, across the whitespace JSON
+   * allows there.
+   *
+   * @param header The decoded header bytes.
+   * @param from The first byte after the member name.
+   * @return {@code true} if a colon follows.
+   */
+  private boolean followedByColon(byte[] header, int from) {
+    for (int i = from; i < header.length; i++) {
+      final byte b = header[i];
+      if (b == ':') {
+        return true;
+      }
+      if (b != ' ' && b != '\t' && b != '\n' && b != '\r') {
+        return false;
       }
     }
     return false;

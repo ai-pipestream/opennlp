@@ -37,6 +37,14 @@
 			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
 		</para>
+		<para>
+			Further detectors, for network addresses, credentials, cryptocurrency
+			addresses, bank routing numbers, and national identifiers, are opt-in and
+			described under
+			<link linkend="tools.pii.packs">Opt-in detectors and packs</link>. None of
+			them is part of <code>CursorPiiExtractor</code>, so what a caller already
+			redacts never changes when a detector is added.
+		</para>
 	</section>
 
 	<section xml:id="tools.pii.pipeline">
@@ -72,6 +80,138 @@ String masked = Masker.mask(document, PiiAnnotator.PII, '*');
 String receipt = Masker.mask(document, PiiAnnotator.PII,
     MaskPolicy.of('*').keepingFormat().keepingTrailing(4));
 // "Contact ****@******e.com, call (***) ***-4567, or charge card **** **** **** 1111."]]>
+			</programlisting>
+		</para>
+		<para>
+			What is customary differs by type, and <code>MaskPolicies</code> collects
+			those defaults: a card keeps its last four digits, an address or an IP
+			address keeps only its separators, and a credential is masked whole,
+			formatting included, since even its shape says which system it opens.
+			Passing the defaults to <code>Masker</code> chooses a policy per mention,
+			so one pass redacts a mixed document correctly.
+			<programlisting language="java"><![CDATA[
+String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
+// "Contact ****@*******.***, call (***) ***-****, or charge card **** **** **** 1111."]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.packs">
+		<title>Opt-in detectors and packs</title>
+		<para>
+			<code>CursorPiiExtractor</code> reports email addresses, phone numbers,
+			IBANs, and payment card numbers, and it always will: adding a type to it
+			would silently change what every existing caller redacts. Everything else
+			is opt-in, in extractors that each validate against the standard they
+			implement rather than against a shape.
+		</para>
+		<itemizedlist>
+			<listitem>
+				<para>
+					<code>NetworkPiiExtractor</code>: IPv4, IPv6, and MAC addresses.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>SecretsPiiExtractor</code>: AWS access key identifiers,
+					GitHub tokens, JSON Web Tokens whose header really decodes to a
+					JWS header, and credentials embedded in a URL.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>CryptoPiiExtractor</code>: Bitcoin addresses, legacy
+					Base58Check and segwit bech32 or bech32m, and Ethereum addresses
+					with the EIP-55 checksum where the case carries one.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>BankingPiiExtractor</code>: ABA routing numbers.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>UsIdentityPiiExtractor</code> and
+					<code>EuIdentityPiiExtractor</code>: United States Social Security
+					and taxpayer numbers, United Kingdom NHS numbers, and the German
+					tax identifier. National identifiers are the most context
+					dependent of the lot, which is why they are never on by default.
+				</para>
+			</listitem>
+		</itemizedlist>
+		<para>
+			<code>CompositePiiExtractor</code> runs several extractors over one text
+			and merges the result, and <code>PiiPacks</code> names the combinations
+			worth having: <code>payment()</code>, <code>contact()</code>,
+			<code>network()</code>, <code>secrets()</code>, <code>crypto()</code>,
+			<code>usIdentity()</code>, <code>euIdentity()</code>, and
+			<code>allStructured()</code> for everything. Overlaps are resolved the way
+			a single extractor resolves them: the leftmost candidate wins, then the
+			longest, then the more specific type, so a value two types both claim
+			resolves the same way whichever pack was listed first.
+			<programlisting language="java"><![CDATA[
+String text = "Deploy from 10.0.0.7 using AKIAIOSFODNN7EXAMPLE, ask jane@example.com.";
+
+List<PiiMention> mentions = PiiPacks.allStructured().extract(text);
+// ipv4, aws-access-key, email
+
+PiiExtractor keysOnly = PiiPacks.secrets();
+PiiExtractor custom = new CompositePiiExtractor(
+    new CursorPiiExtractor(), new NetworkPiiExtractor());]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.transforms">
+		<title>Pseudonymizing, tokenizing, and auditing</title>
+		<para>
+			Masking hides a value but also destroys the fact that two mentions were
+			the same value, which is what makes a redacted support ticket unreadable.
+			<code>Pseudonymizer</code> replaces each mention with a numbered label
+			instead, giving the same value the same label throughout the text. Labels
+			are rarely as long as what they replace, so the returned
+			<code>PiiRewrite</code> carries the new text together with a mapping for
+			moving other annotations onto it.
+			<programlisting language="java"><![CDATA[
+String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+
+PiiRewrite rewrite = new Pseudonymizer()
+    .rewrite(text, new CursorPiiExtractor().extract(text));
+// "Contact EMAIL-1; EMAIL-1 replied to EMAIL-2."
+
+int moved = rewrite.mapOffset(text.indexOf("bob@example.com"));
+List<Annotation<String>> tokens = rewrite.remap(originalTokens);]]>
+			</programlisting>
+		</para>
+		<para>
+			Labels number from one in every text, so they say nothing across
+			documents. Where that is the question, <code>HmacTokenizer</code> derives
+			the label from the value under a secret key, and the same address
+			tokenizes identically in every document. The key is what makes this safe:
+			a plain digest of a value drawn from a small space, a Social Security
+			number for instance, is recovered by digesting the space.
+			<programlisting language="java"><![CDATA[
+HmacTokenizer tokenizer = new HmacTokenizer(key);
+
+String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
+// "EMAIL-3f2a1c9d", the same in every document scanned under this key
+
+String tokenized = tokenizer.rewrite(document).text();]]>
+			</programlisting>
+		</para>
+		<para>
+			<code>PiiAuditReport</code> is what a review can be given instead of the
+			mentions: how many of each type, how many were distinct, and a keyed token
+			per distinct value rather than the value. Nothing in a report carries a
+			value or an offset.
+			<programlisting language="java"><![CDATA[
+PiiAuditReport report = PiiAuditReport.of(document, tokenizer);
+
+report.total();                              // 3
+report.counts().get(PiiMention.TYPE_CARD);   // 1
+report.distinctCounts();                     // repeats counted once
+report.samples(PiiMention.TYPE_EMAIL);       // tokens, never addresses]]>
 			</programlisting>
 		</para>
 	</section>

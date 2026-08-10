@@ -60,7 +60,10 @@ public final class BankingPiiExtractor implements PiiExtractor {
 
   /**
    * The assigned routing symbol ranges as inclusive pairs: the Federal Reserve districts,
-   * the thrift institutions, the electronic transaction ranges, and traveler's checks.
+   * the thrift institutions, the electronic transaction ranges, and traveler's checks. The
+   * assignment scheme as of 2026-08-10; unlike the check digit, which is arithmetic, this
+   * table records what the registrar has handed out and a range added later leaves the
+   * numbers in it unreported until the table is updated.
    */
   private static final int[][] ASSIGNED_PREFIXES = {{1, 12}, {21, 32}, {61, 72}, {80, 80}};
 

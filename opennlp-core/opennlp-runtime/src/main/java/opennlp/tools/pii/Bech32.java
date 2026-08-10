@@ -31,7 +31,10 @@ package opennlp.tools.pii;
  */
 final class Bech32 {
 
-  /** The bech32 charset, in value order. */
+  /**
+   * The bech32 charset, in value order, as BIP-173 defines it. Fixed by the encoding rather
+   * than by a registry, so it carries no revision and cannot go stale.
+   */
   private static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
   private static final int ASCII_RANGE = 128;

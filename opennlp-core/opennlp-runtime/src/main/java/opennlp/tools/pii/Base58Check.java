@@ -33,7 +33,11 @@ import java.security.NoSuchAlgorithmException;
  */
 final class Base58Check {
 
-  /** The base 58 alphabet: no zero, capital O, capital I, or lowercase l. */
+  /**
+   * The base 58 alphabet: no zero, capital O, capital I, or lowercase l. Fixed by the
+   * encoding rather than by a registry, so unlike the tables this package copies from
+   * registrars it carries no revision and cannot go stale.
+   */
   private static final String ALPHABET =
       "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 

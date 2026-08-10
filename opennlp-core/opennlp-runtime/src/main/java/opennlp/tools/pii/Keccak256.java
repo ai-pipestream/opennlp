@@ -33,7 +33,12 @@ package opennlp.tools.pii;
  */
 final class Keccak256 {
 
-  /** The round constants of the iota step, one per round. */
+  /**
+   * The round constants of the iota step, one per round, as the Keccak reference specifies
+   * them. Derived from the permutation itself rather than copied from a registry, so they
+   * carry no revision and cannot go stale; the unit tests check the implementation against
+   * published digests.
+   */
   private static final long[] ROUND_CONSTANTS = {
       0x0000000000000001L, 0x0000000000008082L, 0x800000000000808aL, 0x8000000080008000L,
       0x000000000000808bL, 0x0000000080000001L, 0x8000000080008081L, 0x8000000000008009L,

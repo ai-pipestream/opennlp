@@ -72,7 +72,12 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   private static final int SSN_AREA_UNUSED = 666;
   private static final int ITIN_AREA_FIRST = 900;
 
-  /** The group ranges the IRS assigns to Individual Taxpayer Identification Numbers. */
+  /**
+   * The group ranges the IRS assigns to Individual Taxpayer Identification Numbers, as
+   * published as of 2026-08-10. The ranges are assignment policy rather than arithmetic and
+   * have been widened before, in 2011, so a number the IRS begins issuing outside them stays
+   * unreported until this table is updated.
+   */
   private static final int[][] ITIN_GROUPS = {{50, 65}, {70, 88}, {90, 92}, {94, 99}};
 
   private final Set<String> types;

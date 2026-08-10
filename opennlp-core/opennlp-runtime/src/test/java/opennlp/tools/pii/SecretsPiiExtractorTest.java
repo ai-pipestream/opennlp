@@ -37,6 +37,15 @@ public class SecretsPiiExtractorTest {
   /** The header of {@code {"typ":"JWT"}}, which carries no algorithm. */
   private static final String NO_ALGORITHM_HEADER = "eyJ0eXAiOiJKV1QifQ";
 
+  /** The header of {@code {"notalg":"HS256"}}, whose member only ends in those letters. */
+  private static final String NOTALG_HEADER = "eyJub3RhbGciOiJIUzI1NiJ9";
+
+  /** The header of {@code {"algorithm":"HS256"}}, whose member only begins with them. */
+  private static final String ALGORITHM_HEADER = "eyJhbGdvcml0aG0iOiJIUzI1NiJ9";
+
+  /** The header of <code>{"alg" : "HS256"}</code>, spaced out as JSON permits. */
+  private static final String SPACED_HEADER = "eyJhbGciIDogIkhTMjU2In0";
+
   private static final String PAYLOAD =
       "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ";
 
@@ -145,8 +154,12 @@ public class SecretsPiiExtractorTest {
     Assertions.assertEquals(token, mentions.get(0).normalized());
   }
 
+  /**
+   * Verifies that requiring the colon of the {@code alg} member does not reject a header
+   * whose JSON is spaced out, which the grammar allows.
+   */
   @ParameterizedTest
-  @ValueSource(strings = {HS256_HEADER, RS256_HEADER})
+  @ValueSource(strings = {HS256_HEADER, RS256_HEADER, SPACED_HEADER})
   void testAcceptsJsonWebTokensOfSeveralAlgorithms(String header) {
     final String token = header + "." + PAYLOAD + "." + SIGNATURE;
 
@@ -160,12 +173,15 @@ public class SecretsPiiExtractorTest {
 
   /**
    * Verifies the near misses that a plain three-segment test would accept: a header
-   * without the algorithm parameter that RFC 7515 requires, a header that is not base64url
-   * of a JSON object, and a token missing a segment.
+   * without the algorithm parameter that RFC 7515 requires, a header whose member name
+   * merely contains those three letters, a header that is not base64url of a JSON object,
+   * and a token missing a segment.
    */
   @ParameterizedTest
   @ValueSource(strings = {
       NO_ALGORITHM_HEADER + ".eyJzdWIiOiIxIn0.abcdefgh",
+      NOTALG_HEADER + "." + PAYLOAD + "." + SIGNATURE,
+      ALGORITHM_HEADER + "." + PAYLOAD + "." + SIGNATURE,
       "notbase64url." + PAYLOAD + "." + SIGNATURE,
       HS256_HEADER + "." + PAYLOAD,
       HS256_HEADER + "." + PAYLOAD + ".",
