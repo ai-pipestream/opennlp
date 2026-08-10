@@ -121,16 +121,37 @@ public class CompositePiiExtractorTest {
     Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(0).type());
   }
 
+  /**
+   * Verifies that the more specific type wins an exact-span tie whichever delegate reported
+   * it, so a composite does not depend on the order it was assembled in.
+   */
   @Test
-  void testEarlierExtractorWinsOnAnExactSpanTie() {
+  void testTypePriorityWinsAnExactSpanTieWhateverTheDelegateOrder() {
     final PiiMention phone = mention(2, 10, PiiMention.TYPE_PHONE);
     final PiiMention card = mention(2, 10, PiiMention.TYPE_CARD);
 
-    Assertions.assertEquals(PiiMention.TYPE_PHONE,
+    Assertions.assertEquals(PiiMention.TYPE_CARD,
         new CompositePiiExtractor(new Fixed(phone), new Fixed(card))
             .extract("0123456789abcdef").get(0).type());
     Assertions.assertEquals(PiiMention.TYPE_CARD,
         new CompositePiiExtractor(new Fixed(card), new Fixed(phone))
+            .extract("0123456789abcdef").get(0).type());
+  }
+
+  /**
+   * Verifies that the delegate order settles a tie between types of equal priority, which is
+   * the case for types this package does not name.
+   */
+  @Test
+  void testEarlierDelegateWinsATieBetweenEquallyRankedTypes() {
+    final PiiMention first = mention(2, 10, "custom-first");
+    final PiiMention second = mention(2, 10, "custom-second");
+
+    Assertions.assertEquals("custom-first",
+        new CompositePiiExtractor(new Fixed(first), new Fixed(second))
+            .extract("0123456789abcdef").get(0).type());
+    Assertions.assertEquals("custom-second",
+        new CompositePiiExtractor(new Fixed(second), new Fixed(first))
             .extract("0123456789abcdef").get(0).type());
   }
 

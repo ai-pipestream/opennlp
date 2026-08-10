@@ -28,10 +28,16 @@ import java.util.List;
  * <p>Each delegate scans the full text independently, so delegates never influence one
  * another's decisions and a delegate may be reused in any number of composites. When
  * candidates from different delegates overlap, the same rule the single extractors use
- * decides: the leftmost candidate wins, then the longest, then the delegate that was
- * supplied first, then the {@link PiiTypePriority type priority}. A candidate that
- * overlaps an already accepted one is dropped, never truncated, so every reported span
- * is exactly what its extractor found.</p>
+ * decides: the leftmost candidate wins, then the longest, then the
+ * {@link PiiTypePriority type priority}, and only then the delegate that was supplied
+ * first. A candidate that overlaps an already accepted one is dropped, never truncated, so
+ * every reported span is exactly what its extractor found.</p>
+ *
+ * <p>Deciding by type before delegate order is what makes a composite independent of how it
+ * was assembled: a text in which two types claim the same span, an NHS number that is also
+ * a validly formatted phone number for instance, yields the same mention whichever pack was
+ * listed first. The delegate order only settles ties between types of equal priority, which
+ * in practice means types this package does not name.</p>
  *
  * <p>Delegates that report the same span for the same type, for example two packs that
  * both carry the card scanner, therefore yield one mention rather than a duplicate.</p>
@@ -125,10 +131,10 @@ public final class CompositePiiExtractor implements PiiExtractor {
       if (a.end() != b.end()) {
         return Integer.compare(b.end(), a.end());
       }
-      if (a.order() != b.order()) {
-        return Integer.compare(a.order(), b.order());
+      if (a.priority() != b.priority()) {
+        return Integer.compare(a.priority(), b.priority());
       }
-      return Integer.compare(a.priority(), b.priority());
+      return Integer.compare(a.order(), b.order());
     });
     final List<PiiMention> mentions = new ArrayList<>();
     int lastEnd = 0;
