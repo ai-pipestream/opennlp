@@ -107,4 +107,28 @@ public class MaskerTest {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> Masker.mask(document, PiiAnnotator.PII, '*'));
   }
+
+  /**
+   * Verifies that overlapping spans mask deterministically regardless of layer order when
+   * a policy keeps trailing characters: a later, narrower span must not restore characters
+   * a wider span already redacted.
+   */
+  @Test
+  void testOverlappingLayersMaskIndependentlyOfLayerOrder() {
+    final String text = "card 4111111111111111 end";
+    final LayerKey<String> fullCard = LayerKey.of("full-card", String.class);
+    final LayerKey<String> prefix = LayerKey.of("prefix", String.class);
+    final Document document = Document.of(text)
+        .with(fullCard, List.of(new Annotation<>(new Span(5, 21), "full")))
+        .with(prefix, List.of(new Annotation<>(new Span(5, 9), "prefix")));
+    final MaskPolicy policy = MaskPolicy.of('*').keepingTrailing(4);
+
+    final String fullThenPrefix =
+        Masker.mask(document, List.<LayerKey<?>>of(fullCard, prefix), policy);
+    final String prefixThenFull =
+        Masker.mask(document, List.<LayerKey<?>>of(prefix, fullCard), policy);
+
+    Assertions.assertEquals("card ************1111 end", fullThenPrefix);
+    Assertions.assertEquals("card ************1111 end", prefixThenFull);
+  }
 }
