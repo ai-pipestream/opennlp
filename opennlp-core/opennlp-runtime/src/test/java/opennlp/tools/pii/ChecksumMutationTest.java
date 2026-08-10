@@ -147,12 +147,22 @@ public class ChecksumMutationTest {
         .noneMatch(mention -> type.equals(mention.type())), text);
   }
 
-  /** Returns the next decimal digit, wrapping nine to zero. */
+  /**
+   * Returns the next decimal digit, wrapping nine to zero.
+   *
+   * @param c The current decimal digit.
+   * @return A different decimal digit.
+   */
   private char nextDigit(char c) {
     return c == '9' ? '0' : (char) (c + 1);
   }
 
-  /** Returns the next uppercase ASCII letter, wrapping Z to A. */
+  /**
+   * Returns the next uppercase ASCII letter, wrapping Z to A.
+   *
+   * @param c The current uppercase ASCII letter.
+   * @return A different uppercase ASCII letter.
+   */
   private char nextUpper(char c) {
     return c == 'Z' ? 'A' : (char) (c + 1);
   }

@@ -26,8 +26,10 @@ import java.util.List;
  *
  * <p>An IMEI is reported only when an ASCII case-insensitive {@code IMEI} label directly
  * precedes it, separated only by whitespace or {@code :}, {@code #}, or {@code =}. The
- * candidate must contain exactly 15 digits and pass the Luhn check specified by GSMA
- * TS.06. Single spaces or hyphens may separate digit groups, but may not be mixed.</p>
+ * candidate must contain exactly 15 digits and pass the Luhn check specified by
+ * <a href="https://imeidb.gsma.com/imei/resources/documents/TS.06-v22.0.pdf">
+ * GSMA TS.06</a>. Single spaces or hyphens may separate digit groups, but may not be
+ * mixed.</p>
  *
  * <p>The label is deliberately required even though the check digit is strong enough to
  * reject most arbitrary 15-digit runs. Long numeric identifiers are common in logs and

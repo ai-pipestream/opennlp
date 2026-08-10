@@ -96,7 +96,8 @@ public class MaskPoliciesTest {
     final String value = "4111 1111 1111 1111";
 
     for (final String type : new String[] {PiiMention.TYPE_CARD, PiiMention.TYPE_EMAIL,
-        PiiMention.TYPE_JWT, PiiMention.TYPE_US_SSN, "unknown"}) {
+        PiiMention.TYPE_JWT, PiiMention.TYPE_US_SSN, PiiMention.TYPE_CA_SIN,
+        PiiMention.TYPE_IMEI, "unknown"}) {
       Assertions.assertEquals(value.length(), mask(value, type).length(), type);
     }
   }

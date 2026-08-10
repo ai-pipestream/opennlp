@@ -134,12 +134,16 @@ public record PiiMention(Span span, String type, String normalized) {
   public static final String TYPE_DE_STEUER_ID = "de-steuer-id";
 
   /**
-   * An International Mobile Equipment Identity identifying a mobile device.
+   * A GSMA
+   * <a href="https://imeidb.gsma.com/imei/resources/documents/TS.06-v22.0.pdf">
+   * International Mobile Equipment Identity</a> identifying a mobile device.
    */
   public static final String TYPE_IMEI = "imei";
 
   /**
-   * A Canadian Social Insurance Number.
+   * A Canadian
+   * <a href="https://www.canada.ca/en/employment-social-development/services/sin.html">
+   * Social Insurance Number</a>.
    */
   public static final String TYPE_CA_SIN = "ca-sin";
 

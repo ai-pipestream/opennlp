@@ -21,8 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A deterministic {@link PiiExtractor} for Canadian Social Insurance Numbers: forward
- * scans over the text, no regular expressions. This extractor is opt-in.
+ * A deterministic {@link PiiExtractor} for Canadian
+ * <a href="https://www.canada.ca/en/employment-social-development/services/sin.html">
+ * Social Insurance Numbers</a>: forward scans over the text, no regular expressions.
+ * This extractor is opt-in.
  *
  * <p>A candidate is nine digits, compact or in three groups separated consistently by
  * spaces or hyphens, and must pass the Luhn check. It is reported only when directly
