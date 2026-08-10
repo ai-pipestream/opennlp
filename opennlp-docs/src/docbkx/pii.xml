@@ -33,13 +33,18 @@
 			IANA-registered top-level domain (including punycode forms) and stay
 			within the RFC 1035 presentation-length limit, so private-use suffixes
 			such as <code>.internal</code> or <code>.local</code> are not reported.
+			The ASCII local part is capped at 64 characters and the complete
+			mailbox at 254 characters. The baked IANA snapshot is refreshed with
+			<code>dev/fetch-iana-tlds.sh</code>; pass <code>--check</code> in an
+			automated drift check without changing the source tree.
 			An extractor limited to a subset of the types, for a caller that wants
 			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
 		</para>
 		<para>
 			Further detectors, for network addresses, credentials, cryptocurrency
-			addresses, bank routing numbers, and national identifiers, are opt-in and
+			addresses, bank routing numbers, national identifiers, and device
+			identifiers, are opt-in and
 			described under
 			<link linkend="tools.pii.packs">Opt-in detectors and packs</link>. None of
 			them is part of <code>CursorPiiExtractor</code>, so what a caller already
@@ -114,7 +119,8 @@ String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
 			<listitem>
 				<para>
 					<code>SecretsPiiExtractor</code>: AWS access key identifiers,
-					GitHub tokens, JSON Web Tokens whose header really decodes to a
+					GitHub tokens from their current minimum lengths through the
+					255-character scanner limit, JSON Web Tokens whose header decodes to a
 					JWS header, and credentials embedded in a URL.
 				</para>
 			</listitem>
@@ -132,11 +138,21 @@ String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
 			</listitem>
 			<listitem>
 				<para>
-					<code>UsIdentityPiiExtractor</code> and
-					<code>EuIdentityPiiExtractor</code>: United States Social Security
-					and taxpayer numbers, United Kingdom NHS numbers, and the German
-					tax identifier. National identifiers are the most context
+					<code>UsIdentityPiiExtractor</code>,
+					<code>EuIdentityPiiExtractor</code>, and
+					<code>CaIdentityPiiExtractor</code>: United States Social Security
+					and taxpayer numbers, United Kingdom NHS numbers, the German tax
+					identifier, and context-labeled Canadian Social Insurance Numbers.
+					National identifiers are the most context
 					dependent of the lot, which is why they are never on by default.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>DevicePiiExtractor</code>: 15-digit, Luhn-valid IMEIs that
+					directly follow an <code>IMEI</code> label. The label prevents a
+					generic long number from becoming a device identifier by checksum
+					alone.
 				</para>
 			</listitem>
 		</itemizedlist>
@@ -145,7 +161,8 @@ String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
 			and merges the result, and <code>PiiPacks</code> names the combinations
 			worth having: <code>payment()</code>, <code>contact()</code>,
 			<code>network()</code>, <code>secrets()</code>, <code>crypto()</code>,
-			<code>usIdentity()</code>, <code>euIdentity()</code>, and
+			<code>usIdentity()</code>, <code>euIdentity()</code>,
+			<code>caIdentity()</code>, <code>device()</code>, and
 			<code>allStructured()</code> for everything. Overlaps are resolved the way
 			a single extractor resolves them: the leftmost candidate wins, then the
 			longest, then the more specific type, so a value two types both claim
@@ -195,7 +212,7 @@ List<Annotation<String>> tokens = rewrite.remap(originalTokens);]]>
 HmacTokenizer tokenizer = new HmacTokenizer(key);
 
 String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
-// "EMAIL-3f2a1c9d", the same in every document scanned under this key
+// "EMAIL-3f2a1c9d7e4b6a20", the same in every document scanned under this key
 
 String tokenized = tokenizer.rewrite(document).text();]]>
 			</programlisting>

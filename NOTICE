@@ -134,6 +134,10 @@ third-party sentiment data set is included.
 
 Copyright (c) 1991-2025 Unicode, Inc. All rights reserved.
 
+The top-level-domain label data used by opennlp.tools.pii.IanaTlds is derived
+from the IANA Root Zone Database maintained by Public Technical Identifiers,
+an affiliate of the Internet Corporation for Assigned Names and Numbers.
+
 ============================================================================
 List of third-party dependencies grouped by their license type.
 

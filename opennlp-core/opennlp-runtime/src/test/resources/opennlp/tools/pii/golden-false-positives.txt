@@ -115,6 +115,12 @@ token ghp_
 token gh_0123456789abcdefghijklmnopqrstuvwxyz
 token github_pat_11ABCDEFG0abcdefghij
 
+# Context-gated identifiers: valid bare values and labeled checksum failures.
+device 860000000000009
+device IMEI: 860000000000008
+employee 046 454 286
+employee SIN: 046 454 287
+
 # JWT: three dot separated parts whose first part is not a JSON header.
 token bWFkZSB1cA.cGF5bG9hZA.c2lnbmF0dXJl
 token abc.def.ghi
