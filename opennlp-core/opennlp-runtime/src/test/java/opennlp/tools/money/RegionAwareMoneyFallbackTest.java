@@ -29,6 +29,7 @@ import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.RegionVote;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests the fallback paths of region-aware money extraction: a pipeline-produced empty
@@ -88,5 +89,58 @@ public class RegionAwareMoneyFallbackTest {
     final List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
     assertEquals(1, money.size());
     assertEquals("USD", money.get(0).value().currency());
+  }
+
+  /**
+   * Builds a document that carries a two-row tie ballot: Australia and Canada at half
+   * a share each, ranked in that order.
+   *
+   * @param text The document text. Must not be {@code null}.
+   * @return A {@link Document} with a tied region ballot. Never {@code null}.
+   */
+  private static Document withTieBallot(String text) {
+    return Document.of(text).with(DocumentRegionAnnotator.REGIONS,
+        List.of(Annotation.of(new RegionVote("AU", 0.5)),
+            Annotation.of(new RegionVote("CA", 0.5))));
+  }
+
+  /**
+   * Verifies the margin fallback: with a minimum margin of {@code 0.1}, a tie ballot
+   * is not decisive, so the annotator keeps the default table and reads {@code $5} as
+   * {@code USD} exactly like the empty-ballot path, instead of silently taking the
+   * alphabetically first tied country.
+   */
+  @Test
+  void testTieBelowTheMarginFallsBackToTheDefaultTable() {
+    final Document document = new RegionAwareMoneyAnnotator(0.1)
+        .annotate(withTieBallot("the deal is worth $5"));
+    assertEquals("USD",
+        document.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
+  /**
+   * Verifies that the default zero margin pins the existing behavior: a tie ballot
+   * still elects its top row, so Australia's table reads {@code $5} as {@code AUD}.
+   */
+  @Test
+  void testZeroMarginKeepsTheTopRowOnATie() {
+    final Document document = new RegionAwareMoneyAnnotator()
+        .annotate(withTieBallot("the deal is worth $5"));
+    assertEquals("AUD",
+        document.get(MoneyAnnotator.MONEY).get(0).value().currency());
+  }
+
+  /**
+   * Verifies that an invalid minimum margin is rejected at construction rather than
+   * surfacing on the first document.
+   */
+  @Test
+  void testMarginOutsideTheUnitIntervalIsRejected() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new RegionAwareMoneyAnnotator(-0.1));
+    assertThrows(IllegalArgumentException.class,
+        () -> new RegionAwareMoneyAnnotator(1.1));
+    assertThrows(IllegalArgumentException.class,
+        () -> new RegionAwareMoneyAnnotator(Double.NaN));
   }
 }
