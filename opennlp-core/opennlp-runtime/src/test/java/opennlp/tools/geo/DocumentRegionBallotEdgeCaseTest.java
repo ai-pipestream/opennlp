@@ -162,16 +162,19 @@ public class DocumentRegionBallotEdgeCaseTest {
   }
 
   /**
-   * Verifies the empty case: a document without an entity layer produces a present but
-   * empty region layer, and the geocoder is never consulted for it.
+   * Verifies that an absent entity layer is rejected as an assembly error: the
+   * annotator requires {@code Layers.ENTITIES}, so a document without that layer is
+   * refused with an exception naming it, rather than silently producing an empty
+   * ballot. A present but empty entity layer is the empty-document case instead.
    */
   @Test
-  void testNoLocationEntitiesYieldAnEmptyPresentLayer() {
-    final Document document = new DocumentRegionAnnotator(unreachableGeocoder())
-        .annotate(Document.of("nothing to locate here"));
-
-    assertTrue(document.get(DocumentRegionAnnotator.REGIONS).isEmpty());
-    assertTrue(document.layers().contains(DocumentRegionAnnotator.REGIONS));
+  void testMissingEntityLayerIsRejectedNamingTheLayer() {
+    final DocumentRegionAnnotator annotator =
+        new DocumentRegionAnnotator(unreachableGeocoder());
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(Document.of("nothing to locate here")));
+    assertEquals("document lacks the required layer opennlp:entities<String>",
+        e.getMessage());
   }
 
   /**

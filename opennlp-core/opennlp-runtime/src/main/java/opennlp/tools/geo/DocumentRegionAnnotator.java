@@ -32,6 +32,7 @@ import java.util.Set;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.document.DocumentAnnotators;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
@@ -129,14 +130,17 @@ public class DocumentRegionAnnotator implements DocumentAnnotator {
   /**
    * {@inheritDoc}
    *
+   * @param document The document to annotate. Must not be {@code null} and must carry
+   *                 the {@link Layers#ENTITIES} layer.
+   * @return The document with the {@link #REGIONS} layer added. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
+   *         entity layer is absent.
    * @throws UncheckedIOException Thrown if the {@link Geocoder} fails with an
    *         {@link IOException}.
    */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
+    DocumentAnnotators.requireLayers(document, Layers.ENTITIES);
     final CharSequence text = document.text();
     final Map<String, Double> weights = new HashMap<>();
     final Map<Span, String> nameVotes = new HashMap<>();
