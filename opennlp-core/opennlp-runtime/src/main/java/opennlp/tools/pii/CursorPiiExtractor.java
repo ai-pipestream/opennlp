@@ -202,7 +202,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
       if (end == i + 1
           || !validDomain(text.subSequence(i + 1, end).toString())
           || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
-          || !onEndBoundary(text, end)) {
+          || !Boundaries.onEnd(text, end)) {
         continue;
       }
       final String normalized =
@@ -274,12 +274,12 @@ public final class CursorPiiExtractor implements PiiExtractor {
    */
   private void scanIbans(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
-      if (!isAsciiUpper(text.charAt(i))
+      if (!Ascii.isUpper(text.charAt(i))
           || (i > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, i)))
           || i + 3 >= text.length()
-          || !isAsciiUpper(text.charAt(i + 1))
-          || !isAsciiDigit(text.charAt(i + 2))
-          || !isAsciiDigit(text.charAt(i + 3))) {
+          || !Ascii.isUpper(text.charAt(i + 1))
+          || !Ascii.isDigit(text.charAt(i + 2))
+          || !Ascii.isDigit(text.charAt(i + 3))) {
         continue;
       }
       final StringBuilder compact = new StringBuilder();
@@ -287,11 +287,11 @@ public final class CursorPiiExtractor implements PiiExtractor {
       int p = i;
       while (p < text.length() && compact.length() <= IBAN_MAX_LENGTH) {
         final char c = text.charAt(p);
-        if (isAsciiUpper(c) || isAsciiDigit(c)) {
+        if (Ascii.isUpper(c) || Ascii.isDigit(c)) {
           compact.append(c);
           p++;
         } else if (c == ' ' && p + 1 < text.length()
-            && (isAsciiUpper(text.charAt(p + 1)) || isAsciiDigit(text.charAt(p + 1)))) {
+            && (Ascii.isUpper(text.charAt(p + 1)) || Ascii.isDigit(text.charAt(p + 1)))) {
           groupEnds.add(new int[] {p, compact.length()});
           p++;
         } else {
@@ -304,7 +304,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
       for (int g = groupEnds.size() - 1; g >= 0; g--) {
         final int textEnd = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
-        if (length != registeredLength || !onEndBoundary(text, textEnd)) {
+        if (length != registeredLength || !Boundaries.onEnd(text, textEnd)) {
           continue;
         }
         if (mod97(compact, length) == 1) {
@@ -332,7 +332,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private void scanCards(CharSequence text, List<Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char first = text.charAt(i);
-      if (first < '2' || first > '6' || !onNumberStartBoundary(text, i)) {
+      if (first < '2' || first > '6' || !Boundaries.onNumberStart(text, i)) {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
@@ -342,7 +342,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
       int p = i;
       while (p < text.length() && digits.length() <= CARD_MAX_DIGITS) {
         final char c = text.charAt(p);
-        if (isAsciiDigit(c)) {
+        if (Ascii.isDigit(c)) {
           digits.append(c);
           lastDigit = p;
           previousSeparator = false;
@@ -360,7 +360,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
-            || !onEndBoundary(text, end)
+            || !Boundaries.onEnd(text, end)
             || !luhnValid(digits, length)) {
           continue;
         }
@@ -393,8 +393,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
       final boolean plus = c == '+';
       // A position where a reported phone just ended is a fresh start boundary even
       // though the character before it is a digit of that phone.
-      if ((!plus && !isAsciiDigit(c) && c != '(')
-          || (i != lastEnd && !onNumberStartBoundary(text, i))
+      if ((!plus && !Ascii.isDigit(c) && c != '(')
+          || (i != lastEnd && !Boundaries.onNumberStart(text, i))
           || (i > 0 && text.charAt(i - 1) == '+')) {
         continue;
       }
@@ -412,8 +412,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
       int p = plus ? i + 1 : i;
       while (p < text.length() && digits <= PHONE_MAX_DIGITS) {
         final char ch = text.charAt(p);
-        if (isAsciiDigit(ch)) {
-          if (digits > 0 && p > i && !isAsciiDigit(text.charAt(p - 1))) {
+        if (Ascii.isDigit(ch)) {
+          if (digits > 0 && p > i && !Ascii.isDigit(text.charAt(p - 1))) {
             separated = true;
           }
           digits++;
@@ -451,9 +451,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
             : count >= PHONE_DOMESTIC_MIN_DIGITS && count <= PHONE_DOMESTIC_MAX_DIGITS
                 && visiblySeparated;
         if (!lengthOk
-            || !onEndBoundary(text, end)
+            || !Boundaries.onEnd(text, end)
             || (end + 1 < text.length() && text.charAt(end) == '.'
-                && isAsciiDigit(text.charAt(end + 1)))) {
+                && Ascii.isDigit(text.charAt(end + 1)))) {
           continue;
         }
         hits.add(new Hit(i, end, PRIORITY_PHONE,
@@ -465,39 +465,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
         break;
       }
     }
-  }
-
-  /**
-   * Checks that a numeric candidate does not continue a word, a number, a decimal
-   * fraction, or a comma-grouped number to its left.
-   *
-   * @param text The text being scanned.
-   * @param start The candidate start.
-   * @return {@code true} if the candidate may start here.
-   */
-  private boolean onNumberStartBoundary(CharSequence text, int start) {
-    if (start == 0) {
-      return true;
-    }
-    final int previous = Character.codePointBefore(text, start);
-    if (Character.isLetterOrDigit(previous)) {
-      return false;
-    }
-    return (previous != '.' && previous != ',')
-        || start < 2 || !isAsciiDigit(text.charAt(start - 2));
-  }
-
-  /**
-   * Checks that a candidate ending at {@code end} does not continue into a letter or
-   * digit, judged on the full code point to the right.
-   *
-   * @param text The text being scanned.
-   * @param end The candidate end, exclusive.
-   * @return {@code true} if the candidate may end here.
-   */
-  private boolean onEndBoundary(CharSequence text, int end) {
-    return end >= text.length()
-        || !Character.isLetterOrDigit(Character.codePointAt(text, end));
   }
 
   /**
@@ -544,7 +511,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
     int remainder = 0;
     for (int i = 0; i < length; i++) {
       final char c = compact.charAt((i + IBAN_ROTATION) % length);
-      if (isAsciiDigit(c)) {
+      if (Ascii.isDigit(c)) {
         remainder = (remainder * 10 + (c - '0')) % IBAN_MODULUS;
       } else {
         remainder = (remainder * 100 + (c - 'A' + 10)) % IBAN_MODULUS;
@@ -585,7 +552,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @return {@code true} for ASCII letters, digits, and {@code . _ % + -}.
    */
   private boolean isLocalChar(char c) {
-    return isAsciiLetter(c) || isAsciiDigit(c)
+    return Ascii.isLetter(c) || Ascii.isDigit(c)
         || c == '.' || c == '_' || c == '%' || c == '+' || c == '-';
   }
 
@@ -596,36 +563,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * @return {@code true} for ASCII letters, digits, dot, and hyphen.
    */
   private boolean isDomainChar(char c) {
-    return isAsciiLetter(c) || isAsciiDigit(c) || c == '.' || c == '-';
-  }
-
-  /**
-   * Tests for an ASCII letter.
-   *
-   * @param c The character.
-   * @return {@code true} for {@code A-Z} and {@code a-z}.
-   */
-  private boolean isAsciiLetter(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-  }
-
-  /**
-   * Tests for an uppercase ASCII letter.
-   *
-   * @param c The character.
-   * @return {@code true} for {@code A-Z}.
-   */
-  private boolean isAsciiUpper(char c) {
-    return c >= 'A' && c <= 'Z';
-  }
-
-  /**
-   * Tests for an ASCII digit.
-   *
-   * @param c The character.
-   * @return {@code true} for {@code 0-9}.
-   */
-  private boolean isAsciiDigit(char c) {
-    return c >= '0' && c <= '9';
+    return Ascii.isLetter(c) || Ascii.isDigit(c) || c == '.' || c == '-';
   }
 }
