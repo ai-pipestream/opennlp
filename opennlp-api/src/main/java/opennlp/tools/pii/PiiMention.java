@@ -51,6 +51,89 @@ public record PiiMention(Span span, String type, String normalized) {
   public static final String TYPE_CARD = "card";
 
   /**
+   * An <a href="https://datatracker.ietf.org/doc/html/rfc791">IPv4</a> address in dotted
+   * quad notation.
+   */
+  public static final String TYPE_IPV4 = "ipv4";
+
+  /**
+   * An <a href="https://datatracker.ietf.org/doc/html/rfc4291">IPv6</a> address in the
+   * text representation, compressed or full.
+   */
+  public static final String TYPE_IPV6 = "ipv6";
+
+  /**
+   * An <a href="https://standards.ieee.org/products-programs/regauth/">IEEE 802</a> MAC
+   * address.
+   */
+  public static final String TYPE_MAC = "mac";
+
+  /**
+   * An <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html">
+   * AWS access key identifier</a>.
+   */
+  public static final String TYPE_AWS_ACCESS_KEY = "aws-access-key";
+
+  /**
+   * A <a href="https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/">
+   * GitHub access token</a>.
+   */
+  public static final String TYPE_GITHUB_TOKEN = "github-token";
+
+  /**
+   * A <a href="https://datatracker.ietf.org/doc/html/rfc7519">JSON Web Token</a> in its
+   * compact serialization.
+   */
+  public static final String TYPE_JWT = "jwt";
+
+  /**
+   * A <a href="https://en.bitcoin.it/wiki/Address">Bitcoin</a> address.
+   */
+  public static final String TYPE_BTC_ADDRESS = "btc-address";
+
+  /**
+   * An <a href="https://ethereum.org/en/developers/docs/accounts/">Ethereum</a> account
+   * address.
+   */
+  public static final String TYPE_ETH_ADDRESS = "eth-address";
+
+  /**
+   * An <a href="https://en.wikipedia.org/wiki/ABA_routing_transit_number">ABA routing
+   * transit number</a> of a United States financial institution.
+   */
+  public static final String TYPE_ABA_ROUTING = "aba-routing";
+
+  /**
+   * A credential embedded in a URL's userinfo component, as described by
+   * <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1">RFC 3986</a>.
+   */
+  public static final String TYPE_URL_CREDENTIAL = "url-credential";
+
+  /**
+   * A <a href="https://www.ssa.gov/employer/randomization.html">United States Social
+   * Security number</a>.
+   */
+  public static final String TYPE_US_SSN = "us-ssn";
+
+  /**
+   * A <a href="https://www.irs.gov/individuals/individual-taxpayer-identification-number">
+   * United States Individual Taxpayer Identification Number</a>.
+   */
+  public static final String TYPE_US_ITIN = "us-itin";
+
+  /**
+   * A <a href="https://www.datadictionary.nhs.uk/attributes/nhs_number.html">United
+   * Kingdom NHS number</a>.
+   */
+  public static final String TYPE_UK_NHS = "uk-nhs";
+
+  /**
+   * A German <a href="https://www.bzst.de/DE/Privatpersonen/SteuerlicheIdentifikationsnummer/steuerlicheidentifikationsnummer_node.html">
+   * steuerliche Identifikationsnummer</a>, the personal tax identifier.
+   */
+  public static final String TYPE_DE_STEUER_ID = "de-steuer-id";
+
+  /**
    * Validates the mention.
    *
    * @throws IllegalArgumentException Thrown if {@code span} is {@code null}, or
