@@ -101,14 +101,30 @@ public class CursorQuantityExtractorTest {
   }
 
   /**
-   * Verifies what the scanner accepts for a European-style written number: the decimal
-   * comma is not a decimal marker, so the scan restarts after the comma and only the
-   * trailing digit with its unit is reported.
+   * Verifies that a quantity grouped in a convention {@link opennlp.tools.extraction.NumberScan}
+   * cannot parse is rejected entirely rather than truncated by restarting the scan inside
+   * the group: {@code 1,00,000 kg} must not report {@code 0 kg}, and {@code 1,2345 km}
+   * must not report {@code 2345 km}. Money already has this guard; quantity must match it.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "1,00,000 kg",          // Indian grouping
+      "1,2345 km",            // long trailing group
+      "12,34 m",              // short trailing group
+      "1.234,5 kg"            // European decimal comma after a dot-read decimal
+  })
+  void testGroupingTheScannerCannotParseYieldsNoMention(String text) {
+    assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  /**
+   * Verifies that a comma not followed by a digit is ordinary punctuation behind the
+   * mention: {@code 5 kg, then} keeps its mention and the span ends before the comma.
    */
   @Test
-  void testDecimalCommaRestartsTheScanAfterTheComma() {
-    final Quantity mention = single("1.234,5 kg");
-    assertEquals(new Span(6, 10), mention.span());
+  void testTrailingCommaWithoutDigitStillEndsTheMatch() {
+    final Quantity mention = single("5 kg, then");
+    assertEquals(new Span(0, 4), mention.span());
     assertEquals(0, new BigDecimal("5").compareTo(mention.value()));
     assertEquals("kg", mention.unit());
   }
