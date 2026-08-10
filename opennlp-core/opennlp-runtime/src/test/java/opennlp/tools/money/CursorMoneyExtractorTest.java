@@ -177,26 +177,34 @@ public class CursorMoneyExtractorTest {
     assertEquals(0, new BigDecimal("-5").compareTo(afterParenthesis.amount()));
   }
 
-  @Test
-  void testInvalidGroupingEndsTheMatchAtTheLastValidPosition() {
-    final MoneyAmount mention = single("$1,23");
-    assertEquals(new Span(0, 2), mention.span());
-    assertEquals(0, BigDecimal.ONE.compareTo(mention.amount()));
+  /**
+   * Verifies that an amount grouped in a convention the scanner cannot parse is
+   * rejected entirely rather than truncated to a wildly wrong value: the
+   * Indian-grouped {@code \u20B91,00,000} (rupee sign) must not report 1 INR, and
+   * {@code 1,00,000 USD} must not report 0 USD off a restarted scan over the tail
+   * {@code 000}.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "\u20B91,00,000",       // symbol first, Indian grouping
+      "1,00,000 USD",         // number first, Indian grouping
+      "USD 1,00,000",         // code first, Indian grouping
+      "$1,23",                // short trailing group
+      "\u20AC1.234,56"        // European decimal comma after a dot-read decimal
+  })
+  void testGroupingTheScannerCannotParseYieldsNoMention(String text) {
+    assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
   /**
-   * Verifies what the scanner accepts for a European-style written amount: the decimal
-   * comma is not interpreted, so the match ends before the comma and the dot-separated
-   * part is read as a decimal point, since locale-dependent decimal commas are out of
-   * scope by design.
+   * Verifies that a comma not followed by a digit is ordinary punctuation behind the
+   * amount: {@code $5, sure} keeps its mention and the span ends before the comma.
    */
   @Test
-  void testDecimalCommaEndsTheMatchBeforeTheComma() {
-    // \u20AC1.234,56 reads as one euro mention over \u20AC1.234
-    final MoneyAmount mention = single("\u20AC1.234,56");
-    assertEquals(new Span(0, 6), mention.span());
-    assertEquals(0, new BigDecimal("1.234").compareTo(mention.amount()));
-    assertEquals("EUR", mention.currency());
+  void testTrailingCommaWithoutDigitStillEndsTheMatch() {
+    final MoneyAmount mention = single("$5, sure");
+    assertEquals(new Span(0, 2), mention.span());
+    assertEquals(0, new BigDecimal("5").compareTo(mention.amount()));
   }
 
   /**
