@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the edges of the region ballot: the deterministic order of tied countries, the
- * country-name vote when the geocoder is never consulted, the empty ballot of a document
+ * country-name vote when the geocoder resolves nothing, the empty ballot of a document
  * without location entities, and the confidence weighting that lets one strong mention
  * outvote several weak ones.
  */
@@ -143,12 +143,12 @@ public class DocumentRegionBallotEdgeCaseTest {
 
   /**
    * Verifies that country-name mentions carry a ballot on their own: with two English
-   * country names and a geocoder that fails loudly when consulted, both names vote with
+   * country names and a geocoder that resolves none of them, both names vote with
    * the fixed country-name weight, tie evenly, and rank by ascending country code.
    */
   @Test
-  void testCountryNamesAloneFillTheBallotWithoutTheGeocoder() {
-    final Document document = new DocumentRegionAnnotator(unreachableGeocoder())
+  void testCountryNamesAloneFillTheBallotWithoutGeocoderEvidence() {
+    final Document document = new DocumentRegionAnnotator(tableGeocoder(Map.of()))
         .annotate(withLocations("trade between Mexico and New Zealand grew",
             "Mexico", "New Zealand"));
 
