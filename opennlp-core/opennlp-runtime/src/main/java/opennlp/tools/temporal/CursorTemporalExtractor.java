@@ -35,7 +35,9 @@ import opennlp.tools.util.Span;
  * A deterministic {@link TemporalExtractor}: a single forward scan over the text, no
  * regular expressions, recognizing absolute calendar mentions.
  *
- * <p>Recognized forms: ISO dates ({@code 2026-07-14}); written dates in both orders,
+ * <p>Recognized forms: ISO dates ({@code 2026-07-14}), also as the date part of an
+ * ISO 8601 timestamp ({@code 2026-07-14T09:30:00Z}), reported at day granularity over
+ * the date part only; written dates in both orders,
  * with optional comma and ordinal suffix ({@code July 14, 2026}, {@code 14th July 2026},
  * {@code Jul 14 2026}); month and year ({@code July 2026}); and quarters
  * ({@code Q3 2024}). Month names are matched case-insensitively as full names or
@@ -52,9 +54,10 @@ import opennlp.tools.util.Span;
  * Without a reference date, relative expressions are not reported at all rather than
  * being guessed against the wall clock.</p>
  *
- * <p>Not recognized: named weekdays such as {@code next Tuesday}, times of day, bare
- * years, day-and-month without a year, and numeric formats with slashes, whose day and
- * month order is locale-dependent. The extractor holds no per-call state and is safe to
+ * <p>Not recognized: named weekdays such as {@code next Tuesday}, times of day (the
+ * time part of a timestamp is skipped, never reported), bare years, day-and-month
+ * without a year, and numeric formats with slashes, whose day and month order is
+ * locale-dependent. The extractor holds no per-call state and is safe to
  * share between threads.</p>
  *
  * @since 3.0.0
@@ -65,6 +68,9 @@ public class CursorTemporalExtractor implements TemporalExtractor {
 
   private static final int MIN_YEAR = 1000;
   private static final int MAX_YEAR = 2999;
+
+  /** The length of an extended-format ISO date, {@code 2026-07-14}. */
+  private static final int ISO_DATE_LENGTH = 10;
 
   /**
    * How many letters a candidate keyword or month name may have before the scan gives
@@ -307,7 +313,10 @@ public class CursorTemporalExtractor implements TemporalExtractor {
   }
 
   /**
-   * Matches {@code 2026-07-14}.
+   * Matches {@code 2026-07-14}, alone or as the date part of an ISO 8601 timestamp
+   * such as {@code 2026-07-14T09:30:00Z}. In the timestamp case the mention covers
+   * only the date and stays at day granularity; the time part is skipped, never
+   * reported, since sub-day granularities are out of scope.
    *
    * @param text The text being scanned.
    * @param start The offset of the first digit of the year.
@@ -323,10 +332,48 @@ public class CursorTemporalExtractor implements TemporalExtractor {
       return null;
     }
     final int day = digits(text, start + 8, 2);
-    if (day < 0 || !NumberScan.boundaryAfter(text, start + 10)) {
+    if (day < 0) {
       return null;
     }
-    return day(start, start + 10, year, month, day);
+    final int end = start + ISO_DATE_LENGTH;
+    if (!NumberScan.boundaryAfter(text, end) && !timeOfDayAt(text, end)) {
+      return null;
+    }
+    return day(start, end, year, month, day);
+  }
+
+  /**
+   * Checks whether an ISO 8601 time of day starts at a position: a {@code T} followed
+   * by at least hours and minutes ({@code T09:30}), optional further colon-separated
+   * two-digit groups such as seconds, and an optional zone suffix, either {@code Z}
+   * or a {@code +05:30} style offset, ending at a boundary. A {@code T} followed by
+   * prose letters, as in {@code 2026-07-14Tomorrow}, never qualifies.
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the candidate {@code T}.
+   * @return {@code true} if a time of day starts at {@code start}.
+   */
+  private boolean timeOfDayAt(CharSequence text, int start) {
+    if (NumberScan.charAt(text, start) != 'T'
+        || digits(text, start + 1, 2) < 0 || NumberScan.charAt(text, start + 3) != ':') {
+      return false;
+    }
+    int i = start + 4;
+    if (digits(text, i, 2) < 0) {
+      return false;
+    }
+    i += 2;
+    while (NumberScan.charAt(text, i) == ':' && digits(text, i + 1, 2) >= 0) {
+      i += 3;
+    }
+    final char zone = NumberScan.charAt(text, i);
+    if (zone == 'Z') {
+      i++;
+    } else if ((zone == '+' || zone == '-') && digits(text, i + 1, 2) >= 0
+        && NumberScan.charAt(text, i + 3) == ':' && digits(text, i + 4, 2) >= 0) {
+      i += 6;
+    }
+    return NumberScan.boundaryAfter(text, i);
   }
 
   /**
