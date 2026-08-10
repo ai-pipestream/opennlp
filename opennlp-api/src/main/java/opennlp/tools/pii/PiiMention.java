@@ -134,6 +134,16 @@ public record PiiMention(Span span, String type, String normalized) {
   public static final String TYPE_DE_STEUER_ID = "de-steuer-id";
 
   /**
+   * An International Mobile Equipment Identity identifying a mobile device.
+   */
+  public static final String TYPE_IMEI = "imei";
+
+  /**
+   * A Canadian Social Insurance Number.
+   */
+  public static final String TYPE_CA_SIN = "ca-sin";
+
+  /**
    * Validates the mention.
    *
    * @throws IllegalArgumentException Thrown if {@code span} is {@code null}, or
