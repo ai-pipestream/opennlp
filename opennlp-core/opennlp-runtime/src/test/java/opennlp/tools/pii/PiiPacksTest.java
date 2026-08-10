@@ -37,7 +37,8 @@ public class PiiPacksTest {
       + "host 10.1.2.3 peer 2001:db8::1 mac 00:1b:44:11:3a:b7 "
       + "key AKIAIOSFODNN7EXAMPLE url https://u:p@example.com/ "
       + "btc 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa eth 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed "
-      + "ssn 123-45-6789 itin 900-70-1234 nhs 943 476 5919 idnr 65929970489";
+      + "ssn 123-45-6789 itin 900-70-1234 nhs 943 476 5919 idnr 65929970489 "
+      + "SIN: 046 454 286 IMEI: 490154203237518";
 
   private static Stream<Arguments> packs() {
     return Stream.of(
@@ -48,6 +49,8 @@ public class PiiPacksTest {
         Arguments.of("crypto", (Supplier<PiiExtractor>) PiiPacks::crypto),
         Arguments.of("usIdentity", (Supplier<PiiExtractor>) PiiPacks::usIdentity),
         Arguments.of("euIdentity", (Supplier<PiiExtractor>) PiiPacks::euIdentity),
+        Arguments.of("caIdentity", (Supplier<PiiExtractor>) PiiPacks::caIdentity),
+        Arguments.of("device", (Supplier<PiiExtractor>) PiiPacks::device),
         Arguments.of("allStructured", (Supplier<PiiExtractor>) PiiPacks::allStructured));
   }
 
@@ -130,6 +133,17 @@ public class PiiPacksTest {
   }
 
   @Test
+  void testCaIdentityPackReportsCanadianTypesOnly() {
+    Assertions.assertEquals(Set.of(PiiMention.TYPE_CA_SIN),
+        typesOf(PiiPacks.caIdentity()));
+  }
+
+  @Test
+  void testDevicePackReportsDeviceTypesOnly() {
+    Assertions.assertEquals(Set.of(PiiMention.TYPE_IMEI), typesOf(PiiPacks.device()));
+  }
+
+  @Test
   void testAllStructuredPackReportsEveryType() {
     final Set<String> types = typesOf(PiiPacks.allStructured());
 
@@ -139,7 +153,8 @@ public class PiiPacksTest {
         PiiMention.TYPE_IPV6, PiiMention.TYPE_MAC, PiiMention.TYPE_AWS_ACCESS_KEY,
         PiiMention.TYPE_URL_CREDENTIAL, PiiMention.TYPE_BTC_ADDRESS,
         PiiMention.TYPE_ETH_ADDRESS, PiiMention.TYPE_US_SSN, PiiMention.TYPE_US_ITIN,
-        PiiMention.TYPE_UK_NHS, PiiMention.TYPE_DE_STEUER_ID), types);
+        PiiMention.TYPE_UK_NHS, PiiMention.TYPE_DE_STEUER_ID, PiiMention.TYPE_CA_SIN,
+        PiiMention.TYPE_IMEI), types);
   }
 
   /**
@@ -159,6 +174,8 @@ public class PiiPacksTest {
       "ssn 123-45-6789",
       "itin 900-70-1234",
       "idnr 65929970489",
+      "SIN: 046 454 286",
+      "IMEI: 490154203237518",
       "routing 021000021",
       "key AKIAIOSFODNN7EXAMPLE",
       "btc 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"})
@@ -213,6 +230,12 @@ public class PiiPacksTest {
         PiiPacks.allStructured().extract(text).get(0).type());
   }
 
+  /**
+   * Extracts the fixture and returns its mention types.
+   *
+   * @param extractor The extractor under test.
+   * @return The reported type set.
+   */
   private static Set<String> typesOf(PiiExtractor extractor) {
     return extractor.extract(EVERYTHING).stream().map(PiiMention::type)
         .collect(java.util.stream.Collectors.toUnmodifiableSet());

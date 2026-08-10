@@ -22,7 +22,7 @@ import java.util.Set;
 /**
  * Ready-made {@link PiiExtractor} combinations, one per kind of concern a caller usually
  * has: payment data, contact data, network addresses, credentials, wallet addresses, and
- * national identifiers.
+ * national and device identifiers.
  *
  * <p>A pack saves the caller from naming individual extractors and type sets, and it makes
  * the choice explicit in the code that reads the text: {@code PiiPacks.payment()} says what
@@ -30,11 +30,13 @@ import java.util.Set;
  *
  * <p>Every pack returns a new extractor, and every returned extractor is stateless and safe
  * to share between threads, so a caller may keep one in a static field. Combine packs with
- * {@link CompositePiiExtractor}; the pack that comes first wins an overlap tie.</p>
+ * {@link CompositePiiExtractor}; exact-span ties use {@link PiiTypePriority}, then pack
+ * order only if both types have the same priority.</p>
  *
  * <p>Nothing here changes what the default {@link CursorPiiExtractor} reports. The national
  * packs in particular are opt-in by construction: only {@link #usIdentity()},
- * {@link #euIdentity()}, and {@link #allStructured()} ever report a national identifier.</p>
+ * {@link #euIdentity()}, {@link #caIdentity()}, and {@link #allStructured()} ever report
+ * a national identifier.</p>
  *
  * @since 3.0.0
  */
@@ -113,6 +115,24 @@ public final class PiiPacks {
   }
 
   /**
+   * Canadian national identifiers: context-labeled Social Insurance Numbers.
+   *
+   * @return A new extractor. Never {@code null}.
+   */
+  public static PiiExtractor caIdentity() {
+    return new CaIdentityPiiExtractor();
+  }
+
+  /**
+   * Device identifiers: context-labeled International Mobile Equipment Identities.
+   *
+   * @return A new extractor. Never {@code null}.
+   */
+  public static PiiExtractor device() {
+    return new DevicePiiExtractor();
+  }
+
+  /**
    * Every structured type this package recognizes, that is every pack at once.
    *
    * <p>This is the widest recognition available and therefore the one with the most false
@@ -129,6 +149,8 @@ public final class PiiPacks {
         new NetworkPiiExtractor(),
         new UsIdentityPiiExtractor(),
         new EuIdentityPiiExtractor(),
+        new CaIdentityPiiExtractor(),
+        new DevicePiiExtractor(),
         new BankingPiiExtractor());
   }
 }

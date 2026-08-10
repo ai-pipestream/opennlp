@@ -34,8 +34,9 @@ import java.util.Map;
  *   {@link PiiMention#TYPE_GITHUB_TOKEN}, {@link PiiMention#TYPE_URL_CREDENTIAL}:
  *   prefix-anchored secrets.</li>
  *   <li>{@link PiiMention#TYPE_EMAIL}, {@link PiiMention#TYPE_IBAN},
- *   {@link PiiMention#TYPE_CARD}: the classic types, in the order the default extractor
- *   uses.</li>
+ *   {@link PiiMention#TYPE_IMEI}, {@link PiiMention#TYPE_CARD}: the classic types plus
+ *   context-labeled device identifiers. The IMEI rank precedes card because both use Luhn
+ *   and an IMEI can occupy an identical card-shaped span.</li>
  *   <li>{@link PiiMention#TYPE_BTC_ADDRESS}, {@link PiiMention#TYPE_ETH_ADDRESS}:
  *   checksummed wallet addresses.</li>
  *   <li>{@link PiiMention#TYPE_MAC}, {@link PiiMention#TYPE_IPV6},
@@ -43,6 +44,7 @@ import java.util.Map;
  *   first.</li>
  *   <li>{@link PiiMention#TYPE_US_SSN}, {@link PiiMention#TYPE_US_ITIN},
  *   {@link PiiMention#TYPE_UK_NHS}, {@link PiiMention#TYPE_DE_STEUER_ID},
+ *   {@link PiiMention#TYPE_CA_SIN},
  *   {@link PiiMention#TYPE_ABA_ROUTING}, {@link PiiMention#TYPE_PHONE}: digit runs.</li>
  * </ol>
  *
@@ -63,6 +65,7 @@ public final class PiiTypePriority {
       PiiMention.TYPE_URL_CREDENTIAL,
       PiiMention.TYPE_EMAIL,
       PiiMention.TYPE_IBAN,
+      PiiMention.TYPE_IMEI,
       PiiMention.TYPE_CARD,
       PiiMention.TYPE_BTC_ADDRESS,
       PiiMention.TYPE_ETH_ADDRESS,
@@ -73,6 +76,7 @@ public final class PiiTypePriority {
       PiiMention.TYPE_US_ITIN,
       PiiMention.TYPE_UK_NHS,
       PiiMention.TYPE_DE_STEUER_ID,
+      PiiMention.TYPE_CA_SIN,
       PiiMention.TYPE_ABA_ROUTING,
       PiiMention.TYPE_PHONE,
   };
@@ -86,6 +90,11 @@ public final class PiiTypePriority {
     // This class holds the lookup only and is never instantiated.
   }
 
+  /**
+   * Builds the immutable type-to-rank lookup.
+   *
+   * @return The rank lookup. Never {@code null}.
+   */
   private static Map<String, Integer> buildRanks() {
     final Map<String, Integer> ranks = HashMap.newHashMap(ORDER.length);
     for (int i = 0; i < ORDER.length; i++) {

@@ -22,6 +22,7 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 public class DevicePiiExtractorTest {
@@ -29,16 +30,16 @@ public class DevicePiiExtractorTest {
   private final DevicePiiExtractor extractor = new DevicePiiExtractor();
 
   @ParameterizedTest
-  @ValueSource(strings = {
-      "IMEI: 490154203237518",
-      "imei # 490154203237518",
-      "IMEI=35-693803-564380-9"})
-  void testAcceptsLabeledImei(String text) {
+  @CsvSource({
+      "'IMEI: 490154203237518', 490154203237518",
+      "'imei # 490154203237518', 490154203237518",
+      "'IMEI=35-693803-564380-9', 356938035643809"})
+  void testAcceptsLabeledImei(String text, String normalized) {
     final List<PiiMention> mentions = extractor.extract(text);
 
     Assertions.assertEquals(1, mentions.size(), text);
     Assertions.assertEquals(PiiMention.TYPE_IMEI, mentions.get(0).type());
-    Assertions.assertEquals("490154203237518", mentions.get(0).normalized());
+    Assertions.assertEquals(normalized, mentions.get(0).normalized());
   }
 
   @ParameterizedTest
