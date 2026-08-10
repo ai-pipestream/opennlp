@@ -42,7 +42,7 @@ import opennlp.tools.document.Document;
  * <p>The tokens come from an {@link HmacTokenizer}, so they agree with the tokens of a
  * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text and across
  * every report made under the same key. That is what lets a reviewer ask whether the value
- * behind {@code EMAIL-3f2a1c9d} in one report is the one in another, without either report
+ * behind {@code EMAIL-3f2a1c9d7e4b6a20} in one report is the one in another, without either report
  * holding it.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>

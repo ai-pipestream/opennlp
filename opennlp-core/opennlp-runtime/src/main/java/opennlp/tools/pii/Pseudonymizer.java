@@ -108,6 +108,14 @@ public final class Pseudonymizer {
     return rewrite(document.text(), mentions);
   }
 
+  /**
+   * Returns the stable per-text label for one normalized mention.
+   *
+   * @param mention The mention being replaced.
+   * @param labels Labels already assigned by type and normalized value.
+   * @param counters The next sequence number by type.
+   * @return The existing or newly assigned label.
+   */
   private String label(PiiMention mention, Map<String, String> labels,
       Map<String, Integer> counters) {
     final String key = mention.type() + '\u0000' + mention.normalized();

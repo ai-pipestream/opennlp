@@ -119,6 +119,13 @@ public final class PiiRewrite {
         originalStarts, originalEnds, rewrittenStarts, rewrittenEnds, text.length());
   }
 
+  /**
+   * Validates, copies, and orders mentions for a left-to-right rewrite.
+   *
+   * @param text The source text.
+   * @param mentions The mentions to validate and order.
+   * @return A mutable copy sorted by start offset.
+   */
   private static List<PiiMention> ordered(CharSequence text, List<PiiMention> mentions) {
     final List<PiiMention> ordered = new ArrayList<>(mentions.size());
     for (final PiiMention mention : mentions) {
@@ -206,9 +213,9 @@ public final class PiiRewrite {
    * Maps the spans of a layer's annotations onto the rewritten text, keeping each
    * annotation's value.
    *
-   * <p>An annotation whose span collapses to nothing, one that covered only part of a
-   * replaced value and nothing else, is left out: it no longer describes anything in the
-   * rewritten text.</p>
+   * <p>An annotation wholly inside a replaced value maps to the whole replacement label.
+   * An annotation that crosses a replacement boundary expands or contracts with that
+   * label. Only a genuinely empty mapped span is left out.</p>
    *
    * @param annotations The annotations of the original text. Must not be {@code null} or
    *                    contain {@code null}.
@@ -236,6 +243,14 @@ public final class PiiRewrite {
     return mapped;
   }
 
+  /**
+   * Maps one source offset, choosing a replacement edge when it falls inside a replaced
+   * span.
+   *
+   * @param offset The source offset.
+   * @param towardsStart Whether an interior offset maps to the label start rather than end.
+   * @return The rewritten offset.
+   */
   private int map(int offset, boolean towardsStart) {
     if (offset < 0 || offset > originalLength) {
       throw new IndexOutOfBoundsException("offset out of range: " + offset);

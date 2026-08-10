@@ -77,7 +77,8 @@ public final class HmacTokenizer {
   /**
    * Initializes a tokenizer with an explicit token length. Longer tokens make collisions
    * rarer at the cost of readability: each digit divides the collision probability by
-   * sixteen.
+   * sixteen. Lengths below the 16-digit default are supported for compatibility and compact
+   * displays, but materially increase collision risk in large data sets.
    *
    * @param key The secret key. Must not be {@code null} or empty. The bytes are copied.
    * @param length The number of hexadecimal digits to show. Must be between {@code 4} and
