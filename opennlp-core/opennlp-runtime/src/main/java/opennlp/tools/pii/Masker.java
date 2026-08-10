@@ -19,6 +19,7 @@ package opennlp.tools.pii;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Function;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
@@ -78,6 +79,52 @@ public final class Masker {
       throw new IllegalArgumentException("layer must not be null");
     }
     return mask(document, List.of(layer), policy);
+  }
+
+  /**
+   * Masks the spans of one layer, choosing the policy per annotation.
+   *
+   * <p>This is how a redaction becomes type aware: pass {@link MaskPolicies#byType()} to
+   * mask a {@link PiiAnnotator#PII} layer by the custom of each type, keeping the last four
+   * digits of a card while masking an access token whole.</p>
+   *
+   * @param document The document to redact. Must not be {@code null}.
+   * @param layer The layer whose spans are masked. Must not be {@code null} and must be
+   *              present on the document.
+   * @param policies Chooses the policy from an annotation's value. Must not be
+   *                 {@code null} and must not return {@code null}.
+   * @param <T> The annotation value type of the layer.
+   * @return The document text with every annotated span masked. Never {@code null};
+   *         always the same length as the document text.
+   * @throws IllegalArgumentException Thrown if {@code document}, {@code layer}, or
+   *         {@code policies} is {@code null}, the layer is not present on the document, or
+   *         {@code policies} returns {@code null} for an annotation.
+   */
+  public static <T> String mask(Document document, LayerKey<T> layer,
+      Function<? super T, MaskPolicy> policies) {
+    if (document == null) {
+      throw new IllegalArgumentException("document must not be null");
+    }
+    if (layer == null) {
+      throw new IllegalArgumentException("layer must not be null");
+    }
+    if (policies == null) {
+      throw new IllegalArgumentException("policies must not be null");
+    }
+    if (!document.layers().contains(layer)) {
+      throw new IllegalArgumentException("layer is not present on the document: " + layer);
+    }
+    final StringBuilder masked = new StringBuilder(document.text().toString());
+    for (final Annotation<T> annotation : document.get(layer)) {
+      final MaskPolicy policy = policies.apply(annotation.value());
+      if (policy == null) {
+        throw new IllegalArgumentException("policies must not return null");
+      }
+      final int start = annotation.span().getStart();
+      final int end = annotation.span().getEnd();
+      masked.replace(start, end, policy.apply(masked.substring(start, end)));
+    }
+    return masked.toString();
   }
 
   /**
