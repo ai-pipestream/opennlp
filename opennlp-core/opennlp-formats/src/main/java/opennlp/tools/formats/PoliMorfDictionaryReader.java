@@ -26,6 +26,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
@@ -45,7 +46,10 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
  * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
- * unreachable. Tags are kept verbatim and must match the tags the caller's tagger emits.</p>
+ * unreachable. The fold uses {@link Locale#ROOT} so that the keys come out the same on every
+ * JVM; the default locale of, for example, a Turkish JVM would fold {@code 'I'} to the dotless
+ * {@code 'ı'} and store keys no lookup can reach. Tags are kept verbatim and must match the
+ * tags the caller's tagger emits.</p>
  *
  * <p>This class is stateless, so its methods may be called concurrently.</p>
  */
@@ -79,6 +83,8 @@ public final class PoliMorfDictionaryReader {
 
   /**
    * Reads a {@code surfaceForm\tlemma\ttag} dictionary into a {@link DictionaryLemmatizer}.
+   * Surface forms are folded to lower case with {@link Locale#ROOT}, matching the
+   * locale-independent fold {@link DictionaryLemmatizer} applies to the queried token.
    *
    * @param dictionary The dictionary referenced by an open {@link InputStream}. Must not be
    *                   {@code null}.
@@ -114,7 +120,7 @@ public final class PoliMorfDictionaryReader {
           throw new IOException("PoliMorf line " + lineNumber
               + " has fewer than " + MIN_FIELDS + " tab-separated fields: " + line);
         }
-        final String form = fields[0].toLowerCase();
+        final String form = fields[0].toLowerCase(Locale.ROOT);
         final String lemma = fields[1];
         final String tag = fields[2];
         entries.computeIfAbsent(form + FIELD_SEPARATOR + tag, key -> new LinkedHashSet<>())

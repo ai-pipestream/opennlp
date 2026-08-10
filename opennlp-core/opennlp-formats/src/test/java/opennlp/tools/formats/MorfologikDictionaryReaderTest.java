@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Locale;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,9 @@ public class MorfologikDictionaryReaderTest {
           + "ZwZzBisGQgYrBk4GTgZTAwBhBnQGKxgCc2IBQfoA";
 
   private static final byte SEPARATOR = (byte) '+';
+
+  /** Turkish folds {@code 'I'} to the dotless {@code 'ı'} (U+0131) instead of {@code 'i'}. */
+  private static final Locale TURKISH = Locale.of("tr", "TR");
 
   private static byte[] iso(String s) {
     return s.getBytes(StandardCharsets.ISO_8859_1);
@@ -126,6 +130,65 @@ public class MorfologikDictionaryReaderTest {
         lemmatizer.lemmatize(new String[] {"cat"}, new String[] {"NN"}));
     Assertions.assertArrayEquals(new String[] {"O"},
         lemmatizer.lemmatize(new String[] {"mice"}, new String[] {"NNS"}));
+  }
+
+  /**
+   * Builds a minimal FSA5 automaton accepting exactly {@code sequence}, as a linear chain of
+   * single-arc nodes. After the eight byte header come the dummy node and the epsilon node the
+   * format requires, then one two-byte arc per sequence byte: its label, and a flags byte
+   * combining FINAL (0x01), LAST (0x02), and TARGET_NEXT (0x04). Chain arcs carry LAST plus
+   * TARGET_NEXT; the final arc carries LAST plus FINAL with a goto address of zero, the
+   * terminal node.
+   *
+   * @param sequence The single sequence to accept, taken as ISO-8859-1 bytes.
+   * @return The automaton, referenced by an open {@link InputStream}.
+   */
+  private static InputStream fsa5WithSingleSequence(String sequence) {
+    final byte[] labels = iso(sequence);
+    final byte[] out = new byte[8 + 4 + labels.length * 2];
+    // Magic "\fsa", version 5, filler, annotation, then node data width 0 and goto width 1
+    // packed into one byte.
+    out[0] = '\\';
+    out[1] = 'f';
+    out[2] = 's';
+    out[3] = 'a';
+    out[4] = 0x05;
+    out[5] = '_';
+    out[6] = '+';
+    out[7] = 0x01;
+    // Dummy node: one non-final last arc pointing at the terminal node.
+    out[8] = 0;
+    out[9] = 0x02;
+    // Epsilon node: one last arc leading to the root node laid out right after it.
+    out[10] = 0;
+    out[11] = 0x06;
+    for (int i = 0; i < labels.length; i++) {
+      out[12 + i * 2] = labels[i];
+      out[13 + i * 2] = (byte) (i == labels.length - 1 ? 0x03 : 0x06);
+    }
+    return new ByteArrayInputStream(out);
+  }
+
+  /**
+   * Surface forms have to fold the same way on every JVM. Under a Turkish default locale,
+   * {@link String#toLowerCase()} folds {@code 'I'} to the dotless {@code 'ı'}, storing a key
+   * that a lookup for {@code "istanbul"} can never reach, and the lemma silently degrades to
+   * the {@code "O"} sentinel.
+   */
+  @Test
+  void testFoldsFormsIndependentlyOfDefaultLocale() throws IOException {
+    final Locale defaultLocale = Locale.getDefault();
+    Locale.setDefault(TURKISH);
+    try {
+      final DictionaryLemmatizer lemmatizer = MorfologikDictionaryReader.read(
+          fsa5WithSingleSequence("Istanbul+A+NNP"),
+          SEPARATOR, BaseFormEncoding.SUFFIX, StandardCharsets.ISO_8859_1);
+
+      Assertions.assertArrayEquals(new String[] {"Istanbul"},
+          lemmatizer.lemmatize(new String[] {"istanbul"}, new String[] {"NNP"}));
+    } finally {
+      Locale.setDefault(defaultLocale);
+    }
   }
 
   /** The same dictionary in the older FSA5 format is read identically. */

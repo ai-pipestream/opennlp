@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,27 @@ public class PoliMorfDictionaryReaderUsageExampleTest {
   void testLookupIsCaseInsensitive() throws IOException {
     Assertions.assertArrayEquals(new String[] {"pies"},
         fixture().lemmatize(new String[] {"Psa"}, new String[] {"subst:sg:gen:m2"}));
+  }
+
+  /**
+   * The load-time fold must not depend on the JVM's default locale. Under a Turkish default
+   * locale, {@link String#toLowerCase()} folds {@code 'I'} to the dotless {@code 'ı'}, storing
+   * a key that a lookup for {@code "islandia"} can never reach, and the lemma silently degrades
+   * to the {@code "O"} sentinel.
+   */
+  @Test
+  void testLookupIsIndependentOfDefaultLocale() throws IOException {
+    final Locale defaultLocale = Locale.getDefault();
+    Locale.setDefault(Locale.of("tr", "TR"));
+    try {
+      final DictionaryLemmatizer lemmatizer = PoliMorfDictionaryReader.read(
+          dictionary("Islandia\tIslandia\tsubst:sg:nom:f\n"));
+
+      Assertions.assertArrayEquals(new String[] {"Islandia"},
+          lemmatizer.lemmatize(new String[] {"islandia"}, new String[] {"subst:sg:nom:f"}));
+    } finally {
+      Locale.setDefault(defaultLocale);
+    }
   }
 
   /** Every lemma listed for a form and tag is kept, in first-seen order. */
