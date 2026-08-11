@@ -155,7 +155,7 @@ public final class NumericPacks {
    * @return A new analyzer providing all four numeric layers. Never {@code null}.
    */
   public static DocumentAnalyzer fullPipeline() {
-    return analyzer(annotators(null));
+    return analyzer(annotators());
   }
 
   /**
@@ -168,9 +168,6 @@ public final class NumericPacks {
    *         currency.
    */
   public static DocumentAnalyzer fullPipeline(Locale region) {
-    if (region == null) {
-      throw new IllegalArgumentException("region must not be null");
-    }
     return analyzer(annotators(region));
   }
 
@@ -180,18 +177,39 @@ public final class NumericPacks {
    * list yields a pipeline that also restates every amount in one currency as of the
    * document date.
    *
-   * @param region The region whose conventions numbers are read in, or {@code null} for
-   *               the defaults. Must name a region with a currency when given.
    * @return The annotators in execution order. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code region} names no region with a
+   */
+  public static List<DocumentAnnotator> annotators() {
+    return pipeline(new CursorMoneyExtractor(), new CursorQuantityExtractor());
+  }
+
+  /**
+   * The annotators of {@link #fullPipeline(Locale)} in execution order, for callers that
+   * add further annotators of their own.
+   *
+   * @param region A locale with a country component. Must not be {@code null} and must
+   *               name a region with a currency.
+   * @return The annotators in execution order. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code region} is {@code null} or has no
    *         currency.
    */
   public static List<DocumentAnnotator> annotators(Locale region) {
-    final CursorMoneyExtractor money = region == null
-        ? new CursorMoneyExtractor() : CursorMoneyExtractor.forRegion(region);
-    final CursorQuantityExtractor quantity = region == null
-        ? new CursorQuantityExtractor()
-        : new CursorQuantityExtractor(NumberNotation.forLocale(region));
+    if (region == null) {
+      throw new IllegalArgumentException("region must not be null");
+    }
+    return pipeline(CursorMoneyExtractor.forRegion(region),
+        new CursorQuantityExtractor(NumberNotation.forLocale(region)));
+  }
+
+  /**
+   * Assembles the full pipeline around the extractors the caller's region decided on.
+   *
+   * @param money The money extractor to use. Must not be {@code null}.
+   * @param quantity The quantity extractor to use. Must not be {@code null}.
+   * @return The annotators in execution order. Never {@code null}.
+   */
+  private static List<DocumentAnnotator> pipeline(CursorMoneyExtractor money,
+      CursorQuantityExtractor quantity) {
     return List.of(
         new TemporalAnnotator(new CursorTemporalExtractor()),
         new DocumentDateAnnotator(),

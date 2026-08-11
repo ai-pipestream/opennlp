@@ -175,7 +175,7 @@ public class NumericPacksTest {
    */
   @Test
   void testAnnotatorListIsTheFullPipelineInOrder() {
-    final List<DocumentAnnotator> annotators = NumericPacks.annotators(null);
+    final List<DocumentAnnotator> annotators = NumericPacks.annotators();
 
     Assertions.assertEquals(4, annotators.size());
     Assertions.assertEquals(Set.of(TemporalAnnotator.TEMPORALS), annotators.get(0).provides());
@@ -198,6 +198,10 @@ public class NumericPacksTest {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> NumericPacks.fullPipeline(null));
     Assertions.assertThrows(IllegalArgumentException.class,
+        () -> NumericPacks.annotators(null));
+    Assertions.assertThrows(IllegalArgumentException.class,
         () -> NumericPacks.money(Locale.of("en")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> NumericPacks.annotators(Locale.of("en")));
   }
 }

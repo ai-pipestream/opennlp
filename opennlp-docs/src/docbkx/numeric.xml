@@ -72,9 +72,10 @@ Document document = DocumentAnalyzer.builder()
 			a document the way its region writes and denominates numbers. The packs exist
 			mainly for one ordering rule that is easy to get wrong: the temporal annotator
 			elects the dateline that resolves relative expressions, so it must run before
-			<code>DocumentDateAnnotator</code>. Use <code>NumericPacks.annotators(region)</code>
-			when the pipeline needs more, a <code>MoneyConversionAnnotator</code> for
-			instance, and add to the returned list.
+			<code>DocumentDateAnnotator</code>. Use <code>NumericPacks.annotators()</code>,
+			or its <code>Locale</code> overload, when the pipeline needs more, a
+			<code>MoneyConversionAnnotator</code> for instance, and add to the returned
+			list.
 		</para>
 	</section>
 
