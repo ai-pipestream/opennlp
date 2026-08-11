@@ -38,7 +38,9 @@ import opennlp.tools.util.Span;
  *
  * <p>Recognized forms: a currency symbol before or after the number ({@code $1,234.56},
  * {@code 50\u20AC}), an ISO 4217 code before or after the number ({@code USD 100},
- * {@code 100 USD}), an optional leading minus ({@code -$5}), and scale markers, either
+ * {@code 100 USD}), a spelled-out currency word after the number
+ * ({@code 1.2 million dollars}), an optional leading minus ({@code -$5}), and scale
+ * markers, either
  * an immediate suffix ({@code $1.2M}, {@code \u00A32.5k}, {@code $3bn}) or a following word
  * ({@code $3 billion}). Digit grouping is validated: once a group separator appears, every
  * further group must have exactly three digits. An amount grouped in a convention the
@@ -59,6 +61,15 @@ import opennlp.tools.util.Span;
  * working in another convention supply their own mapping through
  * {@link #CursorMoneyExtractor(Map)}. ISO codes are taken from
  * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
+ *
+ * <p>Spelled-out currency words are matched against a deliberately short table of English
+ * words that name exactly one currency in ordinary use, singular and plural, so
+ * {@code 50 euros} and {@code 3 billion pounds} are money while {@code 5 apples} and
+ * {@code 10 cents} are not. Words that name several currencies at once, {@code peso},
+ * {@code franc}, and {@code krone} among them, are left out rather than guessed, as is
+ * {@code won}, which is an everyday English verb. The one knowingly ambiguous entry is
+ * {@code pound}, which also names a weight: {@code 3 pounds of flour} is read as money,
+ * the price of covering the far more common financial usage.</p>
  *
  * <p>Not recognized: accounting negatives in parentheses and multi-character symbols such
  * as {@code kr} or {@code HK$}. A known symbol directly preceded by an ASCII letter is
@@ -83,6 +94,35 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       Map.entry(0x20AA, "ILS"),   // sheqel sign
       Map.entry(0x0E3F, "THB"),   // baht sign
       Map.entry(0x20AB, "VND"));  // dong sign
+
+  /**
+   * The English words that name one currency each, mapped to its ISO 4217 code. Only
+   * words that denote a single currency in ordinary use are listed; see the class
+   * documentation for what is deliberately absent.
+   */
+  private static final Map<String, String> CURRENCY_WORDS = Map.ofEntries(
+      Map.entry("dollar", "USD"),
+      Map.entry("dollars", "USD"),
+      Map.entry("euro", "EUR"),
+      Map.entry("euros", "EUR"),
+      Map.entry("pound", "GBP"),
+      Map.entry("pounds", "GBP"),
+      Map.entry("sterling", "GBP"),
+      Map.entry("yen", "JPY"),
+      Map.entry("rupee", "INR"),
+      Map.entry("rupees", "INR"),
+      Map.entry("yuan", "CNY"),
+      Map.entry("renminbi", "CNY"),
+      Map.entry("ruble", "RUB"),
+      Map.entry("rubles", "RUB"),
+      Map.entry("rouble", "RUB"),
+      Map.entry("roubles", "RUB"),
+      Map.entry("shekel", "ILS"),
+      Map.entry("shekels", "ILS"),
+      Map.entry("baht", "THB"));
+
+  /** The length of the longest currency word, {@code sterling} and {@code renminbi}. */
+  private static final int MAX_CURRENCY_WORD_LENGTH = 8;
 
   private static final Set<String> ISO_CODES = isoCodes();
 
@@ -317,7 +357,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   }
 
   /**
-   * Matches {@code 100 USD}, {@code 50\u20AC} (euro sign), and {@code 3.5m USD}.
+   * Matches {@code 100 USD}, {@code 50\u20AC} (euro sign), {@code 3.5m USD}, and
+   * {@code 1.2 million dollars}.
    *
    * @param text The text being scanned.
    * @param start The offset the mention starts at, the minus sign included.
@@ -344,8 +385,45 @@ public class CursorMoneyExtractor implements MoneyExtractor {
         return mention(text, start,
             new NumberScan.Result(number.value(), number.end() + 4), code, negative);
       }
+      final CurrencyWord word = currencyWordAt(text, number.end() + 1);
+      if (word != null) {
+        return mention(text, start,
+            new NumberScan.Result(number.value(), word.end()), word.currency(), negative);
+      }
     }
     return null;
+  }
+
+  /**
+   * Reads a spelled-out currency word at a position, as in the {@code dollars} of
+   * {@code 1.2 million dollars}. The scale word, if any, was consumed with the number,
+   * so the currency word is the token directly behind it.
+   *
+   * <p>A hyphen directly behind the word makes it the first element of a compound such as
+   * {@code euro-cent} or {@code dollar-denominated}, which names no amount, so the
+   * candidate is rejected there as it is when the word runs into further letters or
+   * digits.</p>
+   *
+   * @param text The text being scanned.
+   * @param start The offset of the first letter of the candidate word.
+   * @return The word, or {@code null} when the letters at {@code start} name no currency
+   *         or are part of a longer token.
+   */
+  private CurrencyWord currencyWordAt(CharSequence text, int start) {
+    int i = start;
+    final StringBuilder word = new StringBuilder();
+    while (Character.isLetter(NumberScan.charAt(text, i))
+        && word.length() <= MAX_CURRENCY_WORD_LENGTH) {
+      word.append(Character.toLowerCase(text.charAt(i)));
+      i++;
+    }
+    final char after = NumberScan.charAt(text, i);
+    if (word.isEmpty() || word.length() > MAX_CURRENCY_WORD_LENGTH
+        || Character.isLetterOrDigit(after) || after == '-') {
+      return null;
+    }
+    final String currency = CURRENCY_WORDS.get(word.toString());
+    return currency == null ? null : new CurrencyWord(currency, i);
   }
 
   /**
@@ -432,6 +510,13 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     }
     final int cp = Character.codePointBefore(text, index);
     return isUpperAscii(cp) || (cp >= 'a' && cp <= 'z');
+  }
+
+  /**
+   * An intermediate parse result: the currency a spelled-out word names and the exclusive
+   * end offset behind it.
+   */
+  private record CurrencyWord(String currency, int end) {
   }
 
   /**
