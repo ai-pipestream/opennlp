@@ -19,6 +19,7 @@ package opennlp.tools.assets;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.stream.Stream;
@@ -31,6 +32,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -462,6 +464,13 @@ public class CursorAssetDetectorTest {
     assertEquals(List.of(), detector.detect(
         "Plain prose with ordinary words does not contain payloads, "
             + "not even AlphanumericRunsLikeThisOne0123456789 of some length."));
+  }
+
+  /** A one-character base64 run cannot leave the scanner on the same cursor. */
+  @Test
+  void testSingleCharacterRunMakesProgress() {
+    assertTimeoutPreemptively(Duration.ofSeconds(1),
+        () -> assertEquals(List.of(), detector.detect("x")));
   }
 
   /** A truncated payload is trimmed to a decodable length instead of failing later. */
