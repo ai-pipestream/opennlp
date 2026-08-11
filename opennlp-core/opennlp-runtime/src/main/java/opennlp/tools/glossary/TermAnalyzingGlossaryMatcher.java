@@ -48,8 +48,8 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * between consecutive tokens do not take part in matching: {@code hot-dogs},
  * {@code hot, dogs}, and even the sentence-crossing {@code hot. Dogs} all present
  * the token sequence {@code hot dog} to the automaton, and the reported span
- * covers the separators between the first and last matched token. Hyphenated
- * compounds matching is the intent; a hit that crosses a sentence boundary is the
+ * covers the separators between the first and last matched token. Matching
+ * hyphenated compounds is intentional; a hit that crosses a sentence boundary is the
  * documented cost, so run sentence-sized inputs when that matters. A text token
  * whose normalized form is blank vanishes for matching, exactly like characters a
  * normalizer deletes on the character path: its neighbors become adjacent, and a
@@ -68,17 +68,31 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * lists; the matcher itself holds no per-call state and is safe to share across
  * threads when the analyzer is.</p>
  *
+ * @see <a href="https://doi.org/10.1145/360825.360855">Aho, Corasick (1975): Efficient
+ *      string matching: An aid to bibliographic search</a>
  * @since 3.0.0
  */
 public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
 
+  /** The index of the automaton's root state, from which every scan starts. */
   private static final int ROOT = 0;
 
+  /** The registered entries in registration order; raw hits index into this list. */
   private final List<GlossaryEntry> entries;
+
+  /** The analyzer that tokenizes and normalizes both glossary terms and input text. */
   private final TermAnalyzer analyzer;
+
+  /** The normalized token count of each entry, aligned with {@link #entries} by index. */
   private final int[] patternLengths;
+
+  /** The goto function: each state maps a normalized token to its target state. */
   private final List<Map<String, Integer>> transitions;
+
+  /** The failure function: per state, the state to fall back to on a token miss. */
   private final int[] fail;
+
+  /** Per state, the indexes into {@link #entries} of the patterns ending there. */
   private final int[][] outputs;
 
   /**
