@@ -26,6 +26,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.util.Span;
+import opennlp.tools.util.normalizer.DashCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.FullCaseFoldCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.GermanUmlautCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.InvisibleCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
+import opennlp.tools.util.normalizer.TextNormalizer;
+import opennlp.tools.util.normalizer.WhitespaceCharSequenceNormalizer;
 
 public class AhoCorasickGlossaryMatcherTest {
 
@@ -355,6 +362,318 @@ public class AhoCorasickGlossaryMatcherTest {
     // U+00DF, the sharp s: its full folding is the two-letter ss, which the
     // per-code-point mapping deliberately does not apply
     Assertions.assertTrue(sharp.match("stra\u00DFe").isEmpty());
+  }
+
+  /**
+   * An {@link OffsetAwareNormalizer} folds length-changing forms before the automaton
+   * runs, and the hit span maps back to the original characters that produced the fold.
+   */
+  @Test
+  void testOffsetAwareNormalizerMatchesEszettAndKeepsOriginalSpan() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String text = "die stra\u00DFe hier";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("ST", matches.get(0).id());
+    Assertions.assertEquals(new Span(4, 10), matches.get(0).span());
+    Assertions.assertEquals("stra\u00DFe",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * German umlaut expansion matches both directions of the DIN fold: an ASCII registration
+   * hits both the ASCII and umlaut surfaces, and spans cover the original characters.
+   */
+  @Test
+  void testGermanUmlautNormalizerMatchesUmlautAndAsciiSpellings() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("MUE", "mueller"),
+            new GlossaryEntry("KOE", "koeln")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String text = "mueller and m\u00FCller visit k\u00F6ln";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(3, matches.size());
+    Assertions.assertEquals("MUE", matches.get(0).id());
+    Assertions.assertEquals(new Span(0, 7), matches.get(0).span());
+    Assertions.assertEquals("MUE", matches.get(1).id());
+    Assertions.assertEquals("m\u00FCller",
+        text.substring(matches.get(1).span().getStart(), matches.get(1).span().getEnd()));
+    Assertions.assertEquals("KOE", matches.get(2).id());
+    Assertions.assertEquals("k\u00F6ln",
+        text.substring(matches.get(2).span().getStart(), matches.get(2).span().getEnd()));
+  }
+
+  /**
+   * A term registered with the eszett spelling still matches ASCII {@code ss} text once
+   * both sides pass through the same expanding fold.
+   */
+  @Test
+  void testTermRegisteredWithEszettMatchesAsciiSsText() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "stra\u00DFe")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final List<GlossaryMatch> matches = matcher.match("see strasse tonight");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(4, 11), matches.get(0).span());
+    Assertions.assertEquals("stra\u00DFe", matches.get(0).term());
+  }
+
+  /**
+   * Full Unicode case folding is supplied through the normalizer hook, so {@code ignoreCase}
+   * stays off and the expanding sharp-s fold still matches while the span covers the
+   * original eszett spelling.
+   */
+  @Test
+  void testFullCaseFoldNormalizerMatchesCapitalizedEszettForm() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), false,
+        FullCaseFoldCharSequenceNormalizer.getInstance());
+
+    final String text = "Stra\u00DFe ahead";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(0, 6), matches.get(0).span());
+    Assertions.assertEquals("Stra\u00DFe",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * The capital sharp s (U+1E9E) expands to {@code SS} under the German fold. With
+   * {@code ignoreCase}, that still matches a lowercase registration, and hits at the
+   * very start or end of the text report a tight original span.
+   */
+  @Test
+  void testCapitalEszettAtTextEdgesMapsTightOriginalSpans() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), true,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String start = "STRA\u1E9EE";
+    final List<GlossaryMatch> atStart = matcher.match(start);
+    Assertions.assertEquals(1, atStart.size());
+    Assertions.assertEquals(new Span(0, start.length()), atStart.get(0).span());
+
+    final String end = "x STRA\u1E9EE";
+    final List<GlossaryMatch> atEnd = matcher.match(end);
+    Assertions.assertEquals(1, atEnd.size());
+    Assertions.assertEquals(new Span(2, end.length()), atEnd.get(0).span());
+  }
+
+  /**
+   * {@code ignoreCase} still applies after the offset-aware fold, so a lowercase term
+   * matches a mixed-case umlaut surface without requiring full case folding.
+   */
+  @Test
+  void testIgnoreCaseAppliesAfterOffsetAwareFold() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), true,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String text = "Die Stra\u00DFe ist frei.";
+    final List<GlossaryMatch> matches = matcher.match(text);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("Stra\u00DFe",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * Whitespace collapse, dash folding, and invisible stripping compose through
+   * {@link TextNormalizer.Builder#buildAligned()}, and every hit span is expressed in
+   * original-text coordinates across those edits.
+   */
+  @Test
+  void testAlignedPipelineNormalizerMapsHitsAcrossCollapseAndDashFold() {
+    final OffsetAwareNormalizer pipeline = TextNormalizer.builder()
+        .stripInvisible().whitespace().dashes().buildAligned();
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("NY", "New York"),
+            new GlossaryEntry("AB", "a-b")), false, pipeline);
+
+    final String zwsp = "\u200B";
+    final String text = "New" + zwsp + "  York and a\u2014b done";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(2, matches.size());
+    Assertions.assertEquals("NY", matches.get(0).id());
+    Assertions.assertEquals("New" + zwsp + "  York",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+    Assertions.assertEquals("AB", matches.get(1).id());
+    Assertions.assertEquals("a\u2014b",
+        text.substring(matches.get(1).span().getStart(), matches.get(1).span().getEnd()));
+  }
+
+  /**
+   * Leading and trailing whitespace collapsed by the normalizer must not be pulled into
+   * the hit span; only the original characters that produced the match are covered.
+   */
+  @Test
+  void testWhitespaceCollapseDoesNotExpandSpanIntoNeighborSpaces() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("NY", "New York")), false,
+        WhitespaceCharSequenceNormalizer.getInstance());
+
+    final String text = "  New   York  ";
+    final List<GlossaryMatch> matches = matcher.match(text);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 12), matches.get(0).span());
+    Assertions.assertEquals("New   York",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * After folding, a longer term still wins over a shorter overlapping one, and the
+   * reported span covers the original (pre-fold) characters of the longer hit.
+   */
+  @Test
+  void testLongestMatchWinsAfterLengthChangingFold() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("SHORT", "strasse"),
+            new GlossaryEntry("LONG", "strassebahn")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String text = "stra\u00DFebahn kommt";
+    final List<GlossaryMatch> matches = matcher.match(text);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("LONG", matches.get(0).id());
+    Assertions.assertEquals("stra\u00DFebahn",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * Two registrations that become the same pattern after folding keep first-wins
+   * registration order; a later distinct folded term still matches beside it.
+   */
+  @Test
+  void testDuplicateFoldedTermsKeepRegistrationOrder() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("FIRST", "strasse"),
+            new GlossaryEntry("SECOND", "stra\u00DFe"),
+            new GlossaryEntry("CITY", "koeln")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final List<GlossaryMatch> matches = matcher.match("strasse in k\u00F6ln");
+    Assertions.assertEquals(2, matches.size());
+    Assertions.assertEquals("FIRST", matches.get(0).id());
+    Assertions.assertEquals("CITY", matches.get(1).id());
+  }
+
+  /**
+   * The three-argument constructor rejects a null normalizer; the two-argument form
+   * remains the identity path.
+   */
+  @Test
+  void testThreeArgumentConstructorRejectsNullNormalizer() {
+    final List<GlossaryEntry> glossary = List.of(new GlossaryEntry("ML", "machine learning"));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(glossary, true, null));
+    Assertions.assertFalse(
+        new AhoCorasickGlossaryMatcher(glossary, true).match("Machine Learning").isEmpty());
+  }
+
+  /**
+   * Word-boundary filtering still uses the original text after a length-changing fold,
+   * so a match whose original edges sit inside a letter or digit run is dropped.
+   */
+  @Test
+  void testNormalizerHitStillRespectsOriginalWordBoundaries() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    Assertions.assertTrue(matcher.match("superstra\u00DFe").isEmpty());
+    Assertions.assertTrue(matcher.match("stra\u00DFe9").isEmpty());
+    Assertions.assertTrue(matcher.match("9stra\u00DFe").isEmpty());
+    Assertions.assertEquals(1, matcher.match("stra\u00DFe").size());
+    Assertions.assertEquals(1, matcher.match("(stra\u00DFe)").size());
+  }
+
+  /**
+   * A glossary term that normalizes to blank is rejected at construction so the
+   * automaton never holds an empty pattern. Invisible-only terms (accepted by
+   * {@link GlossaryEntry} because zero-width space is not toolkit whitespace) are the
+   * concrete case.
+   */
+  @Test
+  void testRejectsTermThatNormalizesToBlank() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(
+            List.of(new GlossaryEntry("Z", "\u200B")), false,
+            InvisibleCharSequenceNormalizer.getInstance()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(
+            List.of(new GlossaryEntry("Z2", "\u200B\u200B\u200B")), false,
+            InvisibleCharSequenceNormalizer.getInstance()));
+  }
+
+  /**
+   * Three-argument construction still validates the glossary the same way as the
+   * two-argument form, and {@code match(null)} still fails loud.
+   */
+  @Test
+  void testThreeArgumentConstructorValidatesGlossaryAndText() {
+    final OffsetAwareNormalizer fold = GermanUmlautCharSequenceNormalizer.getInstance();
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(null, false, fold));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(List.of(), false, fold));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new AhoCorasickGlossaryMatcher(Collections.singletonList(null), false, fold));
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")), false, fold);
+    Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.match(null));
+  }
+
+  /**
+   * Single-purpose offset-aware rungs remain usable without a builder pipeline, including
+   * en-dash and em-dash folds and a miss when the dash shape is absent from the text.
+   */
+  @Test
+  void testDashAndWhitespaceNormalizersAlone() {
+    final AhoCorasickGlossaryMatcher dashes = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("AB", "a-b")), false,
+        DashCharSequenceNormalizer.getInstance());
+    Assertions.assertEquals(1, dashes.match("see a\u2013b now").size());
+    Assertions.assertEquals(1, dashes.match("see a\u2014b now").size());
+    Assertions.assertEquals(1, dashes.match("see a-b now").size());
+    Assertions.assertTrue(dashes.match("see a b now").isEmpty());
+
+    final AhoCorasickGlossaryMatcher spaces = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("NY", "New York")), false,
+        WhitespaceCharSequenceNormalizer.getInstance());
+    final String text = "visit New   York today";
+    final List<GlossaryMatch> matches = spaces.match(text);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("New   York",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+    Assertions.assertTrue(spaces.match("visit NewYork today").isEmpty());
+  }
+
+  /**
+   * Two non-overlapping folded hits in one scan keep text order, and an empty scan with
+   * a normalizer present returns an empty list rather than failing.
+   */
+  @Test
+  void testMultipleFoldedHitsPreserveOrderAndEmptyTextIsEmpty() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse"),
+            new GlossaryEntry("MUE", "mueller")), false,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    Assertions.assertTrue(matcher.match("").isEmpty());
+    final String text = "stra\u00DFe dann m\u00FCller";
+    final List<GlossaryMatch> matches = matcher.match(text);
+    Assertions.assertEquals(2, matches.size());
+    Assertions.assertEquals("ST", matches.get(0).id());
+    Assertions.assertEquals("MUE", matches.get(1).id());
+    Assertions.assertTrue(matches.get(0).span().getEnd() <= matches.get(1).span().getStart());
   }
 
   /**

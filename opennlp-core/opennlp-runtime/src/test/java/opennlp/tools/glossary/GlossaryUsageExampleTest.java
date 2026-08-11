@@ -27,7 +27,11 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.Layers;
 import opennlp.tools.document.TokenizerAnnotator;
+import opennlp.tools.stemmer.snowball.SnowballStemmer;
+import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
 import opennlp.tools.tokenize.WhitespaceTokenizer;
+import opennlp.tools.util.normalizer.GermanUmlautCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.TermAnalyzer;
 
 /**
  * Demonstrates the intended end-to-end use of the glossary components: a glossary of
@@ -79,6 +83,51 @@ public class GlossaryUsageExampleTest {
     assertHit(hits.get(1), 23, 44, "ALG-42", "maximum entropy model",
         "Maximum Entropy model", text);
     assertHit(hits.get(2), 51, 67, "ALG-7", "perceptron model", "perceptron model", text);
+  }
+
+  /**
+   * Mirrors the offset-aware normalizer example in {@code glossary.xml}: a German
+   * umlaut fold lets a registered ASCII term cover the original eszett surface.
+   */
+  @Test
+  void testOffsetAwareNormalizerManualExample() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("ST", "strasse")),
+        true,
+        GermanUmlautCharSequenceNormalizer.getInstance());
+
+    final String text = "Die Stra\u00DFe ist frei.";
+    final List<GlossaryMatch> hits = matcher.match(text);
+
+    Assertions.assertEquals(1, hits.size());
+    Assertions.assertEquals("ST", hits.get(0).id());
+    Assertions.assertEquals("strasse", hits.get(0).term());
+    Assertions.assertEquals("Stra\u00DFe",
+        text.substring(hits.get(0).span().getStart(), hits.get(0).span().getEnd()));
+  }
+
+  /**
+   * Mirrors the inflection example in {@code glossary.xml}: {@code hot dog} matches
+   * {@code hot dogs} through {@link TermAnalyzingGlossaryMatcher}, and the span covers
+   * the plural surface in original coordinates.
+   */
+  @Test
+  void testInflectedMultiwordManualExample() {
+    final TermAnalyzer terms = TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+    final TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
+        List.of(new GlossaryEntry("FOOD", "hot dog")), terms);
+
+    final String text = "the hot dogs were cold";
+    final List<GlossaryMatch> hits = matcher.match(text);
+
+    Assertions.assertEquals(1, hits.size());
+    Assertions.assertEquals("FOOD", hits.get(0).id());
+    Assertions.assertEquals("hot dog", hits.get(0).term());
+    Assertions.assertEquals("hot dogs",
+        text.substring(hits.get(0).span().getStart(), hits.get(0).span().getEnd()));
   }
 
   /**
