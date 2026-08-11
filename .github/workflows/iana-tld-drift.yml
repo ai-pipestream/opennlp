@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: IANA TLD snapshot drift
+name: PII reference data drift
 
 on:
   schedule:
@@ -26,10 +26,14 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Compare the baked snapshot with IANA
         run: bash dev/fetch-iana-tlds.sh --check
+      - name: Compare phone lengths with libphonenumber
+        run: bash dev/fetch-phone-number-lengths.sh --check
+      - name: Compare IBAN lengths with SWIFT
+        run: bash dev/fetch-iban-lengths.sh --check
