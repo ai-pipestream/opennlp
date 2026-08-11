@@ -18,6 +18,7 @@
 package opennlp.tools.artifacts;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +62,19 @@ public class ArtifactsManualExampleTest {
     final String dejaVu = "d" + new String(new int[] {0x00E9}, 0, 1) + "j"
         + new String(new int[] {0x00E0}, 0, 1) + " vu";
     assertEquals(List.of(), new CursorArtifactDetector().detect(dejaVu));
+  }
+
+  /** The selective-constructor example reports text damage but not replacement markers. */
+  @Test
+  void testSelectiveDetectorExample() {
+    final ArtifactDetector textDamage = new CursorArtifactDetector(Set.of(
+        TextArtifact.TYPE_MOJIBAKE,
+        TextArtifact.TYPE_UNICODE_TAG));
+
+    final List<TextArtifact> damage = textDamage.detect(TEXT);
+
+    assertEquals(1, damage.size());
+    assertEquals(TextArtifact.TYPE_MOJIBAKE, damage.get(0).type());
   }
 
   /** The masking example: every covered character is overwritten, nothing else moves. */

@@ -65,7 +65,9 @@ public record TextArtifact(Span span, String type) {
   public static final String TYPE_ZERO_WIDTH = "zero-width";
 
   /**
-   * A run from the Unicode Tags block outside a well-formed emoji tag flag.
+   * A run from the
+   * <a href="https://www.unicode.org/charts/PDF/UE0000.pdf">Unicode Tags block</a>
+   * outside a well-formed emoji tag flag.
    */
   public static final String TYPE_UNICODE_TAG = "unicode-tag";
 
