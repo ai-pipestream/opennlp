@@ -18,6 +18,7 @@
 package opennlp.tools.temporal;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -29,10 +30,11 @@ import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.util.Span;
 
 /**
- * Pins the reference date relative expressions resolve against in the document
- * pipeline: a document that dates itself in a dateline resolves the relative
- * expressions that follow, while a document that dates itself nowhere leaves them
- * unreported rather than guessing against the wall clock.
+ * Tests how the annotator supplies the reference date relative expressions resolve
+ * against: elected from the document's own dateline by default, fixed by the caller
+ * through the two-argument constructor, and absent when the text dates itself nowhere,
+ * in which case relative expressions stay unreported rather than being guessed against
+ * the wall clock.
  */
 public class TemporalAnnotatorTest {
 
@@ -51,9 +53,9 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins the headline behavior: a dateline dates the document, so a relative expression
-   * later in the same text resolves against it and is reported with its own span and
-   * its resolved value.
+   * Verifies the headline behavior: a dateline dates the document, so a relative
+   * expression later in the same text resolves against it and is reported with its own
+   * span and its resolved value.
    */
   @Test
   void testDatelineResolvesALaterRelativeExpression() {
@@ -71,9 +73,9 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins the election rule as the dateline rule of {@link DocumentDateAnnotator}: the
-   * first day-granularity mention in text order supplies the reference, later days do
-   * not.
+   * Verifies that the election rule is the dateline rule of
+   * {@link DocumentDateAnnotator}: the first day-granularity mention in text order
+   * supplies the reference, later days do not.
    */
   @Test
   void testFirstDayMentionSuppliesTheReference() {
@@ -87,8 +89,9 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins the resolution of every supported relative shape once a dateline is present: a
-   * day word, a counted offset, and a coarser unit that keeps its own granularity.
+   * Verifies that relative expressions of every supported shape resolve once a dateline
+   * is present: a day word, a counted offset, and a coarser unit that keeps its own
+   * granularity.
    */
   @Test
   void testCountedAndCoarserRelativesResolveAgainstTheDateline() {
@@ -107,7 +110,7 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins that a text without a day-granularity mention leaves relative expressions
+   * Verifies that a text without a day-granularity mention leaves relative expressions
    * unreported: a month mention is too coarse to date the document, exactly as it is
    * too coarse to elect the document date.
    */
@@ -123,7 +126,7 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins that a text holding nothing but a relative expression yields the temporal
+   * Verifies that a text holding nothing but a relative expression yields the temporal
    * layer present and empty rather than a mention resolved against the wall clock.
    */
   @Test
@@ -134,9 +137,42 @@ public class TemporalAnnotatorTest {
   }
 
   /**
-   * Pins that the annotator and {@link DocumentDateAnnotator} agree in a pipeline: the
-   * mention that resolves the relative expressions is the one that elects the document
-   * date.
+   * Verifies the explicit reference constructor: a caller who knows the document date
+   * from metadata resolves relative expressions without the text dating itself.
+   */
+  @Test
+  void testFixedReferenceResolvesRelativesWithoutADateline() {
+    final String text = "we shipped it yesterday";
+    final TemporalAnnotator fixed = new TemporalAnnotator(
+        new CursorTemporalExtractor(), LocalDate.of(2026, 7, 14));
+
+    final List<Annotation<TemporalExpression>> mentions = temporals(fixed, text);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(spanOf(text, "yesterday"), mentions.get(0).span());
+    Assertions.assertEquals("2026-07-13", mentions.get(0).value().value());
+  }
+
+  /**
+   * Verifies that a fixed reference wins over the document's own dateline, so a caller
+   * who supplies one is never overruled by the text.
+   */
+  @Test
+  void testFixedReferenceWinsOverTheDateline() {
+    final TemporalAnnotator fixed = new TemporalAnnotator(
+        new CursorTemporalExtractor(), LocalDate.of(2020, 1, 2));
+
+    final List<Annotation<TemporalExpression>> mentions =
+        temporals(fixed, "Berlin, 14 July 2026. The buyer paid yesterday.");
+
+    Assertions.assertEquals(2, mentions.size());
+    Assertions.assertEquals("2020-01-01", mentions.get(1).value().value());
+  }
+
+  /**
+   * Verifies that the annotator and {@link DocumentDateAnnotator} agree in a pipeline:
+   * the mention that resolves the relative expressions is the one that elects the
+   * document date.
    */
   @Test
   void testPipelineElectsTheSameDateThatResolvedTheRelatives() {
@@ -156,11 +192,74 @@ public class TemporalAnnotatorTest {
         document.get(TemporalAnnotator.TEMPORALS).get(1).value().value());
   }
 
+  /**
+   * Verifies that a day-granularity mention whose value is not an ISO 8601 date, as a
+   * third-party extractor may supply, elects no reference: the mentions stay the
+   * absolute ones instead of the annotator failing or inventing a date.
+   */
+  @Test
+  void testNonIsoDayValueElectsNoReference() {
+    final List<Annotation<TemporalExpression>> mentions =
+        temporals(new TemporalAnnotator(new UnIsoExtractor()), "Filed July 14, 2026.");
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals("July 14, 2026", mentions.get(0).value().value());
+  }
+
+  /**
+   * Verifies that an extractor recognizing no relative expressions is unaffected: the
+   * mentions of the reference-aware pass are reported as they come.
+   */
+  @Test
+  void testExtractorWithoutRelativeSupportIsUnaffected() {
+    final List<Annotation<TemporalExpression>> mentions =
+        temporals(new TemporalAnnotator(new IsoOnlyExtractor()), "Filed 2026-07-14.");
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals("2026-07-14", mentions.get(0).value().value());
+  }
+
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new TemporalAnnotator(null));
     Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TemporalAnnotator(null, LocalDate.of(2026, 7, 14)));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TemporalAnnotator(new CursorTemporalExtractor(), null));
+    Assertions.assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(null));
+  }
+
+  /**
+   * A stand-in for a third-party extractor that reports a day-granularity mention whose
+   * value is not an ISO 8601 date, and a relative mention as soon as it is given a
+   * reference date.
+   */
+  private static final class UnIsoExtractor implements TemporalExtractor {
+
+    @Override
+    public List<TemporalExpression> extract(CharSequence text) {
+      return List.of(new TemporalExpression(new Span(6, 19), "July 14, 2026",
+          TemporalExpression.Granularity.DAY));
+    }
+
+    @Override
+    public List<TemporalExpression> extract(CharSequence text, LocalDate reference) {
+      final List<TemporalExpression> mentions = new ArrayList<>(extract(text));
+      mentions.add(new TemporalExpression(new Span(19, 20), reference.toString(),
+          TemporalExpression.Granularity.DAY));
+      return mentions;
+    }
+  }
+
+  /** A stand-in for an extractor that recognizes absolute mentions only. */
+  private static final class IsoOnlyExtractor implements TemporalExtractor {
+
+    @Override
+    public List<TemporalExpression> extract(CharSequence text) {
+      return List.of(new TemporalExpression(new Span(6, 16), "2026-07-14",
+          TemporalExpression.Granularity.DAY));
+    }
   }
 }
