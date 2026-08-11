@@ -43,9 +43,14 @@ import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
  * folding). Hits found in the normalized form are mapped back to original-text spans
  * through the normalizer's {@link AlignedText}, so consumers still read identifiers
  * against the source characters. Hits are constrained to word boundaries on the
- * original text: a hit whose edge character is a letter or digit is dropped when the
- * neighboring original character is also a letter or digit, so {@code cat} never matches
- * inside {@code concatenate}. Overlapping hits are resolved leftmost first, then longest,
+ * original text, following the word-forming classes of UAX&#160;#29: a hit is dropped
+ * when its edge sits between two characters that continue one word, so {@code cat}
+ * never matches inside {@code concatenate}. Han ideographs and hiragana are each a
+ * word of their own under UAX&#160;#29 and never continue a neighbor, so terms match
+ * inside unspaced Chinese and Japanese text at character granularity. Katakana and
+ * Hangul runs chain like alphabetic runs, so a term embedded inside one stays
+ * rejected; splitting those runs needs dictionary segmentation, which is out of
+ * scope for this matcher. Overlapping hits are resolved leftmost first, then longest,
  * then by registration order, and the reported hits never overlap.</p>
  *
  * <p>When the matcher ignores case, terms and text are compared through the
@@ -68,6 +73,13 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
 
   /** The index of the automaton's root state, from which every scan starts. */
   private static final int ROOT = 0;
+
+  /**
+   * No Han or hiragana code point lies below this value (the CJK Radicals Supplement
+   * starts at U+2E80), so most text skips the script lookup in
+   * {@link #continuesWord(int)} entirely.
+   */
+  private static final int LOWEST_HAN_OR_HIRAGANA = 0x2E80;
 
   /** The registered entries in registration order; raw hits index into this list. */
   private final List<GlossaryEntry> entries;
@@ -350,7 +362,9 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /**
    * Checks that a candidate hit does not continue a word on either side. Neighbors are
    * read as whole code points, so a supplementary letter or digit next to a hit blocks
-   * it exactly like a basic-plane one.
+   * it exactly like a basic-plane one. Word continuation follows UAX&#160;#29: two
+   * letters or digits continue one word unless either is a Han ideograph or hiragana,
+   * which are complete words on their own.
    *
    * @param text The text being scanned.
    * @param start The hit start, inclusive.
@@ -358,13 +372,33 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
    * @return {@code true} if the hit sits on word boundaries.
    */
   private boolean onWordBoundary(CharSequence text, int start, int end) {
-    if (start > 0 && Character.isLetterOrDigit(Character.codePointAt(text, start))
-        && Character.isLetterOrDigit(Character.codePointBefore(text, start))) {
+    if (start > 0 && continuesWord(Character.codePointBefore(text, start))
+        && continuesWord(Character.codePointAt(text, start))) {
       return false;
     }
     return end >= text.length()
-        || !Character.isLetterOrDigit(Character.codePointBefore(text, end))
-        || !Character.isLetterOrDigit(Character.codePointAt(text, end));
+        || !continuesWord(Character.codePointBefore(text, end))
+        || !continuesWord(Character.codePointAt(text, end));
+  }
+
+  /**
+   * Decides whether a code point continues the word of an adjacent letter or digit.
+   * Han ideographs and hiragana are each a complete UAX&#160;#29 word, so they never
+   * continue a neighbor; every other letter or digit does.
+   *
+   * @param codePoint The code point next to a hit edge.
+   * @return {@code true} if the code point chains into an adjacent word.
+   */
+  private static boolean continuesWord(int codePoint) {
+    if (!Character.isLetterOrDigit(codePoint)) {
+      return false;
+    }
+    if (codePoint < LOWEST_HAN_OR_HIRAGANA) {
+      return true;
+    }
+    final Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
+    return script != Character.UnicodeScript.HAN
+        && script != Character.UnicodeScript.HIRAGANA;
   }
 
   /**
