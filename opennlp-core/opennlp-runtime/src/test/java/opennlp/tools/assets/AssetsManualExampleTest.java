@@ -71,6 +71,7 @@ public class AssetsManualExampleTest {
     assertEquals(found.payload(), found.span());
   }
 
+  /** The manual's JWT example exposes the claims bytes and stable metadata. */
   @Test
   void testJwtExampleStatesTheAssetExactly() {
     final EmbeddedAsset token = new CursorAssetDetector().detect(JWT).get(0);

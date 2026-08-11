@@ -112,6 +112,7 @@ public class EmbeddedAssetTest {
     assertEquals("text is shorter than the payload span", e.getMessage());
   }
 
+  /** Wrapped MIME base64 decodes through the same public record operation. */
   @Test
   void testDecodeAcceptsWrappedStandardBase64() {
     final String encoded = Base64.getMimeEncoder(4, "\r\n".getBytes(StandardCharsets.US_ASCII))
@@ -122,6 +123,7 @@ public class EmbeddedAssetTest {
     assertArrayEquals("ABCDEF".getBytes(StandardCharsets.US_ASCII), asset.decode(encoded));
   }
 
+  /** Unpadded base64url decodes without conversion to the standard alphabet. */
   @Test
   void testDecodeAcceptsUnpaddedBase64Url() {
     final byte[] bytes = {(byte) 0xFB, (byte) 0xFF, (byte) 0xFF};
@@ -132,6 +134,7 @@ public class EmbeddedAssetTest {
     assertArrayEquals(bytes, asset.decode(encoded));
   }
 
+  /** A payload cannot combine the standard-only and URL-only alphabet characters. */
   @Test
   void testDecodeRejectsMixedBase64Alphabets() {
     final EmbeddedAsset asset = new EmbeddedAsset(new Span(0, 4), new Span(0, 4),

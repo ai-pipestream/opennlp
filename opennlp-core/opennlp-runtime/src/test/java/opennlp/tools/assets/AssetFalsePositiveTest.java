@@ -56,17 +56,24 @@ public class AssetFalsePositiveTest {
     return List.of(NEAR_MISSES);
   }
 
+  /**
+   * Each asset-shaped near miss remains ordinary text in isolation.
+   *
+   * @param fixture The near miss to scan.
+   */
   @ParameterizedTest
   @MethodSource("nearMisses")
   void testNearMissYieldsNothing(String fixture) {
     assertEquals(List.of(), DETECTOR.detect(fixture), fixture);
   }
 
+  /** Corpus seams cannot combine two near misses into a finding. */
   @Test
   void testJoinedCorpusYieldsNothing() {
     assertEquals(List.of(), DETECTOR.detect(String.join(" | ", NEAR_MISSES)));
   }
 
+  /** The corpus is not green because the new transport detectors are silent. */
   @Test
   void testControlTextStillFindsEachNewEncodingFamily() {
     final String header = Base64.getUrlEncoder().withoutPadding().encodeToString(

@@ -235,7 +235,13 @@ public class CursorAssetDetectorTest {
     assertArrayEquals(certificate, asset.decode(text));
   }
 
-  /** Every supported PEM family maps its verified boundary label to stable metadata. */
+  /**
+   * Every supported PEM family maps its verified boundary label to stable metadata.
+   *
+   * @param label The PEM label.
+   * @param format The expected format tag.
+   * @param mediaType The expected media type.
+   */
   @ParameterizedTest
   @MethodSource("pemTypes")
   void testPemTypeMappings(String label, String format, String mediaType) {
