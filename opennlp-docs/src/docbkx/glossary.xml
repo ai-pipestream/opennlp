@@ -109,8 +109,8 @@ List<GlossaryMatch> hits = matcher.match("Die Straße ist frei.");
 			tokens do not take part in matching: <code>hot-dogs</code>,
 			<code>hot, dogs</code>, and even the sentence-crossing
 			<code>hot. Dogs</code> all match a registered <code>hot dog</code>, with
-			the span covering the separators between the matched tokens. Hyphenated
-			compounds matching is the intent; run sentence-sized inputs when a hit must
+			the span covering the separators between the matched tokens. Matching
+			hyphenated compounds is intentional; run sentence-sized inputs when a hit must
 			not cross a sentence boundary. A lemmatizing analyzer is rejected at
 			construction, because lemmas need part-of-speech tags that plain text
 			cannot supply.
@@ -127,6 +127,40 @@ TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
 
 List<GlossaryMatch> hits = matcher.match("the hot dogs were cold");
 // one hit whose span covers the original "hot dogs"]]>
+		</programlisting>
+	</section>
+	<section xml:id="tools.glossary.composite">
+		<title>Combining matchers with CompositeGlossaryMatcher</title>
+		<para>
+			A document can only carry one glossary layer, so a pipeline that wants both
+			exact and inflected hits combines the matchers behind a single
+			<code>GlossaryAnnotator</code> with a <code>CompositeGlossaryMatcher</code>.
+			Delegates are consulted in the order given and earlier matchers win: a hit
+			survives only when its span overlaps no hit already accepted from an
+			earlier matcher. Register the exact matcher first and the inflected matcher
+			second, and the inflected path fills only the gaps the exact automaton
+			misses. Merged hits come back in text order.
+			<code>GlossaryUsageExampleTest</code> mirrors the example below;
+			<code>CompositeGlossaryMatcherTest</code> pins the merge rules.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+TermAnalyzer analyzer = TermAnalyzer.builder()
+    .caseFold()
+    .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+    .build();
+
+List<GlossaryEntry> glossary = List.of(
+    new GlossaryEntry("NYC", "New York City"),
+    new GlossaryEntry("FOOD", "hot dog"));
+
+GlossaryMatcher exact = new AhoCorasickGlossaryMatcher(glossary, true);
+GlossaryMatcher inflected = new TermAnalyzingGlossaryMatcher(glossary, analyzer);
+GlossaryMatcher composite = new CompositeGlossaryMatcher(List.of(exact, inflected));
+
+List<GlossaryMatch> matches = composite.match("Hot dogs are sold across New York City.");
+// two hits in text order: FOOD covering "Hot dogs" (inflected path),
+// NYC covering "New York City" (exact path wins over the inflected duplicate)]]>
 		</programlisting>
 	</section>
 </chapter>
