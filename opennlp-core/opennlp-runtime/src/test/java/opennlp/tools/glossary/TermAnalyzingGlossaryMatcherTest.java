@@ -31,6 +31,7 @@ import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.normalizer.CharSequenceNormalizer;
 import opennlp.tools.util.normalizer.Dimension;
+import opennlp.tools.util.normalizer.EnglishContractionCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
 /**
@@ -342,5 +343,32 @@ public class TermAnalyzingGlossaryMatcherTest {
     final List<GlossaryMatch> matches = matcher.match(bounded);
     Assertions.assertEquals(1, matches.size());
     Assertions.assertEquals(new Span(2, 5), matches.get(0).span());
+  }
+
+  /**
+   * Pre-tokenization contraction expansion composes with stemming while the reported
+   * span remains on the original contracted and inflected source text.
+   */
+  @Test
+  void testContractionExpansionComposesWithTokenStemming() {
+    final TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
+        List.of(new GlossaryEntry("ACTION", "can not dog")), englishStemmingAnalyzer(),
+        EnglishContractionCharSequenceNormalizer.getInstance());
+
+    final String text = "can't dogs";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(0, 10), matches.get(0).span());
+    Assertions.assertEquals(text,
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /** The explicit pre-tokenization normalizer is required on the three-argument path. */
+  @Test
+  void testRejectsNullPreTokenizationNormalizer() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TermAnalyzingGlossaryMatcher(
+            List.of(new GlossaryEntry("TERM", "term")), englishStemmingAnalyzer(), null));
   }
 }
