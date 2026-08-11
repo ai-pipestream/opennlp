@@ -250,7 +250,7 @@ public class CursorArtifactDetectorTest {
     final List<TextArtifact> artifacts = detector.detect(text);
 
     assertEquals(1, artifacts.size());
-    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(TextArtifact.TYPE_UNICODE_TAG, artifacts.get(0).type());
     assertEquals(hidden, artifacts.get(0).span().getCoveredText(text).toString());
   }
 
@@ -261,7 +261,7 @@ public class CursorArtifactDetectorTest {
     final List<TextArtifact> artifacts = detector.detect(hidden);
 
     assertEquals(1, artifacts.size());
-    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(TextArtifact.TYPE_UNICODE_TAG, artifacts.get(0).type());
     assertEquals(hidden, artifacts.get(0).span().getCoveredText(hidden).toString());
   }
 
@@ -280,7 +280,7 @@ public class CursorArtifactDetectorTest {
     final List<TextArtifact> artifacts = detector.detect(malformed);
 
     assertEquals(1, artifacts.size());
-    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(TextArtifact.TYPE_UNICODE_TAG, artifacts.get(0).type());
     assertEquals(hidden, artifacts.get(0).span().getCoveredText(malformed).toString());
   }
 
