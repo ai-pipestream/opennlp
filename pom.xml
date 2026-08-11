@@ -242,6 +242,8 @@
 		<opennlp.download.home>${user.home}</opennlp.download.home>
 		<opennlp.forkCount>1.0C</opennlp.forkCount>
 		<opennlp.models.version>1.3.0</opennlp.models.version>
+		<jacoco.unit.argLine></jacoco.unit.argLine>
+		<jacoco.integration.argLine></jacoco.integration.argLine>
 
 		<!-- Old OpenNLP models are hosted on Sourceforge. Set a default. -->
 		<opennlp.model.v15.base.url>https://opennlp.sourceforge.net/models-1.5/</opennlp.model.v15.base.url>
@@ -330,12 +332,18 @@
 					<executions>
 						<execution>
 							<id>jacoco-prepare-agent</id>
+							<configuration>
+								<propertyName>jacoco.unit.argLine</propertyName>
+							</configuration>
 							<goals>
 								<goal>prepare-agent</goal>
 							</goals>
 						</execution>
 						<execution>
 							<id>jacoco-prepare-agent-integration</id>
+							<configuration>
+								<propertyName>jacoco.integration.argLine</propertyName>
+							</configuration>
 							<goals>
 								<goal>prepare-agent-integration</goal>
 							</goals>
@@ -361,7 +369,7 @@
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-surefire-plugin</artifactId>
 					<configuration>
-						<argLine>-Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off -Dopennlp.model.v15.base.url="${opennlp.model.v15.base.url}"</argLine>
+						<argLine>@{jacoco.unit.argLine} -Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off -Dopennlp.model.v15.base.url="${opennlp.model.v15.base.url}"</argLine>
 						<forkCount>${opennlp.forkCount}</forkCount>
 						<failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
 						<excludes>
@@ -384,7 +392,7 @@
 						</execution>
 					</executions>
 					<configuration>
-						<argLine>-DOPENNLP_DOWNLOAD_HOME=${opennlp.download.home} -Dopennlp.model.v15.base.url="${opennlp.model.v15.base.url}"</argLine>
+						<argLine>@{jacoco.integration.argLine} -DOPENNLP_DOWNLOAD_HOME=${opennlp.download.home} -Dopennlp.model.v15.base.url="${opennlp.model.v15.base.url}"</argLine>
 						<excludes>
 							<exclude>**/*Test.java</exclude>
 						</excludes>
