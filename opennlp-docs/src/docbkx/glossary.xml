@@ -214,4 +214,58 @@ List<GlossaryMatch> hits = matcher.match("私は東京に住む");
 			exact and token paths now share the same <code>WordSegmenter</code>.
 		</para>
 	</section>
+	<section xml:id="tools.glossary.loading">
+		<title>Loading glossaries from TBX and CSV files</title>
+		<para>
+			Glossaries usually arrive as files, not as Java lists. The package
+			<code>opennlp.tools.formats.glossary</code> in the
+			<code>opennlp-formats</code> module reads the two shapes that cover the
+			terminology industry: <code>TbxGlossaryReader</code> for TBX termbases
+			(ISO 30042, the format CAT tools and public termbases such as IATE
+			export, in both the TBX 2 martif and TBX 3 element vocabularies) and
+			<code>CsvGlossaryReader</code> for CSV and TSV term lists following
+			RFC 4180. Both return <code>GlossaryEntry</code> values in file order,
+			with synonyms arriving as several entries sharing one id, exactly the
+			alias convention the matchers already understand.
+			<code>GlossaryLoadingExampleTest</code> asserts both examples below.
+		</para>
+		<para>
+			A termbase is multilingual while a matcher wants one language, so the TBX
+			reader selects a language at construction; <code>en</code> also selects
+			<code>en-US</code>, following BCP 47 lookup. The DOCTYPE real
+			exports carry is tolerated but nothing external is ever fetched, and
+			malformed content fails as <code>InvalidFormatException</code>.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+TbxGlossaryReader reader = new TbxGlossaryReader("en");
+List<GlossaryEntry> glossary;
+try (InputStream in = Files.newInputStream(Path.of("terms.tbx"))) {
+  glossary = reader.read(in);
+}
+
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+List<GlossaryMatch> hits = matcher.match("A frankfurter, please.");
+// the hit reports the concept id the term belongs to in the termbase]]>
+		</programlisting>
+		<para>
+			The CSV reader takes the delimiter and header convention explicitly: the
+			first column is the identifier, the second the term, and further columns
+			are ignored so metadata columns do no harm. Quoted fields may contain the
+			delimiter, doubled quotes, and line breaks; a UTF-8 byte order mark is
+			stripped; rows with missing columns or blank fields fail with their line
+			number.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+String csv = "id,term\nQ60,New York City\nQ11299,Manhattan\n";
+CsvGlossaryReader reader = new CsvGlossaryReader(',', true);
+List<GlossaryEntry> glossary = reader.read(
+    new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+List<GlossaryMatch> hits = matcher.match("From Manhattan to New York City.");
+// two hits: Q11299 and Q60]]>
+		</programlisting>
+	</section>
 </chapter>
