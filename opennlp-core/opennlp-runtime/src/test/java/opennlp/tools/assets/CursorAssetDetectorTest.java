@@ -271,10 +271,14 @@ public class CursorAssetDetectorTest {
         "plain text".getBytes(StandardCharsets.UTF_8));
     final String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(
         new byte[32]);
+    final String noneHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));
 
     assertTrue(detector.detect(header + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect(validHeader + "." + notJson + "." + signature).isEmpty());
     assertTrue(detector.detect(validHeader + "." + claims).isEmpty());
+    assertTrue(detector.detect(validHeader + "." + claims + ".").isEmpty());
+    assertTrue(detector.detect(noneHeader + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect("x" + validHeader + "." + claims + "." + signature).isEmpty());
   }
 
