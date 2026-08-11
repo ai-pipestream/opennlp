@@ -109,7 +109,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *
    * @param units The unit tokens to recognize, matched exactly and case-sensitively.
    *              Must not be {@code null} or empty, and no token may be {@code null},
-   *              blank, or longer than six characters.
+   *              blank, longer than six characters, or contain anything but letters.
    * @throws IllegalArgumentException Thrown if the set is {@code null}, empty, or
    *         contains an invalid token.
    */
@@ -122,7 +122,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *
    * @param units The unit tokens to recognize, matched exactly and case-sensitively.
    *              Must not be {@code null} or empty, and no token may be {@code null},
-   *              blank, or longer than six characters.
+   *              blank, longer than six characters, or contain anything but letters.
    * @param notation The written convention numbers group digits and mark fractions in.
    *                 Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if the set is {@code null}, empty, contains
@@ -133,7 +133,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       throw new IllegalArgumentException("units must not be null or empty");
     }
     for (final String unit : units) {
-      if (unit == null || unit.isBlank() || unit.length() > MAX_UNIT_LENGTH) {
+      if (!validUnit(unit)) {
         throw new IllegalArgumentException("not a valid unit token: " + unit);
       }
     }
@@ -148,11 +148,30 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    * @return {@code notation}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
    */
-  private static NumberNotation requireNotation(NumberNotation notation) {
+  private NumberNotation requireNotation(NumberNotation notation) {
     if (notation == null) {
       throw new IllegalArgumentException("notation must not be null");
     }
     return notation;
+  }
+
+  /**
+   * Checks whether a token can be consumed by the unit scanner.
+   *
+   * @param unit The candidate token, or {@code null}.
+   * @return {@code true} if the token is non-blank, no longer than the configured limit,
+   *         and consists only of letters representable by the scanner.
+   */
+  private boolean validUnit(String unit) {
+    if (unit == null || unit.isBlank() || unit.length() > MAX_UNIT_LENGTH) {
+      return false;
+    }
+    for (int i = 0; i < unit.length(); i++) {
+      if (!Character.isLetter(unit.charAt(i))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

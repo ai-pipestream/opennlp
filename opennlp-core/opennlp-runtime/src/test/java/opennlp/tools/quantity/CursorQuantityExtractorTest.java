@@ -169,6 +169,7 @@ public class CursorQuantityExtractorTest {
         () -> new CursorQuantityExtractor(Set.of("\u00b0C")));
   }
 
+  /** Verifies that malformed repeated-decimal quantities fail closed in both notations. */
   @ParameterizedTest
   @CsvSource(delimiter = ';', value = {
       "1.2.3 kg; LATIN_US",

@@ -18,6 +18,7 @@
 package opennlp.tools.numeric;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -132,8 +133,9 @@ public final class NumericPacks {
   }
 
   /**
-   * Calendar mentions and the document date, with the reference date fixed by the caller
-   * for documents that are dated in metadata rather than in the text.
+   * Calendar mentions and an absolute document date, with the reference for relative
+   * expressions fixed by the caller. A fixed reference is not synthesized as a text span,
+   * so the document-date layer stays empty unless the text contains an absolute day.
    *
    * @param reference The date relative expressions resolve against. Must not be
    *                  {@code null}.
@@ -177,7 +179,7 @@ public final class NumericPacks {
    * list yields a pipeline that also restates every amount in one currency as of the
    * document date.
    *
-   * @return The annotators in execution order. Never {@code null}.
+   * @return A new, modifiable list of annotators in execution order. Never {@code null}.
    */
   public static List<DocumentAnnotator> annotators() {
     return pipeline(new CursorMoneyExtractor(), new CursorQuantityExtractor());
@@ -189,7 +191,7 @@ public final class NumericPacks {
    *
    * @param region A locale with a country component. Must not be {@code null} and must
    *               name a region with a currency.
-   * @return The annotators in execution order. Never {@code null}.
+   * @return A new, modifiable list of annotators in execution order. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code region} is {@code null} or has no
    *         currency.
    */
@@ -210,11 +212,11 @@ public final class NumericPacks {
    */
   private static List<DocumentAnnotator> pipeline(CursorMoneyExtractor money,
       CursorQuantityExtractor quantity) {
-    return List.of(
+    return new ArrayList<>(List.of(
         new TemporalAnnotator(new CursorTemporalExtractor()),
         new DocumentDateAnnotator(),
         new MoneyAnnotator(money),
-        new QuantityAnnotator(quantity));
+        new QuantityAnnotator(quantity)));
   }
 
   /**

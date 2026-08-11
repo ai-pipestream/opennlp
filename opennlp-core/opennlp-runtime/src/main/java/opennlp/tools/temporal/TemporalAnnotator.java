@@ -39,10 +39,9 @@ import opennlp.tools.document.Layers;
  * reports absolute mentions only, and if one of them is a day-granularity mention, it
  * dates the document and a second pass resolves the relative expressions against it
  * through {@link TemporalExtractor#extract(CharSequence, LocalDate)}. The mentions of
- * the second pass are the ones reported, so a dateline makes every relative expression
- * behind it resolvable. The electing mention is the first day-granularity mention in
- * text order, the same dateline rule {@link DocumentDateAnnotator} applies, so the two
- * annotators never disagree about the date a document carries.</p>
+ * the second pass are the ones reported, so a dateline makes relative expressions
+ * resolvable. The electing mention is the first absolute day-granularity mention in text
+ * order, the same rule {@link DocumentDateAnnotator} applies.</p>
  *
  * <p>A document that dates itself nowhere keeps the absolute-only mentions: relative
  * expressions stay unreported rather than being guessed against the wall clock, since a
@@ -142,9 +141,8 @@ public class TemporalAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Elects the document's date from its absolute mentions: the first day-granularity
-   * mention wins, following the dateline convention that a document dates itself up
-   * front.
+   * Elects the document's date from its absolute mentions: the first absolute
+   * day-granularity mention wins.
    *
    * <p>A day-granularity value that is not an ISO 8601 calendar date, as a third-party
    * {@link TemporalExtractor} may supply, elects nothing; the mentions then stay the
@@ -158,7 +156,8 @@ public class TemporalAnnotator implements DocumentAnnotator {
    */
   private LocalDate dateline(List<TemporalExpression> mentions) {
     for (final TemporalExpression mention : mentions) {
-      if (mention.granularity() == TemporalExpression.Granularity.DAY) {
+      if (mention.granularity() == TemporalExpression.Granularity.DAY
+          && mention.origin() == TemporalExpression.Origin.ABSOLUTE) {
         try {
           return LocalDate.parse(mention.value());
         } catch (DateTimeParseException e) {
@@ -176,7 +175,7 @@ public class TemporalAnnotator implements DocumentAnnotator {
    * @return {@code extractor}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code extractor} is {@code null}.
    */
-  private static TemporalExtractor requireExtractor(TemporalExtractor extractor) {
+  private TemporalExtractor requireExtractor(TemporalExtractor extractor) {
     if (extractor == null) {
       throw new IllegalArgumentException("extractor must not be null");
     }

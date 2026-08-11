@@ -31,8 +31,9 @@ import opennlp.tools.document.Layers;
 
 /**
  * Elects the document's reference date from the temporal layer and provides
- * {@link #DOCUMENT_DATE}: the first day-granularity mention in the text wins, following
- * the dateline convention that a document dates itself up front.
+ * {@link #DOCUMENT_DATE}: the first absolute day-granularity mention in the text wins,
+ * following the dateline convention that a document dates itself up front. Relative
+ * mentions resolved against that date cannot elect a different date.
  *
  * <p>The annotation covers the winning mention's span, so the choice stays auditable.
  * A document without a day-granularity mention gets an empty layer; coarser mentions
@@ -54,7 +55,7 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
       Layers.key("document.date", LocalDate.class);
 
   /**
-   * Elects the document date from the first day-granularity temporal mention.
+   * Elects the document date from the first absolute day-granularity temporal mention.
    *
    * <p>The temporal layer must be present, but it may be empty: a document without
    * temporal mentions yields a present-but-empty date layer.</p>
@@ -63,7 +64,7 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
    *                 the {@link TemporalAnnotator#TEMPORALS} layer.
    * @return The document with the {@link #DOCUMENT_DATE} layer added. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, the
-   *         temporal layer is absent, or the electing day-granularity mention carries a
+   *         temporal layer is absent, or the electing absolute day mention carries a
    *         value that is not an ISO 8601 calendar date in the {@code yyyy-MM-dd} form,
    *         as a third-party {@link TemporalExtractor} may supply.
    */
@@ -72,7 +73,8 @@ public class DocumentDateAnnotator implements DocumentAnnotator {
     DocumentAnnotators.requireLayers(document, TemporalAnnotator.TEMPORALS);
     for (final Annotation<TemporalExpression> mention
         : document.get(TemporalAnnotator.TEMPORALS)) {
-      if (mention.value().granularity() == TemporalExpression.Granularity.DAY) {
+      if (mention.value().granularity() == TemporalExpression.Granularity.DAY
+          && mention.value().origin() == TemporalExpression.Origin.ABSOLUTE) {
         final LocalDate date;
         try {
           date = LocalDate.parse(mention.value().value());
