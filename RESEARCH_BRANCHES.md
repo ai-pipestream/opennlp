@@ -1,6 +1,29 @@
 # Research branch map
 
-This fork's layout: `main` mirrors `apache/opennlp` main exactly and never diverges, keeping the fork a clean base for upstream work; `kristian-3.x-features` is the research arm and the default branch, a regenerated integration line that merges every open pull request head and every admitted feature branch (each build records its exact inputs in `PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the `3.x-preview-SNAPSHOT` Maven snapshot); everything else is one feature per branch, stacked on its true dependency. Feature branches may be numerous and unvetted; a branch joins the research arm through a pull request based on `kristian-3.x-features`, whose merge adds it to the regeneration list. Nothing ever merges out of the research arm, and none of this touches the upstream project's own process. Read the warning at the top of [README.md](README.md) before using anything here. State below is as of 2026-08-10, measured against apache main `fc9824a97` (five commits past `014c0182a`: dependency bumps, a NOTICE regeneration, and the OPENNLP-1900 security-model documentation). Every admitted tip was cascaded onto that head on 2026-08-08 with true parent stacking (carried copies refreshed to current parent content), followed by a fleet-wide review pass to the krickert-review standard. A maturity round followed on 2026-08-10: every family was surveyed, defects were fixed test-first, tests and manual examples were extended (about 40 commits across 16 branches), children were re-cascaded onto their changed parents, and the refreshed heads were pushed to the fork the same day. OPENNLP-1895-turboquant was admitted to the research arm on 2026-08-10.
+This fork's layout: `main` mirrors `apache/opennlp` main exactly and never
+diverges, keeping the fork a clean base for upstream work;
+`kristian-3.x-features` is the research arm and the default branch, a
+regenerated integration line that merges every open pull request head and every
+admitted feature branch. Each build records its exact inputs in
+`PIPESTREAM-PROVENANCE.txt`, and artifacts publish only as the
+`ai.pipestream:opennlp-*:0.1.0-alpha4-SNAPSHOT` Maven snapshot. Everything else
+is one feature per branch, stacked on its true dependency. Feature branches may
+be numerous and unvetted; a branch joins the research arm through a pull request
+based on `kristian-3.x-features`, whose merge adds it to the regeneration list.
+Nothing ever merges out of the research arm, and none of this touches the
+upstream project's own process. Read the warning at the top of
+[README.md](README.md) before using anything here.
+
+State below is as of 2026-08-11, measured against apache main `45db4212d`.
+Every admitted tip received a fleet-wide review pass to the krickert-review
+standard. The August 10 maturity round surveyed every family, fixed defects
+test-first, extended tests and manual examples, and re-cascaded children onto
+their changed parents. OPENNLP-1895-turboquant was admitted to the research arm
+that day. The August 11 rounds completed the PII roadmap, hardened numeric and
+repaired its geo stack, completed embedded-assets and text-artifacts, recascaded
+noise, and regenerated the research arm. Exact tested tips remain in
+`PIPESTREAM-PROVENANCE.txt`; round details and measurements remain in the
+workspace-level `QUALITY-PASS.md`.
 
 ## Merge strategy
 
@@ -128,9 +151,9 @@ All staged branches are based on a recent apache main (each rebases fully before
 | `glossary` | Dictionary/glossary matching as a document layer | Staged, needs #1182 | `glossary.xml` cites `GlossaryUsageExampleTest` |
 | `pii` | PII detection and masking layers | Staged, needs #1182 | `pii.xml` cites `PiiUsageExampleTest` |
 | `coref` | Coreference chains as a document layer | Staged, needs #1182 | Document-layer section cites `CorefPipelineExampleTest` (legacy `coref.xml` unchanged) |
-| `numeric` | Money, quantities, temporals, and document-date layers with region-aware currency resolution | Staged, needs #1182 | `numeric.xml` cites `NumericExtractionExampleTest` |
-| `text-artifacts` | Mojibake, replacement-character, and zero-width artifact spans as a document layer | Staged, needs #1182 | `artifacts.xml` cites `ArtifactsManualExampleTest` |
-| `embedded-assets` | Embedded binary payloads (data URIs, bare base64 runs) as exact spans with format identification from file magic, plus asset folding that keeps every offset mapped to the source | Staged, needs #1182 | Magic table covers 220 formats. `assets.xml` cites `AssetsManualExampleTest` |
+| `numeric` | Money, quantities, absolute and relative temporals, and document-date layers with US/EU notation, spelled-out currencies, packs, and region-aware currency resolution | Staged, needs #1182 | `numeric.xml` cites `NumericExtractionExampleTest`; false-positive corpus and JMH included |
+| `text-artifacts` | Mojibake, replacement-character, zero-width, and Unicode tag artifact spans as a document layer, with per-type selection | Staged, needs #1182 | Windows-1252 and ISO-8859-1 C1 mojibake families; valid subdivision emoji tag flags excluded; `artifacts.xml` cites `ArtifactsManualExampleTest` |
+| `embedded-assets` | Data URIs, bare standard and URL-safe base64, MIME/PEM wrapped payloads, RFC 7468 envelopes, and compact JWTs as exact spans with format identification from file magic, plus asset folding that keeps every offset mapped to the source | Staged, needs #1182 | Magic table covers 220 formats; strict bounded JWT header validation; `assets.xml` cites `AssetsManualExampleTest` |
 | `noise` | Severity-tiered structural noise scoring as a document layer, excluding spans already explained as embedded assets | Staged, on `embedded-assets` | `noise.xml` cites `NoiseManualExampleTest` |
 | `predicate-annotators` | Conditional and filtering annotator combinators for predicate-gated pipelines | Staged, needs #1182 | Document predicates section cites `PredicateManualExampleTest` |
 | `region-vote` | Document-scoped region ballot: location mentions, country names, and flag emoji vote on where a document speaks from | Staged, on `numeric` | Document section cites `RegionCurrencyResolutionExampleTest` |
