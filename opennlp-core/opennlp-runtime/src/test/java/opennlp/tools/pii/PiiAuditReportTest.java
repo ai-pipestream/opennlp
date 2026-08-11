@@ -63,6 +63,21 @@ public class PiiAuditReportTest {
   }
 
   @Test
+  void testCountsDistinctValuesEvenWhenShortTokensCollide() {
+    final HmacTokenizer shortTokenizer = new HmacTokenizer(KEY, 4);
+    final List<PiiMention> mentions = List.of(
+        new PiiMention(new opennlp.tools.util.Span(0, 1), PiiMention.TYPE_EMAIL,
+            "u72@example.com"),
+        new PiiMention(new opennlp.tools.util.Span(2, 3), PiiMention.TYPE_EMAIL,
+            "u186@example.com"));
+
+    Assertions.assertEquals(shortTokenizer.token(mentions.get(0)),
+        shortTokenizer.token(mentions.get(1)));
+    Assertions.assertEquals(2,
+        PiiAuditReport.of(mentions, shortTokenizer).distinctCounts().get(PiiMention.TYPE_EMAIL));
+  }
+
+  @Test
   void testNamesTheTypesItFound() {
     Assertions.assertEquals(
         List.of(PiiMention.TYPE_CARD, PiiMention.TYPE_EMAIL, PiiMention.TYPE_PHONE),

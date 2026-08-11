@@ -175,6 +175,18 @@ public class HmacTokenizerTest {
         () -> new HmacTokenizer(new byte[0]));
   }
 
+  @ParameterizedTest
+  @ValueSource(ints = {1, 16, 31})
+  void testRejectsKeysShorterThanSha256Output(int length) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new HmacTokenizer(new byte[length]));
+  }
+
+  @Test
+  void testAcceptsAThirtyTwoByteKey() {
+    Assertions.assertDoesNotThrow(() -> new HmacTokenizer(new byte[32]));
+  }
+
   /**
    * Verifies that the key is copied, so a caller who wipes the array they passed does not
    * silently change every token afterwards.

@@ -28,6 +28,33 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 public class SecretsPiiExtractorTest {
 
+  /** Counts character reads so scanner complexity can be asserted without wall-clock timing. */
+  private static final class CountingCharSequence implements CharSequence {
+
+    private final String value;
+    private int reads;
+
+    private CountingCharSequence(String value) {
+      this.value = value;
+    }
+
+    @Override
+    public int length() {
+      return value.length();
+    }
+
+    @Override
+    public char charAt(int index) {
+      reads++;
+      return value.charAt(index);
+    }
+
+    @Override
+    public CharSequence subSequence(int start, int end) {
+      return value.subSequence(start, end);
+    }
+  }
+
   /** The header of {@code {"alg":"HS256","typ":"JWT"}} in base64url. */
   private static final String HS256_HEADER = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
 
@@ -52,6 +79,16 @@ public class SecretsPiiExtractorTest {
   private static final String SIGNATURE = "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
 
   private final SecretsPiiExtractor extractor = new SecretsPiiExtractor();
+
+  @ParameterizedTest
+  @ValueSource(strings = {"eyJ_", "ghp_"})
+  void testPrefixHeavyNearMissesAreScannedLinearly(String prefix) {
+    final CountingCharSequence text = new CountingCharSequence(prefix.repeat(1024));
+
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
+    Assertions.assertTrue(text.reads <= text.length() * 20,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
 
   @ParameterizedTest
   @ValueSource(strings = {

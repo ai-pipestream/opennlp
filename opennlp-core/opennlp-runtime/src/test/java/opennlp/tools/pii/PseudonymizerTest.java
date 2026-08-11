@@ -89,6 +89,12 @@ public class PseudonymizerTest {
     Assertions.assertEquals("CARD-1 and CARD-2", rewrite.text());
   }
 
+  @Test
+  void testCaseDistinctMailboxLocalPartsGetDifferentLabels() {
+    Assertions.assertEquals("EMAIL-1 EMAIL-2",
+        rewrite("User@example.com user@example.com").text());
+  }
+
   @ParameterizedTest
   @CsvSource({
       "'mail jane@example.com', EMAIL-1",
