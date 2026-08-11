@@ -242,6 +242,22 @@ public class CursorAssetDetectorTest {
     assertArrayEquals(claims, asset.decode(text));
   }
 
+  /** RFC 7519 unsecured JWTs use {@code alg=none} and an empty signature segment. */
+  @Test
+  void testUnsecuredJsonWebToken() {
+    final String header = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));
+    final String claims = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"sub\":\"123\"}".getBytes(StandardCharsets.UTF_8));
+    final String token = header + "." + claims + ".";
+
+    final List<EmbeddedAsset> assets = detector.detect(token);
+
+    assertEquals(1, assets.size());
+    assertEquals(token, assets.get(0).span().getCoveredText(token).toString());
+    assertEquals(EmbeddedAsset.FORMAT_JWT, assets.get(0).format());
+  }
+
   /** JWT lookalikes fail closed unless header, claims, signature, and boundaries agree. */
   @Test
   void testJsonWebTokenNearMisses() {
