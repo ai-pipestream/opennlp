@@ -34,8 +34,9 @@ import opennlp.tools.util.StringUtil;
  *
  * @param span The full location in the original text, including any URI prefix around
  *             the payload. Must not be {@code null}.
- * @param payload The location of the encoded payload characters within {@code span}.
- *                Must not be {@code null} and must lie inside {@code span}.
+ * @param payload The location of the encoded payload within {@code span}, including
+ *                permitted line separators. Must not be {@code null} and must lie
+ *                inside {@code span}.
  * @param format The format, for example {@link #FORMAT_PNG}: sniffed from the decoded
  *               header when it carries a known magic, otherwise as the carrying URI
  *               declared it. Must not be {@code null} or blank.
@@ -125,6 +126,9 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
   /** A RIFF AVI video. */
   public static final String FORMAT_AVI = "avi";
 
+  /** A JSON Web Token in compact serialization. */
+  public static final String FORMAT_JWT = "jwt";
+
   /**
    * Validates the asset.
    *
@@ -156,11 +160,15 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
   /**
    * Decodes the payload from the text the asset was detected in.
    *
+   * <p>Standard base64, CR/LF-wrapped MIME base64, and the base64url alphabet are
+   * accepted. The alphabets may not be mixed.</p>
+   *
    * @param text The original text this asset's spans refer to. Must not be
    *             {@code null}.
    * @return The decoded bytes. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}, shorter
-   *         than the payload span, or the payload characters are not valid base64.
+   *         than the payload span, or the payload characters are not valid base64,
+   *         MIME base64, or base64url.
    */
   public byte[] decode(CharSequence text) {
     if (text == null) {
@@ -169,7 +177,44 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
     if (text.length() < payload.getEnd()) {
       throw new IllegalArgumentException("text is shorter than the payload span");
     }
-    return Base64.getDecoder().decode(
-        text.subSequence(payload.getStart(), payload.getEnd()).toString());
+    final String encoded = text.subSequence(payload.getStart(), payload.getEnd()).toString();
+    boolean standardOnly = false;
+    boolean urlOnly = false;
+    boolean wrapped = false;
+    for (int i = 0; i < encoded.length(); i++) {
+      final char c = encoded.charAt(i);
+      if (c == '+' || c == '/') {
+        standardOnly = true;
+      } else if (c == '-' || c == '_') {
+        urlOnly = true;
+      } else if (c == '\r' || c == '\n') {
+        wrapped = true;
+      } else if (!isSharedBase64Char(c) && c != '=') {
+        throw new IllegalArgumentException("payload contains a non-base64 character");
+      }
+    }
+    if (standardOnly && urlOnly) {
+      throw new IllegalArgumentException("payload mixes base64 and base64url alphabets");
+    }
+    if (wrapped && urlOnly) {
+      throw new IllegalArgumentException("wrapped base64url payloads are not supported");
+    }
+    if (urlOnly) {
+      return Base64.getUrlDecoder().decode(encoded);
+    }
+    if (wrapped) {
+      return Base64.getMimeDecoder().decode(encoded);
+    }
+    return Base64.getDecoder().decode(encoded);
+  }
+
+  /**
+   * Tests the characters shared by the standard and URL-safe base64 alphabets.
+   *
+   * @param c The character to test.
+   * @return {@code true} for an ASCII letter or digit.
+   */
+  private static boolean isSharedBase64Char(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
   }
 }
