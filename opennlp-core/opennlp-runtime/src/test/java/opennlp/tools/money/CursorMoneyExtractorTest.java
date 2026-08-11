@@ -263,6 +263,86 @@ public class CursorMoneyExtractorTest {
   }
 
   /**
+   * Verifies the spelled-out currency words: the word follows the amount and any scale
+   * marker, and the mention covers the whole phrase including the word.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "50 dollars; 50; USD",
+      "1 dollar; 1; USD",
+      "1.2 million dollars; 1200000.0; USD",
+      "50 euros; 50; EUR",
+      "1 euro; 1; EUR",
+      "3 billion pounds; 3000000000; GBP",
+      "40 million sterling; 40000000; GBP",
+      "1,200 yen; 1200; JPY",
+      "500 rupees; 500; INR",
+      "3.5k dollars; 3500.0; USD",
+      "-20 dollars; -20; USD",
+      "12 trillion yuan; 12000000000000; CNY",
+      "80 renminbi; 80; CNY",
+      "300 roubles; 300; RUB",
+      "25 shekels; 25; ILS",
+      "900 baht; 900; THB"
+  })
+  void testSpelledOutCurrencyWordsCoverTheFullMention(String text, String amount,
+      String currency) {
+    final MoneyAmount mention = single(text);
+    assertEquals(new Span(0, text.length()), mention.span(), text);
+    assertEquals(0, new BigDecimal(amount).compareTo(mention.amount()), text);
+    assertEquals(currency, mention.currency(), text);
+  }
+
+  @Test
+  void testCurrencyWordIsMatchedCaseInsensitively() {
+    assertEquals("USD", single("50 Dollars").currency());
+    assertEquals("EUR", single("50 EUROS").currency());
+  }
+
+  @Test
+  void testCurrencyWordMentionInsideSentenceHasExactSpan() {
+    final MoneyAmount mention = single("the fund raised 1.2 million dollars last year");
+    assertEquals(new Span(16, 35), mention.span());
+    assertEquals(0, new BigDecimal("1200000").compareTo(mention.amount()));
+  }
+
+  @Test
+  void testCurrencyWordInTheEuropeanNotation() {
+    final CursorMoneyExtractor european = new CursorMoneyExtractor(NumberNotation.LATIN_EU);
+    final List<MoneyAmount> mentions = european.extract("1.234,56 euros");
+    assertEquals(1, mentions.size());
+    assertEquals(0, new BigDecimal("1234.56").compareTo(mentions.get(0).amount()));
+    assertEquals("EUR", mentions.get(0).currency());
+  }
+
+  /**
+   * Verifies that the word table stays a table of currencies: an ordinary noun after a
+   * number is not money, a currency subunit is not the currency, a word naming several
+   * currencies at once is not guessed at, and a word that only begins like a currency
+   * word does not match. The everyday English verb {@code won} is excluded for the same
+   * reason, although it does name a currency.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "5 apples",
+      "10 cents",
+      "3 pence",
+      "12 items",
+      "500 pesos",              // names several currencies
+      "20 francs",              // names several currencies
+      "75 kronor",              // names several currencies
+      "3 won",                  // an everyday English verb
+      "50 dollarsx",            // the word runs into more letters
+      "50 dollar5",             // the word runs into a digit
+      "50 euro-cent",           // a subunit, not the currency
+      "dollars 50",             // the word does not precede the amount
+      "50  dollars"             // two spaces, not the single separator
+  })
+  void testWordsThatAreNotCurrenciesYieldNoMention(String text) {
+    assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  /**
    * Verifies the European notation end to end: dots group digits and a comma marks the
    * fraction, so a German amount is read at its real magnitude rather than as a value a
    * thousand times too small.
