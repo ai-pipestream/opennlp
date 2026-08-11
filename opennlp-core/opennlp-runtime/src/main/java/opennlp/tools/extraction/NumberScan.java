@@ -29,10 +29,10 @@ import opennlp.tools.commons.Internal;
  * <p>Which character groups digits and which marks the fraction is the caller's
  * {@link NumberNotation}. Grouping is strict: once a group separator appears, the leading
  * group must have at most three digits and every further group exactly three. A scan that
- * stops at a group separator directly followed by a digit fails entirely instead of
- * truncating, because the text continues a grouped number this scanner cannot parse, for
- * example the Indian-grouped {@code 1,00,000} or a European {@code 1.234,56} read in
- * {@link NumberNotation#LATIN_US}; any other stop ends the scan at the last valid
+ * stops at another numeric separator directly followed by a digit fails entirely instead
+ * of truncating, because the text continues a number this scanner cannot parse, for
+ * example the Indian-grouped {@code 1,00,000}, a repeated decimal separator, or a European
+ * {@code 1.234,56} read in {@link NumberNotation#LATIN_US}; any other stop ends at the last valid
  * position. With scaling enabled, an immediate suffix ({@code k}, {@code m}, {@code b},
  * {@code bn}) or a following word ({@code thousand} to {@code trillion}) multiplies the
  * value, and an immediate letter that is no scale marker invalidates the scan
@@ -72,7 +72,7 @@ public final class NumberScan {
    *                 Must not be {@code null}.
    * @return The scanned {@link Result}, whose value is normalized to a dot decimal
    *         separator, or {@code null} when no number starts at {@code start}, the scan
-   *         stops at a group separator directly followed by a digit, or an immediate
+   *         stops at another separator directly followed by a digit, or an immediate
    *         letter suffix is not a scale marker.
    */
   public static Result parse(CharSequence text, int start, boolean applyScale,
@@ -104,11 +104,10 @@ public final class NumberScan {
         i++;
       }
     }
-    if (charAt(text, i) == group && isAsciiDigit(charAt(text, i + 1))) {
-      // The text continues a grouped number this scanner cannot parse, for example the
-      // Indian-grouped 1,00,000 or a number written in the other notation. Truncating
-      // here would silently report a wildly wrong value, so the whole candidate is
-      // rejected.
+    if ((charAt(text, i) == group || charAt(text, i) == decimal)
+        && isAsciiDigit(charAt(text, i + 1))) {
+      // Another separator followed by a digit continues the malformed number. Returning
+      // a valid prefix here would let a typed extractor report the wrong value.
       return null;
     }
     final BigDecimal value = new BigDecimal(normalized.toString());

@@ -21,7 +21,7 @@ import opennlp.tools.util.Span;
 
 /**
  * One temporal mention in a text: the {@link Span} it covers in the original text, the
- * normalized calendar value, and its granularity.
+ * normalized calendar value, granularity, and origin.
  *
  * <p>The value follows the ISO 8601 style at the mention's granularity:
  * {@code 2026-07-14} for a day, {@code 2026-W29} for an ISO week, {@code 2026-07} for
@@ -31,11 +31,14 @@ import opennlp.tools.util.Span;
  * @param span The location of the mention in the original text. Must not be {@code null}.
  * @param value The normalized calendar value. Must not be {@code null} or blank.
  * @param granularity The granularity of the value. Must not be {@code null}.
+ * @param origin Whether the mention was written as an absolute date or resolved from a
+ *               relative expression. Must not be {@code null}.
  *
  * @see <a href="https://www.iso.org/iso-8601-date-and-time-format.html">ISO 8601</a>
  * @since 3.0.0
  */
-public record TemporalExpression(Span span, String value, Granularity granularity) {
+public record TemporalExpression(Span span, String value, Granularity granularity,
+    Origin origin) {
 
   /**
    * The granularities a mention can normalize to.
@@ -54,10 +57,31 @@ public record TemporalExpression(Span span, String value, Granularity granularit
   }
 
   /**
+   * How the normalized value was obtained.
+   */
+  public enum Origin {
+    /** The text states the calendar value directly. */
+    ABSOLUTE,
+    /** The value was resolved from relative text against a reference date. */
+    RELATIVE
+  }
+
+  /**
+   * Initializes an absolute temporal mention.
+   *
+   * @param span The location of the mention. Must not be {@code null}.
+   * @param value The normalized calendar value. Must not be {@code null} or blank.
+   * @param granularity The value granularity. Must not be {@code null}.
+   */
+  public TemporalExpression(Span span, String value, Granularity granularity) {
+    this(span, value, granularity, Origin.ABSOLUTE);
+  }
+
+  /**
    * Validates the mention.
    *
-   * @throws IllegalArgumentException Thrown if {@code span} or {@code granularity} is
-   *         {@code null}, or {@code value} is {@code null} or blank.
+   * @throws IllegalArgumentException Thrown if {@code span}, {@code granularity}, or
+   *         {@code origin} is {@code null}, or {@code value} is {@code null} or blank.
    */
   public TemporalExpression {
     if (span == null) {
@@ -68,6 +92,9 @@ public record TemporalExpression(Span span, String value, Granularity granularit
     }
     if (granularity == null) {
       throw new IllegalArgumentException("granularity must not be null");
+    }
+    if (origin == null) {
+      throw new IllegalArgumentException("origin must not be null");
     }
   }
 }

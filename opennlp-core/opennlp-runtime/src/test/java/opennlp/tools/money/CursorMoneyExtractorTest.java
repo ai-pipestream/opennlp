@@ -441,6 +441,22 @@ public class CursorMoneyExtractorTest {
     assertEquals("CAD", canadian.extract("$5").get(0).currency());
   }
 
+  /** Verifies that constructor sorting keeps every symbol aligned with its currency. */
+  @Test
+  void testCustomSymbolTableKeepsCodesAlignedAfterSorting() {
+    final Map<Integer, String> symbols = new HashMap<>();
+    symbols.put(0x20B9, "INR");
+    symbols.put((int) '$', "CAD");
+    symbols.put(0x20AC, "EUR");
+    symbols.put(0x00A3, "GBP");
+    final CursorMoneyExtractor custom = new CursorMoneyExtractor(symbols);
+
+    final List<MoneyAmount> mentions = custom.extract("$1 \u00A32 \u20AC3 \u20B94");
+
+    assertEquals(List.of("CAD", "GBP", "EUR", "INR"),
+        mentions.stream().map(MoneyAmount::currency).toList());
+  }
+
   @Test
   void testCustomSymbolTableValidation() {
     assertThrows(IllegalArgumentException.class,
@@ -452,12 +468,15 @@ public class CursorMoneyExtractorTest {
         () -> new CursorMoneyExtractor(Map.of(-1, "USD")));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(Map.of(Character.MAX_CODE_POINT + 1, "USD")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor(Map.of((int) 'A', "USD")));
     final Map<Integer, String> nullCodePoint = new HashMap<>();
     nullCodePoint.put(null, "USD");
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(nullCodePoint));
   }
 
+  /** Verifies that malformed repeated-decimal amounts fail closed in every position. */
   @ParameterizedTest
   @ValueSource(strings = {
       "$1.2.3",
@@ -468,6 +487,7 @@ public class CursorMoneyExtractorTest {
     assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Verifies that a valid locale with no currency fails with the public API exception. */
   @Test
   void testRegionWithoutACurrencyFailsAtTheFactoryBoundary() {
     assertThrows(IllegalArgumentException.class,

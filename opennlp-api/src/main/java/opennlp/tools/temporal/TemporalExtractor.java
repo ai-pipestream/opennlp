@@ -22,7 +22,8 @@ import java.util.List;
 
 /**
  * The interface for temporal extractors, which find calendar mentions in a text and
- * report each as a {@link TemporalExpression} with its span in the original text.
+ * report each as a {@link TemporalExpression} with its span in the original text and
+ * whether its value was stated directly or resolved from relative text.
  *
  * @see TemporalExpression
  * @since 3.0.0
@@ -43,7 +44,8 @@ public interface TemporalExtractor {
    * Extracts all temporal mentions from a text, resolving relative expressions such
    * as {@code yesterday} or {@code next month} against a reference date. An
    * implementation that recognizes no relative expressions reports the same mentions
-   * as {@link #extract(CharSequence)}, which is this method's default behavior.
+   * as {@link #extract(CharSequence)}, which is this method's default behavior. A result
+   * resolved from relative text has {@link TemporalExpression.Origin#RELATIVE} origin.
    *
    * @param text The text to scan. Must not be {@code null}.
    * @param reference The date relative expressions resolve against, typically the

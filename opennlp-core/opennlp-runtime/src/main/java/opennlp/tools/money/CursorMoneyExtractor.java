@@ -19,6 +19,7 @@ package opennlp.tools.money;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Currency;
 import java.util.HashMap;
@@ -63,13 +64,12 @@ import opennlp.tools.util.Span;
  * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
  *
  * <p>Spelled-out currency words are matched against a deliberately short table of English
- * words that name exactly one currency in ordinary use, singular and plural, so
+ * words with a conventional default currency, singular and plural, so
  * {@code 50 euros} and {@code 3 billion pounds} are money while {@code 5 apples} and
- * {@code 10 cents} are not. Words that name several currencies at once, {@code peso},
- * {@code franc}, and {@code krone} among them, are left out rather than guessed, as is
- * {@code won}, which is an everyday English verb. The one knowingly ambiguous entry is
- * {@code pound}, which also names a weight: {@code 3 pounds of flour} is read as money,
- * the price of covering the far more common financial usage.</p>
+ * {@code 10 cents} are not. Less predictable families such as {@code peso}, {@code franc},
+ * and {@code krone} are left out, as is {@code won}, which is an everyday English verb.
+ * The defaults resolve {@code dollar} to USD and {@code rupee} to INR. {@code Pound} also
+ * names a weight, so {@code 3 pounds of flour} is knowingly read as money.</p>
  *
  * <p>Not recognized: accounting negatives in parentheses and multi-character symbols such
  * as {@code kr} or {@code HK$}. A known symbol directly preceded by an ASCII letter is
@@ -96,9 +96,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       Map.entry(0x20AB, "VND"));  // dong sign
 
   /**
-   * The English words that name one currency each, mapped to its ISO 4217 code. Only
-   * words that denote a single currency in ordinary use are listed; see the class
-   * documentation for what is deliberately absent.
+   * English currency words mapped to their conventional default ISO 4217 code. See the
+   * class documentation for deliberate omissions and ambiguities.
    */
   private static final Map<String, String> CURRENCY_WORDS = Map.ofEntries(
       Map.entry("dollar", "USD"),
@@ -161,9 +160,10 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    *
    * @param symbolCurrencies Maps a currency symbol code point to the ISO 4217 code it
    *                         denotes. Must not be {@code null} or empty, no key may be
-   *                         {@code null}, and every value must be a known ISO 4217 code.
+   *                         {@code null}, every key must be a Unicode currency-symbol
+   *                         code point, and every value must be a known ISO 4217 code.
    * @throws IllegalArgumentException Thrown if the map is {@code null} or empty, maps a
-   *         {@code null} code point, or names an unknown currency code.
+   *         {@code null} or non-currency-symbol code point, or names an unknown code.
    */
   public CursorMoneyExtractor(Map<Integer, String> symbolCurrencies) {
     this(symbolCurrencies, NumberNotation.LATIN_US);
@@ -174,12 +174,13 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    *
    * @param symbolCurrencies Maps a currency symbol code point to the ISO 4217 code it
    *                         denotes. Must not be {@code null} or empty, no key may be
-   *                         {@code null}, and every value must be a known ISO 4217 code.
+   *                         {@code null}, every key must be a Unicode currency-symbol
+   *                         code point, and every value must be a known ISO 4217 code.
    * @param notation The written convention amounts group digits and mark fractions in.
    *                 Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if the map is {@code null} or empty, maps a
-   *         {@code null} code point, names an unknown currency code, or {@code notation}
-   *         is {@code null}.
+   *         {@code null} or non-currency-symbol code point, names an unknown currency
+   *         code, or {@code notation} is {@code null}.
    */
   public CursorMoneyExtractor(Map<Integer, String> symbolCurrencies, NumberNotation notation) {
     if (symbolCurrencies == null || symbolCurrencies.isEmpty()) {
@@ -189,19 +190,31 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       throw new IllegalArgumentException("notation must not be null");
     }
     this.notation = notation;
-    this.symbolCodePoints = new int[symbolCurrencies.size()];
-    this.currencyCodes = new String[symbolCurrencies.size()];
-    int i = 0;
-    for (final Map.Entry<Integer, String> symbol : symbolCurrencies.entrySet()) {
+    final List<Map.Entry<Integer, String>> symbols =
+        new ArrayList<>(symbolCurrencies.entrySet());
+    for (final Map.Entry<Integer, String> symbol : symbols) {
       if (symbol.getKey() == null) {
         throw new IllegalArgumentException("symbolCurrencies must not map a null code point");
+      }
+      if (!Character.isValidCodePoint(symbol.getKey())) {
+        throw new IllegalArgumentException("not a valid Unicode code point: " + symbol.getKey());
+      }
+      if (Character.getType(symbol.getKey()) != Character.CURRENCY_SYMBOL) {
+        throw new IllegalArgumentException("not a currency symbol code point: "
+            + symbol.getKey());
       }
       final String code = symbol.getValue();
       if (code == null || !ISO_CODES.contains(code)) {
         throw new IllegalArgumentException("not an ISO 4217 currency code: " + code);
       }
+    }
+    symbols.sort(Map.Entry.comparingByKey());
+    this.symbolCodePoints = new int[symbols.size()];
+    this.currencyCodes = new String[symbols.size()];
+    int i = 0;
+    for (final Map.Entry<Integer, String> symbol : symbols) {
       symbolCodePoints[i] = symbol.getKey();
-      currencyCodes[i] = code;
+      currencyCodes[i] = symbol.getValue();
       i++;
     }
   }
@@ -237,6 +250,9 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       currency = Currency.getInstance(region);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("region has no currency: " + region, e);
+    }
+    if (currency == null) {
+      throw new IllegalArgumentException("region has no currency: " + region);
     }
     final NumberNotation regionNotation = NumberNotation.forLocale(region);
     final String symbol = currency.getSymbol(region);
@@ -479,12 +495,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    *         known currency symbol.
    */
   private String currencyFor(int cp) {
-    for (int i = 0; i < symbolCodePoints.length; i++) {
-      if (symbolCodePoints[i] == cp) {
-        return currencyCodes[i];
-      }
-    }
-    return null;
+    final int index = Arrays.binarySearch(symbolCodePoints, cp);
+    return index < 0 ? null : currencyCodes[index];
   }
 
   /**

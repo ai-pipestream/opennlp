@@ -29,6 +29,7 @@ import java.util.Map;
 
 import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.temporal.TemporalExpression.Granularity;
+import opennlp.tools.temporal.TemporalExpression.Origin;
 import opennlp.tools.util.Span;
 
 /**
@@ -49,8 +50,9 @@ import opennlp.tools.util.Span;
  * resolves relative expressions: {@code today}, {@code yesterday}, {@code tomorrow};
  * {@code last}, {@code this}, or {@code next} week, month, quarter, or year; a count
  * of days, weeks, months, or years followed by {@code ago}; and {@code in} followed
- * by such a count. Each resolves against the reference at the granularity its unit
- * names, so {@code last week} is an ISO week and {@code 3 days ago} a calendar day.
+ * by such a count. Each is marked with {@link TemporalExpression.Origin#RELATIVE} and
+ * resolves at the granularity its unit names, so {@code last week} is an ISO week and
+ * {@code 3 days ago} a calendar day.
  * Without a reference date, relative expressions are not reported at all rather than
  * being guessed against the wall clock.</p>
  *
@@ -309,7 +311,7 @@ public class CursorTemporalExtractor implements TemporalExtractor {
           date.getYear(), date.get(IsoFields.QUARTER_OF_YEAR));
       case YEAR -> String.format(Locale.ROOT, "%04d", date.getYear());
     };
-    return new TemporalExpression(new Span(start, end), value, granularity);
+    return new TemporalExpression(new Span(start, end), value, granularity, Origin.RELATIVE);
   }
 
   /**

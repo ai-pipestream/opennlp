@@ -30,6 +30,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.temporal.TemporalExpression.Granularity;
+import opennlp.tools.temporal.TemporalExpression.Origin;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -73,6 +74,7 @@ public class CursorTemporalExtractorTest {
     assertEquals(new Span(0, text.length()), mention.span(), text);
     assertEquals(value, mention.value(), text);
     assertEquals(Granularity.valueOf(granularity), mention.granularity(), text);
+    assertEquals(Origin.ABSOLUTE, mention.origin(), text);
   }
 
   /**
@@ -201,6 +203,9 @@ public class CursorTemporalExtractorTest {
         () -> new TemporalExpression(new Span(0, 1), " ", Granularity.MONTH));
     assertThrows(IllegalArgumentException.class,
         () -> new TemporalExpression(new Span(0, 1), "2026-07", null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new TemporalExpression(new Span(0, 1), "2026-07",
+            Granularity.MONTH, null));
   }
 
   @Test
@@ -235,6 +240,7 @@ public class CursorTemporalExtractorTest {
     assertEquals(3, mentions.size());
     assertEquals("2026-07-16", mentions.get(0).value());
     assertEquals(Granularity.DAY, mentions.get(0).granularity());
+    assertEquals(Origin.RELATIVE, mentions.get(0).origin());
     assertEquals(new Span(6, 15), mentions.get(0).span());
     assertEquals("2026-07-18", mentions.get(1).value());
     assertEquals("2026-07-17", mentions.get(2).value());

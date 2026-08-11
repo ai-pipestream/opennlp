@@ -189,6 +189,7 @@ public class NumericPacksTest {
         .analyze("Chicago, 14 July 2026. It cost $5 yesterday.").layers().size());
   }
 
+  /** Verifies that callers can append to the extension list as documented. */
   @Test
   void testAnnotatorListCanBeExtendedAsDocumented() {
     final List<DocumentAnnotator> annotators = NumericPacks.annotators();

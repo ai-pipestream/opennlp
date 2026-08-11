@@ -68,8 +68,9 @@ Document document = DocumentAnalyzer.builder()
 		<para>
 			<code>NumericPacks</code> assembles the annotators for one kind of number:
 			<code>money()</code>, <code>quantity()</code>, <code>temporal()</code>, and
-			<code>fullPipeline()</code>, each with a <code>Locale</code> variant that reads
-			a document the way its region writes and denominates numbers. The packs exist
+			<code>fullPipeline()</code>. Money, quantity, and full-pipeline variants accept a
+			<code>Locale</code> that reads a document the way its region writes and
+			denominates numbers. The packs exist
 			mainly for one ordering rule that is easy to get wrong: the temporal annotator
 			elects the dateline that resolves relative expressions, so it must run before
 			<code>DocumentDateAnnotator</code>. Use <code>NumericPacks.annotators()</code>,
@@ -86,9 +87,9 @@ Document document = DocumentAnalyzer.builder()
 			absolute mentions only; if one of them is a day-granularity mention, it dates
 			the document and a second pass resolves relative expressions such as
 			<code>yesterday</code>, <code>3 days ago</code>, or <code>next quarter</code>
-			against it. The electing mention is the first day mention in text order, the
-			same dateline rule <code>DocumentDateAnnotator</code> applies, so the two
-			annotators never disagree about the date a document carries.
+			against it. Relative and absolute mentions retain their origin, and only the first
+			absolute day mention can elect the document date. A relative mention before the
+			dateline therefore cannot replace the date that resolved it.
 			<code>NumericManualExampleTest</code> asserts the behavior shown here.
 			<programlisting language="java"><![CDATA[
 Document document = NumericPacks.temporal()
@@ -112,7 +113,9 @@ Document document = NumericPacks.temporal().analyze("The buyer paid yesterday.")
 			When the date is known from metadata rather than from the text, pass it to the
 			<code>TemporalAnnotator(TemporalExtractor, LocalDate)</code> constructor, or use
 			<code>NumericPacks.temporal(LocalDate)</code>. A fixed reference is used for
-			every document and wins over any dateline in it.
+			every document and wins over any dateline when resolving relative expressions.
+			It has no text span and is not synthesized into the document-date layer; that
+			layer remains reserved for absolute days present in the text.
 		</para>
 	</section>
 
@@ -160,14 +163,15 @@ List<MoneyAmount> mentions = new CursorMoneyExtractor()
 			</programlisting>
 		</para>
 		<para>
-			The word table is deliberately short: it holds only English words that name one
-			currency each in ordinary use. Words naming several currencies at once, such as
+			The word table is deliberately short and assigns a conventional default currency
+			to each accepted English word. Less predictable families, such as
 			<code>peso</code>, <code>franc</code>, and <code>krone</code>, are left out
 			rather than guessed at, as is <code>won</code>, which is an everyday English
-			verb. A subunit such as <code>cents</code> is not the currency, and a hyphen
+			verb. The defaults resolve <code>dollar</code> to USD and <code>rupee</code> to
+			INR. A subunit such as <code>cents</code> is not the currency, and a hyphen
 			behind the word marks a compound such as <code>euro-cent</code> and rejects the
-			candidate. The one knowingly ambiguous entry is <code>pound</code>, which also
-			names a weight: <code>3 pounds of flour</code> is read as money.
+			candidate. <code>Pound</code> also names a weight, so
+			<code>3 pounds of flour</code> is knowingly read as money.
 		</para>
 	</section>
 
@@ -186,7 +190,8 @@ List<MoneyAmount> mentions = new CursorMoneyExtractor()
 			Units are matched exactly and case-sensitively against a curated default set;
 			ambiguous English words such as <code>in</code> are excluded. Pass your own set
 			to the <code>CursorQuantityExtractor(Set)</code> constructor to extend or
-			replace it.
+			replace it. Custom tokens contain letters only and are rejected at construction
+			time if the scanner could never consume them.
 			<programlisting language="java"><![CDATA[
 Document document = DocumentAnalyzer.builder()
     .add(new QuantityAnnotator(new CursorQuantityExtractor()))
