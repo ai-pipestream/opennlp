@@ -76,6 +76,8 @@ public class NumericFalsePositiveTest {
       "upgraded to 2.5.1",
       "release 10.15.7 notes",
       "1.2.3.4 is the address",
+      "$1.2.3 is malformed",
+      "1,2,3 euros is malformed",
       // letter-prefixed currency symbols the single-code-point table cannot tell apart
       "HK$50 in Kowloon",
       "US$50 bid",

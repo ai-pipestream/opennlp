@@ -159,6 +159,20 @@ public class NumberNotationTest {
   }
 
   /**
+   * Verifies that a second decimal separator continues the malformed number instead of
+   * ending a valid prefix. Typed extractors must not report that prefix as an amount.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "1.2.3; LATIN_US",
+      "1,2,3; LATIN_EU"
+  })
+  void testRepeatedDecimalSeparatorRejectsTheWholeScan(String text,
+      NumberNotation notation) {
+    Assertions.assertNull(NumberScan.parse(text, 0, false, notation), text);
+  }
+
+  /**
    * Verifies that a digit run too long to be a group is read as a fraction where the
    * separator marks one and rejected where it groups digits: {@code 1,2345} is a fraction
    * in the European notation and no number at all in the other, since a comma there

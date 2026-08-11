@@ -30,6 +30,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.DocumentAnnotator;
+import opennlp.tools.money.CursorMoneyExtractor;
 import opennlp.tools.money.MoneyAmount;
 import opennlp.tools.money.MoneyAnnotator;
 import opennlp.tools.quantity.Quantity;
@@ -90,10 +91,9 @@ public class NumericPacksTest {
   }
 
   /**
-   * Verifies the fixed-reference pack on a text that dates itself nowhere. The resolved
-   * relative expression is a day-granularity mention like any other, so it also elects the
-   * document date, which is the day the text names rather than the reference it was
-   * resolved against.
+   * Verifies the fixed-reference pack on a text that dates itself nowhere. The relative
+   * expression resolves, but it does not masquerade as the absolute mention from which a
+   * document date may be elected.
    */
   @Test
   void testTemporalPackWithAFixedReferenceResolvesWithoutADateline() {
@@ -104,8 +104,7 @@ public class NumericPacksTest {
         document.get(TemporalAnnotator.TEMPORALS);
     Assertions.assertEquals(1, temporals.size());
     Assertions.assertEquals("2026-07-13", temporals.get(0).value().value());
-    Assertions.assertEquals(LocalDate.of(2026, 7, 13),
-        document.get(DocumentDateAnnotator.DOCUMENT_DATE).get(0).value());
+    Assertions.assertTrue(document.get(DocumentDateAnnotator.DOCUMENT_DATE).isEmpty());
   }
 
   @Test
@@ -188,6 +187,15 @@ public class NumericPacksTest {
     annotators.forEach(builder::add);
     Assertions.assertEquals(4, builder.build()
         .analyze("Chicago, 14 July 2026. It cost $5 yesterday.").layers().size());
+  }
+
+  @Test
+  void testAnnotatorListCanBeExtendedAsDocumented() {
+    final List<DocumentAnnotator> annotators = NumericPacks.annotators();
+
+    annotators.add(new MoneyAnnotator(new CursorMoneyExtractor()));
+
+    Assertions.assertEquals(5, annotators.size());
   }
 
   @Test

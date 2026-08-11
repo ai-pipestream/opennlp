@@ -193,6 +193,27 @@ public class TemporalAnnotatorTest {
   }
 
   /**
+   * Verifies that a resolved relative mention before the dateline does not replace the
+   * absolute mention that supplied its reference date.
+   */
+  @Test
+  void testRelativeBeforeDatelineDoesNotElectTheDocumentDate() {
+    final String text = "Yesterday we filed. Dateline: 14 July 2026.";
+    final Document document = DocumentAnalyzer.builder()
+        .add(new TemporalAnnotator(new CursorTemporalExtractor()))
+        .add(new DocumentDateAnnotator())
+        .build()
+        .analyze(text);
+
+    Assertions.assertEquals(LocalDate.of(2026, 7, 14),
+        document.get(DocumentDateAnnotator.DOCUMENT_DATE).get(0).value());
+    Assertions.assertEquals(spanOf(text, "14 July 2026"),
+        document.get(DocumentDateAnnotator.DOCUMENT_DATE).get(0).span());
+    Assertions.assertEquals("2026-07-13",
+        document.get(TemporalAnnotator.TEMPORALS).get(0).value().value());
+  }
+
+  /**
    * Verifies that a day-granularity mention whose value is not an ISO 8601 date, as a
    * third-party extractor may supply, elects no reference: the mentions stay the
    * absolute ones instead of the annotator failing or inventing a date.
