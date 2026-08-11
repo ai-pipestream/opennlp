@@ -273,6 +273,35 @@ public class PseudonymizerTest {
     Assertions.assertEquals(rewrite.text().indexOf('z'), rewrite.mapOffset(text.indexOf('z')));
   }
 
+  @Test
+  void testMapsEveryOffsetAcrossManyReplacements() {
+    final String text = "xx ".repeat(1024);
+    final List<PiiMention> mentions = new ArrayList<>();
+    for (int start = 0; start < text.length(); start += 3) {
+      mentions.add(new PiiMention(new Span(start, start + 2), PiiMention.TYPE_EMAIL,
+          "value" + start));
+    }
+    final PiiRewrite rewrite = PSEUDONYMIZER.rewrite(text, mentions);
+
+    for (int offset = 0; offset <= text.length(); offset++) {
+      int expected = offset;
+      int shift = 0;
+      for (int i = 0; i < mentions.size(); i++) {
+        final Span source = mentions.get(i).span();
+        if (offset <= source.getStart()) {
+          break;
+        }
+        if (offset < source.getEnd()) {
+          expected = rewrite.mentions().get(i).span().getStart();
+          break;
+        }
+        shift += rewrite.mentions().get(i).span().length() - source.length();
+        expected = offset + shift;
+      }
+      Assertions.assertEquals(expected, rewrite.mapOffset(offset), "offset " + offset);
+    }
+  }
+
   @ParameterizedTest
   @ValueSource(ints = {-1, 24})
   void testRejectsAnOffsetOutsideTheOriginalText(int offset) {

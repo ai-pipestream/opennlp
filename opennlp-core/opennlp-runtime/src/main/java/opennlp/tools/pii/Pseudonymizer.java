@@ -48,6 +48,10 @@ import opennlp.tools.document.Document;
  */
 public final class Pseudonymizer {
 
+  /** One unambiguous map key for a mention identity. */
+  private record Identity(String type, String normalized) {
+  }
+
   private final String prefix;
   private final String suffix;
 
@@ -87,7 +91,7 @@ public final class Pseudonymizer {
    *         {@code null}, a span lies outside the text, or two spans overlap.
    */
   public PiiRewrite rewrite(CharSequence text, List<PiiMention> mentions) {
-    final Map<String, String> labels = new HashMap<>();
+    final Map<Identity, String> labels = new HashMap<>();
     final Map<String, Integer> counters = new HashMap<>();
     return PiiRewrite.replace(text, mentions,
         mention -> label(mention, labels, counters));
@@ -116,9 +120,9 @@ public final class Pseudonymizer {
    * @param counters The next sequence number by type.
    * @return The existing or newly assigned label.
    */
-  private String label(PiiMention mention, Map<String, String> labels,
+  private String label(PiiMention mention, Map<Identity, String> labels,
       Map<String, Integer> counters) {
-    final String key = mention.type() + '\u0000' + mention.normalized();
+    final Identity key = new Identity(mention.type(), mention.normalized());
     return labels.computeIfAbsent(key, ignored -> {
       final int number = counters.merge(mention.type(), 1, Integer::sum);
       return prefix + Ascii.toUpper(mention.type()) + '-' + number + suffix;
