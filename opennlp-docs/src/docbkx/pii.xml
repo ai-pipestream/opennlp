@@ -34,7 +34,9 @@
 			within the RFC 1035 presentation-length limit, so private-use suffixes
 			such as <code>.internal</code> or <code>.local</code> are not reported.
 			The ASCII local part is capped at 64 characters and the complete
-			mailbox at 254 characters. The baked IANA snapshot is refreshed with
+			mailbox at 254 characters. Local-part case is preserved in the normalized
+			form, while the case-insensitive domain is lowercased. The baked IANA
+			snapshot is refreshed with
 			<code>dev/fetch-iana-tlds.sh</code>; pass <code>--check</code> in an
 			automated drift check without changing the source tree.
 			An extractor limited to a subset of the types, for a caller that wants
@@ -205,11 +207,14 @@ List<Annotation<String>> tokens = rewrite.remap(originalTokens);]]>
 			Labels number from one in every text, so they say nothing across
 			documents. Where that is the question, <code>HmacTokenizer</code> derives
 			the label from the value under a secret key, and the same address
-			tokenizes identically in every document. The key is what makes this safe:
-			a plain digest of a value drawn from a small space, a Social Security
-			number for instance, is recovered by digesting the space.
+			tokenizes identically in every document. A plain digest of a value drawn
+			from a small space, a Social Security number for instance, is recovered by
+			digesting the space. The secret key prevents that attack, and it must contain
+			at least 32 random bytes. Tokens made under one key are deliberately
+			linkable, so they remain pseudonymous data and logs containing them still
+			require access control.
 			<programlisting language="java"><![CDATA[
-HmacTokenizer tokenizer = new HmacTokenizer(key);
+HmacTokenizer tokenizer = new HmacTokenizer(key); // at least 32 random bytes
 
 String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
 // "EMAIL-3f2a1c9d7e4b6a20", the same in every document scanned under this key
@@ -221,7 +226,7 @@ String tokenized = tokenizer.rewrite(document).text();]]>
 			<code>PiiAuditReport</code> is what a review can be given instead of the
 			mentions: how many of each type, how many were distinct, and a keyed token
 			per distinct value rather than the value. Nothing in a report carries a
-			value or an offset.
+			value or an offset, but its tokens remain linkable pseudonymous data.
 			<programlisting language="java"><![CDATA[
 PiiAuditReport report = PiiAuditReport.of(document, tokenizer);
 

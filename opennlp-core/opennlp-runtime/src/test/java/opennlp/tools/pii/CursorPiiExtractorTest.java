@@ -39,7 +39,7 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals(PiiMention.TYPE_EMAIL, mention.type());
     Assertions.assertEquals("John.Doe+news@Example.co.uk", text.substring(
         mention.span().getStart(), mention.span().getEnd()));
-    Assertions.assertEquals("john.doe+news@example.co.uk", mention.normalized());
+    Assertions.assertEquals("John.Doe+news@example.co.uk", mention.normalized());
   }
 
   @Test
@@ -126,12 +126,12 @@ public class CursorPiiExtractorTest {
 
   /**
    * Verifies punycode TLDs from the IANA root zone are accepted with exact spans and
-   * lowercased normalized forms.
+   * normalized forms with local-part case preserved and domain case folded.
    */
   @ParameterizedTest
   @CsvSource({
       "user@example.xn--p1ai, user@example.xn--p1ai, 0, 21",
-      "Contact USER@EXAMPLE.XN--P1AI please, user@example.xn--p1ai, 8, 29",
+      "Contact USER@EXAMPLE.XN--P1AI please, USER@example.xn--p1ai, 8, 29",
       "mail@site.xn--node now, mail@site.xn--node, 0, 18",
       "a@b.xn--j1amh!, a@b.xn--j1amh, 0, 13"
   })
@@ -143,8 +143,11 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals(normalized, mentions.get(0).normalized());
     Assertions.assertEquals(start, mentions.get(0).span().getStart());
     Assertions.assertEquals(end, mentions.get(0).span().getEnd());
-    Assertions.assertEquals(normalized,
-        text.substring(start, end).toLowerCase(java.util.Locale.ROOT));
+    final int at = normalized.indexOf('@');
+    Assertions.assertEquals(text.substring(start, start + at), normalized.substring(0, at));
+    Assertions.assertEquals(
+        text.substring(start + at, end).toLowerCase(java.util.Locale.ROOT),
+        normalized.substring(at));
   }
 
   /**
@@ -155,7 +158,7 @@ public class CursorPiiExtractorTest {
   @CsvSource({
       "user@EXAMPLE.COM, user@example.com",
       "user@Example.Org, user@example.org",
-      "User@ExAmPle.NeT, user@example.net",
+      "User@ExAmPle.NeT, User@example.net",
       "a@B.Io, a@b.io",
       "x@Y.AI, x@y.ai",
       "ops@Mail.APP, ops@mail.app",

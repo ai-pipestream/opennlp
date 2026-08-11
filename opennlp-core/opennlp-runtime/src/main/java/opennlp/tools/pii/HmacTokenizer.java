@@ -36,11 +36,11 @@ import opennlp.tools.document.Document;
  * which {@link Pseudonymizer} deliberately does not do, and two different addresses
  * practically never collide.</p>
  *
- * <p>The key is what makes this safe. A plain digest of a low-entropy value can be reversed
- * by hashing every candidate, and there are only so many card numbers or Social Security
- * numbers; with a secret key that attack needs the key. Treat the key as the secret it is:
- * keep it out of the data it protects, and know that rotating it invalidates every token
- * derived from the old one.</p>
+ * <p>The key prevents the dictionary attack that reverses a plain digest of a low-entropy
+ * value by hashing every candidate. It must contain at least 32 random bytes and remain
+ * separate from the data it protects. Tokens made with the same key are deliberately
+ * linkable, so they remain pseudonymous data and require access control. Rotating the key
+ * invalidates every token derived from the old one.</p>
  *
  * <p>Tokens rarely have the length of the values they replace, so offsets move; see
  * {@link PiiRewrite} for mapping annotations onto the rewritten text.</p>
@@ -57,6 +57,9 @@ public final class HmacTokenizer {
   /** How many hexadecimal digits of the MAC a token shows unless asked otherwise. */
   private static final int DEFAULT_LENGTH = 16;
 
+  /** Minimum key length recommended for HMAC-SHA-256. */
+  private static final int MINIMUM_KEY_BYTES = 32;
+
   /** Hexadecimal digits, lowercase, indexed by value. */
   private static final char[] HEX = "0123456789abcdef".toCharArray();
 
@@ -67,8 +70,9 @@ public final class HmacTokenizer {
    * Initializes a tokenizer producing tokens with sixteen hexadecimal digits. The 64-bit
    * token space keeps accidental collisions rare while retaining readable labels.
    *
-   * @param key The secret key. Must not be {@code null} or empty. The bytes are copied.
-   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or empty.
+   * @param key The secret key. Must contain at least 32 bytes. The bytes are copied.
+   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or shorter than
+   *         32 bytes.
    */
   public HmacTokenizer(byte[] key) {
     this(key, DEFAULT_LENGTH);
@@ -80,15 +84,18 @@ public final class HmacTokenizer {
    * sixteen. Lengths below the 16-digit default are supported for compatibility and compact
    * displays, but materially increase collision risk in large data sets.
    *
-   * @param key The secret key. Must not be {@code null} or empty. The bytes are copied.
+   * @param key The secret key. Must contain at least 32 bytes. The bytes are copied.
    * @param length The number of hexadecimal digits to show. Must be between {@code 4} and
    *               {@code 64}, the full width of a SHA-256 MAC.
-   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or empty, or
-   *         {@code length} is out of range.
+   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or shorter than
+   *         32 bytes, or {@code length} is out of range.
    */
   public HmacTokenizer(byte[] key, int length) {
-    if (key == null || key.length == 0) {
-      throw new IllegalArgumentException("key must not be null or empty");
+    if (key == null) {
+      throw new IllegalArgumentException("key must not be null");
+    }
+    if (key.length < MINIMUM_KEY_BYTES) {
+      throw new IllegalArgumentException("key must contain at least 32 bytes");
     }
     if (length < 4 || length > 64) {
       throw new IllegalArgumentException("length must be between 4 and 64: " + length);

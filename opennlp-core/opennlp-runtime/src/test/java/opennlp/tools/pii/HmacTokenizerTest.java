@@ -37,8 +37,10 @@ import opennlp.tools.util.Span;
  */
 public class HmacTokenizerTest {
 
-  private static final byte[] KEY = "a test key, not a real one".getBytes(StandardCharsets.UTF_8);
-  private static final byte[] OTHER_KEY = "a different key".getBytes(StandardCharsets.UTF_8);
+  private static final byte[] KEY =
+      "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
+  private static final byte[] OTHER_KEY =
+      "fedcba9876543210fedcba9876543210".getBytes(StandardCharsets.UTF_8);
   private static final PiiExtractor EXTRACTOR = new CursorPiiExtractor();
   private static final HmacTokenizer TOKENIZER = new HmacTokenizer(KEY);
 
