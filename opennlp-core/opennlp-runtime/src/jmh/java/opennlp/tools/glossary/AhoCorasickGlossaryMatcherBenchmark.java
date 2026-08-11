@@ -36,6 +36,7 @@ import org.openjdk.jmh.infra.Blackhole;
 
 import opennlp.tools.stemmer.snowball.SnowballStemmer;
 import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
+import opennlp.tools.util.normalizer.EnglishContractionCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.GermanUmlautCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
@@ -60,6 +61,17 @@ public class AhoCorasickGlossaryMatcherBenchmark {
 
   /** A realistic paragraph repeated to roughly 4 KiB of prose. */
   private static final String FOUR_KIB_TEXT = buildFourKibText();
+
+  /** A 4 KiB document with no registered glossary term. */
+  private static final String NO_HIT_FOUR_KIB_TEXT =
+      "Alpha beta gamma delta epsilon zeta theta lambda. ".repeat(100).substring(0, 4096);
+
+  /** A 4 KiB document containing 1,024 separate exact hits. */
+  private static final String HIT_HEAVY_FOUR_KIB_TEXT = "cat ".repeat(1024);
+
+  /** A contraction-rich document used by the aligned English expansion path. */
+  private static final String CONTRACTION_TEXT =
+      "We can't leave because they won't stop and we're not ready. ".repeat(70);
 
   private static String buildFourKibText() {
     final String paragraph = "The vendors sold hot dogs and soft drinks near the "
@@ -100,7 +112,9 @@ public class AhoCorasickGlossaryMatcherBenchmark {
   public static class MatcherState {
     AhoCorasickGlossaryMatcher exact;
     AhoCorasickGlossaryMatcher exactWide;
+    AhoCorasickGlossaryMatcher exactHitHeavy;
     AhoCorasickGlossaryMatcher offsetAware;
+    AhoCorasickGlossaryMatcher contractionAware;
     TermAnalyzingGlossaryMatcher termAnalyzing;
     TermAnalyzingGlossaryMatcher termAnalyzingWide;
 
@@ -114,8 +128,15 @@ public class AhoCorasickGlossaryMatcherBenchmark {
           .build();
       exact = new AhoCorasickGlossaryMatcher(small, true);
       exactWide = new AhoCorasickGlossaryMatcher(wide, true);
+      exactHitHeavy = new AhoCorasickGlossaryMatcher(
+          List.of(new GlossaryEntry("CAT", "cat")), false);
       offsetAware = new AhoCorasickGlossaryMatcher(small, true,
           GermanUmlautCharSequenceNormalizer.getInstance());
+      contractionAware = new AhoCorasickGlossaryMatcher(List.of(
+          new GlossaryEntry("CANNOT", "can not"),
+          new GlossaryEntry("WILL_NOT", "will not"),
+          new GlossaryEntry("WE_ARE", "we are")), true,
+          EnglishContractionCharSequenceNormalizer.getInstance());
       termAnalyzing = new TermAnalyzingGlossaryMatcher(small, analyzer);
       termAnalyzingWide = new TermAnalyzingGlossaryMatcher(wide, analyzer);
     }
@@ -136,6 +157,18 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     blackhole.consume(state.exactWide.match(FOUR_KIB_TEXT));
   }
 
+  /** Measures the lazy-boundary path when the automaton finds no candidate. */
+  @Benchmark
+  public void exactNoHitFourKib(MatcherState state, Blackhole blackhole) {
+    blackhole.consume(state.exact.match(NO_HIT_FOUR_KIB_TEXT));
+  }
+
+  /** Measures boundary resolution and overlap handling for 1,024 exact hits. */
+  @Benchmark
+  public void exactHitHeavyFourKib(MatcherState state, Blackhole blackhole) {
+    blackhole.consume(state.exactHitHeavy.match(HIT_HEAVY_FOUR_KIB_TEXT));
+  }
+
   @Benchmark
   public void offsetAwareGermanUmlautShortText(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.offsetAware.match(SHORT_TEXT));
@@ -144,6 +177,12 @@ public class AhoCorasickGlossaryMatcherBenchmark {
   @Benchmark
   public void offsetAwareGermanUmlautFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.offsetAware.match(FOUR_KIB_TEXT));
+  }
+
+  /** Measures aligned English contraction expansion and original-span recovery. */
+  @Benchmark
+  public void offsetAwareEnglishContractions(MatcherState state, Blackhole blackhole) {
+    blackhole.consume(state.contractionAware.match(CONTRACTION_TEXT));
   }
 
   @Benchmark

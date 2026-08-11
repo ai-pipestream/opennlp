@@ -250,11 +250,12 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /**
    * {@inheritDoc}
    *
-   * <p>One forward pass collects every candidate, then hits that sit inside a word are
+   * <p>One automaton pass collects every candidate, then hits that sit inside a word are
    * dropped and the remaining overlaps are resolved leftmost first, then longest, then
-   * by registration order. When a normalizer is configured, the pass runs over the
-   * normalized text and candidate spans are mapped back to the original before the
-   * boundary check.</p>
+   * by registration order. Unambiguous ASCII edges use constant-time boundary checks; the
+   * complete UAX&#160;#29 segmenter runs lazily only when a candidate has an ambiguous edge.
+   * When a normalizer is configured, the automaton scans normalized text and maps candidate
+   * spans back to the original before the boundary check.</p>
    */
   @Override
   public List<GlossaryMatch> match(CharSequence text) {
@@ -290,10 +291,16 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
           start = normalizedStart;
           end = normalizedEnd;
         }
-        if (wordBoundaries == null) {
+        final boolean spaceDelimited = isAsciiSpaceDelimited(text, start, end);
+        final boolean obviousInterior = !spaceDelimited
+            && (isObviousWordInterior(text, start) || isObviousWordInterior(text, end));
+        final boolean obviousBoundaries = spaceDelimited || (!obviousInterior
+            && isObviousWordBoundary(text, start) && isObviousWordBoundary(text, end));
+        if (!obviousInterior && !obviousBoundaries && wordBoundaries == null) {
           wordBoundaries = wordBoundaries(text);
         }
-        if (onWordBoundary(wordBoundaries, start, end)) {
+        if (!obviousInterior
+            && (obviousBoundaries || onWordBoundary(wordBoundaries, start, end))) {
           hits.add(new int[] {start, end, pattern});
         }
       }
@@ -361,7 +368,8 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /**
    * Builds an O(1) membership index over the UAX&#160;#29 boundaries in the original
    * text. The segmenter streams offsets into the packed bit set without allocating per
-   * character. Callers build the index lazily, only after the automaton finds a candidate.
+   * character. Callers build the index lazily, only after a candidate has an edge that the
+   * constant-time ASCII checks cannot decide.
    *
    * @param text The original text being scanned.
    * @return The boundary offsets, including zero and the text length.
@@ -371,6 +379,110 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
     boundaries.set(0);
     WordSegmenter.forEachSegment(text, (start, end) -> boundaries.set(end));
     return boundaries;
+  }
+
+  /**
+   * Recognizes the dominant prose case with four direct character checks: an ASCII word whose
+   * edges are the text limits or ASCII spaces. The complete checks below handle every other case.
+   *
+   * @param text The original text being scanned.
+   * @param start The candidate start, inclusive.
+   * @param end The candidate end, exclusive.
+   * @return {@code true} if both edges are unconditional UAX&#160;#29 boundaries.
+   */
+  private boolean isAsciiSpaceDelimited(CharSequence text, int start, int end) {
+    final boolean startBoundary = start == 0
+        || (text.charAt(start - 1) == ' ' && isAsciiWordCharacter(text.charAt(start)));
+    final boolean endBoundary = end == text.length()
+        || (text.charAt(end) == ' ' && isAsciiWordCharacter(text.charAt(end - 1)));
+    return startBoundary && endBoundary;
+  }
+
+  /**
+   * Recognizes the common boundary between an ASCII word character and an ASCII space without
+   * invoking the full segmenter. These pairs are unconditional breaks under UAX&#160;#29. All
+   * other pairs fall back to the complete algorithm.
+   *
+   * @param text The original text being scanned.
+   * @param offset The candidate boundary offset.
+   * @return {@code true} if the offset is unconditionally a word boundary.
+   */
+  private boolean isObviousWordBoundary(CharSequence text, int offset) {
+    if (offset == 0 || offset == text.length()) {
+      return true;
+    }
+    final char left = text.charAt(offset - 1);
+    final char right = text.charAt(offset);
+    return (left == ' ' && isAsciiWordCharacter(right))
+        || (right == ' ' && isAsciiWordCharacter(left))
+        || (isAsciiWordCharacter(left) && isTerminalAsciiMidWord(text, offset))
+        || (isAsciiWordCharacter(right) && isInitialAsciiMidWord(text, offset));
+  }
+
+  /**
+   * Recognizes mid-word punctuation followed by a space or the end of text. Without a following
+   * word character, UAX&#160;#29 does not join the punctuation to the word on its left.
+   *
+   * @param text The original text being scanned.
+   * @param offset The offset immediately before the punctuation.
+   * @return {@code true} if terminal punctuation makes {@code offset} a boundary.
+   */
+  private boolean isTerminalAsciiMidWord(CharSequence text, int offset) {
+    final char punctuation = text.charAt(offset);
+    return isAsciiMidWordPunctuation(punctuation)
+        && (offset + 1 == text.length() || text.charAt(offset + 1) == ' ');
+  }
+
+  /**
+   * Recognizes mid-word punctuation preceded by a space or the start of text. Without a preceding
+   * word character, UAX&#160;#29 does not join the punctuation to the word on its right.
+   *
+   * @param text The original text being scanned.
+   * @param offset The offset immediately after the punctuation.
+   * @return {@code true} if initial punctuation makes {@code offset} a boundary.
+   */
+  private boolean isInitialAsciiMidWord(CharSequence text, int offset) {
+    final char punctuation = text.charAt(offset - 1);
+    return isAsciiMidWordPunctuation(punctuation)
+        && (offset == 1 || text.charAt(offset - 2) == ' ');
+  }
+
+  /**
+   * Checks the ASCII punctuation that can join letters or numbers only when a word character
+   * occurs on both sides.
+   *
+   * @param value The character to classify.
+   * @return {@code true} for full stop, comma, or colon.
+   */
+  private boolean isAsciiMidWordPunctuation(char value) {
+    return value == '.' || value == ',' || value == ':';
+  }
+
+  /**
+   * Recognizes adjacent ASCII word characters, which UAX&#160;#29 unconditionally keeps in the
+   * same word. Candidates with either edge in such a pair can be rejected without segmentation.
+   *
+   * @param text The original text being scanned.
+   * @param offset The candidate boundary offset.
+   * @return {@code true} if the offset is unconditionally inside a word.
+   */
+  private boolean isObviousWordInterior(CharSequence text, int offset) {
+    return offset > 0 && offset < text.length()
+        && isAsciiWordCharacter(text.charAt(offset - 1))
+        && isAsciiWordCharacter(text.charAt(offset));
+  }
+
+  /**
+   * Checks the ASCII classes that UAX&#160;#29 joins into words.
+   *
+   * @param value The character to classify.
+   * @return {@code true} for an ASCII letter, digit, or connector underscore.
+   */
+  private boolean isAsciiWordCharacter(char value) {
+    return value >= 'A' && value <= 'Z'
+        || value >= 'a' && value <= 'z'
+        || value >= '0' && value <= '9'
+        || value == '_';
   }
 
   /**
