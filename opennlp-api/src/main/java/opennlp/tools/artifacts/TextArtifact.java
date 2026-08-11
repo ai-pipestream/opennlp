@@ -65,6 +65,11 @@ public record TextArtifact(Span span, String type) {
   public static final String TYPE_ZERO_WIDTH = "zero-width";
 
   /**
+   * A run from the Unicode Tags block outside a well-formed emoji tag flag.
+   */
+  public static final String TYPE_UNICODE_TAG = "unicode-tag";
+
+  /**
    * A sequence that reads as UTF-8 bytes shown through a single-byte decoding, the
    * classic double-decode damage.
    */

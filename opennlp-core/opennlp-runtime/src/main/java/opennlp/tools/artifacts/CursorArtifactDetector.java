@@ -54,6 +54,9 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   private static final int WORD_JOINER = 0x2060;
   private static final int ZERO_WIDTH_NO_BREAK_SPACE = 0xFEFF;
   private static final int VARIATION_SELECTOR_16 = 0xFE0F;
+  private static final int WAVING_BLACK_FLAG = 0x1F3F4;
+  private static final int TAG_OFFSET = 0xE0000;
+  private static final int CANCEL_TAG = 0xE007F;
 
   /**
    * The characters <a href="https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT">
@@ -79,11 +82,11 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
-    final List<TextArtifact> artifacts = new ArrayList<>();
-    scanClasses(text, artifacts);
-    scanMojibake(text, artifacts);
-    artifacts.sort((a, b) -> Integer.compare(a.span().getStart(), b.span().getStart()));
-    return artifacts;
+    final List<TextArtifact> classes = new ArrayList<>();
+    final List<TextArtifact> mojibake = new ArrayList<>();
+    scanClasses(text, classes);
+    scanMojibake(text, mojibake);
+    return merge(classes, mojibake);
   }
 
   /**
@@ -127,6 +130,10 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       }
       if (type == null && isZeroWidth(codePoint)) {
         i = flushZeroWidth(text, i, artifacts);
+        continue;
+      }
+      if (type == null && isUnicodeTag(codePoint)) {
+        i = flushUnicodeTags(text, i, artifacts);
         continue;
       }
       i += width;
@@ -177,6 +184,72 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     return codePoint == ZERO_WIDTH_SPACE || codePoint == ZERO_WIDTH_NON_JOINER
         || codePoint == ZERO_WIDTH_JOINER || codePoint == WORD_JOINER
         || codePoint == ZERO_WIDTH_NO_BREAK_SPACE;
+  }
+
+  /**
+   * Whether a code point belongs to the Unicode Tags block.
+   *
+   * @param codePoint The code point.
+   * @return {@code true} from U+E0000 through U+E007F.
+   */
+  private boolean isUnicodeTag(int codePoint) {
+    return codePoint >= TAG_OFFSET && codePoint <= CANCEL_TAG;
+  }
+
+  /**
+   * Resolves a maximal Unicode tag run. A well-formed subdivision flag is
+   * orthographic; every other use is reported as hidden tag text.
+   *
+   * @param text The text.
+   * @param start The first tag character.
+   * @param artifacts The list to add a finding to.
+   * @return The first index after the tag run.
+   */
+  private int flushUnicodeTags(CharSequence text, int start,
+      List<TextArtifact> artifacts) {
+    int end = start;
+    while (end < text.length()) {
+      final int codePoint = Character.codePointAt(text, end);
+      if (!isUnicodeTag(codePoint)) {
+        break;
+      }
+      end += Character.charCount(codePoint);
+    }
+    if (!isEmojiTagFlag(text, start, end)) {
+      artifacts.add(new TextArtifact(new Span(start, end), TextArtifact.TYPE_UNICODE_TAG));
+    }
+    return end;
+  }
+
+  /**
+   * Tests one tag run against the UTS #51 subdivision-flag shape.
+   *
+   * @param text The source text.
+   * @param start The first tag character.
+   * @param end The first index after the tag run.
+   * @return {@code true} for a terminated black-flag tag sequence with a two-letter
+   *         region and a non-empty subdivision suffix.
+   */
+  private boolean isEmojiTagFlag(CharSequence text, int start, int end) {
+    if (before(text, start) != WAVING_BLACK_FLAG) {
+      return false;
+    }
+    int i = start;
+    int count = 0;
+    while (i < end) {
+      final int codePoint = Character.codePointAt(text, i);
+      i += Character.charCount(codePoint);
+      if (codePoint == CANCEL_TAG) {
+        return i == end && count >= 3;
+      }
+      final int ascii = codePoint - TAG_OFFSET;
+      final boolean letter = ascii >= 'a' && ascii <= 'z';
+      if ((!letter && (ascii < '0' || ascii > '9')) || (count < 2 && !letter)) {
+        return false;
+      }
+      count++;
+    }
+    return false;
   }
 
   /**
@@ -264,11 +337,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       while (i < length && singleByte(text.charAt(i)) >= 0x80) {
         i++;
       }
-      final byte[] bytes = new byte[i - start];
-      for (int b = 0; b < bytes.length; b++) {
-        bytes[b] = (byte) singleByte(text.charAt(start + b));
-      }
-      if (isUtf8(bytes)) {
+      if (isUtf8(text, start, i)) {
         artifacts.add(new TextArtifact(new Span(start, i), TextArtifact.TYPE_MOJIBAKE));
       }
     }
@@ -292,6 +361,9 @@ public final class CursorArtifactDetector implements ArtifactDetector {
         return 0x80 + b;
       }
     }
+    if (c >= 0x80 && c <= 0x9F) {
+      return c;
+    }
     return -1;
   }
 
@@ -302,14 +374,16 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * <a href="https://www.rfc-editor.org/rfc/rfc3629#section-3">RFC 3629, section 3</a>
    * requires.
    *
-   * @param bytes The candidate bytes.
-   * @return {@code true} if the whole array is well-formed multi-byte UTF-8.
+   * @param text The source text.
+   * @param start The candidate start.
+   * @param end The candidate end.
+   * @return {@code true} if the whole range has a well-formed multi-byte UTF-8 image.
    */
-  private boolean isUtf8(byte[] bytes) {
+  private boolean isUtf8(CharSequence text, int start, int end) {
     boolean multiByte = false;
-    int i = 0;
-    while (i < bytes.length) {
-      final int lead = bytes[i] & 0xFF;
+    int i = start;
+    while (i < end) {
+      final int lead = singleByte(text.charAt(i));
       if (lead < 0x80) {
         i++;
         continue;
@@ -332,12 +406,12 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       } else {
         return false;
       }
-      if (i + continuations >= bytes.length) {
+      if (i + continuations >= end) {
         return false;
       }
       int codePoint = lead & (0x3F >> continuations);
       for (int k = 1; k <= continuations; k++) {
-        final int continuation = bytes[i + k] & 0xFF;
+        final int continuation = singleByte(text.charAt(i + k));
         if (continuation < 0x80 || continuation > 0xBF) {
           return false;
         }
@@ -351,5 +425,42 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       i += 1 + continuations;
     }
     return multiByte;
+  }
+
+  /**
+   * Merges ordered class and mojibake findings. Mojibake is the more specific
+   * explanation when its Latin-1 image contains C1 controls.
+   *
+   * @param classes The ordered per-code-point class findings.
+   * @param mojibake The ordered mojibake findings.
+   * @return The ordered, non-overlapping findings.
+   */
+  private List<TextArtifact> merge(List<TextArtifact> classes,
+      List<TextArtifact> mojibake) {
+    final List<TextArtifact> merged = new ArrayList<>(classes.size() + mojibake.size());
+    int c = 0;
+    int m = 0;
+    while (c < classes.size() && m < mojibake.size()) {
+      final TextArtifact classified = classes.get(c);
+      final TextArtifact damaged = mojibake.get(m);
+      if (classified.span().getEnd() <= damaged.span().getStart()) {
+        merged.add(classified);
+        c++;
+      } else if (damaged.span().getEnd() <= classified.span().getStart()) {
+        merged.add(damaged);
+        m++;
+      } else {
+        merged.add(damaged);
+        m++;
+        final int damageEnd = damaged.span().getEnd();
+        while (c < classes.size() && classes.get(c).span().getStart() < damageEnd) {
+          c++;
+        }
+      }
+    }
+    merged.addAll(classes.subList(c, classes.size()));
+    merged.addAll(mojibake.subList(m, mojibake.size()));
+    merged.sort((a, b) -> Integer.compare(a.span().getStart(), b.span().getStart()));
+    return merged;
   }
 }
