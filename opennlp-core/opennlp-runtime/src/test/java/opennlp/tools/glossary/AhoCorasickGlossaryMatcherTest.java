@@ -817,6 +817,81 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
   }
 
+  /**
+   * UAX&#160;#29 keeps an apostrophe inside an English contraction, so the uncontracted
+   * prefix is not a complete word at that offset.
+   */
+  @Test
+  void testContractionInteriorIsNotAWordBoundary() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("PREFIX", "can")), false);
+
+    Assertions.assertTrue(matcher.match("can't").isEmpty());
+  }
+
+  /**
+   * UAX&#160;#29 rule WB4 keeps extending marks with their base. A glossary term that
+   * omits the mark must not stop inside the resulting word segment.
+   */
+  @ParameterizedTest
+  @CsvSource(value = {
+      "cafe|cafe\u0301",
+      "\u845B|\u845B\uFE00"
+  }, delimiter = '|')
+  void testExtendingMarkStaysWithItsBase(String term, String text) {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("PART", term)), false);
+
+    Assertions.assertTrue(matcher.match(text).isEmpty());
+  }
+
+  /**
+   * UAX&#160;#29 joins letters to connector punctuation and joins acronym components
+   * across mid-letter punctuation, so neither prefix is a complete word.
+   */
+  @ParameterizedTest
+  @CsvSource(value = {
+      "cat|cat_food",
+      "U|U.S.A"
+  }, delimiter = '|')
+  void testUaxWordJoiningPunctuationBlocksPartialHit(String term, String text) {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("PART", term)), false);
+
+    Assertions.assertTrue(matcher.match(text).isEmpty());
+  }
+
+  /**
+   * UAX&#160;#29 rule WB3c keeps an extended pictograph after a zero-width joiner in
+   * the same segment, so one pictograph inside the sequence is not a complete hit.
+   */
+  @Test
+  void testEmojiZwjSequenceDoesNotExposeAnInteriorBoundary() {
+    final String man = "\uD83D\uDC68";
+    final String familyPrefix = man + "\u200D\uD83D\uDC69";
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("MAN", man)), false);
+
+    Assertions.assertTrue(matcher.match(familyPrefix).isEmpty());
+  }
+
+  /**
+   * Supplementary Han ideographs receive the same per-ideograph UAX&#160;#29
+   * boundaries as basic-plane Han characters while spans remain UTF-16 offsets.
+   */
+  @Test
+  void testSupplementaryHanTermMatchesBetweenHanNeighbors() {
+    final String term = "\uD840\uDC00"; // U+20000
+    final String text = "\u4E00" + term + "\u4E8C";
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("SUPPLEMENTARY", term)), false);
+
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(1, 3), matches.get(0).span());
+  }
+
   @Test
   void testInvalidMatcherArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
