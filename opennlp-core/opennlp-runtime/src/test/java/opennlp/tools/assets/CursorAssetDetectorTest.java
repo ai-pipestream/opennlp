@@ -313,6 +313,8 @@ public class CursorAssetDetectorTest {
         "{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));
     final String malformedHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(
         "{\"alg\":\"HS256\",}".getBytes(StandardCharsets.UTF_8));
+    final String emptyAlgorithm = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"alg\":\"\"}".getBytes(StandardCharsets.UTF_8));
 
     assertTrue(detector.detect(header + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect(validHeader + "." + notJson + "." + signature).isEmpty());
@@ -320,6 +322,7 @@ public class CursorAssetDetectorTest {
     assertTrue(detector.detect(validHeader + "." + claims + ".").isEmpty());
     assertTrue(detector.detect(noneHeader + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect(malformedHeader + "." + claims + "." + signature).isEmpty());
+    assertTrue(detector.detect(emptyAlgorithm + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect("x" + validHeader + "." + claims + "." + signature).isEmpty());
   }
 
