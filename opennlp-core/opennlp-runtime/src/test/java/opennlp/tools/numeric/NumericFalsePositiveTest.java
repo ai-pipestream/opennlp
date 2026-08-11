@@ -114,7 +114,7 @@ public class NumericFalsePositiveTest {
       "renewing next quarter"
   };
 
-  static List<String> universal() {
+  private static List<String> universal() {
     return List.of(UNIVERSAL);
   }
 
