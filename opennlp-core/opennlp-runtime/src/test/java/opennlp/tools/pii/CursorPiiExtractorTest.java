@@ -43,6 +43,15 @@ public class CursorPiiExtractorTest {
   }
 
   @Test
+  void testEmailNormalizationPreservesLocalPartCase() {
+    final List<PiiMention> mentions =
+        extractor.extract("User@Example.com user@example.com");
+
+    Assertions.assertEquals(List.of("User@example.com", "user@example.com"),
+        mentions.stream().map(PiiMention::normalized).toList());
+  }
+
+  @Test
   void testEmailExcludesTrailingPunctuation() {
     final List<PiiMention> mentions = extractor.extract("Reach me at jane@example.com.");
 
