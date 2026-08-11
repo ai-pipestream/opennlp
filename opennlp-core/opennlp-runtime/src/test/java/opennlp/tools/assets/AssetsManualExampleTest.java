@@ -17,6 +17,8 @@
 
 package opennlp.tools.assets;
 
+import java.nio.charset.StandardCharsets;
+
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Document;
@@ -42,6 +44,10 @@ public class AssetsManualExampleTest {
       + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
       + " into the body.";
 
+  /** The chapter's compact JWT example and its decoded claims. */
+  private static final String JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+      + ".eyJzdWIiOiIxMjMifQ.AAAA";
+
   @Test
   void testDetectionExampleStatesTheAssetExactly() {
     final EmbeddedAsset asset = new CursorAssetDetector().detect(TEXT).get(0);
@@ -63,6 +69,15 @@ public class AssetsManualExampleTest {
     assertEquals(7, found.height());
     assertEquals(45, found.decodedLength());
     assertEquals(found.payload(), found.span());
+  }
+
+  @Test
+  void testJwtExampleStatesTheAssetExactly() {
+    final EmbeddedAsset token = new CursorAssetDetector().detect(JWT).get(0);
+    assertEquals(EmbeddedAsset.FORMAT_JWT, token.format());
+    assertEquals("application/jwt", token.mediaType());
+    assertEquals("{\"sub\":\"123\"}",
+        new String(token.decode(JWT), StandardCharsets.UTF_8));
   }
 
   @Test

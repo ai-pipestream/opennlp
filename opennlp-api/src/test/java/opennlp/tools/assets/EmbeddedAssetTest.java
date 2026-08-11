@@ -17,6 +17,8 @@
 
 package opennlp.tools.assets;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -108,5 +110,36 @@ public class EmbeddedAssetTest {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> valid().decode("short"));
     assertEquals("text is shorter than the payload span", e.getMessage());
+  }
+
+  @Test
+  void testDecodeAcceptsWrappedStandardBase64() {
+    final String encoded = Base64.getMimeEncoder(4, "\r\n".getBytes(StandardCharsets.US_ASCII))
+        .encodeToString("ABCDEF".getBytes(StandardCharsets.US_ASCII));
+    final EmbeddedAsset asset = new EmbeddedAsset(new Span(0, encoded.length()),
+        new Span(0, encoded.length()), "bin", "application/octet-stream", 6, -1, -1);
+
+    assertArrayEquals("ABCDEF".getBytes(StandardCharsets.US_ASCII), asset.decode(encoded));
+  }
+
+  @Test
+  void testDecodeAcceptsUnpaddedBase64Url() {
+    final byte[] bytes = {(byte) 0xFB, (byte) 0xFF, (byte) 0xFF};
+    final String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    final EmbeddedAsset asset = new EmbeddedAsset(new Span(0, encoded.length()),
+        new Span(0, encoded.length()), "bin", "application/octet-stream", 3, -1, -1);
+
+    assertArrayEquals(bytes, asset.decode(encoded));
+  }
+
+  @Test
+  void testDecodeRejectsMixedBase64Alphabets() {
+    final EmbeddedAsset asset = new EmbeddedAsset(new Span(0, 4), new Span(0, 4),
+        "bin", "application/octet-stream", 3, -1, -1);
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> asset.decode("+_AA"));
+
+    assertEquals("payload mixes base64 and base64url alphabets", e.getMessage());
   }
 }

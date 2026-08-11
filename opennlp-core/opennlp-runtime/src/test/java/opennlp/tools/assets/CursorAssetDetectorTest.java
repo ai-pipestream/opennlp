@@ -134,6 +134,27 @@ public class CursorAssetDetectorTest {
         .encodeToString(bytes);
   }
 
+  /**
+   * The standard and widely deployed PEM labels supported by the detector.
+   *
+   * @return Label, format, and media type triples.
+   */
+  private static Stream<Arguments> pemTypes() {
+    return Stream.of(
+        Arguments.of("CERTIFICATE", "pem-cert", "application/x-x509-cert"),
+        Arguments.of("X509 CRL", "pem-crl", "application/pkix-crl"),
+        Arguments.of("CERTIFICATE REQUEST", "pem-request", "application/pkcs10"),
+        Arguments.of("PKCS7", "pem-pkcs7", "application/pkcs7-signature"),
+        Arguments.of("CMS", "pem-cms", "application/pkcs7-mime"),
+        Arguments.of("PRIVATE KEY", "pem-key", "application/x-x509-key"),
+        Arguments.of("ENCRYPTED PRIVATE KEY", "pem-key", "application/x-x509-key"),
+        Arguments.of("PUBLIC KEY", "pem-key", "application/x-x509-key"),
+        Arguments.of("ATTRIBUTE CERTIFICATE", "pem-attribute-cert",
+            "application/x-x509-attribute-cert"),
+        Arguments.of("EC PARAMETERS", "pem-parameters",
+            "application/x-x509-ec-parameters"));
+  }
+
   @Test
   void testBarePngRunWithDimensions() {
     final byte[] bytes = png(640, 480);
@@ -214,6 +235,23 @@ public class CursorAssetDetectorTest {
     assertArrayEquals(certificate, asset.decode(text));
   }
 
+  /** Every supported PEM family maps its verified boundary label to stable metadata. */
+  @ParameterizedTest
+  @MethodSource("pemTypes")
+  void testPemTypeMappings(String label, String format, String mediaType) {
+    final byte[] content = new byte[96];
+    final String body = wrapped(content, 64);
+    final String pem = "-----BEGIN " + label + "-----\n" + body.replace("\r\n", "\n")
+        + "\n-----END " + label + "-----";
+
+    final List<EmbeddedAsset> assets = detector.detect(pem);
+
+    assertEquals(1, assets.size());
+    assertEquals(format, assets.get(0).format());
+    assertEquals(mediaType, assets.get(0).mediaType());
+    assertArrayEquals(content, assets.get(0).decode(pem));
+  }
+
   /** A compact JWT reports its full token and exposes the claims segment as payload. */
   @Test
   void testJsonWebToken() {
@@ -273,12 +311,15 @@ public class CursorAssetDetectorTest {
         new byte[32]);
     final String noneHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(
         "{\"alg\":\"none\"}".getBytes(StandardCharsets.UTF_8));
+    final String malformedHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"alg\":\"HS256\",}".getBytes(StandardCharsets.UTF_8));
 
     assertTrue(detector.detect(header + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect(validHeader + "." + notJson + "." + signature).isEmpty());
     assertTrue(detector.detect(validHeader + "." + claims).isEmpty());
     assertTrue(detector.detect(validHeader + "." + claims + ".").isEmpty());
     assertTrue(detector.detect(noneHeader + "." + claims + "." + signature).isEmpty());
+    assertTrue(detector.detect(malformedHeader + "." + claims + "." + signature).isEmpty());
     assertTrue(detector.detect("x" + validHeader + "." + claims + "." + signature).isEmpty());
   }
 
