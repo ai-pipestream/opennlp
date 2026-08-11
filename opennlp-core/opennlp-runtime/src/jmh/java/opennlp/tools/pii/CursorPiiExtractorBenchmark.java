@@ -28,6 +28,7 @@ import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
@@ -51,7 +52,9 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  *       character or two.</li>
  *   <li>{@code nearMiss}: the same prose seeded with values that are shaped right and fail
  *       their checksum, which forces every scanner to run its validation and then report
- *       nothing. This is the adversarial case and the upper bound on rejection cost.</li>
+ *       nothing.</li>
+ *   <li>{@code prefixHeavy}: a long base64url run carrying repeated token prefixes. This
+ *       pins the linear rejection path for hostile identifier-shaped input.</li>
  *   <li>{@code dense}: the same prose seeded with real values, one every few words, which
  *       adds the cost of normalizing and reporting a mention.</li>
  * </ul>
@@ -60,8 +63,9 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  * {@link PiiPacks#allStructured()} configuration run each workload, so the price of turning
  * every detector on is visible rather than assumed.</p>
  *
- * <p>One op scans one 4 kB document; each thread walks the document list from its own
- * cursor.</p>
+ * <p>One invocation scans one 4 kB document and is declared as 4,096 operations, so the
+ * reported throughput unit is characters per second. Single-thread methods measure scanner
+ * efficiency; parallel methods measure shared-extractor scalability.</p>
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -99,7 +103,7 @@ public class CursorPiiExtractorBenchmark {
   @State(Scope.Benchmark)
   public static class Corpus {
 
-    @Param({"clean", "nearMiss", "dense"})
+    @Param({"clean", "nearMiss", "prefixHeavy", "dense"})
     String workload;
 
     String[] documents;
@@ -114,7 +118,9 @@ public class CursorPiiExtractorBenchmark {
       final Random random = new Random(42);
       documents = new String[DOCUMENTS];
       for (int i = 0; i < DOCUMENTS; i++) {
-        documents[i] = document(random, seeds);
+        documents[i] = workload.equals("prefixHeavy")
+            ? "eyJ_".repeat(TARGET_LENGTH / 4)
+            : document(random, seeds);
       }
     }
 
@@ -138,7 +144,7 @@ public class CursorPiiExtractorBenchmark {
         text.append(words % 12 == 11 ? ". " : " ");
         words++;
       }
-      return text.toString();
+      return text.substring(0, TARGET_LENGTH);
     }
   }
 
@@ -173,7 +179,8 @@ public class CursorPiiExtractorBenchmark {
   }
 
   @Benchmark
-  @Threads(Threads.MAX)
+  @Threads(1)
+  @OperationsPerInvocation(TARGET_LENGTH)
   public void defaultExtractor(Corpus corpus, Default state, Cursor cursor, Blackhole bh) {
     final List<PiiMention> mentions = state.extractor.extract(
         corpus.documents[cursor.position++ & (DOCUMENTS - 1)]);
@@ -181,8 +188,28 @@ public class CursorPiiExtractorBenchmark {
   }
 
   @Benchmark
-  @Threads(Threads.MAX)
+  @Threads(1)
+  @OperationsPerInvocation(TARGET_LENGTH)
   public void widestConfiguration(Corpus corpus, Widest state, Cursor cursor, Blackhole bh) {
+    final List<PiiMention> mentions = state.extractor.extract(
+        corpus.documents[cursor.position++ & (DOCUMENTS - 1)]);
+    bh.consume(mentions);
+  }
+
+  @Benchmark
+  @Threads(Threads.MAX)
+  @OperationsPerInvocation(TARGET_LENGTH)
+  public void defaultExtractorParallel(Corpus corpus, Default state, Cursor cursor, Blackhole bh) {
+    final List<PiiMention> mentions = state.extractor.extract(
+        corpus.documents[cursor.position++ & (DOCUMENTS - 1)]);
+    bh.consume(mentions);
+  }
+
+  @Benchmark
+  @Threads(Threads.MAX)
+  @OperationsPerInvocation(TARGET_LENGTH)
+  public void widestConfigurationParallel(Corpus corpus, Widest state, Cursor cursor,
+      Blackhole bh) {
     final List<PiiMention> mentions = state.extractor.extract(
         corpus.documents[cursor.position++ & (DOCUMENTS - 1)]);
     bh.consume(mentions);
