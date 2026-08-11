@@ -83,6 +83,17 @@ public class PseudonymizerTest {
   }
 
   @Test
+  void testTypeAndValuePairsCannotAliasThroughTheirSeparator() {
+    final List<PiiMention> mentions = List.of(
+        new PiiMention(new Span(0, 1), "a", "b\u0000c"),
+        new PiiMention(new Span(2, 3), "a\u0000b", "c"));
+
+    final PiiRewrite rewrite = PSEUDONYMIZER.rewrite("x y", mentions);
+    Assertions.assertNotEquals(rewrite.mentions().get(0).normalized(),
+        rewrite.mentions().get(1).normalized());
+  }
+
+  @Test
   void testDifferentValuesOfOneTypeGetDifferentLabels() {
     final PiiRewrite rewrite = rewrite("4111111111111111 and 5500005555555559");
 
