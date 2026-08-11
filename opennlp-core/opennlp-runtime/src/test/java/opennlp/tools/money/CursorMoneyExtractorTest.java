@@ -448,10 +448,30 @@ public class CursorMoneyExtractorTest {
     assertThrows(IllegalArgumentException.class, () -> new CursorMoneyExtractor(Map.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(Map.of((int) '$', "DOLLARS")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor(Map.of(-1, "USD")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor(Map.of(Character.MAX_CODE_POINT + 1, "USD")));
     final Map<Integer, String> nullCodePoint = new HashMap<>();
     nullCodePoint.put(null, "USD");
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(nullCodePoint));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "$1.2.3",
+      "USD 1.2.3",
+      "1.2.3 USD"
+  })
+  void testRepeatedDecimalSeparatorYieldsNoMention(String text) {
+    assertTrue(extractor.extract(text).isEmpty(), text);
+  }
+
+  @Test
+  void testRegionWithoutACurrencyFailsAtTheFactoryBoundary() {
+    assertThrows(IllegalArgumentException.class,
+        () -> CursorMoneyExtractor.forRegion(Locale.of("", "AQ")));
   }
 
   /**

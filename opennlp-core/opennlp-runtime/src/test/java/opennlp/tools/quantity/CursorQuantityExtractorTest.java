@@ -161,6 +161,22 @@ public class CursorQuantityExtractorTest {
         () -> new CursorQuantityExtractor(Set.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorQuantityExtractor(Set.of("toolongunit")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor(Set.of("m2")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor(Set.of("kg/m")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor(Set.of("\u00b0C")));
+  }
+
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "1.2.3 kg; LATIN_US",
+      "1,2,3 kg; LATIN_EU"
+  })
+  void testRepeatedDecimalSeparatorYieldsNoMention(String text,
+      NumberNotation notation) {
+    assertTrue(new CursorQuantityExtractor(notation).extract(text).isEmpty(), text);
   }
 
   /**
