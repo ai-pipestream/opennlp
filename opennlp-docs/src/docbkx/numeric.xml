@@ -22,10 +22,12 @@
 		<para>
 			Numeric extraction on the document pipeline combines temporal mentions,
 			document-date election, money amounts, measured quantities, and optional
-			document-dated currency conversion. A dateline elects the document date;
-			money mentions carry normalized <code>BigDecimal</code> amounts and ISO
-			currency codes; <code>MoneyConversionAnnotator</code> restates those amounts
-			in one target currency as of that date.
+			document-dated currency conversion. A dateline elects the document date and
+			resolves the relative expressions behind it; money mentions carry normalized
+			<code>BigDecimal</code> amounts and ISO currency codes;
+			<code>MoneyConversionAnnotator</code> restates those amounts in one target
+			currency as of that date. <code>NumericPacks</code> assembles the whole thing
+			in one call.
 		</para>
 		<para>
 			All extractors are model-free: they scan the text once, without regular
@@ -58,6 +60,113 @@ Document document = DocumentAnalyzer.builder()
 // MONEY: €2.5 million -> 2500000 EUR; $2,400,000 -> 2400000 USD
 // CONVERTED_MONEY: 3000000 USD and 2400000 USD on the same spans]]>
 			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.numeric.packs">
+		<title>Ready-made pipelines</title>
+		<para>
+			<code>NumericPacks</code> assembles the annotators for one kind of number:
+			<code>money()</code>, <code>quantity()</code>, <code>temporal()</code>, and
+			<code>fullPipeline()</code>, each with a <code>Locale</code> variant that reads
+			a document the way its region writes and denominates numbers. The packs exist
+			mainly for one ordering rule that is easy to get wrong: the temporal annotator
+			elects the dateline that resolves relative expressions, so it must run before
+			<code>DocumentDateAnnotator</code>. Use <code>NumericPacks.annotators(region)</code>
+			when the pipeline needs more, a <code>MoneyConversionAnnotator</code> for
+			instance, and add to the returned list.
+		</para>
+	</section>
+
+	<section xml:id="tools.numeric.relative">
+		<title>Relative dates</title>
+		<para>
+			<code>TemporalAnnotator</code> scans the text twice. The first pass reports
+			absolute mentions only; if one of them is a day-granularity mention, it dates
+			the document and a second pass resolves relative expressions such as
+			<code>yesterday</code>, <code>3 days ago</code>, or <code>next quarter</code>
+			against it. The electing mention is the first day mention in text order, the
+			same dateline rule <code>DocumentDateAnnotator</code> applies, so the two
+			annotators never disagree about the date a document carries.
+			<code>NumericManualExampleTest</code> asserts the behavior shown here.
+			<programlisting language="java"><![CDATA[
+Document document = NumericPacks.temporal()
+    .analyze("Berlin, 14 July 2026. The buyer paid yesterday.");
+
+// TEMPORALS: 14 July 2026 -> 2026-07-14; yesterday -> 2026-07-13
+// DOCUMENT_DATE: 2026-07-14, on the span of the dateline]]>
+			</programlisting>
+		</para>
+		<para>
+			A document that dates itself nowhere keeps the absolute mentions and reports no
+			relative expression at all, rather than resolving it against the wall clock and
+			answering differently every day the document is read.
+			<programlisting language="java"><![CDATA[
+Document document = NumericPacks.temporal().analyze("The buyer paid yesterday.");
+
+// TEMPORALS: empty]]>
+			</programlisting>
+		</para>
+		<para>
+			When the date is known from metadata rather than from the text, pass it to the
+			<code>TemporalAnnotator(TemporalExtractor, LocalDate)</code> constructor, or use
+			<code>NumericPacks.temporal(LocalDate)</code>. A fixed reference is used for
+			every document and wins over any dateline in it.
+		</para>
+	</section>
+
+	<section xml:id="tools.numeric.notations">
+		<title>Regional number notations</title>
+		<para>
+			The extractors read digits in one written convention, named by
+			<code>NumberNotation</code>: <code>LATIN_US</code> groups with commas and marks
+			the fraction with a dot, <code>LATIN_EU</code> does the opposite. The choice
+			matters by a factor of a thousand, since <code>1.234,56</code> is just over a
+			thousand in one convention and just over one in the other. Text that cannot be
+			read whole in the stated convention is rejected rather than approximated, so a
+			document in the wrong notation yields no mentions instead of wrong ones.
+		</para>
+		<para>
+			<code>CursorMoneyExtractor.forRegion(Locale)</code> and the regional packs derive
+			the notation from the locale's own <code>DecimalFormatSymbols</code>, not from a
+			hard-coded country list, and resolve ambiguous currency symbols in the same step.
+			<programlisting language="java"><![CDATA[
+String text = "Der Kaufer zahlte 2.400.000 EUR fur 1.250,5 GB Speicher.";
+
+Document german = NumericPacks.fullPipeline(Locale.GERMANY).analyze(text);
+// MONEY: 2.400.000 EUR -> 2400000 EUR
+// QUANTITIES: 1.250,5 GB -> 1250.5 GB
+
+Document american = NumericPacks.fullPipeline().analyze(text);
+// MONEY and QUANTITIES: empty, the text is not written in that notation]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.numeric.currencywords">
+		<title>Spelled-out currencies</title>
+		<para>
+			An amount may name its currency in words instead of a symbol or an ISO code:
+			<code>50 euros</code>, <code>1.2 million dollars</code>,
+			<code>3 billion pounds</code>. The word follows the amount and any scale marker,
+			and the mention covers the whole phrase.
+			<programlisting language="java"><![CDATA[
+List<MoneyAmount> mentions = new CursorMoneyExtractor()
+    .extract("the fund raised 1.2 million dollars and 50 euros");
+
+// 1.2 million dollars -> 1200000 USD
+// 50 euros -> 50 EUR]]>
+			</programlisting>
+		</para>
+		<para>
+			The word table is deliberately short: it holds only English words that name one
+			currency each in ordinary use. Words naming several currencies at once, such as
+			<code>peso</code>, <code>franc</code>, and <code>krone</code>, are left out
+			rather than guessed at, as is <code>won</code>, which is an everyday English
+			verb. A subunit such as <code>cents</code> is not the currency, and a hyphen
+			behind the word marks a compound such as <code>euro-cent</code> and rejects the
+			candidate. The one knowingly ambiguous entry is <code>pound</code>, which also
+			names a weight: <code>3 pounds of flour</code> is read as money.
 		</para>
 	</section>
 
