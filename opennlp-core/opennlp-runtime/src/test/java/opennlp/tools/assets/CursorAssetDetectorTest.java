@@ -120,6 +120,18 @@ public class CursorAssetDetectorTest {
     return "x " + run + " y";
   }
 
+  /**
+   * Encodes bytes with the requested RFC line width and CRLF separators.
+   *
+   * @param bytes The bytes to encode.
+   * @param width The line width, a multiple of four.
+   * @return The wrapped base64 text.
+   */
+  private static String wrapped(byte[] bytes, int width) {
+    return Base64.getMimeEncoder(width, "\r\n".getBytes(StandardCharsets.US_ASCII))
+        .encodeToString(bytes);
+  }
+
   @Test
   void testBarePngRunWithDimensions() {
     final byte[] bytes = png(640, 480);
@@ -135,6 +147,127 @@ public class CursorAssetDetectorTest {
     assertEquals(bytes.length, asset.decodedLength());
     assertEquals(encoded, asset.span().getCoveredText(text).toString());
     assertArrayEquals(bytes, asset.decode(text));
+  }
+
+  /** A MIME payload wrapped at 76 columns remains one exact, decodable asset span. */
+  @Test
+  void testMimeWrappedBarePayload() {
+    final ByteArrayOutputStream content = new ByteArrayOutputStream();
+    content.writeBytes(png(640, 480));
+    content.writeBytes(new byte[128]);
+    final byte[] bytes = content.toByteArray();
+    final String encoded = wrapped(bytes, 76);
+    final String text = embed(encoded);
+
+    final List<EmbeddedAsset> assets = detector.detect(text);
+
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals(EmbeddedAsset.FORMAT_PNG, asset.format());
+    assertEquals(encoded, asset.span().getCoveredText(text).toString());
+    assertEquals(encoded, asset.payload().getCoveredText(text).toString());
+    assertEquals(bytes.length, asset.decodedLength());
+    assertArrayEquals(bytes, asset.decode(text));
+  }
+
+  /** A base64url payload uses the URL alphabet without padding and still decodes. */
+  @Test
+  void testBareBase64UrlPayload() {
+    final ByteArrayOutputStream content = new ByteArrayOutputStream();
+    content.writeBytes(png(8, 9));
+    content.writeBytes(new byte[] {(byte) 0xFB, (byte) 0xFF, (byte) 0xFF});
+    final byte[] bytes = content.toByteArray();
+    final String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    assertTrue(encoded.indexOf('-') >= 0 || encoded.indexOf('_') >= 0);
+
+    final List<EmbeddedAsset> assets = detector.detect(embed(encoded));
+
+    assertEquals(1, assets.size());
+    assertEquals(EmbeddedAsset.FORMAT_PNG, assets.get(0).format());
+    assertArrayEquals(bytes, assets.get(0).decode(embed(encoded)));
+  }
+
+  /** An RFC 7468 certificate envelope reports the envelope and decodes its body. */
+  @Test
+  void testPemCertificateEnvelope() {
+    final byte[] certificate = new byte[160];
+    certificate[0] = 0x30;
+    certificate[1] = (byte) 0x82;
+    certificate[2] = 0x01;
+    certificate[3] = 0x20;
+    final String body = wrapped(certificate, 64);
+    final String pem = "-----BEGIN CERTIFICATE-----\r\n" + body
+        + "\r\n-----END CERTIFICATE-----";
+    final String text = "certificate:\n" + pem + "\nend";
+
+    final List<EmbeddedAsset> assets = detector.detect(text);
+
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals("pem-cert", asset.format());
+    assertEquals("application/x-x509-cert", asset.mediaType());
+    assertEquals(pem, asset.span().getCoveredText(text).toString());
+    assertEquals(body, asset.payload().getCoveredText(text).toString());
+    assertEquals(certificate.length, asset.decodedLength());
+    assertArrayEquals(certificate, asset.decode(text));
+  }
+
+  /** A compact JWT reports its full token and exposes the claims segment as payload. */
+  @Test
+  void testJsonWebToken() {
+    final byte[] header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}"
+        .getBytes(StandardCharsets.UTF_8);
+    final byte[] claims = "{\"sub\":\"1234567890\",\"admin\":true}"
+        .getBytes(StandardCharsets.UTF_8);
+    final String encodedHeader = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(header);
+    final String encodedClaims = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(claims);
+    final String signature = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(new byte[32]);
+    final String token = encodedHeader + "." + encodedClaims + "." + signature;
+    final String text = "token=" + token + ";";
+
+    final List<EmbeddedAsset> assets = detector.detect(text);
+
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals("jwt", asset.format());
+    assertEquals("application/jwt", asset.mediaType());
+    assertEquals(token, asset.span().getCoveredText(text).toString());
+    assertEquals(encodedClaims, asset.payload().getCoveredText(text).toString());
+    assertEquals(claims.length, asset.decodedLength());
+    assertArrayEquals(claims, asset.decode(text));
+  }
+
+  /** JWT lookalikes fail closed unless header, claims, signature, and boundaries agree. */
+  @Test
+  void testJsonWebTokenNearMisses() {
+    final String header = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
+    final String validHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"alg\":\"HS256\"}".getBytes(StandardCharsets.UTF_8));
+    final String claims = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "{\"sub\":\"123\"}".getBytes(StandardCharsets.UTF_8));
+    final String notJson = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        "plain text".getBytes(StandardCharsets.UTF_8));
+    final String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        new byte[32]);
+
+    assertTrue(detector.detect(header + "." + claims + "." + signature).isEmpty());
+    assertTrue(detector.detect(validHeader + "." + notJson + "." + signature).isEmpty());
+    assertTrue(detector.detect(validHeader + "." + claims).isEmpty());
+    assertTrue(detector.detect("x" + validHeader + "." + claims + "." + signature).isEmpty());
+  }
+
+  /** PEM envelopes fail closed on mismatched labels and malformed body characters. */
+  @Test
+  void testPemEnvelopeNearMisses() {
+    final String body = wrapped(new byte[96], 64);
+    assertTrue(detector.detect("-----BEGIN CERTIFICATE-----\r\n" + body
+        + "\r\n-----END PUBLIC KEY-----").isEmpty());
+    assertTrue(detector.detect("-----BEGIN CERTIFICATE-----\r\n" + body + "!"
+        + "\r\n-----END CERTIFICATE-----").isEmpty());
   }
 
   @Test
