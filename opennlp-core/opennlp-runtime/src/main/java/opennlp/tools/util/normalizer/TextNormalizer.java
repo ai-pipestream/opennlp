@@ -175,6 +175,18 @@ public final class TextNormalizer {
     }
 
     /**
+     * {@return this builder with conservative English contraction expansion appended}
+     *
+     * <p>Unambiguous forms such as {@code can't}, {@code we're}, and {@code I'll}
+     * expand to whitespace-separated words. Ambiguous {@code 's}, {@code 'd}, and
+     * {@code ain't} forms remain unchanged. The step is offset-aware and English-specific,
+     * so it is opt-in rather than part of {@link TextNormalizer#defaultChain()}.</p>
+     */
+    public Builder englishContractions() {
+      return add(EnglishContractionCharSequenceNormalizer.getInstance());
+    }
+
+    /**
      * Appends a custom normalizer.
      *
      * @param custom The normalizer to append. Must not be {@code null}.
