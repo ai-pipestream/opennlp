@@ -55,18 +55,29 @@ public class JsonObjectParserTest {
         "{\"missing\" true}");
   }
 
+  /**
+   * Every JSON value production is accepted inside a complete object.
+   *
+   * @param json The valid object to parse.
+   */
   @ParameterizedTest
   @MethodSource("validObjects")
   void testValidObject(String json) {
     assertTrue(JsonObjectParser.parse(json, null).valid(), json);
   }
 
+  /**
+   * Common malformed lookalikes fail closed.
+   *
+   * @param json The malformed object to reject.
+   */
   @ParameterizedTest
   @MethodSource("invalidObjects")
   void testInvalidObject(String json) {
     assertFalse(JsonObjectParser.parse(json, null).valid(), json);
   }
 
+  /** Member capture is decoded, top-level only, and duplicate-intolerant. */
   @Test
   void testCapturesOnlyOneTopLevelStringMember() {
     final JsonObjectParser.Result parsed = JsonObjectParser.parse(

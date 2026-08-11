@@ -62,28 +62,40 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final String DATA_URI_SCHEME = "data:";
   private static final String BASE64_MARKER = ";base64,";
   private static final String JWT_MEDIA_TYPE = "application/jwt";
+  private static final String JWT_ALGORITHM_MEMBER = "alg";
+  private static final String JWT_UNSECURED_ALGORITHM = "none";
   private static final int MAX_JWT_SEGMENT_LENGTH = 16 * 1024;
+  private static final String PEM_CERT_FORMAT = "pem-cert";
+  private static final String PEM_REQUEST_FORMAT = "pem-request";
+  private static final String PEM_KEY_FORMAT = "pem-key";
+  private static final String PEM_PARAMETERS_FORMAT = "pem-parameters";
+  private static final String X509_CERT_MEDIA_TYPE = "application/x-x509-cert";
+  private static final String PKCS10_MEDIA_TYPE = "application/pkcs10";
+  private static final String X509_KEY_MEDIA_TYPE = "application/x-x509-key";
 
   private static final List<PemType> PEM_TYPES = List.of(
-      pemType("CERTIFICATE", "pem-cert", "application/x-x509-cert"),
-      pemType("X509 CERTIFICATE", "pem-cert", "application/x-x509-cert"),
+      pemType("CERTIFICATE", PEM_CERT_FORMAT, X509_CERT_MEDIA_TYPE),
+      pemType("X509 CERTIFICATE", PEM_CERT_FORMAT, X509_CERT_MEDIA_TYPE),
       pemType("X509 CRL", "pem-crl", "application/pkix-crl"),
-      pemType("CERTIFICATE REQUEST", "pem-request", "application/pkcs10"),
-      pemType("NEW CERTIFICATE REQUEST", "pem-request", "application/pkcs10"),
+      pemType("CERTIFICATE REQUEST", PEM_REQUEST_FORMAT, PKCS10_MEDIA_TYPE),
+      pemType("NEW CERTIFICATE REQUEST", PEM_REQUEST_FORMAT, PKCS10_MEDIA_TYPE),
       pemType("PKCS7", "pem-pkcs7", "application/pkcs7-signature"),
       pemType("CMS", "pem-cms", "application/pkcs7-mime"),
-      pemType("PRIVATE KEY", "pem-key", "application/x-x509-key"),
-      pemType("ENCRYPTED PRIVATE KEY", "pem-key", "application/x-x509-key"),
-      pemType("RSA PRIVATE KEY", "pem-key", "application/x-x509-key"),
-      pemType("DSA PRIVATE KEY", "pem-key", "application/x-x509-key"),
-      pemType("EC PRIVATE KEY", "pem-key", "application/x-x509-key"),
-      pemType("PUBLIC KEY", "pem-key", "application/x-x509-key"),
-      pemType("RSA PUBLIC KEY", "pem-key", "application/x-x509-key"),
+      pemType("PRIVATE KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("ENCRYPTED PRIVATE KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("RSA PRIVATE KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("DSA PRIVATE KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("EC PRIVATE KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("PUBLIC KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
+      pemType("RSA PUBLIC KEY", PEM_KEY_FORMAT, X509_KEY_MEDIA_TYPE),
       pemType("ATTRIBUTE CERTIFICATE", "pem-attribute-cert",
           "application/x-x509-attribute-cert"),
-      pemType("DSA PARAMETERS", "pem-parameters", "application/x-x509-dsa-parameters"),
-      pemType("EC PARAMETERS", "pem-parameters", "application/x-x509-ec-parameters"),
-      pemType("DH PARAMETERS", "pem-parameters", "application/x-x509-dh-parameters"));
+      pemType("DSA PARAMETERS", PEM_PARAMETERS_FORMAT,
+          "application/x-x509-dsa-parameters"),
+      pemType("EC PARAMETERS", PEM_PARAMETERS_FORMAT,
+          "application/x-x509-ec-parameters"),
+      pemType("DH PARAMETERS", PEM_PARAMETERS_FORMAT,
+          "application/x-x509-dh-parameters"));
 
   /**
    * The base64 image of the RIFF container magic. RIFF is recognized apart from the
@@ -166,8 +178,8 @@ public final class CursorAssetDetector implements AssetDetector {
     }
     final String declared = text.subSequence(mediaTypeStart, i).toString();
     final int payloadStart = i + BASE64_MARKER.length();
-    final Payload payload = payload(text, payloadStart, true);
-    if (payload.end() == payloadStart) {
+    final Payload payload = payload(text, payloadStart, false);
+    if (payload.end() == payloadStart || payload.urlSafe()) {
       return start;
     }
     final byte[] header = decodeHeader(text, payload);
@@ -336,12 +348,14 @@ public final class CursorAssetDetector implements AssetDetector {
     }
     final String headerJson = utf8(header);
     final String claimsJson = utf8(claims);
-    if (!jsonObject(headerJson) || !jsonObject(claimsJson)) {
+    final JsonObjectParser.Result parsedHeader =
+        JsonObjectParser.parse(headerJson, JWT_ALGORITHM_MEMBER);
+    if (!parsedHeader.valid() || !JsonObjectParser.parse(claimsJson, null).valid()) {
       return start;
     }
-    final String algorithm = jsonStringMember(headerJson, "alg");
-    if (algorithm == null
-        || ("none".equals(algorithm) != (tokenEnd == signatureStart))) {
+    final String algorithm = parsedHeader.member();
+    if (algorithm == null || algorithm.isEmpty()
+        || (JWT_UNSECURED_ALGORITHM.equals(algorithm) != (tokenEnd == signatureStart))) {
       return start;
     }
     final Payload payload = new Payload(claimsStart, claimsEnd,
@@ -401,78 +415,6 @@ public final class CursorAssetDetector implements AssetDetector {
     } catch (CharacterCodingException e) {
       return null;
     }
-  }
-
-  /**
-   * Tests whether a decoded JWT segment is a JSON object at its outer boundary.
-   *
-   * @param value The decoded UTF-8 text, possibly {@code null}.
-   * @return {@code true} when the first and last non-whitespace characters are braces.
-   */
-  private boolean jsonObject(String value) {
-    if (value == null) {
-      return false;
-    }
-    int start = 0;
-    int end = value.length();
-    while (start < end && Character.isWhitespace(value.charAt(start))) {
-      start++;
-    }
-    while (end > start && Character.isWhitespace(value.charAt(end - 1))) {
-      end--;
-    }
-    return end - start >= 2 && value.charAt(start) == '{' && value.charAt(end - 1) == '}';
-  }
-
-  /**
-   * Finds a non-empty string-valued member in a small JSON object. This is a structural
-   * JWT guard, not a general JSON parser.
-   *
-   * @param json The decoded object text.
-   * @param name The member name.
-   * @return The member value, or {@code null} when absent or not a string.
-   */
-  private String jsonStringMember(String json, String name) {
-    final String key = "\"" + name + "\"";
-    for (int i = 0; i + key.length() < json.length(); i++) {
-      if (!matches(json, i, key)) {
-        continue;
-      }
-      int before = i - 1;
-      while (before >= 0 && Character.isWhitespace(json.charAt(before))) {
-        before--;
-      }
-      if (before < 0 || (json.charAt(before) != '{' && json.charAt(before) != ',')) {
-        continue;
-      }
-      int at = i + key.length();
-      while (at < json.length() && Character.isWhitespace(json.charAt(at))) {
-        at++;
-      }
-      if (at >= json.length() || json.charAt(at++) != ':') {
-        continue;
-      }
-      while (at < json.length() && Character.isWhitespace(json.charAt(at))) {
-        at++;
-      }
-      if (at >= json.length() || json.charAt(at++) != '"') {
-        continue;
-      }
-      final int valueStart = at;
-      boolean escaped = false;
-      while (at < json.length()) {
-        final char c = json.charAt(at);
-        if (c == '"' && !escaped) {
-          return at > valueStart ? json.substring(valueStart, at) : null;
-        }
-        escaped = c == '\\' && !escaped;
-        if (c != '\\') {
-          escaped = false;
-        }
-        at++;
-      }
-    }
-    return null;
   }
 
   /**
@@ -859,12 +801,27 @@ public final class CursorAssetDetector implements AssetDetector {
         format, mediaType);
   }
 
-  /** One scanned encoded payload and the counts needed for exact decoding metadata. */
+  /**
+   * One scanned encoded payload and the counts needed for exact decoding metadata.
+   *
+   * @param start The payload start.
+   * @param end The payload end.
+   * @param encodedLength The encoded character count, excluding line separators.
+   * @param padding The trailing padding character count.
+   * @param urlSafe Whether the payload uses a URL-only alphabet character.
+   */
   private record Payload(int start, int end, int encodedLength, int padding,
                          boolean urlSafe) {
   }
 
-  /** One supported RFC 7468 boundary pair and the asset tags it implies. */
+  /**
+   * One supported RFC 7468 boundary pair and the asset tags it implies.
+   *
+   * @param begin The complete begin boundary.
+   * @param end The complete end boundary.
+   * @param format The asset format tag.
+   * @param mediaType The asset media type.
+   */
   private record PemType(String begin, String end, String format, String mediaType) {
   }
 }

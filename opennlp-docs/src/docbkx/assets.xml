@@ -21,7 +21,8 @@
 		<title>Introduction</title>
 		<para>
 			Text dumps carry binaries: web pages inline images as <code>data:</code> URIs,
-			documents paste base64 payloads, and hostile bodies smuggle encoded content.
+			documents paste base64 payloads, mail wraps MIME bodies, and logs contain PEM
+			envelopes and JSON Web Tokens.
 			The package <code>opennlp.tools.assets</code> finds such assets as exact spans
 			over the original text, identifies their format, and can replace them with text
 			while keeping every offset mapped to the source.
@@ -90,6 +91,50 @@ EmbeddedAsset found = new CursorAssetDetector().detect(bare).get(0);
 			A bare run carries no URI around its payload, so the asset's span and its
 			payload span cover the same characters.
 			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.transport-forms">
+		<title>Wrapped base64, PEM, and JWT</title>
+		<para>
+			Bare standard-base64 payloads can cross LF or CRLF line separators when their
+			continued lines use the conventional 76-column MIME or 64-column PEM width.
+			The final line may be shorter. Unwrapped payloads may instead use the URL-safe
+			alphabet from
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc4648.html#section-5">RFC
+			4648 section 5</link>. The detector still requires a known and decoded file
+			magic before it reports either form as a bare asset.
+		</para>
+		<para>
+			A textual envelope following
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc7468.html">RFC 7468</link>
+			is different: its verified, matching <code>BEGIN</code> and <code>END</code>
+			labels identify the content. The asset span covers the full envelope while the
+			payload span covers only its line-wrapped body, so <code>decode</code> returns
+			the DER bytes directly. Empty bodies, mismatched labels, lines longer than 64
+			characters, invalid padding, and non-base64 body characters fail closed.
+		</para>
+		<para>
+			Compact JSON Web Tokens from
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc7519.html">RFC 7519</link>
+			are recognized as three base64url segments. The header and claims must decode
+			as UTF-8 JSON objects, the header must carry a non-empty string-valued
+			<code>alg</code>, and each segment is bounded to 16 KiB. For an unsecured token,
+			<code>alg</code> must be <code>none</code> and the signature segment must be empty;
+			all other algorithms require a non-empty signature segment. The full token is
+			the asset span and the claims segment is the payload:
+			<programlisting language="java"><![CDATA[
+String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    + ".eyJzdWIiOiIxMjMifQ.AAAA";
+
+EmbeddedAsset token = new CursorAssetDetector().detect(jwt).get(0);
+// token.format()    = "jwt"
+// token.mediaType() = "application/jwt"
+// new String(token.decode(jwt), StandardCharsets.UTF_8) = "{\"sub\":\"123\"}"]]>
+			</programlisting>
+			Detection validates structure only. It does not verify a JWT signature, trust a
+			key, or make an authorization decision. <code>AssetsManualExampleTest</code>
+			asserts the example exactly.
 		</para>
 	</section>
 
