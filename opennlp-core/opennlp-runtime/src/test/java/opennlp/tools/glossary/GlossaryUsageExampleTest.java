@@ -131,6 +131,38 @@ public class GlossaryUsageExampleTest {
   }
 
   /**
+   * Mirrors the composite matcher example in {@code glossary.xml}: an exact
+   * {@link AhoCorasickGlossaryMatcher} and an inflected {@link TermAnalyzingGlossaryMatcher}
+   * merge behind {@link CompositeGlossaryMatcher}, so plural {@code Hot dogs} and exact
+   * {@code New York City} both survive in text order, and the exact matcher wins the NYC
+   * stretch.
+   */
+  @Test
+  void testCompositeMatcherManualExample() {
+    final TermAnalyzer analyzer = TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+    final List<GlossaryEntry> glossary = List.of(
+        new GlossaryEntry("NYC", "New York City"),
+        new GlossaryEntry("FOOD", "hot dog"));
+    final GlossaryMatcher exact = new AhoCorasickGlossaryMatcher(glossary, true);
+    final GlossaryMatcher inflected = new TermAnalyzingGlossaryMatcher(glossary, analyzer);
+    final GlossaryMatcher composite = new CompositeGlossaryMatcher(List.of(exact, inflected));
+    final String text = "Hot dogs are sold across New York City.";
+    final List<GlossaryMatch> matches = composite.match(text);
+
+    Assertions.assertEquals(2, matches.size());
+    Assertions.assertEquals("FOOD", matches.get(0).id());
+    Assertions.assertEquals("Hot dogs",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+    Assertions.assertEquals("NYC", matches.get(1).id());
+    Assertions.assertEquals("New York City",
+        text.substring(matches.get(1).span().getStart(), matches.get(1).span().getEnd()));
+    Assertions.assertEquals("New York City", matches.get(1).term());
+  }
+
+  /**
    * Shows the read side of the layer contract for consumers that cannot know which
    * annotators ran: a document that never saw a glossary annotator reads as an empty
    * glossary layer rather than failing, and the key is absent from the layer set.
