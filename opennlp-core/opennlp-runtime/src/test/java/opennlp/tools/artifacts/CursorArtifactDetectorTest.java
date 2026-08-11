@@ -51,6 +51,24 @@ public class CursorArtifactDetectorTest {
   }
 
   /**
+   * Encodes ASCII as Unicode tag characters.
+   *
+   * @param ascii The ASCII text to encode.
+   * @param cancel Whether to append CANCEL TAG.
+   * @return The tag character sequence.
+   */
+  private static String tags(String ascii, boolean cancel) {
+    final StringBuilder tagged = new StringBuilder();
+    for (int i = 0; i < ascii.length(); i++) {
+      tagged.appendCodePoint(0xE0000 + ascii.charAt(i));
+    }
+    if (cancel) {
+      tagged.appendCodePoint(0xE007F);
+    }
+    return tagged.toString();
+  }
+
+  /**
    * @return One accepting case per artifact class: the text, the expected type, and the
    *         expected covered text.
    */
@@ -204,6 +222,66 @@ public class CursorArtifactDetectorTest {
     assertEquals(0, artifacts.get(0).span().getStart());
     assertEquals(2, artifacts.get(0).span().getEnd());
     assertEquals(3, artifacts.get(1).span().getStart());
+  }
+
+  /**
+   * Latin-1 decoders preserve C1 bytes as controls, so their UTF-8 damage requires an
+   * identity fallback where Windows-1252 assigns a printable character instead.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "\u00C2\u0080",
+      "\u00E2\u0082\u00AC"
+  })
+  void testLatin1C1Mojibake(String damaged) {
+    final List<TextArtifact> artifacts = detector.detect("value " + damaged + " end");
+
+    assertEquals(1, artifacts.size());
+    assertEquals(TextArtifact.TYPE_MOJIBAKE, artifacts.get(0).type());
+    assertEquals(damaged, artifacts.get(0).span().getCoveredText(
+        "value " + damaged + " end").toString());
+  }
+
+  /** Orphan tag characters expose hidden ASCII as one Unicode-tag artifact. */
+  @Test
+  void testUnicodeTagRunIsFlagged() {
+    final String hidden = tags("secret", true);
+    final String text = "visible " + hidden + " text";
+    final List<TextArtifact> artifacts = detector.detect(text);
+
+    assertEquals(1, artifacts.size());
+    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(hidden, artifacts.get(0).span().getCoveredText(text).toString());
+  }
+
+  /** The whole Tags block, including deprecated and unassigned slots, is classified. */
+  @Test
+  void testWholeUnicodeTagsBlockIsClassified() {
+    final String hidden = cp(0xE0000, 0xE0001, 0xE0010, 0xE007F);
+    final List<TextArtifact> artifacts = detector.detect(hidden);
+
+    assertEquals(1, artifacts.size());
+    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(hidden, artifacts.get(0).span().getCoveredText(hidden).toString());
+  }
+
+  /** A well-formed subdivision flag keeps its Unicode tag sequence as orthographic. */
+  @Test
+  void testEmojiTagFlagIsOrthographic() {
+    final String england = cp(0x1F3F4) + tags("gbeng", true);
+    assertEquals(List.of(), detector.detect(england));
+  }
+
+  /** An unterminated subdivision flag is hidden tag text, not a valid emoji sequence. */
+  @Test
+  void testMalformedEmojiTagFlagIsFlagged() {
+    final String hidden = tags("gbeng", false);
+    final String malformed = cp(0x1F3F4) + hidden;
+    final List<TextArtifact> artifacts = detector.detect(malformed);
+
+    assertEquals(1, artifacts.size());
+    assertEquals("unicode-tag", artifacts.get(0).type());
+    assertEquals(hidden, artifacts.get(0).span().getCoveredText(malformed).toString());
   }
 
   /**
