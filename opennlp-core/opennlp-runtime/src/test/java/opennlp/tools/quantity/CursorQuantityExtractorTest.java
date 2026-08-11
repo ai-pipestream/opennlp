@@ -29,6 +29,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
+import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -154,11 +155,87 @@ public class CursorQuantityExtractorTest {
 
   @Test
   void testCustomUnitValidation() {
-    assertThrows(IllegalArgumentException.class, () -> new CursorQuantityExtractor(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor((Set<String>) null));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorQuantityExtractor(Set.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorQuantityExtractor(Set.of("toolongunit")));
+  }
+
+  /**
+   * Verifies the European notation end to end: dots group digits and a comma marks the
+   * fraction, so a German measurement is read at its real magnitude.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "1.250 GB; 1250; GB",
+      "1.234,5 kg; 1234.5; kg",
+      "1.250,75 kWh; 1250.75; kWh",
+      "2,5km; 2.5; km",
+      "45,5 %; 45.5; %",
+      "-2,5 kg; -2.5; kg"
+  })
+  void testEuropeanNotationShapesCoverTheFullMention(String text, String value, String unit) {
+    final CursorQuantityExtractor european =
+        new CursorQuantityExtractor(NumberNotation.LATIN_EU);
+    final List<Quantity> mentions = european.extract(text);
+
+    assertEquals(1, mentions.size(), "expected one mention in: " + text);
+    assertEquals(new Span(0, text.length()), mentions.get(0).span(), text);
+    assertEquals(0, new BigDecimal(value).compareTo(mentions.get(0).value()), text);
+    assertEquals(unit, mentions.get(0).unit(), text);
+  }
+
+  /**
+   * Verifies that a number written in one notation yields no mention under the other,
+   * including the Indian grouping, which neither notation knows: a quantity at a wrong
+   * magnitude is worse than a missing one.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "1,234.56 kg; LATIN_EU",
+      "1,234,567.89 kg; LATIN_EU",
+      "1,00,000 kg; LATIN_EU",
+      "1.234,56 kg; LATIN_US",
+      "1.234.567,89 kg; LATIN_US",
+      "1.00.000 kg; LATIN_US"
+  })
+  void testQuantityInTheOtherNotationYieldsNoMention(String text, NumberNotation notation) {
+    assertTrue(new CursorQuantityExtractor(notation).extract(text).isEmpty(), text);
+  }
+
+  /**
+   * Verifies that text valid in both notations is read as the notation says, a factor of a
+   * thousand apart.
+   */
+  @Test
+  void testQuantityValidInBothNotationsMeansWhatTheNotationSays() {
+    final CursorQuantityExtractor european =
+        new CursorQuantityExtractor(NumberNotation.LATIN_EU);
+    assertEquals(0, new BigDecimal("1250")
+        .compareTo(european.extract("1.250 GB").get(0).value()));
+    assertEquals(0, new BigDecimal("1250")
+        .compareTo(extractor.extract("1,250 GB").get(0).value()));
+    assertEquals(0, new BigDecimal("1.250")
+        .compareTo(european.extract("1,250 GB").get(0).value()));
+  }
+
+  @Test
+  void testNotationAndUnitsCombine() {
+    final CursorQuantityExtractor custom =
+        new CursorQuantityExtractor(Set.of("bbl"), NumberNotation.LATIN_EU);
+    assertEquals(0, new BigDecimal("1500")
+        .compareTo(custom.extract("1.500 bbl").get(0).value()));
+    assertTrue(custom.extract("80 kg").isEmpty());
+  }
+
+  @Test
+  void testNotationValidation() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor((NumberNotation) null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorQuantityExtractor(Set.of("bbl"), null));
   }
 
   /**

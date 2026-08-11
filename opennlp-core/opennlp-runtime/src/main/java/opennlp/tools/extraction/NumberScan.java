@@ -26,12 +26,14 @@ import opennlp.tools.commons.Internal;
  * quantity, temporal): digits with strict grouping, an optional decimal part, and
  * optionally scale markers.
  *
- * <p>Grouping is strict: once a comma appears, the leading group must have at most three
- * digits and every further group exactly three. A scan that stops at a comma directly
- * followed by a digit fails entirely instead of truncating, because the text continues
- * a grouped number this scanner cannot parse, for example the Indian-grouped
- * {@code 1,00,000}; any other stop ends the scan at the last valid position. With
- * scaling enabled, an immediate suffix ({@code k}, {@code m}, {@code b},
+ * <p>Which character groups digits and which marks the fraction is the caller's
+ * {@link NumberNotation}. Grouping is strict: once a group separator appears, the leading
+ * group must have at most three digits and every further group exactly three. A scan that
+ * stops at a group separator directly followed by a digit fails entirely instead of
+ * truncating, because the text continues a grouped number this scanner cannot parse, for
+ * example the Indian-grouped {@code 1,00,000} or a European {@code 1.234,56} read in
+ * {@link NumberNotation#LATIN_US}; any other stop ends the scan at the last valid
+ * position. With scaling enabled, an immediate suffix ({@code k}, {@code m}, {@code b},
  * {@code bn}) or a following word ({@code thousand} to {@code trillion}) multiplies the
  * value, and an immediate letter that is no scale marker invalidates the scan
  * entirely.</p>
@@ -66,11 +68,17 @@ public final class NumberScan {
    * @param applyScale {@code true} to consume and apply scale markers, in which case an
    *                   immediate letter that is no scale marker fails the scan;
    *                   {@code false} to stop after the decimal part.
-   * @return The scanned {@link Result}, or {@code null} when no number starts at
-   *         {@code start}, the scan stops at a comma directly followed by a digit,
-   *         or an immediate letter suffix is not a scale marker.
+   * @param notation The written convention the text groups digits and marks fractions in.
+   *                 Must not be {@code null}.
+   * @return The scanned {@link Result}, whose value is normalized to a dot decimal
+   *         separator, or {@code null} when no number starts at {@code start}, the scan
+   *         stops at a group separator directly followed by a digit, or an immediate
+   *         letter suffix is not a scale marker.
    */
-  public static Result parse(CharSequence text, int start, boolean applyScale) {
+  public static Result parse(CharSequence text, int start, boolean applyScale,
+      NumberNotation notation) {
+    final char group = notation.groupSeparator();
+    final char decimal = notation.decimalSeparator();
     int i = start;
     int digits = 0;
     final StringBuilder normalized = new StringBuilder();
@@ -82,13 +90,13 @@ public final class NumberScan {
     if (digits == 0) {
       return null;
     }
-    if (charAt(text, i) == ',' && digits <= 3) {
-      while (charAt(text, i) == ',' && groupOfThree(text, i + 1)) {
+    if (charAt(text, i) == group && digits <= 3) {
+      while (charAt(text, i) == group && groupOfThree(text, i + 1)) {
         normalized.append(text, i + 1, i + 4);
         i += 4;
       }
     }
-    if (charAt(text, i) == '.' && isAsciiDigit(charAt(text, i + 1))) {
+    if (charAt(text, i) == decimal && isAsciiDigit(charAt(text, i + 1))) {
       normalized.append('.');
       i++;
       while (isAsciiDigit(charAt(text, i))) {
@@ -96,10 +104,11 @@ public final class NumberScan {
         i++;
       }
     }
-    if (charAt(text, i) == ',' && isAsciiDigit(charAt(text, i + 1))) {
-      // The text continues a comma-grouped number this scanner cannot parse, for
-      // example the Indian-grouped 1,00,000. Truncating here would silently report
-      // a wildly wrong value, so the whole candidate is rejected.
+    if (charAt(text, i) == group && isAsciiDigit(charAt(text, i + 1))) {
+      // The text continues a grouped number this scanner cannot parse, for example the
+      // Indian-grouped 1,00,000 or a number written in the other notation. Truncating
+      // here would silently report a wildly wrong value, so the whole candidate is
+      // rejected.
       return null;
     }
     final BigDecimal value = new BigDecimal(normalized.toString());
@@ -107,18 +116,24 @@ public final class NumberScan {
   }
 
   /**
-   * Checks whether the position is the tail of a comma-grouped number the scanner
-   * rejected: it is directly preceded by a comma that is itself directly preceded by
-   * a digit. Such a tail, for example the final {@code 000} of {@code 1,00,000}, must
-   * not seed a mention of its own.
+   * Checks whether the position continues a number the scan already read or rejected: it
+   * is directly preceded by a group or decimal separator that is itself directly preceded
+   * by a digit. Such a tail, for example the final {@code 000} of {@code 1,00,000} or the
+   * {@code 3} of a version number {@code 1.2.3}, must not seed a mention of its own,
+   * since a restarted scan there would report a fragment as if it were the whole number.
    *
    * @param text The text. Must not be {@code null}.
    * @param index The candidate start offset.
-   * @return {@code true} if a number starting at {@code index} would continue a
-   *         grouped number.
+   * @param notation The written convention the text writes numbers in. Must not be
+   *                 {@code null}.
+   * @return {@code true} if a number starting at {@code index} would continue an earlier
+   *         one.
    */
-  public static boolean continuesGroupedNumber(CharSequence text, int index) {
-    return charAt(text, index - 1) == ',' && isAsciiDigit(charAt(text, index - 2));
+  public static boolean continuesNumber(CharSequence text, int index,
+      NumberNotation notation) {
+    final char before = charAt(text, index - 1);
+    return (before == notation.groupSeparator() || before == notation.decimalSeparator())
+        && isAsciiDigit(charAt(text, index - 2));
   }
 
   /**
