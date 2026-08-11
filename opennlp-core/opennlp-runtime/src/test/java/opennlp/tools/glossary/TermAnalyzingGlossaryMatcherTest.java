@@ -300,4 +300,47 @@ public class TermAnalyzingGlossaryMatcherTest {
     Assertions.assertEquals("hot zap dogs",
         text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
   }
+
+  /**
+   * Pins CJK behavior on the token path: the UAX&#160;#29 tokenizer yields one token per
+   * Han ideograph, so an unspaced Japanese sentence presents Tokyo as two adjacent
+   * tokens and the registered term matches with its exact original span. No stemmer is
+   * involved; case folding alone is enough.
+   */
+  @Test
+  void testUnspacedHanTextMatchesThroughTokenPath() {
+    final TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
+        List.of(new GlossaryEntry("Q1490", "\u6771\u4EAC")),
+        TermAnalyzer.builder().caseFold().build());
+
+    // watashi wa Tokyo ni sumu, no spaces anywhere
+    final String text = "\u79C1\u306F\u6771\u4EAC\u306B\u4F4F\u3080";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("Q1490", matches.get(0).id());
+    Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
+  }
+
+  /**
+   * Pins the katakana limitation on the token path: a katakana run is a single
+   * UAX&#160;#29 token, so a term embedded inside a longer run never matches, while the
+   * same term bounded by other scripts is its own token and does. Splitting inside
+   * katakana runs needs dictionary segmentation, which is out of scope here.
+   */
+  @Test
+  void testKatakanaRunHidesEmbeddedTermOnTokenPath() {
+    final TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
+        List.of(new GlossaryEntry("TOWER", "\u30BF\u30EF\u30FC")),
+        TermAnalyzer.builder().caseFold().build());
+
+    // toukyou tawaa as one katakana run: no hit inside it
+    Assertions.assertTrue(
+        matcher.match("\u30C8\u30A6\u30AD\u30E7\u30A6\u30BF\u30EF\u30FC").isEmpty());
+    // the same term after Han neighbors is a token of its own
+    final String bounded = "\u6771\u4EAC\u30BF\u30EF\u30FC";
+    final List<GlossaryMatch> matches = matcher.match(bounded);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 5), matches.get(0).span());
+  }
 }
