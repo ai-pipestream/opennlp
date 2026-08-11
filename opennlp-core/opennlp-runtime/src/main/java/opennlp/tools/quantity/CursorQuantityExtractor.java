@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.util.Span;
 
@@ -35,10 +36,16 @@ import opennlp.tools.util.Span;
  * attached ({@code 2.5km}) or separated by one space ({@code 80 kg}); and an optional
  * leading minus. Digit grouping follows the shared strict rule. A number grouped in a
  * convention the scanner cannot parse, for example the Indian-grouped {@code 1,00,000},
- * is rejected entirely rather than truncated to a wrong value, and the comma-adjoined
- * tail of such a number never seeds a mention of its own. A bare number without a
- * percent marker or unit is never a quantity, which also keeps money mentions such as
- * {@code $3 billion} out of this layer.</p>
+ * is rejected entirely rather than truncated to a wrong value, and the
+ * separator-adjoined tail of such a number never seeds a mention of its own. A bare
+ * number without a percent marker or unit is never a quantity, which also keeps money
+ * mentions such as {@code $3 billion} out of this layer.</p>
+ *
+ * <p>Numbers are read in one {@link NumberNotation}, {@link NumberNotation#LATIN_US} by
+ * default, so {@code 1,250 GB} is a little over a thousand gigabytes. A document written
+ * in the European convention is read by an extractor built for it, in which
+ * {@code 1.250 GB} means the same; text in the other notation is rejected rather than
+ * misread.</p>
  *
  * <p>Units are matched exactly, case-sensitively, against a curated default set of
  * common measurement tokens; ambiguous English words such as {@code in} are deliberately
@@ -74,15 +81,31 @@ public class CursorQuantityExtractor implements QuantityExtractor {
 
   private final Set<String> units;
 
+  private final NumberNotation notation;
+
   /**
-   * Initializes the extractor with the default unit set.
+   * Initializes the extractor with the default unit set and
+   * {@link NumberNotation#LATIN_US}.
    */
   public CursorQuantityExtractor() {
     this.units = DEFAULT_UNITS;
+    this.notation = NumberNotation.LATIN_US;
   }
 
   /**
-   * Initializes the extractor with a custom unit set.
+   * Initializes the extractor with the default unit set and a number notation.
+   *
+   * @param notation The written convention numbers group digits and mark fractions in.
+   *                 Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
+   */
+  public CursorQuantityExtractor(NumberNotation notation) {
+    this.units = DEFAULT_UNITS;
+    this.notation = requireNotation(notation);
+  }
+
+  /**
+   * Initializes the extractor with a custom unit set and {@link NumberNotation#LATIN_US}.
    *
    * @param units The unit tokens to recognize, matched exactly and case-sensitively.
    *              Must not be {@code null} or empty, and no token may be {@code null},
@@ -91,6 +114,21 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *         contains an invalid token.
    */
   public CursorQuantityExtractor(Set<String> units) {
+    this(units, NumberNotation.LATIN_US);
+  }
+
+  /**
+   * Initializes the extractor with a custom unit set and a number notation.
+   *
+   * @param units The unit tokens to recognize, matched exactly and case-sensitively.
+   *              Must not be {@code null} or empty, and no token may be {@code null},
+   *              blank, or longer than six characters.
+   * @param notation The written convention numbers group digits and mark fractions in.
+   *                 Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if the set is {@code null}, empty, contains
+   *         an invalid token, or {@code notation} is {@code null}.
+   */
+  public CursorQuantityExtractor(Set<String> units, NumberNotation notation) {
     if (units == null || units.isEmpty()) {
       throw new IllegalArgumentException("units must not be null or empty");
     }
@@ -100,6 +138,21 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       }
     }
     this.units = Set.copyOf(units);
+    this.notation = requireNotation(notation);
+  }
+
+  /**
+   * Validates the notation a constructor was given.
+   *
+   * @param notation The notation to validate.
+   * @return {@code notation}. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
+   */
+  private static NumberNotation requireNotation(NumberNotation notation) {
+    if (notation == null) {
+      throw new IllegalArgumentException("notation must not be null");
+    }
+    return notation;
   }
 
   /**
@@ -143,12 +196,12 @@ public class CursorQuantityExtractor implements QuantityExtractor {
       i++;
     }
     if (!NumberScan.isAsciiDigit(NumberScan.charAt(text, i))
-        || NumberScan.continuesGroupedNumber(text, i)
+        || NumberScan.continuesNumber(text, i, notation)
         || !(negative ? NumberScan.signBoundaryBefore(text, start)
             : NumberScan.boundaryBefore(text, start))) {
       return null;
     }
-    final NumberScan.Result number = NumberScan.parse(text, i, false);
+    final NumberScan.Result number = NumberScan.parse(text, i, false, notation);
     if (number == null) {
       return null;
     }

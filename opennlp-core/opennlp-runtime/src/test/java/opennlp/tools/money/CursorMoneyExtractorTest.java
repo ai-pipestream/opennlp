@@ -20,6 +20,7 @@ package opennlp.tools.money;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -260,6 +262,98 @@ public class CursorMoneyExtractorTest {
     assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Verifies the European notation end to end: dots group digits and a comma marks the
+   * fraction, so a German amount is read at its real magnitude rather than as a value a
+   * thousand times too small.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "1.234,56 EUR; 1234.56; EUR",
+      "1.234.567,89 EUR; 1234567.89; EUR",
+      "\u20AC1.234,56; 1234.56; EUR",     // U+20AC, the euro sign
+      "\u20AC50,25; 50.25; EUR",
+      "\u20AC1.500; 1500; EUR",
+      "EUR 2.400.000; 2400000; EUR",
+      "-\u20AC5,50; -5.50; EUR",
+      "\u20AC2,5 million; 2500000.0; EUR",
+      "1.250,5 CHF; 1250.5; CHF"
+  })
+  void testEuropeanNotationShapesCoverTheFullMention(String text, String amount,
+      String currency) {
+    final CursorMoneyExtractor european = new CursorMoneyExtractor(NumberNotation.LATIN_EU);
+    final List<MoneyAmount> mentions = european.extract(text);
+
+    assertEquals(1, mentions.size(), "expected one mention in: " + text);
+    assertEquals(new Span(0, text.length()), mentions.get(0).span(), text);
+    assertEquals(0, new BigDecimal(amount).compareTo(mentions.get(0).amount()), text);
+    assertEquals(currency, mentions.get(0).currency(), text);
+  }
+
+  /**
+   * Verifies that an amount written in one notation yields no mention under the other:
+   * a wrong magnitude in a money layer is worse than a missing one, so the mismatch is
+   * fail-closed in both directions.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = ';', value = {
+      "$1,234.56; LATIN_EU",
+      "1,234.56 USD; LATIN_EU",
+      "USD 1,234.56; LATIN_EU",
+      "1,234,567.89 USD; LATIN_EU",
+      "\u20AC1.234,56; LATIN_US",
+      "1.234,56 EUR; LATIN_US",
+      "EUR 1.234,56; LATIN_US",
+      "1.234.567,89 EUR; LATIN_US"
+  })
+  void testAmountInTheOtherNotationYieldsNoMention(String text, NumberNotation notation) {
+    assertTrue(new CursorMoneyExtractor(notation).extract(text).isEmpty(), text);
+  }
+
+  /**
+   * Verifies the sharpest case of the notation choice: an amount whose text is valid in
+   * both conventions means a thousand times more in one of them, and each extractor
+   * reports the value its own notation implies.
+   */
+  @Test
+  void testAmountValidInBothNotationsMeansWhatTheNotationSays() {
+    final CursorMoneyExtractor european = new CursorMoneyExtractor(NumberNotation.LATIN_EU);
+    assertEquals(0, new BigDecimal("1500")
+        .compareTo(european.extract("1.500 EUR").get(0).amount()));
+    assertEquals(0, new BigDecimal("1.500")
+        .compareTo(extractor.extract("1.500 EUR").get(0).amount()));
+  }
+
+  /**
+   * Verifies that a region resolves the notation as well as the symbol: a German document
+   * is read in the European notation, and an Australian one keeps the notation its region
+   * writes while resolving the dollar sign to its own currency.
+   */
+  @Test
+  void testForRegionResolvesTheNotationOfTheRegion() {
+    final CursorMoneyExtractor german = CursorMoneyExtractor.forRegion(Locale.GERMANY);
+    assertEquals(0, new BigDecimal("1234.56")
+        .compareTo(german.extract("1.234,56 EUR").get(0).amount()));
+    assertTrue(german.extract("$1,234.56").isEmpty());
+
+    final CursorMoneyExtractor french = CursorMoneyExtractor.forRegion(Locale.FRANCE);
+    assertEquals(0, new BigDecimal("50.25")
+        .compareTo(french.extract("50,25 EUR").get(0).amount()));
+
+    final CursorMoneyExtractor australian = CursorMoneyExtractor.forRegion(Locale.of("en", "AU"));
+    final MoneyAmount australianAmount = australian.extract("$1,234.56").get(0);
+    assertEquals(0, new BigDecimal("1234.56").compareTo(australianAmount.amount()));
+    assertEquals("AUD", australianAmount.currency());
+  }
+
+  @Test
+  void testNotationValidation() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor((NumberNotation) null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor(Map.of((int) '$', "USD"), null));
+  }
+
   @Test
   void testCustomSymbolTable() {
     final CursorMoneyExtractor canadian =
@@ -269,7 +363,8 @@ public class CursorMoneyExtractorTest {
 
   @Test
   void testCustomSymbolTableValidation() {
-    assertThrows(IllegalArgumentException.class, () -> new CursorMoneyExtractor(null));
+    assertThrows(IllegalArgumentException.class,
+        () -> new CursorMoneyExtractor((Map<Integer, String>) null));
     assertThrows(IllegalArgumentException.class, () -> new CursorMoneyExtractor(Map.of()));
     assertThrows(IllegalArgumentException.class,
         () -> new CursorMoneyExtractor(Map.of((int) '$', "DOLLARS")));

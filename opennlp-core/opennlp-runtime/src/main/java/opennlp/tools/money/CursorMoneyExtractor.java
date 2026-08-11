@@ -28,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.util.Span;
 
@@ -39,12 +40,19 @@ import opennlp.tools.util.Span;
  * {@code 50\u20AC}), an ISO 4217 code before or after the number ({@code USD 100},
  * {@code 100 USD}), an optional leading minus ({@code -$5}), and scale markers, either
  * an immediate suffix ({@code $1.2M}, {@code \u00A32.5k}, {@code $3bn}) or a following word
- * ({@code $3 billion}). Digit grouping is validated: once a comma appears, every further
- * group must have exactly three digits. An amount grouped in a convention the scanner
- * cannot parse, for example the Indian-grouped {@code 1,00,000}, is rejected entirely
- * rather than truncated to a wrong value, and the comma-adjoined tail of such a number
- * never seeds a mention of its own. A bare number without a currency marker is never
- * money.</p>
+ * ({@code $3 billion}). Digit grouping is validated: once a group separator appears, every
+ * further group must have exactly three digits. An amount grouped in a convention the
+ * scanner cannot parse, for example the Indian-grouped {@code 1,00,000}, is rejected
+ * entirely rather than truncated to a wrong value, and the separator-adjoined tail of such
+ * a number never seeds a mention of its own. A bare number without a currency marker is
+ * never money.</p>
+ *
+ * <p>Amounts are read in one {@link NumberNotation}, {@link NumberNotation#LATIN_US} by
+ * default: {@code $1,234.56} is a little over a thousand dollars. A document written in
+ * the European convention is read by an extractor built for it, either with the notation
+ * given directly or with {@link #forRegion(Locale)}, and then {@code 1.234,56 EUR} is a
+ * little over a thousand euros. Text in the other notation is rejected rather than
+ * misread.</p>
  *
  * <p>Currency symbols are inherently ambiguous; the default table maps each symbol to
  * the ISO code it most commonly denotes, for example {@code $} to {@code USD}. Callers
@@ -52,12 +60,11 @@ import opennlp.tools.util.Span;
  * {@link #CursorMoneyExtractor(Map)}. ISO codes are taken from
  * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
  *
- * <p>Not recognized: accounting negatives in parentheses, multi-character symbols such as
- * {@code kr} or {@code HK$}, spelled-out currency words such as {@code dollars}, and
- * locale-dependent decimal commas. A known symbol directly preceded by an ASCII letter
- * is read as part of such a longer symbol and rejected, so {@code HK$50} and
- * {@code US$50} yield no mention rather than a wrong one. The extractor holds no
- * per-call state and is safe to share between threads.</p>
+ * <p>Not recognized: accounting negatives in parentheses and multi-character symbols such
+ * as {@code kr} or {@code HK$}. A known symbol directly preceded by an ASCII letter is
+ * read as part of such a longer symbol and rejected, so {@code HK$50} and {@code US$50}
+ * yield no mention rather than a wrong one. The extractor holds no per-call state and is
+ * safe to share between threads.</p>
  *
  * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
@@ -87,15 +94,30 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   private final int[] symbolCodePoints;
   private final String[] currencyCodes;
 
+  private final NumberNotation notation;
+
   /**
-   * Initializes the extractor with the default symbol table.
+   * Initializes the extractor with the default symbol table and
+   * {@link NumberNotation#LATIN_US}.
    */
   public CursorMoneyExtractor() {
-    this(DEFAULT_SYMBOLS);
+    this(DEFAULT_SYMBOLS, NumberNotation.LATIN_US);
   }
 
   /**
-   * Initializes the extractor with a custom symbol table.
+   * Initializes the extractor with the default symbol table and a number notation.
+   *
+   * @param notation The written convention amounts group digits and mark fractions in.
+   *                 Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
+   */
+  public CursorMoneyExtractor(NumberNotation notation) {
+    this(DEFAULT_SYMBOLS, notation);
+  }
+
+  /**
+   * Initializes the extractor with a custom symbol table and
+   * {@link NumberNotation#LATIN_US}.
    *
    * @param symbolCurrencies Maps a currency symbol code point to the ISO 4217 code it
    *                         denotes. Must not be {@code null} or empty, no key may be
@@ -104,9 +126,29 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    *         {@code null} code point, or names an unknown currency code.
    */
   public CursorMoneyExtractor(Map<Integer, String> symbolCurrencies) {
+    this(symbolCurrencies, NumberNotation.LATIN_US);
+  }
+
+  /**
+   * Initializes the extractor with a custom symbol table and a number notation.
+   *
+   * @param symbolCurrencies Maps a currency symbol code point to the ISO 4217 code it
+   *                         denotes. Must not be {@code null} or empty, no key may be
+   *                         {@code null}, and every value must be a known ISO 4217 code.
+   * @param notation The written convention amounts group digits and mark fractions in.
+   *                 Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if the map is {@code null} or empty, maps a
+   *         {@code null} code point, names an unknown currency code, or {@code notation}
+   *         is {@code null}.
+   */
+  public CursorMoneyExtractor(Map<Integer, String> symbolCurrencies, NumberNotation notation) {
     if (symbolCurrencies == null || symbolCurrencies.isEmpty()) {
       throw new IllegalArgumentException("symbolCurrencies must not be null or empty");
     }
+    if (notation == null) {
+      throw new IllegalArgumentException("notation must not be null");
+    }
+    this.notation = notation;
     this.symbolCodePoints = new int[symbolCurrencies.size()];
     this.currencyCodes = new String[symbolCurrencies.size()];
     int i = 0;
@@ -125,16 +167,20 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   }
 
   /**
-   * Creates an extractor whose symbol table resolves ambiguous symbols for a region:
-   * in an Australian document, {@code $} denotes {@code AUD}.
+   * Creates an extractor for a region: its symbol table resolves ambiguous symbols the
+   * way the region does, so in an Australian document {@code $} denotes {@code AUD}, and
+   * it reads numbers in the notation the region writes them in, so a German document's
+   * {@code 1.234,56} is a little over a thousand.
    *
-   * <p>The override is derived from JDK locale data: when the region's own currency is
-   * written with a single currency-sign code point in that region, that symbol maps to
-   * the region's currency, and all other defaults stay. Regions whose conventional
-   * symbol is not a single currency sign, for example a letter, keep the default table
-   * unchanged. This is the hook for document-level location evidence: once a pipeline
-   * knows where a document speaks from, money in it is identified in the right
-   * currency and can be converted through {@link FxRates}.</p>
+   * <p>Both decisions are derived from JDK locale data rather than from a hard-coded list
+   * of countries. The symbol override applies when the region's own currency is written
+   * with a single currency-sign code point in that region; that symbol then maps to the
+   * region's currency and all other defaults stay. Regions whose conventional symbol is
+   * not a single currency sign, for example a letter, keep the default table unchanged.
+   * The notation comes from {@link NumberNotation#forLocale(Locale)}. This is the hook for
+   * document-level location evidence: once a pipeline knows where a document speaks from,
+   * money in it is identified in the right currency and can be converted through
+   * {@link FxRates}.</p>
    *
    * @param region A locale with a country component. Must not be {@code null} and must
    *               name a region with a currency.
@@ -152,17 +198,18 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("region has no currency: " + region, e);
     }
+    final NumberNotation regionNotation = NumberNotation.forLocale(region);
     final String symbol = currency.getSymbol(region);
     if (symbol.codePointCount(0, symbol.length()) != 1) {
-      return new CursorMoneyExtractor();
+      return new CursorMoneyExtractor(regionNotation);
     }
     final int cp = symbol.codePointAt(0);
     if (Character.getType(cp) != Character.CURRENCY_SYMBOL) {
-      return new CursorMoneyExtractor();
+      return new CursorMoneyExtractor(regionNotation);
     }
     final Map<Integer, String> symbols = new HashMap<>(DEFAULT_SYMBOLS);
     symbols.put(cp, currency.getCurrencyCode());
-    return new CursorMoneyExtractor(symbols);
+    return new CursorMoneyExtractor(symbols, regionNotation);
   }
 
   /**
@@ -225,7 +272,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
       }
     }
     if (NumberScan.isAsciiDigit(cp)
-        && !NumberScan.continuesGroupedNumber(text, i)
+        && !NumberScan.continuesNumber(text, i, notation)
         && (negative ? NumberScan.signBoundaryBefore(text, start)
             : NumberScan.boundaryBefore(text, i))) {
       return numberFirst(text, start, i, negative);
@@ -249,7 +296,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     if (NumberScan.charAt(text, i) == ' ') {
       i++;
     }
-    return mention(text, start, NumberScan.parse(text, i, true), currency, negative);
+    return mention(text, start, NumberScan.parse(text, i, true, notation), currency, negative);
   }
 
   /**
@@ -265,7 +312,8 @@ public class CursorMoneyExtractor implements MoneyExtractor {
     if (code == null || NumberScan.charAt(text, codeIndex + 3) != ' ') {
       return null;
     }
-    return mention(text, start, NumberScan.parse(text, codeIndex + 4, true), code, false);
+    return mention(text, start, NumberScan.parse(text, codeIndex + 4, true, notation),
+        code, false);
   }
 
   /**
@@ -279,7 +327,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    */
   private MoneyAmount numberFirst(CharSequence text, int start, int digitIndex,
       boolean negative) {
-    final NumberScan.Result number = NumberScan.parse(text, digitIndex, true);
+    final NumberScan.Result number = NumberScan.parse(text, digitIndex, true, notation);
     if (number == null) {
       return null;
     }
