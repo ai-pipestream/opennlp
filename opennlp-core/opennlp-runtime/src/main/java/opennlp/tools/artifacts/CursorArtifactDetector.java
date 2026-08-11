@@ -37,15 +37,19 @@ import opennlp.tools.util.StringUtil;
  * are.</p>
  *
  * <p>Mojibake is reported when a maximal run of non-ASCII characters that Windows-1252
- * can encode maps to a byte sequence that is entirely valid UTF-8 encoding at least one
- * non-ASCII character. Text damaged by reading UTF-8 through that decoding satisfies this
- * by construction, while ordinarily accented words do not: their bytes are not valid
- * UTF-8 sequences.</p>
+ * or ISO-8859-1 can encode maps to a byte sequence that is entirely valid UTF-8 encoding
+ * at least one non-ASCII character. Text damaged by reading UTF-8 through either decoding
+ * satisfies this by construction, while ordinarily accented words do not: their bytes are
+ * not valid UTF-8 sequences.</p>
+ *
+ * <p>Unicode tag characters are reported as hidden text unless they form a well-formed
+ * subdivision flag after U+1F3F4 WAVING BLACK FLAG.</p>
  *
  * <p>All types are reported by default; the {@link #CursorArtifactDetector(Set)}
  * constructor limits detection to a subset.</p>
  *
- * <p>The detector is stateless and safe for concurrent use by multiple threads.</p>
+ * <p>The detector holds immutable configuration and no per-call state, and is safe for
+ * concurrent use by multiple threads.</p>
  *
  * @since 3.0.0
  */
@@ -74,12 +78,13 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   private static final int CANCEL_TAG = 0xE007F;
 
   private final Set<String> types;
+  private final boolean classesEnabled;
 
   /**
    * The characters <a href="https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT">
    * Windows-1252</a> places at 0x80-0x9F, indexed by byte value minus 0x80; -1 marks the
-   * five bytes it leaves undefined. All other characters up to U+00FF encode as their own
-   * code point.
+   * five bytes it leaves undefined. Characters in the C1 range also fall back to their
+   * identity byte so the detector covers text damaged through ISO-8859-1.
    */
   private static final int[] SINGLE_BYTE_SPECIALS = {
       0x20AC, -1, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
@@ -91,6 +96,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   /** Initializes a detector that reports every built-in type. */
   public CursorArtifactDetector() {
     types = ALL_TYPES;
+    classesEnabled = true;
   }
 
   /**
@@ -106,12 +112,17 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
+    boolean hasClassType = false;
     for (final String type : types) {
       if (!ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
+      if (!TextArtifact.TYPE_MOJIBAKE.equals(type)) {
+        hasClassType = true;
+      }
     }
     this.types = Set.copyOf(types);
+    classesEnabled = hasClassType;
   }
 
   /**
@@ -127,7 +138,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     }
     final List<TextArtifact> classes = new ArrayList<>();
     final List<TextArtifact> mojibake = new ArrayList<>();
-    if (types.size() > 1 || !types.contains(TextArtifact.TYPE_MOJIBAKE)) {
+    if (classesEnabled) {
       scanClasses(text, classes);
     }
     if (types.contains(TextArtifact.TYPE_MOJIBAKE)) {
@@ -281,7 +292,8 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * Tests one tag run against the UTS #51 subdivision-flag shape.
+   * Tests one tag run against the
+   * <a href="https://www.unicode.org/reports/tr51/">UTS #51</a> subdivision-flag shape.
    *
    * @param text The source text.
    * @param start The first tag character.
@@ -519,7 +531,6 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     }
     merged.addAll(classes.subList(c, classes.size()));
     merged.addAll(mojibake.subList(m, mojibake.size()));
-    merged.sort((a, b) -> Integer.compare(a.span().getStart(), b.span().getStart()));
     return merged;
   }
 }

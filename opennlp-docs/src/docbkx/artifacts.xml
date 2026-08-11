@@ -36,7 +36,11 @@
 			<code>private-use</code>, <code>bidi-control</code> (explicit directional
 			overrides and isolates), <code>zero-width</code> (zero-width characters outside
 			their orthographic uses; joiners in emoji sequences and single occurrences
-			between letters are kept), and <code>mojibake</code> (a stretch whose
+			between letters are kept), <code>unicode-tag</code> (hidden characters from the
+			<link xlink:href="https://www.unicode.org/charts/PDF/UE0000.pdf">Unicode Tags
+			block</link>, except a well-formed subdivision flag from
+			<link xlink:href="https://www.unicode.org/reports/tr51/">UTS #51</link>), and
+			<code>mojibake</code> (a stretch whose
 			single-byte image is valid multi-byte UTF-8, the signature of a double decode).
 		</para>
 	</section>
@@ -61,10 +65,28 @@ for (TextArtifact artifact : detector.detect(text)) {
 mojibake [3..5)
 replacement [12..13)]]>
 			</programlisting>
-			Ordinary accented words are not mojibake: their single-byte images are not
-			valid UTF-8 sequences, so a text like <code>déjà vu</code> yields no
-			finding at all.
+			The reverse mapping covers both Windows-1252 and ISO-8859-1. The latter preserves
+			bytes 0x80 through 0x9F as C1 controls, so damaged text such as the UTF-8 euro
+			sign read through Latin-1 is still reported as one mojibake span rather than an
+			unrelated control. Ordinary accented words are not mojibake: their single-byte
+			images are not valid UTF-8 sequences, so a text like <code>déjà vu</code> yields
+			no finding at all.
 			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
+		</para>
+		<para>
+			The default constructor reports every built-in type. A caller can limit findings
+			to selected types with the set constructor:
+			<programlisting language="java"><![CDATA[
+ArtifactDetector textDamage = new CursorArtifactDetector(Set.of(
+    TextArtifact.TYPE_MOJIBAKE,
+    TextArtifact.TYPE_UNICODE_TAG));
+
+List<TextArtifact> damage = textDamage.detect(text);]]>
+			</programlisting>
+			The set must be non-empty and contain only the constants declared by
+			<code>TextArtifact</code>. It is copied during construction, so later changes to
+			the caller's set do not alter the detector.
+			<code>ArtifactsManualExampleTest</code> mirrors the configuration shown here.
 		</para>
 	</section>
 
