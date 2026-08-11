@@ -27,6 +27,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.util.Span;
 import opennlp.tools.util.normalizer.DashCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.EnglishContractionCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.FullCaseFoldCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.GermanUmlautCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.InvisibleCharSequenceNormalizer;
@@ -827,6 +828,53 @@ public class AhoCorasickGlossaryMatcherTest {
         List.of(new GlossaryEntry("PREFIX", "can")), false);
 
     Assertions.assertTrue(matcher.match("can't").isEmpty());
+  }
+
+  /**
+   * Optional English contraction expansion runs on both the registered term and source
+   * text, while the aligned hit still covers the untouched source contraction.
+   */
+  @ParameterizedTest
+  @CsvSource(value = {
+      "can not|can't|0|5",
+      "will not|won't|0|5",
+      "we are|we\u2019re|0|5"
+  }, delimiter = '|')
+  void testOffsetAwareEnglishContractionExpansion(String term, String text,
+      int expectedStart, int expectedEnd) {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("EXPANDED", term)), true,
+        EnglishContractionCharSequenceNormalizer.getInstance());
+
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(expectedStart, expectedEnd), matches.get(0).span());
+    Assertions.assertEquals(text,
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * A normalized subword still maps to an interior source offset, so UAX&#160;#29
+   * prevents contraction expansion from exposing a false standalone hit.
+   */
+  @Test
+  void testContractionExpansionDoesNotExposeSubwordHit() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("PREFIX", "can")), false,
+        EnglishContractionCharSequenceNormalizer.getInstance());
+
+    Assertions.assertTrue(matcher.match("can't").isEmpty());
+  }
+
+  /** Ambiguous English suffixes fail closed instead of guessing their expansion. */
+  @Test
+  void testContractionExpansionLeavesAmbiguousSuffixUnmatched() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("AMBIGUOUS", "he is")), false,
+        EnglishContractionCharSequenceNormalizer.getInstance());
+
+    Assertions.assertTrue(matcher.match("he's").isEmpty());
   }
 
   /**
