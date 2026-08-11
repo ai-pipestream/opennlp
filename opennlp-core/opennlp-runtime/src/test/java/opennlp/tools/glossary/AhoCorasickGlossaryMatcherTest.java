@@ -690,6 +690,133 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
   }
 
+  /**
+   * Unspaced Han text matches: under UAX&#160;#29 every ideograph is its own word, so a
+   * neighboring ideograph never continues a word across the hit edge. Tokyo (U+6771
+   * U+4EAC) is found inside an unspaced Japanese sentence with its exact span.
+   */
+  @Test
+  void testUnspacedHanTermMatchesInsideJapaneseSentence() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("Q1490", "\u6771\u4EAC")), false);
+
+    // watashi wa Tokyo ni sumu, no spaces anywhere
+    final String text = "\u79C1\u306F\u6771\u4EAC\u306B\u4F4F\u3080";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals("Q1490", matches.get(0).id());
+    Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
+    Assertions.assertEquals("\u6771\u4EAC",
+        text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
+  }
+
+  /**
+   * A Han term inside a longer Han run matches: China (U+4E2D U+56FD) is reported
+   * inside "Chinese person" (U+4E2D U+56FD U+4EBA), because the trailing ideograph is
+   * its own word rather than a continuation. This is how dictionary matching behaves
+   * in unspaced scripts, the reverse of the Latin cat/concatenate rule.
+   */
+  @Test
+  void testHanTermInsideLongerHanRunMatches() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("Q148", "\u4E2D\u56FD")), false);
+
+    // wo ai zhongguoren, no spaces
+    final String text = "\u6211\u7231\u4E2D\u56FD\u4EBA";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
+  }
+
+  /**
+   * A Latin letter next to a Han hit does not block it: UAX&#160;#29 places a word
+   * boundary between an alphabetic run and an ideograph, so a term glued to ASCII
+   * letters still matches with its exact span.
+   */
+  @Test
+  void testLatinNeighborDoesNotBlockHanHit() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("Q1490", "\u6771\u4EAC")), false);
+
+    final String text = "visit\u6771\u4EACnow";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(5, 7), matches.get(0).span());
+  }
+
+  /**
+   * Hiragana characters are each their own UAX&#160;#29 word, so a hiragana greeting is
+   * found inside a longer unspaced hiragana run with its exact span.
+   */
+  @Test
+  void testHiraganaTermMatchesInsideUnspacedHiraganaRun() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("GREET", "\u304A\u306F\u3088\u3046")), false);
+
+    // ohayou gozaimasu, no spaces
+    final String text = "\u304A\u306F\u3088\u3046\u3054\u3056\u3044\u307E\u3059";
+    final List<GlossaryMatch> matches = matcher.match(text);
+
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(0, 4), matches.get(0).span());
+  }
+
+  /**
+   * Katakana chains under UAX&#160;#29 (a katakana run is one word), so a term embedded
+   * in a longer katakana run stays rejected, exactly like cat inside concatenate. The
+   * same term beside non-katakana neighbors matches.
+   */
+  @Test
+  void testKatakanaRunStillHidesEmbeddedTerm() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("TOWER", "\u30BF\u30EF\u30FC")), false);
+
+    // toukyou tawaa as one katakana run: no hit inside it
+    Assertions.assertTrue(
+        matcher.match("\u30C8\u30A6\u30AD\u30E7\u30A6\u30BF\u30EF\u30FC").isEmpty());
+    // the same term bounded by Han neighbors is a word of its own
+    final String bounded = "\u6771\u4EAC\u30BF\u30EF\u30FC";
+    final List<GlossaryMatch> matches = matcher.match(bounded);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 5), matches.get(0).span());
+  }
+
+  /**
+   * Hangul chains under UAX&#160;#29 (Korean separates words with spaces), so a syllable
+   * embedded in a longer Hangul run stays rejected while the spaced occurrence matches.
+   */
+  @Test
+  void testHangulRunStillHidesEmbeddedTerm() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("KO", "\uD55C\uAD6D")), false);
+
+    // hangugeo as one Hangul run: no hit inside it
+    Assertions.assertTrue(matcher.match("\uD55C\uAD6D\uC5B4").isEmpty());
+    final List<GlossaryMatch> matches = matcher.match("\uD55C\uAD6D \uC5B4");
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(0, 2), matches.get(0).span());
+  }
+
+  /**
+   * The UAX&#160;#29 boundary rule composes with an offset-aware normalizer: after a
+   * whitespace collapse the hit span maps back to original coordinates, and Han
+   * neighbors in the original text do not block the mapped hit.
+   */
+  @Test
+  void testHanBoundaryAppliesToNormalizedHitsInOriginalCoordinates() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("Q1490", "\u6771\u4EAC")), false,
+        WhitespaceCharSequenceNormalizer.getInstance());
+
+    final String text = "\u79C1\u306F\u6771\u4EAC\u306B";
+    final List<GlossaryMatch> matches = matcher.match(text);
+    Assertions.assertEquals(1, matches.size());
+    Assertions.assertEquals(new Span(2, 4), matches.get(0).span());
+  }
+
   @Test
   void testInvalidMatcherArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
