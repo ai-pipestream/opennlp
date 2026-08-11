@@ -82,17 +82,27 @@ import opennlp.tools.util.Span;
  */
 public class CursorMoneyExtractor implements MoneyExtractor {
 
+  private static final String USD = "USD";
+  private static final String EUR = "EUR";
+  private static final String GBP = "GBP";
+  private static final String JPY = "JPY";
+  private static final String INR = "INR";
+  private static final String RUB = "RUB";
+  private static final String ILS = "ILS";
+  private static final String THB = "THB";
+  private static final String CNY = "CNY";
+
   private static final Map<Integer, String> DEFAULT_SYMBOLS = Map.ofEntries(
-      Map.entry((int) '$', "USD"),
-      Map.entry(0x20AC, "EUR"),   // euro sign
-      Map.entry(0x00A3, "GBP"),   // pound sign
-      Map.entry(0x00A5, "JPY"),   // yen sign
-      Map.entry(0x20B9, "INR"),   // rupee sign
+      Map.entry((int) '$', USD),
+      Map.entry(0x20AC, EUR),   // euro sign
+      Map.entry(0x00A3, GBP),   // pound sign
+      Map.entry(0x00A5, JPY),   // yen sign
+      Map.entry(0x20B9, INR),   // rupee sign
       Map.entry(0x20A9, "KRW"),   // won sign
-      Map.entry(0x20BD, "RUB"),   // ruble sign
+      Map.entry(0x20BD, RUB),   // ruble sign
       Map.entry(0x20BA, "TRY"),   // lira sign
-      Map.entry(0x20AA, "ILS"),   // sheqel sign
-      Map.entry(0x0E3F, "THB"),   // baht sign
+      Map.entry(0x20AA, ILS),   // sheqel sign
+      Map.entry(0x0E3F, THB),   // baht sign
       Map.entry(0x20AB, "VND"));  // dong sign
 
   /**
@@ -100,25 +110,25 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    * class documentation for deliberate omissions and ambiguities.
    */
   private static final Map<String, String> CURRENCY_WORDS = Map.ofEntries(
-      Map.entry("dollar", "USD"),
-      Map.entry("dollars", "USD"),
-      Map.entry("euro", "EUR"),
-      Map.entry("euros", "EUR"),
-      Map.entry("pound", "GBP"),
-      Map.entry("pounds", "GBP"),
-      Map.entry("sterling", "GBP"),
-      Map.entry("yen", "JPY"),
-      Map.entry("rupee", "INR"),
-      Map.entry("rupees", "INR"),
-      Map.entry("yuan", "CNY"),
-      Map.entry("renminbi", "CNY"),
-      Map.entry("ruble", "RUB"),
-      Map.entry("rubles", "RUB"),
-      Map.entry("rouble", "RUB"),
-      Map.entry("roubles", "RUB"),
-      Map.entry("shekel", "ILS"),
-      Map.entry("shekels", "ILS"),
-      Map.entry("baht", "THB"));
+      Map.entry("dollar", USD),
+      Map.entry("dollars", USD),
+      Map.entry("euro", EUR),
+      Map.entry("euros", EUR),
+      Map.entry("pound", GBP),
+      Map.entry("pounds", GBP),
+      Map.entry("sterling", GBP),
+      Map.entry("yen", JPY),
+      Map.entry("rupee", INR),
+      Map.entry("rupees", INR),
+      Map.entry("yuan", CNY),
+      Map.entry("renminbi", CNY),
+      Map.entry("ruble", RUB),
+      Map.entry("rubles", RUB),
+      Map.entry("rouble", RUB),
+      Map.entry("roubles", RUB),
+      Map.entry("shekel", ILS),
+      Map.entry("shekels", ILS),
+      Map.entry("baht", THB));
 
   /** The length of the longest currency word, {@code sterling} and {@code renminbi}. */
   private static final int MAX_CURRENCY_WORD_LENGTH = 8;
