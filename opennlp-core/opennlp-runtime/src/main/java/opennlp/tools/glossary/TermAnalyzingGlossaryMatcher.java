@@ -73,7 +73,7 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * <p>The automaton is built once in the constructor. Each {@link #match(CharSequence)}
  * call re-analyzes the text, allocating one {@link Term} per token plus the hit
  * lists; the matcher itself holds no per-call state and is safe to share across
- * threads when the analyzer is.</p>
+ * threads when the analyzer and pre-tokenization normalizer are.</p>
  *
  * @see <a href="https://doi.org/10.1145/360825.360855">Aho, Corasick (1975): Efficient
  *      string matching: An aid to bibliographic search</a>
