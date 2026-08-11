@@ -128,6 +128,27 @@ TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
 List<GlossaryMatch> hits = matcher.match("the hot dogs were cold");
 // one hit whose span covers the original "hot dogs"]]>
 		</programlisting>
+		<para>
+			A whole-text <code>OffsetAwareNormalizer</code> can run before tokenization.
+			This is required for a transform that changes one source token into multiple
+			tokens, such as English contraction expansion. The three-argument matcher
+			constructor applies the transform to both registered terms and source text,
+			then maps matched tokens back to source offsets. Ambiguous contractions fail
+			closed rather than guessing a meaning. <code>GlossaryUsageExampleTest</code>
+			mirrors this example.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+OffsetAwareNormalizer contractions = TextNormalizer.builder()
+    .englishContractions()
+    .buildAligned();
+
+TermAnalyzingGlossaryMatcher expanded = new TermAnalyzingGlossaryMatcher(
+    List.of(new GlossaryEntry("ACTION", "can not dog")), terms, contractions);
+
+List<GlossaryMatch> expandedHits = expanded.match("can't dogs");
+// one hit whose span covers the untouched source text "can't dogs"]]>
+		</programlisting>
 	</section>
 	<section xml:id="tools.glossary.composite">
 		<title>Combining matchers with CompositeGlossaryMatcher</title>
@@ -166,12 +187,14 @@ List<GlossaryMatch> matches = composite.match("Hot dogs are sold across New York
 	<section xml:id="tools.glossary.cjk">
 		<title>Matching in unspaced CJK text</title>
 		<para>
-			Word boundaries follow the word-forming classes of UAX #29. Han
-			ideographs and hiragana are each a complete word, so glossary terms match
-			inside unspaced Chinese and Japanese text at character granularity: no
-			spaces, no segmenter, and the span still covers the original characters.
-			Latin text keeps the familiar rule, so <code>cat</code> never matches
-			inside <code>concatenate</code>.
+			Word boundaries follow the complete default rules in
+			<link xlink:href="https://www.unicode.org/reports/tr29/">UAX #29</link>.
+			This includes apostrophes, combining marks, variation selectors, connector
+			punctuation, emoji ZWJ sequences, and supplementary-plane characters. Han
+			ideographs and hiragana receive character-granularity boundaries, so glossary
+			terms match inside unspaced Chinese and Japanese text with no separate
+			segmenter, while spans still cover the original characters. Latin contractions
+			stay whole, so <code>can</code> does not match inside <code>can't</code>.
 			<code>GlossaryUsageExampleTest</code> mirrors the example below.
 		</para>
 		<programlisting language="java">
@@ -183,13 +206,12 @@ List<GlossaryMatch> hits = matcher.match("私は東京に住む");
 // one hit whose span covers 東京 inside the unspaced sentence]]>
 		</programlisting>
 		<para>
-			Katakana and Hangul runs chain like alphabetic runs: a term embedded
-			inside a longer run is rejected, exactly like <code>cat</code> inside
-			<code>concatenate</code>, because splitting those runs requires
-			dictionary segmentation rather than a boundary rule. The
+			The default UAX #29 rules are locale-neutral boundaries, not linguistic word
+			segmentation. Katakana and Hangul runs stay joined, and scripts such as Thai,
+			Lao, Khmer, and Myanmar need dictionary-based tailoring when callers require
+			language-specific words. The
 			<code>TermAnalyzingGlossaryMatcher</code> behaves the same way, since the
-			UAX #29 word tokenizer it builds on yields one token per ideograph
-			and one token per katakana run.
+			exact and token paths now share the same <code>WordSegmenter</code>.
 		</para>
 	</section>
 </chapter>
