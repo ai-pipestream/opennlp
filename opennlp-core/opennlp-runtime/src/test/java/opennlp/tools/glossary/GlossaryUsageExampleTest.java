@@ -163,6 +163,25 @@ public class GlossaryUsageExampleTest {
   }
 
   /**
+   * Mirrors the unspaced CJK example in {@code glossary.xml}: Tokyo (U+6771 U+4EAC) is
+   * found inside an unspaced Japanese sentence with no segmenter, and the span covers
+   * the original characters.
+   */
+  @Test
+  void testUnspacedCjkManualExample() {
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+        List.of(new GlossaryEntry("Q1490", "\u6771\u4EAC")), false);
+
+    final String text = "\u79C1\u306F\u6771\u4EAC\u306B\u4F4F\u3080";
+    final List<GlossaryMatch> hits = matcher.match(text);
+
+    Assertions.assertEquals(1, hits.size());
+    Assertions.assertEquals("Q1490", hits.get(0).id());
+    Assertions.assertEquals("\u6771\u4EAC",
+        text.substring(hits.get(0).span().getStart(), hits.get(0).span().getEnd()));
+  }
+
+  /**
    * Shows the read side of the layer contract for consumers that cannot know which
    * annotators ran: a document that never saw a glossary annotator reads as an empty
    * glossary layer rather than failing, and the key is absent from the layer set.
