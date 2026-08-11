@@ -49,16 +49,19 @@ public final class PiiRewrite {
   private final int[] originalEnds;
   private final int[] rewrittenStarts;
   private final int[] rewrittenEnds;
+  private final int[] cumulativeShifts;
   private final int originalLength;
 
   private PiiRewrite(String text, List<PiiMention> mentions, int[] originalStarts,
-      int[] originalEnds, int[] rewrittenStarts, int[] rewrittenEnds, int originalLength) {
+      int[] originalEnds, int[] rewrittenStarts, int[] rewrittenEnds,
+      int[] cumulativeShifts, int originalLength) {
     this.text = text;
     this.mentions = mentions;
     this.originalStarts = originalStarts;
     this.originalEnds = originalEnds;
     this.rewrittenStarts = rewrittenStarts;
     this.rewrittenEnds = rewrittenEnds;
+    this.cumulativeShifts = cumulativeShifts;
     this.originalLength = originalLength;
   }
 
@@ -93,6 +96,7 @@ public final class PiiRewrite {
     final int[] originalEnds = new int[count];
     final int[] rewrittenStarts = new int[count];
     final int[] rewrittenEnds = new int[count];
+    final int[] cumulativeShifts = new int[count];
     final List<PiiMention> labelled = new ArrayList<>(count);
     final StringBuilder rewritten = new StringBuilder(text.length());
     int copied = 0;
@@ -110,13 +114,17 @@ public final class PiiRewrite {
       rewrittenStarts[i] = rewritten.length();
       rewritten.append(label);
       rewrittenEnds[i] = rewritten.length();
+      final int previousShift = i == 0 ? 0 : cumulativeShifts[i - 1];
+      cumulativeShifts[i] = previousShift
+          + (rewrittenEnds[i] - rewrittenStarts[i]) - (end - start);
       labelled.add(new PiiMention(new Span(rewrittenStarts[i], rewrittenEnds[i]),
           mention.type(), label));
       copied = end;
     }
     rewritten.append(text, copied, text.length());
     return new PiiRewrite(rewritten.toString(), Collections.unmodifiableList(labelled),
-        originalStarts, originalEnds, rewrittenStarts, rewrittenEnds, text.length());
+        originalStarts, originalEnds, rewrittenStarts, rewrittenEnds, cumulativeShifts,
+        text.length());
   }
 
   /**
@@ -255,16 +263,23 @@ public final class PiiRewrite {
     if (offset < 0 || offset > originalLength) {
       throw new IndexOutOfBoundsException("offset out of range: " + offset);
     }
-    int shift = 0;
-    for (int i = 0; i < originalStarts.length; i++) {
-      if (offset <= originalStarts[i]) {
-        break;
+    int low = 0;
+    int high = originalStarts.length;
+    while (low < high) {
+      final int middle = (low + high) >>> 1;
+      if (originalStarts[middle] < offset) {
+        low = middle + 1;
+      } else {
+        high = middle;
       }
-      if (offset < originalEnds[i]) {
-        return towardsStart ? rewrittenStarts[i] : rewrittenEnds[i];
-      }
-      shift += (rewrittenEnds[i] - rewrittenStarts[i]) - (originalEnds[i] - originalStarts[i]);
     }
-    return offset + shift;
+    final int preceding = low - 1;
+    if (preceding < 0) {
+      return offset;
+    }
+    if (offset < originalEnds[preceding]) {
+      return towardsStart ? rewrittenStarts[preceding] : rewrittenEnds[preceding];
+    }
+    return offset + cumulativeShifts[preceding];
   }
 }
