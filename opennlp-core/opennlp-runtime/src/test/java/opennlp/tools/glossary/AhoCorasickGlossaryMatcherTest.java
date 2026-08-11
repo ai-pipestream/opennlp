@@ -858,13 +858,18 @@ public class AhoCorasickGlossaryMatcherTest {
    * A normalized subword still maps to an interior source offset, so UAX&#160;#29
    * prevents contraction expansion from exposing a false standalone hit.
    */
-  @Test
-  void testContractionExpansionDoesNotExposeSubwordHit() {
+  @ParameterizedTest
+  @CsvSource(value = {
+      "can|can't",
+      "not|can't",
+      "will|won't"
+  }, delimiter = '|')
+  void testContractionExpansionDoesNotExposeSubwordHit(String term, String text) {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
-        List.of(new GlossaryEntry("PREFIX", "can")), false,
+        List.of(new GlossaryEntry("PREFIX", term)), false,
         EnglishContractionCharSequenceNormalizer.getInstance());
 
-    Assertions.assertTrue(matcher.match("can't").isEmpty());
+    Assertions.assertTrue(matcher.match(text).isEmpty());
   }
 
   /** Ambiguous English suffixes fail closed instead of guessing their expansion. */
@@ -907,6 +912,38 @@ public class AhoCorasickGlossaryMatcherTest {
         List.of(new GlossaryEntry("PART", term)), false);
 
     Assertions.assertTrue(matcher.match(text).isEmpty());
+  }
+
+  /**
+   * Terminal mid-word punctuation forms a boundary, while full stop and colon join a following
+   * Unicode letter under UAX&#160;#29. Comma is a numeric joiner, not a letter joiner. These cases
+   * pin both sides of the ASCII fast path.
+   */
+  @ParameterizedTest
+  @CsvSource(value = {
+      "cat.|1",
+      "cat. dog|1",
+      "cat.\u00E9|0",
+      "cat,\u00E9|1",
+      "cat:\u00E9|0"
+  }, delimiter = '|')
+  void testMidWordPunctuationBoundaryDependsOnFollowingLetter(String text,
+      int expectedMatches) {
+    Assertions.assertEquals(expectedMatches, CAT_MATCHER.match(text).size());
+  }
+
+  /**
+   * Full stop joins letters on both sides but forms a boundary at the start of text. This pins the
+   * leading-punctuation side of the ASCII fast path.
+   */
+  @ParameterizedTest
+  @CsvSource(value = {
+      ".cat|1",
+      "\u00E9.cat|0"
+  }, delimiter = '|')
+  void testMidWordPunctuationBoundaryDependsOnPrecedingLetter(String text,
+      int expectedMatches) {
+    Assertions.assertEquals(expectedMatches, CAT_MATCHER.match(text).size());
   }
 
   /**
