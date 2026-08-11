@@ -17,7 +17,9 @@
 
 package opennlp.tools.artifacts;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -383,5 +385,49 @@ public class CursorArtifactDetectorTest {
   @Test
   void testEmptyTextYieldsNothing() {
     assertEquals(List.of(), detector.detect(""));
+  }
+
+  /** A type-limited detector reports only the requested artifact family. */
+  @Test
+  void testTypeLimitedDetector() {
+    final String mojibake = cp(0x00C3, 0x00A9);
+    final String hidden = tags("secret", true);
+    final String text = "control " + cp(0x0007) + " caf" + mojibake + " " + hidden;
+
+    final List<TextArtifact> artifacts = new CursorArtifactDetector(
+        Set.of(TextArtifact.TYPE_MOJIBAKE)).detect(text);
+
+    assertEquals(1, artifacts.size());
+    assertEquals(TextArtifact.TYPE_MOJIBAKE, artifacts.get(0).type());
+  }
+
+  /** Constructor validation rejects absent, empty, and unknown type sets. */
+  @Test
+  void testTypeLimitedDetectorRejectsInvalidSets() {
+    final IllegalArgumentException nullTypes = assertThrows(IllegalArgumentException.class,
+        () -> new CursorArtifactDetector(null));
+    final IllegalArgumentException emptyTypes = assertThrows(IllegalArgumentException.class,
+        () -> new CursorArtifactDetector(Set.of()));
+    final IllegalArgumentException unknownType = assertThrows(IllegalArgumentException.class,
+        () -> new CursorArtifactDetector(Set.of("unknown")));
+
+    assertEquals("types must not be null or empty", nullTypes.getMessage());
+    assertEquals("types must not be null or empty", emptyTypes.getMessage());
+    assertEquals("types contains an unrecognized type: unknown", unknownType.getMessage());
+  }
+
+  /** The constructor snapshots its type set instead of retaining caller-owned state. */
+  @Test
+  void testTypeLimitedDetectorDefensivelyCopiesSet() {
+    final Set<String> types = new HashSet<>();
+    types.add(TextArtifact.TYPE_CONTROL);
+    final CursorArtifactDetector controlOnly = new CursorArtifactDetector(types);
+    types.add(TextArtifact.TYPE_MOJIBAKE);
+    final String text = cp(0x0007) + " " + cp(0x00C3, 0x00A9);
+
+    final List<TextArtifact> artifacts = controlOnly.detect(text);
+
+    assertEquals(1, artifacts.size());
+    assertEquals(TextArtifact.TYPE_CONTROL, artifacts.get(0).type());
   }
 }
