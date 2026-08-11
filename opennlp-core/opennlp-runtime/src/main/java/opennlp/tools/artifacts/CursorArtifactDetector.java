@@ -19,6 +19,7 @@ package opennlp.tools.artifacts;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import opennlp.tools.tokenize.uax29.ExtendedPictographic;
 import opennlp.tools.util.Span;
@@ -41,11 +42,25 @@ import opennlp.tools.util.StringUtil;
  * by construction, while ordinarily accented words do not: their bytes are not valid
  * UTF-8 sequences.</p>
  *
+ * <p>All types are reported by default; the {@link #CursorArtifactDetector(Set)}
+ * constructor limits detection to a subset.</p>
+ *
  * <p>The detector is stateless and safe for concurrent use by multiple threads.</p>
  *
  * @since 3.0.0
  */
 public final class CursorArtifactDetector implements ArtifactDetector {
+
+  private static final Set<String> ALL_TYPES = Set.of(
+      TextArtifact.TYPE_REPLACEMENT,
+      TextArtifact.TYPE_CONTROL,
+      TextArtifact.TYPE_NONCHARACTER,
+      TextArtifact.TYPE_UNPAIRED_SURROGATE,
+      TextArtifact.TYPE_PRIVATE_USE,
+      TextArtifact.TYPE_BIDI_CONTROL,
+      TextArtifact.TYPE_ZERO_WIDTH,
+      TextArtifact.TYPE_UNICODE_TAG,
+      TextArtifact.TYPE_MOJIBAKE);
 
   private static final int REPLACEMENT = 0xFFFD;
   private static final int ZERO_WIDTH_SPACE = 0x200B;
@@ -57,6 +72,8 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   private static final int WAVING_BLACK_FLAG = 0x1F3F4;
   private static final int TAG_OFFSET = 0xE0000;
   private static final int CANCEL_TAG = 0xE007F;
+
+  private final Set<String> types;
 
   /**
    * The characters <a href="https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT">
@@ -71,6 +88,32 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, -1, 0x017E, 0x0178,
   };
 
+  /** Initializes a detector that reports every built-in type. */
+  public CursorArtifactDetector() {
+    types = ALL_TYPES;
+  }
+
+  /**
+   * Initializes a detector limited to selected artifact types.
+   *
+   * @param types The types to report, drawn from the {@code TYPE_*} constants on
+   *              {@link TextArtifact}. Must not be {@code null} or empty and must not
+   *              contain a type this detector does not recognize.
+   * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty,
+   *         or contains an unrecognized type.
+   */
+  public CursorArtifactDetector(Set<String> types) {
+    if (types == null || types.isEmpty()) {
+      throw new IllegalArgumentException("types must not be null or empty");
+    }
+    for (final String type : types) {
+      if (!ALL_TYPES.contains(type)) {
+        throw new IllegalArgumentException("types contains an unrecognized type: " + type);
+      }
+    }
+    this.types = Set.copyOf(types);
+  }
+
   /**
    * {@inheritDoc}
    *
@@ -84,8 +127,12 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     }
     final List<TextArtifact> classes = new ArrayList<>();
     final List<TextArtifact> mojibake = new ArrayList<>();
-    scanClasses(text, classes);
-    scanMojibake(text, mojibake);
+    if (types.size() > 1 || !types.contains(TextArtifact.TYPE_MOJIBAKE)) {
+      scanClasses(text, classes);
+    }
+    if (types.contains(TextArtifact.TYPE_MOJIBAKE)) {
+      scanMojibake(text, mojibake);
+    }
     return merge(classes, mojibake);
   }
 
@@ -114,7 +161,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
       } else if (Character.isSurrogate(c)) {
         codePoint = c;
         width = 1;
-        type = TextArtifact.TYPE_UNPAIRED_SURROGATE;
+        type = enabled(TextArtifact.TYPE_UNPAIRED_SURROGATE);
       } else {
         codePoint = c;
         width = 1;
@@ -128,11 +175,13 @@ public final class CursorArtifactDetector implements ArtifactDetector {
         runType = type;
         runStart = i;
       }
-      if (type == null && isZeroWidth(codePoint)) {
+      if (type == null && types.contains(TextArtifact.TYPE_ZERO_WIDTH)
+          && isZeroWidth(codePoint)) {
         i = flushZeroWidth(text, i, artifacts);
         continue;
       }
-      if (type == null && isUnicodeTag(codePoint)) {
+      if (type == null && types.contains(TextArtifact.TYPE_UNICODE_TAG)
+          && isUnicodeTag(codePoint)) {
         i = flushUnicodeTags(text, i, artifacts);
         continue;
       }
@@ -152,26 +201,36 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    */
   private String classify(int codePoint) {
     if (codePoint == REPLACEMENT) {
-      return TextArtifact.TYPE_REPLACEMENT;
+      return enabled(TextArtifact.TYPE_REPLACEMENT);
     }
     if ((codePoint < 0x20 || (codePoint >= 0x7F && codePoint <= 0x9F))
         && !StringUtil.isUnicodeWhitespace(codePoint)) {
-      return TextArtifact.TYPE_CONTROL;
+      return enabled(TextArtifact.TYPE_CONTROL);
     }
     if ((codePoint >= 0xFDD0 && codePoint <= 0xFDEF) || (codePoint & 0xFFFE) == 0xFFFE) {
-      return TextArtifact.TYPE_NONCHARACTER;
+      return enabled(TextArtifact.TYPE_NONCHARACTER);
     }
     if ((codePoint >= 0xE000 && codePoint <= 0xF8FF)
         || (codePoint >= 0xF0000 && codePoint <= 0xFFFFD)
         || (codePoint >= 0x100000 && codePoint <= 0x10FFFD)) {
-      return TextArtifact.TYPE_PRIVATE_USE;
+      return enabled(TextArtifact.TYPE_PRIVATE_USE);
     }
     if ((codePoint >= 0x202A && codePoint <= 0x202E)
         || (codePoint >= 0x2066 && codePoint <= 0x2069)
         || codePoint == 0x200E || codePoint == 0x200F || codePoint == 0x061C) {
-      return TextArtifact.TYPE_BIDI_CONTROL;
+      return enabled(TextArtifact.TYPE_BIDI_CONTROL);
     }
     return null;
+  }
+
+  /**
+   * Applies the configured type filter to one classified type.
+   *
+   * @param type The built-in type.
+   * @return The type when enabled, otherwise {@code null}.
+   */
+  private String enabled(String type) {
+    return types.contains(type) ? type : null;
   }
 
   /**
