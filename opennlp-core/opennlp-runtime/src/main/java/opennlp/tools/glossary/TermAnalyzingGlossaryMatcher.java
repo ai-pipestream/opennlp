@@ -27,7 +27,9 @@ import java.util.Map;
 
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
+import opennlp.tools.util.normalizer.AlignedText;
 import opennlp.tools.util.normalizer.Dimension;
+import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
 import opennlp.tools.util.normalizer.Term;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
@@ -43,6 +45,11 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * character span from the start of token {@code i} to the end of token {@code j}
  * in the original text, so a registered {@code hot dog} can match {@code hot dogs}
  * and still cover the plural surface.</p>
+ *
+ * <p>An optional {@link OffsetAwareNormalizer} can expand or fold the whole input
+ * before tokenization. The same transform runs over registered terms, and matched token
+ * spans map back through its {@link AlignedText}. This supports pre-tokenization edits
+ * such as English contraction expansion while preserving original source offsets.</p>
  *
  * <p>Because the UAX&#160;#29 word tokenizer yields word tokens only, the characters
  * between consecutive tokens do not take part in matching: {@code hot-dogs},
@@ -83,6 +90,9 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
   /** The analyzer that tokenizes and normalizes both glossary terms and input text. */
   private final TermAnalyzer analyzer;
 
+  /** Optional whole-text fold applied before tokenization, with source alignment. */
+  private final OffsetAwareNormalizer preTokenizerNormalizer;
+
   /** The normalized token count of each entry, aligned with {@link #entries} by index. */
   private final int[] patternLengths;
 
@@ -110,6 +120,43 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
    */
   public TermAnalyzingGlossaryMatcher(Collection<GlossaryEntry> glossary,
       TermAnalyzer analyzer) {
+    this(glossary, analyzer, null, false);
+  }
+
+  /**
+   * Builds a token-normalized matcher with an aligned whole-text fold before tokenization.
+   *
+   * @param glossary The entries to match. Must not be {@code null} or empty, and no
+   *                 entry may be {@code null}. When two entries normalize to the same
+   *                 token sequence, the one registered first wins.
+   * @param analyzer The analyzer that tokenizes and normalizes terms and text. Must
+   *                 not be {@code null} and must not configure {@link Dimension#LEMMA}.
+   * @param preTokenizerNormalizer The required whole-text fold applied to registered
+   *                 terms and source text before tokenization. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code glossary} is {@code null}, empty,
+   *         or contains {@code null}, if {@code analyzer} or
+   *         {@code preTokenizerNormalizer} is {@code null}, if the analyzer configures
+   *         {@link Dimension#LEMMA}, or if a term yields no word tokens or a blank
+   *         normalized token after analysis.
+   */
+  public TermAnalyzingGlossaryMatcher(Collection<GlossaryEntry> glossary,
+      TermAnalyzer analyzer, OffsetAwareNormalizer preTokenizerNormalizer) {
+    this(glossary, analyzer, preTokenizerNormalizer, true);
+  }
+
+  /**
+   * Shared constructor for the identity and pre-tokenization-normalized paths.
+   *
+   * @param glossary The entries to match.
+   * @param analyzer The token analyzer.
+   * @param preTokenizerNormalizer The whole-text fold, or {@code null} for identity.
+   * @param requirePreTokenizerNormalizer Whether to reject a {@code null} fold.
+   * @throws IllegalArgumentException Thrown for an invalid glossary or analyzer, a
+   *         required but absent fold, or a term that cannot produce a matchable token.
+   */
+  private TermAnalyzingGlossaryMatcher(Collection<GlossaryEntry> glossary,
+      TermAnalyzer analyzer, OffsetAwareNormalizer preTokenizerNormalizer,
+      boolean requirePreTokenizerNormalizer) {
     if (glossary == null || glossary.isEmpty()) {
       throw new IllegalArgumentException("glossary must not be null or empty");
     }
@@ -120,6 +167,9 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
       throw new IllegalArgumentException("analyzer must not configure Dimension.LEMMA:"
           + " lemmas need part-of-speech tags, which analyze(CharSequence) cannot supply");
     }
+    if (requirePreTokenizerNormalizer && preTokenizerNormalizer == null) {
+      throw new IllegalArgumentException("preTokenizerNormalizer must not be null");
+    }
     for (final GlossaryEntry entry : glossary) {
       if (entry == null) {
         throw new IllegalArgumentException("glossary must not contain null entries");
@@ -127,6 +177,7 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
     }
     this.entries = List.copyOf(glossary);
     this.analyzer = analyzer;
+    this.preTokenizerNormalizer = preTokenizerNormalizer;
     this.patternLengths = new int[entries.size()];
     this.transitions = new ArrayList<>();
     transitions.add(new HashMap<>());
@@ -194,14 +245,19 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
-    final List<Term> terms = new ArrayList<>();
-    for (final Term term : analyzer.analyze(text)) {
+    final AlignedText aligned = preTokenizerNormalizer == null
+        ? null : preTokenizerNormalizer.normalizeAligned(text);
+    final CharSequence analysisText = aligned == null ? text : aligned.normalized();
+    final List<AnalyzedTerm> terms = new ArrayList<>();
+    for (final Term term : analyzer.analyze(analysisText)) {
       if (term.span() == null) {
         throw new IllegalStateException(
             "TermAnalyzingGlossaryMatcher requires Terms with original spans");
       }
       if (!StringUtil.isBlank(term.normalized())) {
-        terms.add(term);
+        final Span span = aligned == null ? term.span()
+            : aligned.toOriginalSpan(term.span().getStart(), term.span().getEnd());
+        terms.add(new AnalyzedTerm(term.normalized(), span));
       }
     }
     final List<int[]> hits = new ArrayList<>();
@@ -229,7 +285,9 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
    *         loud instead of silently vanishing from the registered phrase.
    */
   private List<String> normalizedTokens(String term) {
-    final List<Term> terms = analyzer.analyze(term);
+    final CharSequence analysisText = preTokenizerNormalizer == null
+        ? term : preTokenizerNormalizer.normalize(term);
+    final List<Term> terms = analyzer.analyze(analysisText);
     final List<String> tokens = new ArrayList<>(terms.size());
     for (final Term analyzed : terms) {
       final String normalized = analyzed.normalized();
@@ -240,6 +298,10 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
       tokens.add(normalized);
     }
     return tokens;
+  }
+
+  /** One normalized token and its span in the original, pre-fold source text. */
+  private record AnalyzedTerm(String normalized, Span span) {
   }
 
   /**
