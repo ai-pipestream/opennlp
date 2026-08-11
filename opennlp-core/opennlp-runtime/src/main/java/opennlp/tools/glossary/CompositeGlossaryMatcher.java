@@ -18,7 +18,6 @@
 package opennlp.tools.glossary;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -36,8 +35,10 @@ import java.util.List;
  * where one ends exactly where the other starts, do not intersect and both
  * survive. Accepted hits are reported in text order.</p>
  *
- * <p>The composite holds no per-call state; it is safe to share across threads
- * when every delegate is.</p>
+ * <p>Delegate results satisfy the {@link GlossaryMatcher} contract: they are sorted
+ * and non-overlapping. The composite filters and merges each result in a linear pass.
+ * It holds no per-call state and is safe to share across threads when every delegate
+ * is.</p>
  *
  * @since 3.0.0
  */
@@ -79,24 +80,78 @@ public final class CompositeGlossaryMatcher implements GlossaryMatcher {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
-    final List<GlossaryMatch> accepted = new ArrayList<>();
+    List<GlossaryMatch> accepted = new ArrayList<>();
     for (final GlossaryMatcher matcher : matchers) {
-      for (final GlossaryMatch hit : matcher.match(text)) {
-        if (intersectsNone(accepted, hit)) {
-          accepted.add(hit);
+      final List<GlossaryMatch> candidates = matcher.match(text);
+      if (!candidates.isEmpty()) {
+        final List<GlossaryMatch> additions = filterOverlaps(accepted, candidates);
+        if (!additions.isEmpty()) {
+          accepted = accepted.isEmpty() ? additions : mergeByStart(accepted, additions);
         }
       }
     }
-    accepted.sort(Comparator.comparingInt(hit -> hit.span().getStart()));
     return accepted;
   }
 
-  private static boolean intersectsNone(List<GlossaryMatch> accepted, GlossaryMatch hit) {
-    for (final GlossaryMatch kept : accepted) {
-      if (kept.span().intersects(hit.span())) {
-        return false;
+  /**
+   * Removes candidates that intersect a higher-priority hit or an earlier candidate.
+   * Both inputs are in text order, so only the next accepted hit and the last surviving
+   * candidate can intersect the current candidate.
+   *
+   * @param accepted The higher-priority hits already retained.
+   * @param candidates The next delegate's hits in text order.
+   * @return The candidates that do not intersect an accepted or earlier candidate hit.
+   */
+  private List<GlossaryMatch> filterOverlaps(List<GlossaryMatch> accepted,
+      List<GlossaryMatch> candidates) {
+    final List<GlossaryMatch> additions = new ArrayList<>(candidates.size());
+    int acceptedIndex = 0;
+    for (final GlossaryMatch candidate : candidates) {
+      while (acceptedIndex < accepted.size()
+          && accepted.get(acceptedIndex).span().getEnd() <= candidate.span().getStart()) {
+        acceptedIndex++;
+      }
+      final boolean intersectsAccepted = acceptedIndex < accepted.size()
+          && accepted.get(acceptedIndex).span().intersects(candidate.span());
+      final boolean intersectsEarlierCandidate = !additions.isEmpty()
+          && additions.get(additions.size() - 1).span().intersects(candidate.span());
+      if (!intersectsAccepted && !intersectsEarlierCandidate) {
+        additions.add(candidate);
       }
     }
-    return true;
+    return additions;
+  }
+
+  /**
+   * Merges two text-ordered, non-overlapping hit lists. On equal starts, an accepted
+   * higher-priority hit remains first.
+   *
+   * @param accepted The higher-priority hits.
+   * @param additions The disjoint hits accepted from the next delegate.
+   * @return All hits in text order.
+   */
+  private List<GlossaryMatch> mergeByStart(List<GlossaryMatch> accepted,
+      List<GlossaryMatch> additions) {
+    final List<GlossaryMatch> merged = new ArrayList<>(accepted.size() + additions.size());
+    int acceptedIndex = 0;
+    int additionIndex = 0;
+    while (acceptedIndex < accepted.size() && additionIndex < additions.size()) {
+      final GlossaryMatch acceptedHit = accepted.get(acceptedIndex);
+      final GlossaryMatch addition = additions.get(additionIndex);
+      if (acceptedHit.span().getStart() <= addition.span().getStart()) {
+        merged.add(acceptedHit);
+        acceptedIndex++;
+      } else {
+        merged.add(addition);
+        additionIndex++;
+      }
+    }
+    while (acceptedIndex < accepted.size()) {
+      merged.add(accepted.get(acceptedIndex++));
+    }
+    while (additionIndex < additions.size()) {
+      merged.add(additions.get(additionIndex++));
+    }
+    return merged;
   }
 }
