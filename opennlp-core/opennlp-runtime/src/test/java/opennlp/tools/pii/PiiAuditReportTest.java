@@ -63,6 +63,7 @@ public class PiiAuditReportTest {
     Assertions.assertEquals(2, report.distinctCounts().get(PiiMention.TYPE_EMAIL));
   }
 
+  /** Verifies that display-token collisions do not collapse distinct value counts. */
   @Test
   void testCountsDistinctValuesEvenWhenShortTokensCollide() {
     final HmacTokenizer shortTokenizer = new HmacTokenizer(KEY, 4);

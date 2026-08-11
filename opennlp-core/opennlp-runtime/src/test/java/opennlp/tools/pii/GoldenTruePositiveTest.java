@@ -38,6 +38,14 @@ public class GoldenTruePositiveTest {
 
   private static final PiiExtractor EXTRACTOR = PiiPacks.allStructured();
 
+  /**
+   * Verifies one exact positive-corpus row.
+   *
+   * @param type The expected mention type.
+   * @param covered The expected covered source text.
+   * @param normalized The expected normalized form.
+   * @param text The source text.
+   */
   @ParameterizedTest
   @MethodSource("examples")
   void testGoldenExample(String type, String covered, String normalized, String text) {

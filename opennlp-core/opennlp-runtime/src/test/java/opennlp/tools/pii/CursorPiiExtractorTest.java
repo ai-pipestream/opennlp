@@ -42,6 +42,7 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals("John.Doe+news@example.co.uk", mention.normalized());
   }
 
+  /** Verifies that normalization folds only the domain portion of a mailbox. */
   @Test
   void testEmailNormalizationPreservesLocalPartCase() {
     final List<PiiMention> mentions =
