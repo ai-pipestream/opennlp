@@ -39,7 +39,12 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  */
 public class TermAnalyzingGlossaryMatcherTest {
 
-  private static TermAnalyzer englishStemmingAnalyzer() {
+  /**
+   * Builds the analyzer shared by the English inflection cases.
+   *
+   * @return A case-folding English stemming analyzer.
+   */
+  private TermAnalyzer englishStemmingAnalyzer() {
     return TermAnalyzer.builder()
         .caseFold()
         .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))

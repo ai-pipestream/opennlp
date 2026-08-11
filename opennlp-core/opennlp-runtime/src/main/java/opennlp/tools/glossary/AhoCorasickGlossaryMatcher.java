@@ -145,6 +145,13 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   /**
    * Shared constructor. When {@code requireNormalizer} is {@code true}, {@code normalizer}
    * must be non-null; otherwise {@code null} means the identity (two-argument) path.
+   *
+   * @param glossary The entries to match.
+   * @param ignoreCase Whether to match terms regardless of character case.
+   * @param normalizer The offset-aware fold, or {@code null} for identity matching.
+   * @param requireNormalizer Whether to reject a {@code null} normalizer.
+   * @throws IllegalArgumentException Thrown for an invalid glossary, a required but absent
+   *         normalizer, or a term that normalizes to blank.
    */
   private AhoCorasickGlossaryMatcher(Collection<GlossaryEntry> glossary, boolean ignoreCase,
       OffsetAwareNormalizer normalizer, boolean requireNormalizer) {

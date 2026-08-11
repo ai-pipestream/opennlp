@@ -43,7 +43,8 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * JMH throughput for the three glossary matching paths: the exact character
  * automaton, the offset-aware orthographic fold, and the token-normalized
  * {@link TermAnalyzingGlossaryMatcher}. Two inputs per path: a short mixed text
- * and a realistic 4 KiB document, each against a small and a wide glossary.
+ * and a realistic 4 KiB document. The exact and token-normalized paths also run
+ * the 4 KiB input against a 2,007-entry glossary.
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
