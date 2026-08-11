@@ -380,6 +380,17 @@ public class CursorPiiExtractorTest {
         mention.span().getStart(), mention.span().getEnd()));
   }
 
+  /** Verifies that the current SWIFT registry entry for Yemen is recognized. */
+  @Test
+  void testYemeniIban() {
+    final String value = "YE15CBYE0001018861234567891234";
+    final List<PiiMention> mentions = extractor.extract(value);
+
+    Assertions.assertEquals(1, mentions.size());
+    Assertions.assertEquals(PiiMention.TYPE_IBAN, mentions.get(0).type());
+    Assertions.assertEquals(value, mentions.get(0).normalized());
+  }
+
   @ParameterizedTest
   @CsvSource({
       "account GB82WEST12345698765432 closed, GB82WEST12345698765432",
