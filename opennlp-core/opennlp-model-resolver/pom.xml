@@ -117,7 +117,7 @@
               <goal>test</goal>
             </goals>
             <configuration>
-              <argLine>-Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off --add-opens java.base/jdk.internal.loader=ALL-UNNAMED</argLine>
+              <argLine>@{jacoco.unit.argLine} -Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off --add-opens java.base/jdk.internal.loader=ALL-UNNAMED</argLine>
             </configuration>
           </execution>
           <!-- This phase is here to trigger a fallback to the classpath from the system properties, which cannot be hit, if add-opens is present. -->
@@ -127,7 +127,7 @@
               <goal>test</goal>
             </goals>
             <configuration>
-              <argLine>-Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off</argLine>
+              <argLine>@{jacoco.unit.argLine} -Xmx2048m -Dorg.slf4j.simpleLogger.defaultLogLevel=off</argLine>
             </configuration>
           </execution>
         </executions>
