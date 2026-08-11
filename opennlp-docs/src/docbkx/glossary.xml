@@ -163,4 +163,33 @@ List<GlossaryMatch> matches = composite.match("Hot dogs are sold across New York
 // NYC covering "New York City" (exact path wins over the inflected duplicate)]]>
 		</programlisting>
 	</section>
+	<section xml:id="tools.glossary.cjk">
+		<title>Matching in unspaced CJK text</title>
+		<para>
+			Word boundaries follow the word-forming classes of UAX #29. Han
+			ideographs and hiragana are each a complete word, so glossary terms match
+			inside unspaced Chinese and Japanese text at character granularity: no
+			spaces, no segmenter, and the span still covers the original characters.
+			Latin text keeps the familiar rule, so <code>cat</code> never matches
+			inside <code>concatenate</code>.
+			<code>GlossaryUsageExampleTest</code> mirrors the example below.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+    List.of(new GlossaryEntry("Q1490", "東京")), false);
+
+List<GlossaryMatch> hits = matcher.match("私は東京に住む");
+// one hit whose span covers 東京 inside the unspaced sentence]]>
+		</programlisting>
+		<para>
+			Katakana and Hangul runs chain like alphabetic runs: a term embedded
+			inside a longer run is rejected, exactly like <code>cat</code> inside
+			<code>concatenate</code>, because splitting those runs requires
+			dictionary segmentation rather than a boundary rule. The
+			<code>TermAnalyzingGlossaryMatcher</code> behaves the same way, since the
+			UAX #29 word tokenizer it builds on yields one token per ideograph
+			and one token per katakana run.
+		</para>
+	</section>
 </chapter>
