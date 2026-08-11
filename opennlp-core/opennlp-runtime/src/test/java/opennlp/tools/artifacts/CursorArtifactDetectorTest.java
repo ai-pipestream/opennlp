@@ -229,6 +229,8 @@ public class CursorArtifactDetectorTest {
   /**
    * Latin-1 decoders preserve C1 bytes as controls, so their UTF-8 damage requires an
    * identity fallback where Windows-1252 assigns a printable character instead.
+   *
+   * @param damaged The Latin-1 image of valid multi-byte UTF-8.
    */
   @ParameterizedTest
   @ValueSource(strings = {
