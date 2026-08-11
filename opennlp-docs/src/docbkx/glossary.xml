@@ -65,4 +65,68 @@ List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
 			glossary layer, and the key is absent from <code>layers()</code>.
 		</para>
 	</section>
+
+	<section xml:id="tools.glossary.normalizer">
+		<title>Matching with an offset-aware normalizer</title>
+		<para>
+			The two-argument matcher compares characters literally, aside from the
+			optional per-code-point case fold. Length-changing orthographic folds such
+			as German umlaut expansion, full Unicode case folding, whitespace collapse,
+			or dash folding are supplied through the three-argument constructor that
+			takes a non-null <code>OffsetAwareNormalizer</code>. Terms and text are
+			folded before the automaton runs, and every hit span is mapped back to the
+			original text. Stemming and lemmatization are not expressible this way.
+			<code>GlossaryUsageExampleTest</code> mirrors the example below.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
+    List.of(new GlossaryEntry("ST", "strasse")),
+    true,
+    GermanUmlautCharSequenceNormalizer.getInstance());
+
+List<GlossaryMatch> hits = matcher.match("Die Straße ist frei.");
+// one hit whose span covers the original "Straße"]]>
+		</programlisting>
+	</section>
+
+	<section xml:id="tools.glossary.inflection">
+		<title>Matching inflected forms through TermAnalyzer</title>
+		<para>
+			Token-level inflection needs a stemmer. Build a
+			<code>TermAnalyzingGlossaryMatcher</code> over a
+			<code>TermAnalyzer</code> that case-folds and stems. The
+			matcher runs Aho-Corasick over normalized tokens and reports spans from the
+			first matched token's original start to the last matched token's original
+			end, so a registered <code>hot dog</code> covers the surface
+			<code>hot dogs</code>. Keep <code>AhoCorasickGlossaryMatcher</code> for
+			exact and orthographic matching when no tokenizer is required.
+			<code>GlossaryUsageExampleTest</code> mirrors the example below;
+			<code>TermAnalyzingGlossaryMatcherTest</code> pins the reproduction.
+		</para>
+		<para>
+			The word tokenizer drops punctuation, so the characters between consecutive
+			tokens do not take part in matching: <code>hot-dogs</code>,
+			<code>hot, dogs</code>, and even the sentence-crossing
+			<code>hot. Dogs</code> all match a registered <code>hot dog</code>, with
+			the span covering the separators between the matched tokens. Hyphenated
+			compounds matching is the intent; run sentence-sized inputs when a hit must
+			not cross a sentence boundary. A lemmatizing analyzer is rejected at
+			construction, because lemmas need part-of-speech tags that plain text
+			cannot supply.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+TermAnalyzer terms = TermAnalyzer.builder()
+    .caseFold()
+    .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+    .build();
+
+TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
+    List.of(new GlossaryEntry("FOOD", "hot dog")), terms);
+
+List<GlossaryMatch> hits = matcher.match("the hot dogs were cold");
+// one hit whose span covers the original "hot dogs"]]>
+		</programlisting>
+	</section>
 </chapter>
