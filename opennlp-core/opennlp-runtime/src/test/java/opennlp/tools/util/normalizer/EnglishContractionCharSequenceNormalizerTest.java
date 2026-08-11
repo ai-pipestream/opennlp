@@ -43,7 +43,10 @@ public class EnglishContractionCharSequenceNormalizerTest {
       "let's|let us",
       "CAN'T|CAN NOT",
       "Won't|Will not",
-      "can\u2019t|can not"
+      "can\u2019t|can not",
+      "can\u02BCt|can not",
+      "can\uFF07t|can not",
+      "we can't and they won't|we can not and they will not"
   }, delimiter = '|')
   void testExpandsUnambiguousEnglishContractions(String input, String expected) {
     Assertions.assertEquals(expected, normalizer.normalize(input).toString());

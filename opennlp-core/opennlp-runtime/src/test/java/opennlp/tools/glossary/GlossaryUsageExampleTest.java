@@ -31,7 +31,9 @@ import opennlp.tools.stemmer.snowball.SnowballStemmer;
 import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
 import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.normalizer.GermanUmlautCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
 import opennlp.tools.util.normalizer.TermAnalyzer;
+import opennlp.tools.util.normalizer.TextNormalizer;
 
 /**
  * Demonstrates the intended end-to-end use of the glossary components: a glossary of
@@ -160,6 +162,32 @@ public class GlossaryUsageExampleTest {
     Assertions.assertEquals("New York City",
         text.substring(matches.get(1).span().getStart(), matches.get(1).span().getEnd()));
     Assertions.assertEquals("New York City", matches.get(1).term());
+  }
+
+  /**
+   * Mirrors the pre-tokenization contraction example in {@code glossary.xml}: English
+   * expansion feeds separate tokens to the stemming path while the hit covers the
+   * untouched contracted source.
+   */
+  @Test
+  void testContractionExpansionManualExample() {
+    final TermAnalyzer terms = TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+    final OffsetAwareNormalizer contractions = TextNormalizer.builder()
+        .englishContractions()
+        .buildAligned();
+    final TermAnalyzingGlossaryMatcher expanded = new TermAnalyzingGlossaryMatcher(
+        List.of(new GlossaryEntry("ACTION", "can not dog")), terms, contractions);
+
+    final String text = "can't dogs";
+    final List<GlossaryMatch> expandedHits = expanded.match(text);
+
+    Assertions.assertEquals(1, expandedHits.size());
+    Assertions.assertEquals("ACTION", expandedHits.get(0).id());
+    Assertions.assertEquals(text, text.substring(expandedHits.get(0).span().getStart(),
+        expandedHits.get(0).span().getEnd()));
   }
 
   /**

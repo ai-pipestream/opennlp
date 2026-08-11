@@ -32,10 +32,18 @@ package opennlp.tools.util.normalizer;
  * <p>The expansion is a derived matching view. {@link #normalizeAligned(CharSequence)}
  * maps a match over the expanded words back to the untouched contraction, including
  * its original apostrophe.</p>
+ *
+ * @since 3.0.0
  */
 public final class EnglishContractionCharSequenceNormalizer implements OffsetAwareNormalizer {
 
   private static final long serialVersionUID = 5698236849033803551L;
+
+  /** Replacement suffix for an unambiguous negative contraction. */
+  private static final String NOT_SUFFIX = " not";
+
+  /** Validation message shared by both normalization entry points. */
+  private static final String TEXT_NULL_MESSAGE = "text must not be null";
 
   /** Auxiliary stems that form an unambiguous negative contraction with {@code n't}. */
   private static final String[] NEGATIVE_STEMS = {
@@ -76,7 +84,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
   @Override
   public CharSequence normalize(CharSequence text) {
     if (text == null) {
-      throw new IllegalArgumentException("text must not be null");
+      throw new IllegalArgumentException(TEXT_NULL_MESSAGE);
     }
     final Contraction first = nextContraction(text, 0);
     if (first == null) {
@@ -99,7 +107,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
   @Override
   public AlignedText normalizeAligned(CharSequence text) {
     if (text == null) {
-      throw new IllegalArgumentException("text must not be null");
+      throw new IllegalArgumentException(TEXT_NULL_MESSAGE);
     }
     final String original = text.toString();
     final StringBuilder normalized = new StringBuilder(original.length() + 8);
@@ -152,15 +160,15 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
     }
     final boolean upper = isAllUpperAscii(text, start, end);
     if (matchesAsciiIgnoreCase(text, start, end, "can't")) {
-      return new Contraction(start, apostrophe, end, null, caseReplacement(" not", upper));
+      return new Contraction(start, apostrophe, end, null, caseReplacement(NOT_SUFFIX, upper));
     }
     if (matchesAsciiIgnoreCase(text, start, end, "won't")) {
       return new Contraction(start, apostrophe - 1, end,
-          caseWord("will", text, start, apostrophe - 1), caseReplacement(" not", upper));
+          caseWord("will", text, start, apostrophe - 1), caseReplacement(NOT_SUFFIX, upper));
     }
     if (matchesAsciiIgnoreCase(text, start, end, "shan't")) {
       return new Contraction(start, apostrophe - 1, end,
-          caseWord("shall", text, start, apostrophe - 1), caseReplacement(" not", upper));
+          caseWord("shall", text, start, apostrophe - 1), caseReplacement(NOT_SUFFIX, upper));
     }
     if (matchesAsciiIgnoreCase(text, start, end, "let's")) {
       return new Contraction(start, apostrophe, end, null, caseReplacement(" us", upper));
@@ -168,7 +176,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
     if (apostrophe > start && asciiEqualsIgnoreCase(text.charAt(apostrophe - 1), 'n')
         && matchesAsciiIgnoreCase(text, apostrophe + 1, end, "t")
         && containsAsciiIgnoreCase(NEGATIVE_STEMS, text, start, apostrophe - 1)) {
-      return new Contraction(start, apostrophe - 1, end, null, caseReplacement(" not", upper));
+      return new Contraction(start, apostrophe - 1, end, null, caseReplacement(NOT_SUFFIX, upper));
     }
     if (matchesAsciiIgnoreCase(text, apostrophe + 1, end, "re")
         && containsAsciiIgnoreCase(ARE_SUBJECTS, text, start, apostrophe)) {
