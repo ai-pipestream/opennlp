@@ -24,6 +24,9 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.stemmer.snowball.SnowballStemmer;
+import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
+import opennlp.tools.util.normalizer.TermAnalyzer;
 
 public class GlossaryAnnotatorTest {
 
@@ -94,5 +97,60 @@ public class GlossaryAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new GlossaryAnnotator(null));
     final GlossaryAnnotator annotator = annotator(false);
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
+  }
+
+  /**
+   * Pins the collision {@link CompositeGlossaryMatcher} solves: a document already carrying
+   * a glossary layer from one {@link GlossaryAnnotator} rejects a second annotator with a
+   * different matcher, because {@link Document} forbids adding the same layer twice.
+   */
+  @Test
+  void testSecondGlossaryAnnotatorRejectsDuplicateLayer() {
+    final List<GlossaryEntry> glossary = List.of(NEW_YORK_CITY);
+    final GlossaryAnnotator exact =
+        new GlossaryAnnotator(new AhoCorasickGlossaryMatcher(glossary, true));
+    final TermAnalyzer analyzer = TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+    final GlossaryAnnotator inflected =
+        new GlossaryAnnotator(new TermAnalyzingGlossaryMatcher(glossary, analyzer));
+
+    final Document once = exact.annotate(Document.of("New York City"));
+    Assertions.assertEquals(1, once.get(GlossaryAnnotator.GLOSSARY).size());
+    Assertions.assertThrows(IllegalArgumentException.class, () -> inflected.annotate(once));
+  }
+
+  /**
+   * Verifies that one {@link GlossaryAnnotator} wrapping a {@link CompositeGlossaryMatcher}
+   * of exact then inflected matchers records both kinds of hit on a single glossary layer:
+   * the plural {@code Hot dogs} from the inflected path, then {@code New York City} from
+   * the exact path, in text order.
+   */
+  @Test
+  void testCompositeMatcherCarriesExactAndInflectedHitsInOneLayer() {
+    final List<GlossaryEntry> glossary = List.of(
+        new GlossaryEntry("NYC", "New York City"),
+        new GlossaryEntry("FOOD", "hot dog"));
+    final TermAnalyzer analyzer = TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+    final GlossaryMatcher composite = new CompositeGlossaryMatcher(List.of(
+        new AhoCorasickGlossaryMatcher(glossary, true),
+        new TermAnalyzingGlossaryMatcher(glossary, analyzer)));
+    final GlossaryAnnotator annotator = new GlossaryAnnotator(composite);
+
+    final String text = "Hot dogs are sold across New York City.";
+    final Document document = annotator.annotate(Document.of(text));
+
+    final List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
+    Assertions.assertEquals(2, hits.size());
+    Assertions.assertEquals("FOOD", hits.get(0).value().id());
+    Assertions.assertEquals("Hot dogs", document.text().subSequence(
+        hits.get(0).span().getStart(), hits.get(0).span().getEnd()).toString());
+    Assertions.assertEquals("NYC", hits.get(1).value().id());
+    Assertions.assertEquals("New York City", document.text().subSequence(
+        hits.get(1).span().getStart(), hits.get(1).span().getEnd()).toString());
   }
 }
