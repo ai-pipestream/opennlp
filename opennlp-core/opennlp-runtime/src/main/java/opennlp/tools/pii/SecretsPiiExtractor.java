@@ -221,7 +221,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    */
   private void scanGithubTokens(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
-      if (text.charAt(i) != 'g' || !Boundaries.onWordStart(text, i)) {
+      if (text.charAt(i) != 'g' || !onTokenStart(text, i, false)) {
         continue;
       }
       int end = -1;
@@ -257,12 +257,18 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    */
   private int tokenEnd(CharSequence text, int start, int minimumLength, int tokenStart) {
     int end = start;
-    while (end < text.length()) {
+    while (end < text.length() && end - tokenStart <= GITHUB_MAX_LENGTH) {
       final char c = text.charAt(end);
       if (!Ascii.isLetterOrDigit(c) && c != '_') {
         break;
       }
       end++;
+    }
+    if (end < text.length()) {
+      final char c = text.charAt(end);
+      if (Ascii.isLetterOrDigit(c) || c == '_') {
+        return -1;
+      }
     }
     if (end - start < minimumLength || end - tokenStart > GITHUB_MAX_LENGTH
         || !onTokenEnd(text, end)) {
@@ -281,7 +287,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
     final int[] minimum =
         {JWT_HEADER_MIN_LENGTH, JWT_PAYLOAD_MIN_LENGTH, JWT_SIGNATURE_MIN_LENGTH};
     for (int i = 0; i < text.length(); i++) {
-      if (!startsWith(text, i, JWT_HEADER_PREFIX) || !Boundaries.onWordStart(text, i)) {
+      if (!startsWith(text, i, JWT_HEADER_PREFIX) || !onTokenStart(text, i, true)) {
         continue;
       }
       int p = i;
@@ -483,6 +489,24 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private boolean onTokenEnd(CharSequence text, int end) {
     return Boundaries.onEnd(text, end)
         && (end >= text.length() || text.charAt(end) != '_');
+  }
+
+  /**
+   * Checks that a token does not begin inside a longer identifier. GitHub token bodies
+   * allow underscores; base64url additionally allows hyphens.
+   *
+   * @param text The text being scanned.
+   * @param start The candidate start.
+   * @param base64Url Whether hyphen is part of the candidate alphabet.
+   * @return {@code true} if the candidate may start here.
+   */
+  private boolean onTokenStart(CharSequence text, int start, boolean base64Url) {
+    if (start == 0) {
+      return true;
+    }
+    final char previous = text.charAt(start - 1);
+    return !Ascii.isLetterOrDigit(previous) && previous != '_'
+        && (!base64Url || previous != '-');
   }
 
   /**

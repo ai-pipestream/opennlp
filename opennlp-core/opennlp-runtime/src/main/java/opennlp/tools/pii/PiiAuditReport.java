@@ -29,8 +29,8 @@ import java.util.TreeMap;
 import opennlp.tools.document.Document;
 
 /**
- * What a scan found, in a form that is safe to log: how many mentions of each type, how many
- * of them were distinct, and a keyed token per distinct value instead of the value.
+ * What a scan found without carrying raw values: how many mentions of each type, how many
+ * of them were distinct, and a keyed token per sampled distinct value.
  *
  * <p>A report is the artefact a review actually needs. Whether a redaction pipeline is
  * working is a question about counts and about which types appear where, and answering it by
@@ -43,7 +43,9 @@ import opennlp.tools.document.Document;
  * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text and across
  * every report made under the same key. That is what lets a reviewer ask whether the value
  * behind {@code EMAIL-3f2a1c9d7e4b6a20} in one report is the one in another, without either report
- * holding it.</p>
+ * holding it. The tokens are deliberately linkable and therefore pseudonymous rather than
+ * anonymous; logs containing them require the same access controls as other pseudonymous
+ * analytics.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -116,13 +118,12 @@ public final class PiiAuditReport {
       final String type = mention.type();
       counts.merge(type, 1, Integer::sum);
       total++;
-      final String token = tokenizer.token(mention);
       final boolean unseen = distinct.computeIfAbsent(type, ignored -> new LinkedHashSet<>())
-          .add(token);
+          .add(mention.normalized());
       if (unseen) {
         final List<String> kept = samples.computeIfAbsent(type, ignored -> new ArrayList<>());
         if (kept.size() < samplesPerType) {
-          kept.add(token);
+          kept.add(tokenizer.token(mention));
         }
       }
     }

@@ -19,7 +19,6 @@ package opennlp.tools.pii;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -64,9 +63,10 @@ import java.util.Set;
  * overlap. All candidates are checked against word boundaries so nothing is reported
  * from inside a longer alphanumeric run.</p>
  *
- * <p>Normalized forms: email addresses are lowercased, IBANs keep their uppercase
- * letters and digits with separators removed, and phone and card numbers keep digits
- * only, with a leading {@code +} preserved for phone numbers.</p>
+ * <p>Normalized forms: email domains are lowercased while mailbox local-part case is
+ * preserved, IBANs keep their uppercase letters and digits with separators removed,
+ * and phone and card numbers keep digits only, with a leading {@code +} preserved for
+ * phone numbers.</p>
  *
  * <p>All four types are reported by default; the {@link #CursorPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
@@ -184,14 +184,17 @@ public final class CursorPiiExtractor implements PiiExtractor {
       }
       if (end == i + 1
           || end - start > EMAIL_MAX_LENGTH
-          || !validDomain(text.subSequence(i + 1, end).toString())
+          || !validDomain(text, i + 1, end)
           || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
           || !Boundaries.onEnd(text, end)) {
         continue;
       }
-      final String normalized =
-          text.subSequence(start, end).toString().toLowerCase(Locale.ROOT);
-      Hits.add(hits, start, end, PiiMention.TYPE_EMAIL, normalized);
+      final StringBuilder normalized = new StringBuilder(end - start);
+      normalized.append(text, start, i + 1);
+      for (int p = i + 1; p < end; p++) {
+        normalized.append(Ascii.toLower(text.charAt(p)));
+      }
+      Hits.add(hits, start, end, PiiMention.TYPE_EMAIL, normalized.toString());
     }
   }
 
@@ -221,31 +224,34 @@ public final class CursorPiiExtractor implements PiiExtractor {
    * each 1 to 63 characters without a leading or trailing hyphen, and a final label that
    * is an {@link IanaTlds IANA-registered} top-level domain.
    *
-   * @param domain The domain without the {@code @}.
+   * @param text The text being scanned.
+   * @param start The domain start, inclusive.
+   * @param end The domain end, exclusive.
    * @return {@code true} if the domain is acceptable.
    */
-  private boolean validDomain(String domain) {
-    if (domain.length() > DOMAIN_MAX_LENGTH) {
+  private boolean validDomain(CharSequence text, int start, int end) {
+    if (end - start > DOMAIN_MAX_LENGTH) {
       return false;
     }
     int labels = 0;
-    int labelStart = 0;
-    for (int i = 0; i <= domain.length(); i++) {
-      if (i == domain.length() || domain.charAt(i) == '.') {
+    int labelStart = start;
+    int tldStart = start;
+    for (int i = start; i <= end; i++) {
+      if (i == end || text.charAt(i) == '.') {
         final int length = i - labelStart;
         if (length < 1 || length > DOMAIN_LABEL_MAX_LENGTH
-            || domain.charAt(labelStart) == '-' || domain.charAt(i - 1) == '-') {
+            || text.charAt(labelStart) == '-' || text.charAt(i - 1) == '-') {
           return false;
         }
         labels++;
+        tldStart = labelStart;
         labelStart = i + 1;
       }
     }
     if (labels < 2) {
       return false;
     }
-    final int tldStart = domain.lastIndexOf('.') + 1;
-    return IanaTlds.registered(domain, tldStart, domain.length());
+    return IanaTlds.registered(text, tldStart, end);
   }
 
   /**

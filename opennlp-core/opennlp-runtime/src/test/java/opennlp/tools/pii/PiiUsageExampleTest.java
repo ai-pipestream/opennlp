@@ -152,7 +152,7 @@ public class PiiUsageExampleTest {
   @Test
   void testAuditReportCountsWithoutRevealing() {
     final HmacTokenizer tokenizer = new HmacTokenizer(
-        "keep this key out of the report".getBytes(StandardCharsets.UTF_8));
+        "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
     final Document document = annotator.annotate(Document.of(TEXT));
 
     final PiiAuditReport report = PiiAuditReport.of(document, tokenizer);

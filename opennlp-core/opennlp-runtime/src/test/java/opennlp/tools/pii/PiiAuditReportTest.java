@@ -34,7 +34,8 @@ import opennlp.tools.document.Document;
  */
 public class PiiAuditReportTest {
 
-  private static final byte[] KEY = "a test key".getBytes(StandardCharsets.UTF_8);
+  private static final byte[] KEY =
+      "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
   private static final HmacTokenizer TOKENIZER = new HmacTokenizer(KEY);
   private static final PiiExtractor EXTRACTOR = new CursorPiiExtractor();
 
@@ -67,9 +68,9 @@ public class PiiAuditReportTest {
     final HmacTokenizer shortTokenizer = new HmacTokenizer(KEY, 4);
     final List<PiiMention> mentions = List.of(
         new PiiMention(new opennlp.tools.util.Span(0, 1), PiiMention.TYPE_EMAIL,
-            "u72@example.com"),
+            "u165@example.com"),
         new PiiMention(new opennlp.tools.util.Span(2, 3), PiiMention.TYPE_EMAIL,
-            "u186@example.com"));
+            "u488@example.com"));
 
     Assertions.assertEquals(shortTokenizer.token(mentions.get(0)),
         shortTokenizer.token(mentions.get(1)));
@@ -163,7 +164,8 @@ public class PiiAuditReportTest {
   @Test
   void testDifferentKeysGiveDifferentSamples() {
     final List<PiiMention> mentions = EXTRACTOR.extract(TEXT);
-    final HmacTokenizer other = new HmacTokenizer("another key".getBytes(StandardCharsets.UTF_8));
+    final HmacTokenizer other = new HmacTokenizer(
+        "fedcba9876543210fedcba9876543210".getBytes(StandardCharsets.UTF_8));
 
     Assertions.assertNotEquals(
         PiiAuditReport.of(mentions, TOKENIZER).samples(PiiMention.TYPE_EMAIL),
