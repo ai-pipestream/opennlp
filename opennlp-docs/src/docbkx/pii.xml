@@ -38,7 +38,10 @@
 			form, while the case-insensitive domain is lowercased. The baked IANA
 			snapshot is refreshed with
 			<code>dev/fetch-iana-tlds.sh</code>; pass <code>--check</code> in an
-			automated drift check without changing the source tree.
+			automated drift check without changing the source tree. The calling-code
+			and IBAN length tables are regenerated from libphonenumber and the SWIFT
+			registry with <code>dev/fetch-phone-number-lengths.sh</code> and
+			<code>dev/fetch-iban-lengths.sh</code>, respectively.
 			An extractor limited to a subset of the types, for a caller that wants
 			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.

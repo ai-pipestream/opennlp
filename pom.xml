@@ -242,8 +242,8 @@
 		<opennlp.download.home>${user.home}</opennlp.download.home>
 		<opennlp.forkCount>1.0C</opennlp.forkCount>
 		<opennlp.models.version>1.3.0</opennlp.models.version>
-		<jacoco.unit.argLine></jacoco.unit.argLine>
-		<jacoco.integration.argLine></jacoco.integration.argLine>
+		<jacoco.unit.argLine />
+		<jacoco.integration.argLine />
 
 		<!-- Old OpenNLP models are hosted on Sourceforge. Set a default. -->
 		<opennlp.model.v15.base.url>https://opennlp.sourceforge.net/models-1.5/</opennlp.model.v15.base.url>

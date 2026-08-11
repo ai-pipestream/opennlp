@@ -98,7 +98,7 @@ public class HmacTokenizerTest {
   }
 
   /**
-   * Pins a real collision in the former eight-hexadecimal-digit default. The default
+   * Pins a real collision produced by eight hexadecimal digits. The default
    * must preserve these distinct normalized values as distinct audit identities.
    */
   @Test
@@ -177,6 +177,11 @@ public class HmacTokenizerTest {
         () -> new HmacTokenizer(new byte[0]));
   }
 
+  /**
+   * Verifies rejection below the HMAC-SHA-256 output width.
+   *
+   * @param length The rejected key length.
+   */
   @ParameterizedTest
   @ValueSource(ints = {1, 16, 31})
   void testRejectsKeysShorterThanSha256Output(int length) {
@@ -184,6 +189,7 @@ public class HmacTokenizerTest {
         () -> new HmacTokenizer(new byte[length]));
   }
 
+  /** Verifies acceptance at the minimum key length. */
   @Test
   void testAcceptsAThirtyTwoByteKey() {
     Assertions.assertDoesNotThrow(() -> new HmacTokenizer(new byte[32]));

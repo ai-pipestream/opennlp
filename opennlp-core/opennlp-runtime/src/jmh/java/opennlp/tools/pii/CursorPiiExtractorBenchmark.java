@@ -44,7 +44,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  * JMH benchmark for the PII extractors, in throughput of characters scanned.
  *
  * <p>Redaction usually sits in front of everything else a pipeline does, so the question the
- * benchmark answers is what a scan costs on text that holds nothing worth reporting. Three
+ * benchmark answers is what a scan costs on text that holds nothing worth reporting. Four
  * workloads separate the costs:</p>
  * <ul>
  *   <li>{@code clean}: prose with no PII at all, the case that dominates a real corpus. This
@@ -63,9 +63,10 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  * {@link PiiPacks#allStructured()} configuration run each workload, so the price of turning
  * every detector on is visible rather than assumed.</p>
  *
- * <p>One invocation scans one 4 kB document and is declared as 4,096 operations, so the
- * reported throughput unit is characters per second. Single-thread methods measure scanner
- * efficiency; parallel methods measure shared-extractor scalability.</p>
+ * <p>One invocation scans one 4,096-character document and is declared as 4,096
+ * operations, so the reported throughput unit is characters per second. Single-thread
+ * methods measure scanner efficiency; parallel methods measure shared-extractor
+ * scalability.</p>
  */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -108,6 +109,7 @@ public class CursorPiiExtractorBenchmark {
 
     String[] documents;
 
+    /** Builds the fixed-size documents for the selected workload. */
     @Setup(Level.Trial)
     public void build() {
       final String[] seeds = switch (workload) {
@@ -125,7 +127,7 @@ public class CursorPiiExtractorBenchmark {
     }
 
     /**
-     * Builds one document of roughly {@link #TARGET_LENGTH} characters, seeding a value
+     * Builds one document of exactly {@link #TARGET_LENGTH} characters, seeding a value
      * every eight words when the workload calls for them.
      *
      * @param random The source of the word and value choices.
@@ -178,6 +180,14 @@ public class CursorPiiExtractorBenchmark {
     }
   }
 
+  /**
+   * Measures the default extractor with one worker.
+   *
+   * @param corpus The input documents.
+   * @param state The default extractor.
+   * @param cursor The per-thread document cursor.
+   * @param bh Consumes the extracted mentions.
+   */
   @Benchmark
   @Threads(1)
   @OperationsPerInvocation(TARGET_LENGTH)
@@ -187,6 +197,14 @@ public class CursorPiiExtractorBenchmark {
     bh.consume(mentions);
   }
 
+  /**
+   * Measures the widest built-in pack with one worker.
+   *
+   * @param corpus The input documents.
+   * @param state The widest extractor.
+   * @param cursor The per-thread document cursor.
+   * @param bh Consumes the extracted mentions.
+   */
   @Benchmark
   @Threads(1)
   @OperationsPerInvocation(TARGET_LENGTH)
@@ -196,6 +214,14 @@ public class CursorPiiExtractorBenchmark {
     bh.consume(mentions);
   }
 
+  /**
+   * Measures the default extractor with the runner's maximum worker count.
+   *
+   * @param corpus The input documents.
+   * @param state The default extractor.
+   * @param cursor The per-thread document cursor.
+   * @param bh Consumes the extracted mentions.
+   */
   @Benchmark
   @Threads(Threads.MAX)
   @OperationsPerInvocation(TARGET_LENGTH)
@@ -205,6 +231,14 @@ public class CursorPiiExtractorBenchmark {
     bh.consume(mentions);
   }
 
+  /**
+   * Measures the widest built-in pack with the runner's maximum worker count.
+   *
+   * @param corpus The input documents.
+   * @param state The widest extractor.
+   * @param cursor The per-thread document cursor.
+   * @param bh Consumes the extracted mentions.
+   */
   @Benchmark
   @Threads(Threads.MAX)
   @OperationsPerInvocation(TARGET_LENGTH)

@@ -52,6 +52,18 @@ public final class PiiRewrite {
   private final int[] cumulativeShifts;
   private final int originalLength;
 
+  /**
+   * Initializes an immutable rewrite from its text and parallel offset tables.
+   *
+   * @param text The rewritten text.
+   * @param mentions The rewritten mentions.
+   * @param originalStarts Original mention starts.
+   * @param originalEnds Original mention ends.
+   * @param rewrittenStarts Rewritten mention starts.
+   * @param rewrittenEnds Rewritten mention ends.
+   * @param cumulativeShifts Offset shift after each mention.
+   * @param originalLength The original text length.
+   */
   private PiiRewrite(String text, List<PiiMention> mentions, int[] originalStarts,
       int[] originalEnds, int[] rewrittenStarts, int[] rewrittenEnds,
       int[] cumulativeShifts, int originalLength) {

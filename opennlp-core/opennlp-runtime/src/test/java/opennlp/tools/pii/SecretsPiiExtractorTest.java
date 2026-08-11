@@ -34,21 +34,29 @@ public class SecretsPiiExtractorTest {
     private final String value;
     private int reads;
 
+    /**
+     * Initializes the counted sequence.
+     *
+     * @param value The wrapped text.
+     */
     private CountingCharSequence(String value) {
       this.value = value;
     }
 
+    /** {@inheritDoc} */
     @Override
     public int length() {
       return value.length();
     }
 
+    /** {@inheritDoc} */
     @Override
     public char charAt(int index) {
       reads++;
       return value.charAt(index);
     }
 
+    /** {@inheritDoc} */
     @Override
     public CharSequence subSequence(int start, int end) {
       return value.subSequence(start, end);
@@ -80,6 +88,11 @@ public class SecretsPiiExtractorTest {
 
   private final SecretsPiiExtractor extractor = new SecretsPiiExtractor();
 
+  /**
+   * Verifies linear scanning for repeated token prefixes.
+   *
+   * @param prefix The repeated near-miss prefix.
+   */
   @ParameterizedTest
   @ValueSource(strings = {"eyJ_", "ghp_"})
   void testPrefixHeavyNearMissesAreScannedLinearly(String prefix) {

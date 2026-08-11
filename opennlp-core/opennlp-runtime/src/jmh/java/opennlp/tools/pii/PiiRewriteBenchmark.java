@@ -71,7 +71,12 @@ public class PiiRewriteBenchmark {
     }
   }
 
-  /** Measures individual offset lookups across the complete dense rewrite. */
+  /**
+   * Measures individual offset lookups across the complete dense rewrite.
+   *
+   * @param state The dense rewrite.
+   * @param bh Consumes mapped offsets.
+   */
   @Benchmark
   @OperationsPerInvocation(MENTIONS)
   public void mapOffsets(RewriteState state, Blackhole bh) {
@@ -80,7 +85,12 @@ public class PiiRewriteBenchmark {
     }
   }
 
-  /** Measures bulk annotation remapping across the complete dense rewrite. */
+  /**
+   * Measures bulk annotation remapping across the complete dense rewrite.
+   *
+   * @param state The dense rewrite and annotations.
+   * @param bh Consumes mapped annotations.
+   */
   @Benchmark
   @OperationsPerInvocation(MENTIONS)
   public void remapAnnotations(RewriteState state, Blackhole bh) {

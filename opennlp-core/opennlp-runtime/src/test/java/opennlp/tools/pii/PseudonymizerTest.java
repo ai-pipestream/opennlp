@@ -82,6 +82,7 @@ public class PseudonymizerTest {
         rewrite("4111 1111 1111 1111 and 4111-1111-1111-1111").text());
   }
 
+  /** Verifies that structured type-value identities cannot alias at a delimiter. */
   @Test
   void testTypeAndValuePairsCannotAliasThroughTheirSeparator() {
     final List<PiiMention> mentions = List.of(
@@ -100,6 +101,7 @@ public class PseudonymizerTest {
     Assertions.assertEquals("CARD-1 and CARD-2", rewrite.text());
   }
 
+  /** Verifies that mailbox local-part case remains part of pseudonym identity. */
   @Test
   void testCaseDistinctMailboxLocalPartsGetDifferentLabels() {
     Assertions.assertEquals("EMAIL-1 EMAIL-2",
@@ -273,6 +275,7 @@ public class PseudonymizerTest {
     Assertions.assertEquals(rewrite.text().indexOf('z'), rewrite.mapOffset(text.indexOf('z')));
   }
 
+  /** Verifies binary-search mapping against a direct scan for every source offset. */
   @Test
   void testMapsEveryOffsetAcrossManyReplacements() {
     final String text = "xx ".repeat(1024);
