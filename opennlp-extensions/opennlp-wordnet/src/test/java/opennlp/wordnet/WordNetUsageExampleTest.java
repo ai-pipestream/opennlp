@@ -100,6 +100,46 @@ public class WordNetUsageExampleTest {
   }
 
   /**
+   * Compose a WN-LMF LexiconExtension against its resolver-supplied base exactly as the
+   * chapter's extension listing shows: a catalog-backed resolver, the composed descriptor's
+   * {@code extensionOf} and {@code dependencies}, the extension-added sense last in lookup,
+   * and navigation from a new synset to a resolved base synset.
+   */
+  @Test
+  void testComposeLexiconExtension() throws IOException {
+    final WnLmfResolver resolver = reference -> {
+      if ("ewn".equals(reference.ref()) && "2020".equals(reference.version())) {
+        return new WnLmfSource("extension-base.xml",
+            WordNetUsageExampleTest.class.getResourceAsStream("extension-base.xml"));
+      }
+      throw new IOException("No lexicon " + reference.ref() + " " + reference.version());
+    };
+    try (InputStream in = WordNetUsageExampleTest.class
+        .getResourceAsStream("extension-computer-science.xml")) {
+      assertNotNull(in, "Fixture extension-computer-science.xml must be on the test classpath");
+      final WnLmfResource resource =
+          WnLmfReader.readResource(in, "extension-computer-science.xml", resolver);
+      final WnLmfLexicon composed = resource.lexicons().get(0);
+
+      final WnLmfDependency base = composed.extensionOf().orElseThrow();
+      assertEquals("ewn", base.ref());
+      assertEquals("2020", base.version());
+      assertEquals("omw-fr", composed.dependencies().get(0).ref());
+
+      final LexicalKnowledgeBase lexicon = composed.knowledgeBase();
+      final List<Synset> senses = lexicon.lookup("process", WordNetPOS.NOUN);
+      assertEquals(3, senses.size());
+      final Synset added = senses.get(2);
+      assertEquals("ewn-20000123-n", added.id());
+      assertEquals("a running instance of a computer program", added.gloss());
+
+      final String hypernymId = added.related(WordNetRelation.HYPERNYM).get(0);
+      assertEquals(List.of("software"),
+          lexicon.synset(hypernymId).orElseThrow().lemmas());
+    }
+  }
+
+  /**
    * Follow the hypernym relation from the first sense of dog as the chapter's relation
    * navigation listing shows.
    */
