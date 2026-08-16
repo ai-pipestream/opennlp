@@ -101,6 +101,19 @@ public class SpellCheckingCharSequenceNormalizerTest {
   }
 
   @Test
+  void perTokenPreservesCasingOfSupplementaryPlaneInitial() {
+    // DESERET CAPITAL LETTER LONG I (U+10400) and its lower-case form (U+10428) are
+    // cased letters outside the BMP, so each is two chars in UTF-16. The leading-capital
+    // pattern must be recognized on the original and re-applied to the correction as a
+    // whole code point, not as the bare leading surrogate.
+    final SymSpell engine = new SymSpell();
+    engine.add("𐐨word", 1000);
+    final var normalizer = new SpellCheckingCharSequenceNormalizer(engine);
+    assertEquals("𐐨word", norm(normalizer, "𐐨wrod"));
+    assertEquals("𐐀word", norm(normalizer, "𐐀wrod"));
+  }
+
+  @Test
   void minTokenLengthSkipsShortTokens() {
     final var lenient = SpellCheckingCharSequenceNormalizer.builder(symSpell)
         .minTokenLength(1).build();
