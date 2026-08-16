@@ -314,7 +314,9 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
   /**
    * Re-applies the casing pattern of {@code original} to {@code corrected}: all-upper
    * stays all-upper, leading-capital stays leading-capital, otherwise the suggestion's
-   * own casing (typically lower-case) is used.
+   * own casing (typically lower-case) is used. The leading capital is read and written
+   * as a whole code point, so a first letter outside the BMP keeps its capital instead
+   * of being judged and upper-cased as its leading surrogate.
    */
   private static String applyCasing(String original, String corrected) {
     if (corrected.isEmpty()) {
@@ -323,8 +325,12 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
     if (isAllUpper(original)) {
       return corrected.toUpperCase(Locale.ROOT);
     }
-    if (Character.isUpperCase(original.charAt(0))) {
-      return Character.toUpperCase(corrected.charAt(0)) + corrected.substring(1);
+    if (Character.isUpperCase(original.codePointAt(0))) {
+      final int initial = corrected.codePointAt(0);
+      return new StringBuilder(corrected.length())
+          .appendCodePoint(Character.toUpperCase(initial))
+          .append(corrected, Character.charCount(initial), corrected.length())
+          .toString();
     }
     return corrected;
   }
