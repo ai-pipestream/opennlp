@@ -44,7 +44,8 @@ class CLITest {
 
   @Test
   void testOffersExactlyTheModelCommands() {
-    assertEquals(Set.of("AssembleModel", "DistillModel", "QuantizeModel"), CLI.getToolNames());
+    assertEquals(Set.of("AssembleModel", "DistillModel", "QuantizeModel",
+        "NormalizeDictionary", "NormalizeReporter", "LearnVocabulary"), CLI.getToolNames());
   }
 
   @Test
