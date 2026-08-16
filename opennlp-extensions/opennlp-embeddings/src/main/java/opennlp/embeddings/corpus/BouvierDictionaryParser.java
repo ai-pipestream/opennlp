@@ -25,8 +25,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
+
+import opennlp.tools.util.StringUtil;
 
 /**
  * Parses the hand-keyed HTML transcription of Bouvier's Law Dictionary (6th revised
@@ -76,7 +77,7 @@ public final class BouvierDictionaryParser {
     for (Path file : files) {
       // The 2001/2002 transcription predates UTF-8 hosting; Latin-1 decodes every byte.
       for (DictionaryEntry entry : parse(Files.readString(file, StandardCharsets.ISO_8859_1))) {
-        if (seen.add(entry.headword().toLowerCase(Locale.ROOT))) {
+        if (seen.add(StringUtil.toLowerCase(entry.headword()))) {
           entries.add(entry);
         }
       }
@@ -111,7 +112,7 @@ public final class BouvierDictionaryParser {
         if (close < 0) {
           break;
         }
-        final String tag = html.substring(i + 1, close).trim().toLowerCase(Locale.ROOT);
+        final String tag = StringUtil.toLowerCase(html.substring(i + 1, close).trim());
         final String name = tagName(tag);
         switch (name) {
           case "p" -> {
@@ -179,7 +180,7 @@ public final class BouvierDictionaryParser {
    * headword, otherwise a continuation of the previous entry's definition.
    */
   private static void flushParagraph(List<String[]> raw, String bold, StringBuilder text) {
-    String body = String.join(" ", text.toString().split("\\s+")).strip();
+    String body = collapseWhitespace(text.toString());
     while (!body.isEmpty() && isLeadingPunctuation(body.charAt(0))) {
       body = body.substring(1).strip();
     }
@@ -200,7 +201,7 @@ public final class BouvierDictionaryParser {
     if (candidate.isEmpty() || candidate.length() > MAX_HEADWORD_LENGTH) {
       return false;
     }
-    if (!candidate.equals(candidate.toUpperCase(Locale.ROOT))) {
+    if (!candidate.equals(StringUtil.toUpperCase(candidate))) {
       return false;
     }
     if (candidate.contains("BOUVIER") || candidate.contains("DICTIONARY")) {
@@ -215,8 +216,35 @@ public final class BouvierDictionaryParser {
     return true;
   }
 
+  /**
+   * {@return the text with every whitespace run collapsed to a single space and both ends
+   * trimmed}
+   *
+   * @param text The text to collapse.
+   */
+  private static String collapseWhitespace(String text) {
+    final StringBuilder collapsed = new StringBuilder(text.length());
+    final int length = text.length();
+    boolean pendingSpace = false;
+    int i = 0;
+    while (i < length) {
+      final int c = text.codePointAt(i);
+      if (Character.isWhitespace(c)) {
+        pendingSpace = collapsed.length() > 0;
+      } else {
+        if (pendingSpace) {
+          collapsed.append(' ');
+          pendingSpace = false;
+        }
+        collapsed.appendCodePoint(c);
+      }
+      i += Character.charCount(c);
+    }
+    return collapsed.toString();
+  }
+
   private static String cleanHeadword(String word) {
-    String cleaned = String.join(" ", word.strip().split("\\s+"));
+    String cleaned = collapseWhitespace(word);
     while (!cleaned.isEmpty()
         && " ,.;:".indexOf(cleaned.charAt(cleaned.length() - 1)) >= 0) {
       cleaned = cleaned.substring(0, cleaned.length() - 1);

@@ -22,8 +22,9 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+
+import opennlp.tools.util.StringUtil;
 
 /**
  * Learns a vocabulary from corpus texts and dictionary headwords: every dictionary term
@@ -175,7 +176,7 @@ public final class VocabularyLearner {
   /** Folds a text to lower case and splits it into maximal letter-or-digit runs. */
   private static List<String> words(String text) {
     final List<String> words = new ArrayList<>();
-    final String folded = text.toLowerCase(Locale.ROOT);
+    final String folded = StringUtil.toLowerCase(text);
     final int length = folded.length();
     int i = 0;
     while (i < length) {
