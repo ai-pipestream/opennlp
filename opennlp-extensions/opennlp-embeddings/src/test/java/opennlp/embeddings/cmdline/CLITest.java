@@ -84,4 +84,17 @@ class CLITest {
 
     assertTrue(help.contains("-modelDir dir"), help);
   }
+
+  @Test
+  void testEvalVectorSearchHelpNamesEveryParameter() {
+    final String help = new EvalVectorSearchTool().getHelp();
+
+    assertTrue(help.contains("-model dir"), help);
+    assertTrue(help.contains("-passages file"), help);
+    assertTrue(help.contains("-dictionary file"), help);
+    assertTrue(help.contains("-out file"), help);
+    assertTrue(help.contains("[-bits num]"), help);
+    assertTrue(help.contains("[-seed num]"), help);
+    assertTrue(help.contains("[-topK num]"), help);
+  }
 }

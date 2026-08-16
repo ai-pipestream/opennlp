@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import opennlp.embeddings.QuantizedEmbeddingMatrix;
 import opennlp.embeddings.StaticEmbeddingModel;
 import opennlp.embeddings.corpus.CasePassage;
 import opennlp.embeddings.corpus.DictionaryEntry;
@@ -38,8 +39,9 @@ import opennlp.tools.util.java.Experimental;
  *
  * <p>Three evaluations, each self-labeling:</p>
  * <ol>
- *   <li><b>Index fidelity</b>: every passage vector queries both indexes; the quantized index's
- *   overlap with the exact top-k and its rank-1 agreement measure pure quantization loss.</li>
+ *   <li><b>Index fidelity</b>: every indexable passage vector queries both indexes; the
+ *   quantized index's overlap with the exact top-k and its rank-1 agreement measure pure
+ *   quantization loss.</li>
  *   <li><b>Definition to headword</b>: each dictionary definition queries an index of headword
  *   embeddings; the definition's own headword is the relevant answer.</li>
  *   <li><b>Half passage</b>: the first half of each passage queries the passage index; the
@@ -69,6 +71,19 @@ public final class SearchEvaluator {
    */
   public record IndexMetrics(String name, int rows, double bytesPerVector, long buildMillis,
                              double queriesPerSecond) {
+
+    /**
+     * Validates one index measurement.
+     *
+     * @throws IllegalArgumentException Thrown if a value is invalid.
+     */
+    public IndexMetrics {
+      requireName(name);
+      requireNonNegative(rows, "rows");
+      requireNonNegative(bytesPerVector, "bytesPerVector");
+      requireNonNegative(buildMillis, "buildMillis");
+      requireNonNegative(queriesPerSecond, "queriesPerSecond");
+    }
   }
 
   /**
@@ -83,13 +98,28 @@ public final class SearchEvaluator {
    */
   public record RetrievalMetrics(String name, int queries, double mrr, double recallAt1,
                                  double recallAtK) {
+
+    /**
+     * Validates one retrieval measurement.
+     *
+     * @throws IllegalArgumentException Thrown if a value is invalid.
+     */
+    public RetrievalMetrics {
+      requireName(name);
+      requireNonNegative(queries, "queries");
+      requireRatio(mrr, "mrr");
+      requireRatio(recallAt1, "recallAt1");
+      requireRatio(recallAtK, "recallAtK");
+    }
   }
 
   /**
    * One complete evaluation run.
    *
-   * @param passageCount        The number of indexed passages.
-   * @param headwordCount       The number of indexed dictionary headwords.
+   * @param passageCount        The total number of supplied passages.
+   * @param indexedPassageCount The number of passages with a usable embedding.
+   * @param headwordCount       The total number of supplied dictionary headwords.
+   * @param indexedHeadwordCount The number of headwords with a usable embedding.
    * @param dimension           The embedding dimension.
    * @param vocabularySize      The model's subword vocabulary size.
    * @param termCount           The model's term-row count.
@@ -103,12 +133,53 @@ public final class SearchEvaluator {
    * @param definitionToHeadword The definition-to-headword metrics, exact then quantized.
    * @param halfPassage         The half-passage metrics, exact then quantized.
    */
-  public record Report(int passageCount, int headwordCount, int dimension, int vocabularySize,
-                       int termCount, int bits, int topK, long embedMillis,
+  public record Report(int passageCount, int indexedPassageCount,
+                       int headwordCount, int indexedHeadwordCount,
+                       int dimension, int vocabularySize, int termCount,
+                       int bits, int topK, long embedMillis,
                        IndexMetrics flat, IndexMetrics quantized,
                        double fidelityRecallAtK, double fidelityAgreement,
                        List<RetrievalMetrics> definitionToHeadword,
                        List<RetrievalMetrics> halfPassage) {
+
+    /**
+     * Validates and copies one complete report.
+     *
+     * @throws IllegalArgumentException Thrown if a value is invalid.
+     */
+    public Report {
+      requirePositive(passageCount, "passageCount");
+      requirePositive(indexedPassageCount, "indexedPassageCount");
+      requireRange(indexedPassageCount, passageCount, "indexedPassageCount", "passageCount");
+      requireNonNegative(headwordCount, "headwordCount");
+      requireNonNegative(indexedHeadwordCount, "indexedHeadwordCount");
+      requireRange(indexedHeadwordCount, headwordCount, "indexedHeadwordCount", "headwordCount");
+      requirePositive(dimension, "dimension");
+      requireNonNegative(vocabularySize, "vocabularySize");
+      requireNonNegative(termCount, "termCount");
+      if (bits < QuantizedEmbeddingMatrix.MIN_BITS
+          || bits > QuantizedEmbeddingMatrix.MAX_BITS) {
+        throw new IllegalArgumentException("bits must be between "
+            + QuantizedEmbeddingMatrix.MIN_BITS + " and "
+            + QuantizedEmbeddingMatrix.MAX_BITS + ": " + bits);
+      }
+      requirePositive(topK, "topK");
+      requireNonNegative(embedMillis, "embedMillis");
+      if (flat == null) {
+        throw new IllegalArgumentException("flat must not be null");
+      }
+      if (quantized == null) {
+        throw new IllegalArgumentException("quantized must not be null");
+      }
+      if (flat.rows() != indexedPassageCount || quantized.rows() != indexedPassageCount) {
+        throw new IllegalArgumentException(
+            "index row counts must equal indexedPassageCount: " + indexedPassageCount);
+      }
+      requireRatio(fidelityRecallAtK, "fidelityRecallAtK");
+      requireRatio(fidelityAgreement, "fidelityAgreement");
+      definitionToHeadword = copyMetrics(definitionToHeadword, "definitionToHeadword");
+      halfPassage = copyMetrics(halfPassage, "halfPassage");
+    }
 
     /** {@return the human-readable report as GitHub-flavored markdown} */
     public String toMarkdown() {
@@ -116,8 +187,10 @@ public final class SearchEvaluator {
       md.append("# Vector search evaluation\n\n");
       md.append("Model: ").append(vocabularySize).append(" subword rows, ")
           .append(termCount).append(" term rows, dimension ").append(dimension)
-          .append(". Corpus: ").append(passageCount).append(" passages, ")
-          .append(headwordCount).append(" dictionary headwords. Quantization: ")
+          .append(". Corpus: ").append(passageCount).append(" passages (")
+          .append(indexedPassageCount).append(" indexable), ")
+          .append(headwordCount).append(" dictionary headwords (")
+          .append(indexedHeadwordCount).append(" indexable). Quantization: ")
           .append(bits).append(" bits per dimension. Evaluation depth: top ")
           .append(topK).append(".\n\n");
       md.append("Embedding the passages took ").append(embedMillis).append(" ms.\n\n");
@@ -137,6 +210,7 @@ public final class SearchEvaluator {
 
       md.append("## Index fidelity (quantized vs exact, passages as queries)\n\n");
       md.append("| metric | value |\n|---|---|\n");
+      md.append("| eligible queries | ").append(indexedPassageCount).append(" |\n");
       md.append("| recall@").append(topK).append(" vs exact | ")
           .append(format(fidelityRecallAtK)).append(" |\n");
       md.append("| rank-1 agreement | ").append(format(fidelityAgreement)).append(" |\n\n");
@@ -174,7 +248,9 @@ public final class SearchEvaluator {
     public String toTsv() {
       final StringBuilder tsv = new StringBuilder(1024);
       line(tsv, "passages", passageCount);
+      line(tsv, "passages.indexed", indexedPassageCount);
       line(tsv, "headwords", headwordCount);
+      line(tsv, "headwords.indexed", indexedHeadwordCount);
       line(tsv, "dimension", dimension);
       line(tsv, "vocabulary.subwords", vocabularySize);
       line(tsv, "vocabulary.terms", termCount);
@@ -189,6 +265,7 @@ public final class SearchEvaluator {
       }
       line(tsv, "fidelity.recallAtK", format(fidelityRecallAtK));
       line(tsv, "fidelity.rank1Agreement", format(fidelityAgreement));
+      line(tsv, "fidelity.queries", indexedPassageCount);
       for (final RetrievalMetrics m : definitionToHeadword) {
         retrievalLines(tsv, "definitionToHeadword." + m.name(), m);
       }
@@ -233,42 +310,65 @@ public final class SearchEvaluator {
    * Runs the full evaluation.
    *
    * @param model      The embedding model. Must not be {@code null}.
-   * @param passages   The passages to index and query. Must not be {@code null} or empty.
+   * @param passages   The passages to index and query. Must not be {@code null} or empty, must
+   *                   contain no {@code null} elements, and must have unique ids. At least one
+   *                   passage text must produce a usable embedding.
    * @param dictionary The dictionary entries for the definition-to-headword evaluation. Must
-   *                   not be {@code null}; may be empty, which skips that evaluation's queries.
+   *                   not be {@code null}, must contain no {@code null} elements, and must have
+   *                   unique headwords. It may be empty, which skips that evaluation's queries.
    * @param bits       The quantization bit width, as in
    *                   {@link TurboQuantIndex#TurboQuantIndex(int, int, long)}.
    * @param seed       The quantization rotation seed.
    * @param topK       The evaluation depth. Must be at least 1.
    * @return The report.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or out of range, or
-   *     {@code passages} is empty.
+   * @throws IllegalArgumentException Thrown if an argument violates the constraints above or is
+   *     out of range.
    */
   public static Report run(StaticEmbeddingModel model, List<CasePassage> passages,
                            List<DictionaryEntry> dictionary, int bits, long seed, int topK) {
     if (model == null) {
-      throw new IllegalArgumentException("Model must not be null");
+      throw new IllegalArgumentException("model must not be null");
     }
     if (passages == null || passages.isEmpty()) {
-      throw new IllegalArgumentException("Passages must not be null or empty");
+      throw new IllegalArgumentException("passages must not be null or empty");
     }
     if (dictionary == null) {
-      throw new IllegalArgumentException("Dictionary must not be null");
+      throw new IllegalArgumentException("dictionary must not be null");
+    }
+    if (bits < QuantizedEmbeddingMatrix.MIN_BITS
+        || bits > QuantizedEmbeddingMatrix.MAX_BITS) {
+      throw new IllegalArgumentException("bits must be between "
+          + QuantizedEmbeddingMatrix.MIN_BITS + " and "
+          + QuantizedEmbeddingMatrix.MAX_BITS + ": " + bits);
     }
     if (topK < 1) {
-      throw new IllegalArgumentException("TopK must be at least 1, got " + topK);
+      throw new IllegalArgumentException("topK must be at least 1: " + topK);
     }
+    validateInputs(passages, dictionary);
 
     final long embedStart = System.nanoTime();
     final float[][] passageVectors = new float[passages.size()][];
+    final boolean[] indexedPassages = new boolean[passages.size()];
+    final List<float[]> fidelityQueries = new ArrayList<>(passages.size());
     for (int i = 0; i < passages.size(); i++) {
       passageVectors[i] = model.embed(passages.get(i).text());
+      if (hasDirection(passageVectors[i])) {
+        indexedPassages[i] = true;
+        fidelityQueries.add(passageVectors[i]);
+      }
+    }
+    if (fidelityQueries.isEmpty()) {
+      throw new IllegalArgumentException(
+          "passages must contain at least one text with a usable embedding");
     }
     final long embedMillis = millisSince(embedStart);
 
     final FlatFloatIndex flat = new FlatFloatIndex(model.dimension());
     final TurboQuantIndex quantized = new TurboQuantIndex(model.dimension(), bits, seed);
     for (int i = 0; i < passages.size(); i++) {
+      if (!indexedPassages[i]) {
+        continue;
+      }
       flat.add(passages.get(i).id(), passageVectors[i]);
       quantized.add(passages.get(i).id(), passageVectors[i]);
     }
@@ -279,13 +379,15 @@ public final class SearchEvaluator {
     quantized.freeze();
     final long quantizedBuildMillis = millisSince(quantizedBuildStart);
 
-    // Fidelity: quantized against exact on every passage vector; this pass also warms both
+    // Fidelity: quantized against exact on every indexable passage vector; this also warms both
     // indexes for the throughput measurement after it.
-    double overlap = 0;
+    long overlap = 0;
+    long exactResultCount = 0;
     int agreement = 0;
-    for (final float[] query : passageVectors) {
+    for (final float[] query : fidelityQueries) {
       final List<VectorIndex.Hit> exact = flat.topK(query, topK);
       final List<VectorIndex.Hit> approximate = quantized.topK(query, topK);
+      exactResultCount += exact.size();
       final Set<String> truth = new HashSet<>(exact.size() * 2);
       for (final VectorIndex.Hit hit : exact) {
         truth.add(hit.id());
@@ -300,32 +402,41 @@ public final class SearchEvaluator {
         agreement++;
       }
     }
-    final double fidelityRecall = overlap / ((double) passages.size() * topK);
-    final double fidelityAgreement = agreement / (double) passages.size();
+    final double fidelityRecall = overlap / (double) exactResultCount;
+    final double fidelityAgreement = agreement / (double) fidelityQueries.size();
+
+    final float[][] timedQueries = fidelityQueries.toArray(float[][]::new);
 
     final IndexMetrics flatMetrics = new IndexMetrics("exact", flat.size(),
         model.dimension() * (double) Float.BYTES, flatBuildMillis,
-        queriesPerSecond(flat, passageVectors, topK));
+        queriesPerSecond(flat, timedQueries, topK));
     final IndexMetrics quantizedMetrics = new IndexMetrics("turboquant", quantized.size(),
         quantized.bytesPerVector(), quantizedBuildMillis,
-        queriesPerSecond(quantized, passageVectors, topK));
+        queriesPerSecond(quantized, timedQueries, topK));
 
     // Definition to headword: an index of headword embeddings queried by definitions.
     final List<RetrievalMetrics> definitionToHeadword = new ArrayList<>(2);
+    int indexedHeadwordCount = 0;
     if (!dictionary.isEmpty()) {
       final FlatFloatIndex flatHeadwords = new FlatFloatIndex(model.dimension());
       final TurboQuantIndex quantizedHeadwords =
           new TurboQuantIndex(model.dimension(), bits, seed);
+      final List<DictionaryEntry> indexedHeadwords = new ArrayList<>(dictionary.size());
       for (final DictionaryEntry entry : dictionary) {
         final float[] vector = model.embed(entry.headword());
+        if (!hasDirection(vector)) {
+          continue;
+        }
         flatHeadwords.add(entry.headword(), vector);
         quantizedHeadwords.add(entry.headword(), vector);
+        indexedHeadwords.add(entry);
       }
       flatHeadwords.freeze();
       quantizedHeadwords.freeze();
-      final List<String> targets = new ArrayList<>(dictionary.size());
-      final List<float[]> queries = new ArrayList<>(dictionary.size());
-      for (final DictionaryEntry entry : dictionary) {
+      indexedHeadwordCount = indexedHeadwords.size();
+      final List<String> targets = new ArrayList<>(indexedHeadwordCount);
+      final List<float[]> queries = new ArrayList<>(indexedHeadwordCount);
+      for (final DictionaryEntry entry : indexedHeadwords) {
         queries.add(model.embed(entry.definition()));
         targets.add(entry.headword());
       }
@@ -337,7 +448,11 @@ public final class SearchEvaluator {
     // Half passage: the first half of each passage queries the passage index.
     final List<String> passageTargets = new ArrayList<>(passages.size());
     final List<float[]> halfQueries = new ArrayList<>(passages.size());
-    for (final CasePassage passage : passages) {
+    for (int i = 0; i < passages.size(); i++) {
+      if (!indexedPassages[i]) {
+        continue;
+      }
+      final CasePassage passage = passages.get(i);
       halfQueries.add(model.embed(firstHalf(passage.text())));
       passageTargets.add(passage.id());
     }
@@ -345,10 +460,59 @@ public final class SearchEvaluator {
         retrieval("exact", flat, halfQueries, passageTargets, topK),
         retrieval("turboquant", quantized, halfQueries, passageTargets, topK));
 
-    return new Report(passages.size(), dictionary.size(), model.dimension(),
+    return new Report(passages.size(), fidelityQueries.size(),
+        dictionary.size(), indexedHeadwordCount, model.dimension(),
         model.vocabularySize(), model.termCount(), bits, topK, embedMillis,
         flatMetrics, quantizedMetrics, fidelityRecall, fidelityAgreement,
         List.copyOf(definitionToHeadword), halfPassage);
+  }
+
+  /**
+   * Validates collection elements and identifiers before embedding begins.
+   *
+   * @param passages The passage inputs.
+   * @param dictionary The dictionary inputs.
+   * @throws IllegalArgumentException Thrown if an element is {@code null} or an identifier
+   *     repeats.
+   */
+  private static void validateInputs(List<CasePassage> passages,
+                                     List<DictionaryEntry> dictionary) {
+    final Set<String> passageIds = new HashSet<>(passages.size() * 2);
+    for (int i = 0; i < passages.size(); i++) {
+      final CasePassage passage = passages.get(i);
+      if (passage == null) {
+        throw new IllegalArgumentException("passages must not contain null at index " + i);
+      }
+      if (!passageIds.add(passage.id())) {
+        throw new IllegalArgumentException("passage id must be unique: " + passage.id());
+      }
+    }
+    final Set<String> headwords = new HashSet<>(dictionary.size() * 2);
+    for (int i = 0; i < dictionary.size(); i++) {
+      final DictionaryEntry entry = dictionary.get(i);
+      if (entry == null) {
+        throw new IllegalArgumentException("dictionary must not contain null at index " + i);
+      }
+      if (!headwords.add(entry.headword())) {
+        throw new IllegalArgumentException("dictionary headword must be unique: "
+            + entry.headword());
+      }
+    }
+  }
+
+  /**
+   * Tests whether a model-produced embedding has a direction.
+   *
+   * @param vector The embedding vector.
+   * @return {@code true} when at least one coordinate is nonzero.
+   */
+  private static boolean hasDirection(float[] vector) {
+    for (final float value : vector) {
+      if (value != 0f) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -435,5 +599,94 @@ public final class SearchEvaluator {
    */
   private static long millisSince(long startNanos) {
     return (System.nanoTime() - startNanos) / 1_000_000;
+  }
+
+  /**
+   * Validates an index or retrieval name.
+   *
+   * @param name The name.
+   * @throws IllegalArgumentException Thrown if {@code name} is {@code null} or blank.
+   */
+  private static void requireName(String name) {
+    if (name == null || name.isBlank()) {
+      throw new IllegalArgumentException("name must not be null or blank");
+    }
+  }
+
+  /**
+   * Validates a positive integer.
+   *
+   * @param value The value.
+   * @param name The argument name.
+   * @throws IllegalArgumentException Thrown if {@code value} is not positive.
+   */
+  private static void requirePositive(int value, String name) {
+    if (value < 1) {
+      throw new IllegalArgumentException(name + " must be at least 1: " + value);
+    }
+  }
+
+  /**
+   * Validates a nonnegative numeric value.
+   *
+   * @param value The value.
+   * @param name The argument name.
+   * @throws IllegalArgumentException Thrown if {@code value} is negative or non-finite.
+   */
+  private static void requireNonNegative(double value, String name) {
+    if (!Double.isFinite(value) || value < 0) {
+      throw new IllegalArgumentException(name + " must be finite and nonnegative: " + value);
+    }
+  }
+
+  /**
+   * Validates an inclusive count range.
+   *
+   * @param value The subset count.
+   * @param maximum The total count.
+   * @param name The subset argument name.
+   * @param maximumName The total argument name.
+   * @throws IllegalArgumentException Thrown if {@code value} exceeds {@code maximum}.
+   */
+  private static void requireRange(int value, int maximum, String name, String maximumName) {
+    if (value > maximum) {
+      throw new IllegalArgumentException(name + " must not exceed " + maximumName + ": "
+          + value + " > " + maximum);
+    }
+  }
+
+  /**
+   * Validates a ratio.
+   *
+   * @param value The ratio.
+   * @param name The argument name.
+   * @throws IllegalArgumentException Thrown if {@code value} is outside {@code [0, 1]}.
+   */
+  private static void requireRatio(double value, String name) {
+    if (!Double.isFinite(value) || value < 0 || value > 1) {
+      throw new IllegalArgumentException(name + " must be between 0 and 1: " + value);
+    }
+  }
+
+  /**
+   * Validates and copies a retrieval-metric list.
+   *
+   * @param metrics The metrics.
+   * @param name The argument name.
+   * @return The immutable copy.
+   * @throws IllegalArgumentException Thrown if {@code metrics} is {@code null} or contains
+   *     {@code null}.
+   */
+  private static List<RetrievalMetrics> copyMetrics(
+      List<RetrievalMetrics> metrics, String name) {
+    if (metrics == null) {
+      throw new IllegalArgumentException(name + " must not be null");
+    }
+    for (int i = 0; i < metrics.size(); i++) {
+      if (metrics.get(i) == null) {
+        throw new IllegalArgumentException(name + " must not contain null at index " + i);
+      }
+    }
+    return List.copyOf(metrics);
   }
 }

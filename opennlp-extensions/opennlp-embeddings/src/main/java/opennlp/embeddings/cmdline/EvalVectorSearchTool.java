@@ -41,16 +41,19 @@ public class EvalVectorSearchTool extends BasicCmdLineTool {
   interface Params extends EvalVectorSearchParams {
   }
 
+  /** {@inheritDoc} */
   @Override
   public String getShortDescription() {
     return "Evaluates exact and quantized vector search over an embedded passage corpus";
   }
 
+  /** {@inheritDoc} */
   @Override
   public String getHelp() {
     return getBasicHelp(Params.class);
   }
 
+  /** {@inheritDoc} */
   @Override
   public void run(String[] args) {
     final Params params = validateAndParseParams(args, Params.class);
@@ -86,7 +89,7 @@ public class EvalVectorSearchTool extends BasicCmdLineTool {
    *
    * @param out The markdown report path.
    */
-  private static Path tsvPath(Path out) {
+  private Path tsvPath(Path out) {
     final String name = out.getFileName().toString();
     final int dot = name.lastIndexOf('.');
     final String tsvName = (dot > 0 ? name.substring(0, dot) : name) + ".tsv";

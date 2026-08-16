@@ -138,6 +138,33 @@ class TurboQuantIndexTest {
     assertThrows(IllegalStateException.class, () -> empty.write(dir));
   }
 
+  @ParameterizedTest
+  @ValueSource(ints = {2, 3, 4})
+  void testBytesPerVectorIncludesPaddedCodesScaleAndNorm(int bits) {
+    final int unpaddedDimension = 65;
+    final TurboQuantIndex index = new TurboQuantIndex(unpaddedDimension, bits, 42);
+    final float[] vector = new float[unpaddedDimension];
+    vector[0] = 1;
+    index.add("one", vector);
+    index.freeze();
+
+    final int paddedDimension = 128;
+    final double expected = (paddedDimension * bits + Byte.SIZE - 1) / Byte.SIZE
+        + 2 * Float.BYTES;
+    assertEquals(expected, index.bytesPerVector());
+  }
+
+  @Test
+  void testBytesPerVectorRequiresAFrozenNonEmptyIndex() {
+    final TurboQuantIndex building = new TurboQuantIndex(DIMENSION, 4, 42);
+    building.add("one", collection()[0]);
+    assertThrows(IllegalStateException.class, building::bytesPerVector);
+
+    final TurboQuantIndex empty = new TurboQuantIndex(DIMENSION, 4, 42);
+    empty.freeze();
+    assertThrows(IllegalStateException.class, empty::bytesPerVector);
+  }
+
   @Test
   void testReadRejectsAMissingFile(@TempDir Path dir) {
     assertThrows(IllegalArgumentException.class, () -> TurboQuantIndex.read(dir));
