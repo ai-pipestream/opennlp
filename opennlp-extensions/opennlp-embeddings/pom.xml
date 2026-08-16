@@ -59,7 +59,12 @@
       <version>${onnxruntime.version}</version>
     </dependency>
 
+<<<<<<< HEAD
     <!-- Lucene is used only by the HNSW benchmark tests. -->
+=======
+    <!-- The HNSW baseline the evaluation harness benchmarks against; test scope keeps the
+         module's runtime free of search-engine dependencies. -->
+>>>>>>> 0de4dabf7 (OPENNLP-1911: Add a test-scope Lucene HNSW baseline)
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-core</artifactId>
