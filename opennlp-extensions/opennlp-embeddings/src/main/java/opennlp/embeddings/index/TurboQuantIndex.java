@@ -164,6 +164,22 @@ public final class TurboQuantIndex implements VectorIndex {
   }
 
   /**
+   * {@return the storage cost of one indexed vector: the packed codes over the padded
+   * dimension plus the per-row scale and norm floats}
+   *
+   * @throws IllegalStateException Thrown if the index is not frozen or is empty.
+   */
+  public double bytesPerVector() {
+    if (buffer != null) {
+      throw new IllegalStateException("The index is not frozen; freeze() ends the build phase");
+    }
+    if (matrix == null) {
+      throw new IllegalStateException("An empty index stores no vectors");
+    }
+    return (matrix.paddedDimension() * bits + Byte.SIZE - 1) / Byte.SIZE + 2 * Float.BYTES;
+  }
+
+  /**
    * Writes this frozen, non-empty index as a directory of {@value #VECTORS_FILE} and
    * {@value #IDS_FILE}. The directory is created when missing; the two files are replaced.
    *

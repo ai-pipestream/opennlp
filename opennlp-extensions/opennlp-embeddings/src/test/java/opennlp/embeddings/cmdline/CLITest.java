@@ -39,13 +39,15 @@ class CLITest {
 
   /** {@return the tools the dispatcher registers, as parameterized-test arguments} */
   static Stream<BasicCmdLineTool> tools() {
-    return Stream.of(new AssembleModelTool(), new DistillModelTool(), new QuantizeModelTool());
+    return Stream.of(new AssembleModelTool(), new DistillModelTool(), new QuantizeModelTool(),
+        new EvalVectorSearchTool());
   }
 
   @Test
   void testOffersExactlyTheModelCommands() {
     assertEquals(Set.of("AssembleModel", "DistillModel", "QuantizeModel",
-        "NormalizeDictionary", "NormalizeReporter", "LearnVocabulary"), CLI.getToolNames());
+        "NormalizeDictionary", "NormalizeReporter", "LearnVocabulary", "EvalVectorSearch"),
+        CLI.getToolNames());
   }
 
   @Test
