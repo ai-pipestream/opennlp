@@ -40,6 +40,17 @@ quantized index over the embedded passages and writes one markdown report
 (and a TSV twin) with index fidelity, definition-to-headword retrieval,
 half-passage retrieval, throughput, and storage cost.
 
+A Lucene HNSW baseline reruns the same measurements against a graph index
+for comparison. It lives in the module's test tree
+(`opennlp.embeddings.eval.HnswBaseline`) so Lucene stays a bench-scope
+dependency; run it with the module's test classes and test dependencies on
+the classpath:
+
+```
+HnswBaseline $H/model $H/normalized/passages.jsonl \
+             $H/normalized/dictionary.tsv $H/hnsw-report.md
+```
+
 The original Python normalizers were retired 2026-08-16 after the Java ports
 reproduced their output byte for byte on the full first acquisition (see
 `opennlp.embeddings.corpus`).

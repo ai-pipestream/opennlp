@@ -51,6 +51,9 @@ import opennlp.tools.util.java.Experimental;
  * <p>The run is deterministic apart from the wall-clock timings: the quantization seed is
  * fixed by the caller and the queries are the inputs in order.</p>
  *
+ * <p>The package-private measurement helpers are shared with the bench-scope HNSW baseline in
+ * the test tree, so both report the same metrics the same way.</p>
+ *
  * <p>Warning: Experimental new feature; the API might change in a later release.</p>
  */
 @Experimental
@@ -381,29 +384,7 @@ public final class SearchEvaluator {
 
     // Fidelity: quantized against exact on every indexable passage vector; this also warms both
     // indexes for the throughput measurement after it.
-    long overlap = 0;
-    long exactResultCount = 0;
-    int agreement = 0;
-    for (final float[] query : fidelityQueries) {
-      final List<VectorIndex.Hit> exact = flat.topK(query, topK);
-      final List<VectorIndex.Hit> approximate = quantized.topK(query, topK);
-      exactResultCount += exact.size();
-      final Set<String> truth = new HashSet<>(exact.size() * 2);
-      for (final VectorIndex.Hit hit : exact) {
-        truth.add(hit.id());
-      }
-      for (final VectorIndex.Hit hit : approximate) {
-        if (truth.contains(hit.id())) {
-          overlap++;
-        }
-      }
-      if (!exact.isEmpty() && !approximate.isEmpty()
-          && exact.get(0).id().equals(approximate.get(0).id())) {
-        agreement++;
-      }
-    }
-    final double fidelityRecall = overlap / (double) exactResultCount;
-    final double fidelityAgreement = agreement / (double) fidelityQueries.size();
+    final Fidelity fidelity = fidelity(flat, quantized, fidelityQueries, topK);
 
     final float[][] timedQueries = fidelityQueries.toArray(float[][]::new);
 
@@ -463,8 +444,55 @@ public final class SearchEvaluator {
     return new Report(passages.size(), fidelityQueries.size(),
         dictionary.size(), indexedHeadwordCount, model.dimension(),
         model.vocabularySize(), model.termCount(), bits, topK, embedMillis,
-        flatMetrics, quantizedMetrics, fidelityRecall, fidelityAgreement,
+        flatMetrics, quantizedMetrics, fidelity.recallAtK(), fidelity.rank1Agreement(),
         List.copyOf(definitionToHeadword), halfPassage);
+  }
+
+  /**
+   * An approximate index's agreement with the exact one on the same queries.
+   *
+   * @param recallAtK      The mean overlap between the two top-k result sets, relative to the
+   *                       number of exact results returned.
+   * @param rank1Agreement The share of queries where both indexes rank the same id first.
+   */
+  record Fidelity(double recallAtK, double rank1Agreement) {
+  }
+
+  /**
+   * Measures an approximate index against the exact one: each query runs against both, and the
+   * approximate results are scored by their overlap with the exact top {@code topK}.
+   *
+   * @param exact       The exact index.
+   * @param approximate The approximate index over the same vectors.
+   * @param queries     The query vectors; every query must have a direction.
+   * @param topK        The evaluation depth.
+   * @return The fidelity measurements.
+   */
+  static Fidelity fidelity(VectorIndex exact, VectorIndex approximate,
+                           List<float[]> queries, int topK) {
+    long overlap = 0;
+    long exactResultCount = 0;
+    int agreement = 0;
+    for (final float[] query : queries) {
+      final List<VectorIndex.Hit> truth = exact.topK(query, topK);
+      final List<VectorIndex.Hit> answer = approximate.topK(query, topK);
+      exactResultCount += truth.size();
+      final Set<String> truthIds = new HashSet<>(truth.size() * 2);
+      for (final VectorIndex.Hit hit : truth) {
+        truthIds.add(hit.id());
+      }
+      for (final VectorIndex.Hit hit : answer) {
+        if (truthIds.contains(hit.id())) {
+          overlap++;
+        }
+      }
+      if (!truth.isEmpty() && !answer.isEmpty()
+          && truth.get(0).id().equals(answer.get(0).id())) {
+        agreement++;
+      }
+    }
+    return new Fidelity(overlap / (double) exactResultCount,
+        agreement / (double) queries.size());
   }
 
   /**
@@ -506,7 +534,7 @@ public final class SearchEvaluator {
    * @param vector The embedding vector.
    * @return {@code true} when at least one coordinate is nonzero.
    */
-  private static boolean hasDirection(float[] vector) {
+  static boolean hasDirection(float[] vector) {
     for (final float value : vector) {
       if (value != 0f) {
         return true;
@@ -528,7 +556,7 @@ public final class SearchEvaluator {
    * @param topK    The evaluation depth.
    * @return The metrics.
    */
-  private static RetrievalMetrics retrieval(String name, VectorIndex index,
+  static RetrievalMetrics retrieval(String name, VectorIndex index,
                                             List<float[]> queries, List<String> targets,
                                             int topK) {
     int usable = 0;
@@ -567,7 +595,7 @@ public final class SearchEvaluator {
    * @param topK    The result depth per query.
    * @return Queries per second.
    */
-  private static double queriesPerSecond(VectorIndex index, float[][] queries, int topK) {
+  static double queriesPerSecond(VectorIndex index, float[][] queries, int topK) {
     final long start = System.nanoTime();
     for (final float[] query : queries) {
       index.topK(query, topK);
@@ -583,7 +611,7 @@ public final class SearchEvaluator {
    *
    * @param text The passage text.
    */
-  private static String firstHalf(String text) {
+  static String firstHalf(String text) {
     final int midpoint = text.length() / 2;
     if (midpoint == 0) {
       return text;
