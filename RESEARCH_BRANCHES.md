@@ -14,7 +14,7 @@ Nothing ever merges out of the research arm, and none of this touches the
 upstream project's own process. Read the warning at the top of
 [README.md](README.md) before using anything here.
 
-State below is as of 2026-08-13, measured against apache main `543067eea`.
+State below is as of 2026-08-15, measured against apache main `543067eea`.
 Every admitted tip received a fleet-wide review pass to the krickert-review
 standard. The August 10 maturity round surveyed every family, fixed defects
 test-first, extended tests and manual examples, and re-cascaded children onto
@@ -24,7 +24,10 @@ repaired its geo stack, completed embedded-assets and text-artifacts, recascaded
 noise, and regenerated the research arm. On August 13, #1206 and #1207 merged
 into Apache main, while #1208 remains approved and open. Also on August 13,
 the resource installer was renamed to `OPENNLP-1909-resource-installer` and
-proposed upstream as draft #1211; the glossary branch has three additional
+proposed upstream as draft #1211; on August 15 the term vector layer went
+upstream as draft #1212 after a review round (null-span-element validation,
+final annotator, shared test fixture, supplementary-plane offset pin). The
+glossary branch has three additional
 local loader commits. Both tips are newer than the current published preview. Exact
 integrated tips remain in `PIPESTREAM-PROVENANCE.txt`; the currently published
 generated tip is `3b441fdee`. Round details and measurements remain in the
@@ -58,9 +61,10 @@ flowchart LR
   main --> p1205["#1205 · OPENNLP-1903 · BeamSearch chain nodes"]
   main --> p1208["#1208 · OPENNLP-1906 · APPROVED · linear abbreviation veto"]
 
+  p1182 --> p1212["#1212 · OPENNLP-1897 · term vectors"]
+
   %% ---- filed upstream, pull request deliberately held ----
   d1152 --> tq["OPENNLP-1895 · quantized embedding tables · in research arm, PR held"]
-  p1182 --> tv["OPENNLP-1897 · term vectors · PR held"]
 
   %% ---- staged engines (this fork only) ----
   main --> depp["depparse · dependency parser + neural tier"]
@@ -68,7 +72,7 @@ flowchart LR
   main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> morf["morfologik-fsa · CFSA2/FSA5 readers + PoliMorf lemmatizer"]
   main --> sjoin["symbol-joiner · symbol spell-out normalizer"]
-  tv --> dehyp["dehyphenation · line-break rejoin + retokenizing term vectors"]
+  p1212 --> dehyp["dehyphenation · line-break rejoin + retokenizing term vectors"]
   d1154 --> prof["place-profiles"]
 
   %% ---- staged annotators over the document container ----
@@ -104,9 +108,9 @@ flowchart LR
 
   class merged mergedC;
   class d1165,huns,cjk,p1205,p1208 ready;
-  class d1152,d1154,d1155,d1166,d1167,p1211 draft;
+  class d1152,d1154,d1155,d1166,d1167,p1211,p1212 draft;
   class p1182 foundation;
-  class tq,tv filed;
+  class tq filed;
   class depp,fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
 ```
 
@@ -131,6 +135,7 @@ fleet-wide review pass. Status records live GitHub review state as verified on
 | [#1191](https://github.com/apache/opennlp/pull/1191) | [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | Viterbi lattice tokenization over user-supplied MeCab-format dictionaries (Japanese, Korean) plus a Chinese unigram segmenter | Open, non-draft, changes requested, GitHub BLOCKED; head `85cb63f50` | About 5M chars/s on real IPADIC; 392k entries load in under a second; segmentation matches the reference implementation on the cost-sensitive test sentences. Manual pinned by `LatticeUsageExampleTest`. Review pass `65579e9cd` fixed lexicon lines edged with Unicode whitespace, which previously failed to load when a line started with an ideographic space |
 | [#1205](https://github.com/apache/opennlp/pull/1205) | [OPENNLP-1903](https://issues.apache.org/jira/browse/OPENNLP-1903) | `BeamSearch` keeps candidate histories as shared chain nodes instead of copying each `Sequence` per candidate, removing quadratic copying from beam decoding | Open, non-draft, review required, GitHub BLOCKED; head `e9429a0e9` | JMH benchmark for long sequences included; machine-specific numbers kept out of `BENCHMARKS.md` |
 | [#1208](https://github.com/apache/opennlp/pull/1208) | [OPENNLP-1906](https://issues.apache.org/jira/browse/OPENNLP-1906) | Sentence-detector abbreviation veto made linear in document length with an abbreviation index (was quadratic) | APPROVED, open, non-draft, cleanly mergeable; head `986247a62` | Full required check matrix green |
+| [#1212](https://github.com/apache/opennlp/pull/1212) | [OPENNLP-1897](https://issues.apache.org/jira/browse/OPENNLP-1897) | Document-scoped term vector layer: an immutable `TermVector` payload (term, frequency, occurrence spans in original-text coordinates) and a `TermVectorAnnotator` rolling the token layer up into per-term statistics, with pluggable term identity (as-is, per-token `CharSequenceNormalizer`, whole-document `OffsetAwareNormalizer`) and a scoring-only mode that never allocates offsets | Draft, opened 2026-08-15; stacks on #1182 and stays draft until the container lands; head `9829831e0` | 32 tests including normalization-shifted offset fidelity (whitespace collapse, eszett fold), supplementary-plane offsets, and mirror-tested manual examples in the document chapter |
 | [#1211](https://github.com/apache/opennlp/pull/1211) | [OPENNLP-1909](https://issues.apache.org/jira/browse/OPENNLP-1909) | Bounded `http`, `https`, and `file` installer for user-supplied third-party resources with SHA-256 or SHA-512 verification, target-local staging, symlink-safe promotion, and a dependency-free classic, ustar, GNU, and PAX tar reader | Draft, opened 2026-08-13; head `5357f64a9` | Proposed single hardened download path the per-feature installers on #1190 and #1191 can converge on. Immutable limits cover network timeouts, redirects, downloads, archive entries, total installed bytes, and every decompressed gzip byte; base-256 tar fields are supported and sparse extensions fail loud. 120 focused tests and 1,767 runtime tests green; model-loading manual cites the end-to-end and limit examples |
 
 ## Filed upstream, pull request deliberately held
@@ -138,7 +143,6 @@ fleet-wide review pass. Status records live GitHub review state as verified on
 | JIRA | Branch | What it offers | Status |
 |---|---|---|---|
 | [OPENNLP-1895](https://issues.apache.org/jira/browse/OPENNLP-1895) | `OPENNLP-1895-turboquant` | Quantized static embedding tables at 2 to 4 bits per dimension: a seeded randomized Hadamard rotation, per-bit Lloyd-Max grids solved at build time, packed codes with a self-describing on-disk format, pooling and scoring that stay in rotated space, and a `QuantizeModel` command-line converter that verifies by re-reading from disk | Filed 2026-07-23 as a New Feature, still Open, announced on dev@. Stacked on `static-embeddings`, cascaded with that stack onto `fc9824a97`; the 2026-08-10 maturity round converted every malformed-content path to the checked `InvalidFormatException` loader contract, bounded declared sizes before allocation, and corrected the quantized size numbers for power-of-two padding, full module suite 388 green. Admitted to the research arm 2026-08-10. No pull request is open: it waits until #1165 and #1152 move, as promised in that dev@ note; throughput numbers against the Rust reference are still outstanding |
-| [OPENNLP-1897](https://issues.apache.org/jira/browse/OPENNLP-1897) | `OPENNLP-1897-term-vectors` | A term-vector layer for the document container: an immutable `TermVector` payload (normalized term, frequency, occurrence spans in original-text coordinates) and a `TermVectorAnnotator` that rolls the token layer up into per-term statistics, with optional `OffsetAwareNormalizer` grouping and a scoring-only mode that never allocates offsets | Filed 2026-07-26 as a New Feature, still Open. One commit on `OPENNLP-1888-DocumentShape`, 22 tests including the ticket's normalization-shifted offset-fidelity cases (whitespace collapse, eszett fold), module build green, pushed to the fork only. No pull request is open: it is an additive layer over #1182 and waits for the container to move first |
 
 ## Staged feature branches (this fork only, not yet proposed upstream)
 
