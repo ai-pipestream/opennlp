@@ -14,7 +14,15 @@ Nothing ever merges out of the research arm, and none of this touches the
 upstream project's own process. Read the warning at the top of
 [README.md](README.md) before using anything here.
 
-State below is as of 2026-08-15, measured against apache main `543067eea`.
+State below is as of 2026-08-19, measured against apache main `ea2ec5350`.
+On August 17 draft #1211 was hardened per the #1191 review threads (required
+remote checksums, no-overwrite promotion, entry ceilings with startup
+overrides), and on August 18 it was stacked on #1190 and #1191 with convergence
+commits that delete their per-PR download code; #1211 is out of draft. On
+August 19 the rung metaphor was retired: the sandbox gRPC surface renamed it to
+Normalizer end to end, and apache branch OPENNLP-1916-minor-normalizer-fix
+(in the regeneration list until it merges to main) carries the wording fix
+plus a fail-loud, defensively copied aggregate normalizer chain.
 Every admitted tip received a fleet-wide review pass to the krickert-review
 standard. The August 10 maturity round surveyed every family, fixed defects
 test-first, extended tests and manual examples, and re-cascaded children onto
