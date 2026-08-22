@@ -14,7 +14,10 @@ Nothing ever merges out of the research arm, and none of this touches the
 upstream project's own process. Read the warning at the top of
 [README.md](README.md) before using anything here.
 
-State below is as of 2026-08-19, measured against apache main `ea2ec5350`.
+State below is as of 2026-08-21, measured against apache main `ea2ec5350`.
+On August 21 the dependency parser, its typed Document adapter, and dependency-path
+relation extraction moved from staged research branches to the draft pull request
+stack #1236, #1237, and #1238.
 On August 17 draft #1211 was hardened per the #1191 review threads (required
 remote checksums, no-overwrite promotion, entry ceilings with startup
 overrides), and on August 18 it was stacked on #1190 and #1191 with convergence
@@ -70,12 +73,14 @@ flowchart LR
   main --> p1208["#1208 · OPENNLP-1906 · APPROVED · linear abbreviation veto"]
 
   p1182 --> p1212["#1212 · OPENNLP-1897 · term vectors"]
+  p1182 --> p1236["#1236 · OPENNLP-547 · dependency parser"]
+  p1236 --> p1237["#1237 · OPENNLP-1919 · dependency layer"]
+  p1237 --> p1238["#1238 · OPENNLP-1920 · relation extraction"]
 
   %% ---- filed upstream, pull request deliberately held ----
   d1152 --> tq["OPENNLP-1895 · quantized embedding tables · in research arm, PR held"]
 
   %% ---- staged engines (this fork only) ----
-  main --> depp["depparse · dependency parser + neural tier"]
   main --> fftag["ff-postagger · neural tagger"]
   main --> bilstm["bilstm-tagger · recurrent tagger tier"]
   main --> morf["morfologik-fsa · CFSA2/FSA5 readers + PoliMorf lemmatizer"]
@@ -95,10 +100,6 @@ flowchart LR
   asset --> noiz["noise · severity-tiered noise scoring"]
   p1182 --> pred["predicate-annotators · conditional pipelines"]
 
-  depp --> deppa["depparse-annotator"]
-  p1182 -. foundation copied .-> deppa
-  deppa --> rel["relation"]
-
   d1152 --> emb["embedding-annotator"]
   p1182 -. foundation copied .-> emb
 
@@ -116,10 +117,10 @@ flowchart LR
 
   class merged mergedC;
   class d1165,huns,cjk,p1205,p1208 ready;
-  class d1152,d1154,d1155,d1166,d1167,p1211,p1212 draft;
+  class d1152,d1154,d1155,d1166,d1167,p1211,p1212,p1236,p1237,p1238 draft;
   class p1182 foundation;
   class tq filed;
-  class depp,fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,deppa,rel,geo,hier,rvote,emb cut;
+  class fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,geo,hier,rvote,emb cut;
 ```
 
 Green nodes are non-draft pull requests, including #1208 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), purple is filed in JIRA with the pull request deliberately held, and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13 and now arrive through apache main.
@@ -145,6 +146,9 @@ fleet-wide review pass. Status records live GitHub review state as verified on
 | [#1208](https://github.com/apache/opennlp/pull/1208) | [OPENNLP-1906](https://issues.apache.org/jira/browse/OPENNLP-1906) | Sentence-detector abbreviation veto made linear in document length with an abbreviation index (was quadratic) | APPROVED, open, non-draft, cleanly mergeable; head `986247a62` | Full required check matrix green |
 | [#1212](https://github.com/apache/opennlp/pull/1212) | [OPENNLP-1897](https://issues.apache.org/jira/browse/OPENNLP-1897) | Document-scoped term vector layer: an immutable `TermVector` payload (term, frequency, occurrence spans in original-text coordinates) and a `TermVectorAnnotator` rolling the token layer up into per-term statistics, with pluggable term identity (as-is, per-token `CharSequenceNormalizer`, whole-document `OffsetAwareNormalizer`) and a scoring-only mode that never allocates offsets | Draft, opened 2026-08-15; stacks on #1182 and stays draft until the container lands; head `9829831e0` | 32 tests including normalization-shifted offset fidelity (whitespace collapse, eszett fold), supplementary-plane offsets, and mirror-tested manual examples in the document chapter |
 | [#1211](https://github.com/apache/opennlp/pull/1211) | [OPENNLP-1909](https://issues.apache.org/jira/browse/OPENNLP-1909) | Bounded `http`, `https`, and `file` installer for user-supplied third-party resources with SHA-256 or SHA-512 verification, target-local staging, symlink-safe promotion, and a dependency-free classic, ustar, GNU, and PAX tar reader | Draft, opened 2026-08-13; head `5357f64a9` | Proposed single hardened download path the per-feature installers on #1190 and #1191 can converge on. Immutable limits cover network timeouts, redirects, downloads, archive entries, total installed bytes, and every decompressed gzip byte; base-256 tar fields are supported and sparse extensions fail loud. 120 focused tests and 1,767 runtime tests green; model-loading manual cites the end-to-end and limit examples |
+| [#1236](https://github.com/apache/opennlp/pull/1236) | [OPENNLP-547](https://issues.apache.org/jira/browse/OPENNLP-547) | Dependency parser API, immutable dependency graphs, event-model and pure-Java feedforward parser tiers, CoNLL-U input, training, evaluation, and model persistence | Draft, opened 2026-08-21; temporarily stacks on #1182; head `e69d29820` | The parser does not require the Document API. The temporary base keeps the review stack linear and can move to main after #1182 merges. Manual: `dependency.xml`, pinned by `ConlluDependencyParserUsageTest` |
+| [#1237](https://github.com/apache/opennlp/pull/1237) | [OPENNLP-1919](https://issues.apache.org/jira/browse/OPENNLP-1919) | Per-sentence dependency parses emitted as a typed `opennlp:dependencies` Document layer with document token indexes and graph-alignment validation | Draft, opened 2026-08-21; stacks on #1236 and #1182; head `d17b74a6b` | `dependency.xml` cites `DependencyAnnotatorPipelineTest` |
+| [#1238](https://github.com/apache/opennlp/pull/1238) | [OPENNLP-1920](https://issues.apache.org/jira/browse/OPENNLP-1920) | Deterministic relation extraction over ordered entity pairs and dependency paths, with optional pivot triggers and typed entity-index references | Draft, opened 2026-08-21; stacks on #1237; head `66f74f474` | 44 relation tests green. Manual: `relation.xml`, pinned by `RelationExtractionExampleTest` |
 
 ## Filed upstream, pull request deliberately held
 
@@ -158,7 +162,6 @@ All staged branches are based on a recent apache main (each rebases fully before
 
 | Branch | What it offers | Status | Notes |
 |---|---|---|---|
-| `depparse` | Transition-based dependency parsing: classical perceptron tiers plus a feedforward neural tier with beam decoding | Staged | UD English EWT test, gold UPOS: 86.78 UAS / 84.61 LAS at beam 4; all-neural pipeline 84.30 / 80.79 at 452 tok/s with the vector-augmented tagger. The published Stanza end-to-end reference on the same treebank is 88.90 / 86.77, so this is not yet at parity; the tagger is the dominant gap. Manual: `dependency.xml`, pinned by `ConlluDependencyParserUsageTest` |
 | `ff-postagger` | Feedforward neural POS tagger on the same trainer recipe, with opt-in pretrained word-vector input features and a coverage lexicon | Staged | 94.68% on UD English EWT vs 93.75% for the best classical configuration in-tree; 95.51% with the opt-in vector block (potion-base-8M vectors plus a dictionary lexicon), defaults unchanged. Manual section cites `FeedforwardPOSTaggerUsageTest` |
 | `bilstm-tagger` | Bidirectional LSTM tagger tier: character BiLSTM word representations, learned plus frozen pretrained embeddings, optional stacked encoder, CRF decoding, and multi-task auxiliary training; every layer gradient-checked against finite differences | Experimental, accuracy gate pending | 96.00% on UD English EWT so far vs the 97.0% gate; active lever is pretrained-table fine-tuning. Manual section cites `BilstmPOSTaggerUsageTest` |
 | `morfologik-fsa` | Clean-room readers for the morfologik CFSA2 and FSA5 automaton formats behind a shared `FsaSequenceReader`, decoding into a `DictionaryLemmatizer`, plus a PoliMorf morphological-table reader | Staged, on current main, 389 formats tests green | Split out of #1167 on 2026-07-24, where these commits were written under `formats:`/`lemmatizer:` titles with no JIRA key. Unlike `opennlp-extensions/opennlp-morfologik`, which depends on `morfologik-stemming` and `morfologik-tools`, this adds no dependency. The PoliMorf reader's `StringUtil.isBlank` call became a private helper, since that method is an OPENNLP-1888 addition absent from main. The second review pass #1167 carried over these files was reconciled back into this branch on 2026-08-08 (folded header check, truncated-header pins); #1167 no longer carries the commits |
@@ -174,8 +177,6 @@ All staged branches are based on a recent apache main (each rebases fully before
 | `region-vote` | Document-scoped region ballot: location mentions, country names, and flag emoji vote on where a document speaks from | Staged, on `numeric` | Document section cites `RegionCurrencyResolutionExampleTest` |
 | `geocode-annotator` | Gazetteer-backed geocoding of location entities into a document layer | Staged, on `region-vote` | `geo.xml` pipeline cites `LocationPipelineExampleTest`. Its EmojiFlags copies dropped in the 2026-08-08 cascade now that #1177 is upstream |
 | `hierarchy-annotator` | Administrative containment chains for resolved locations | Staged, on `geocode-annotator` | `geo.xml` cites `HierarchyPipelineExampleTest` |
-| `depparse-annotator` | Per-sentence dependency parses as a document layer | Staged, on `depparse` | `dependency.xml` cites `DependencyAnnotatorPipelineTest` |
-| `relation` | Predicate-driven relation mentions over dependency parses | Staged, on `depparse-annotator` | `relation.xml` cites `RelationExtractionExampleTest` |
 | `embedding-annotator` | Embedding vectors for any span layer (tokens, sentences) | Staged, on #1152 | `embeddings.xml` annotator section cites `EmbeddingAnnotatorUsageTest` |
 | `OPENNLP-XXXX-symbol-joiner` | Whole-token symbol spell-out normalizer (`&` to `and`, `§` to `section`, IP marks) | Staged, on main | Row in the normalizer chapter table; identity passthrough pinned by parameterized tests |
 | `OPENNLP-XXXX-dehyphenation` | Line-break de-hyphenation normalizer with exact alignment, plus `RetokenizingTermVectorAnnotator` for count-changing normalizers | Staged, on OPENNLP-1897 | Normalizer chapter section cites `RetokenizingTermVectorAnnotatorTest` |
