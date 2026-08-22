@@ -30,7 +30,9 @@ Every admitted tip received a fleet-wide review pass to the krickert-review
 standard. The August 10 maturity round surveyed every family, fixed defects
 test-first, extended tests and manual examples, and re-cascaded children onto
 their changed parents. OPENNLP-1895-turboquant was admitted to the research arm
-that day. The August 11 rounds completed the PII roadmap, hardened numeric and
+that day and is now draft #1213, followed by draft #1214 for the bounded
+in-memory index and draft #1215 for its evaluation harness. The August 11
+rounds completed the PII roadmap, hardened numeric and
 repaired its geo stack, completed embedded-assets and text-artifacts, recascaded
 noise, and regenerated the research arm. On August 13, #1206 and #1207 merged
 into Apache main, while #1208 remains approved and open. Also on August 13,
@@ -64,6 +66,9 @@ flowchart LR
   main --> d1166["#1166 · OPENNLP-1886 · light stemmers"]
   main --> d1165["#1165 · OPENNLP-1885 · SentencePiece"]
   d1165 --> d1152["#1152 · OPENNLP-1877 · static embeddings"]
+  d1152 --> p1213["#1213 · OPENNLP-1895 · quantized embedding tables"]
+  p1213 --> p1214["#1214 · OPENNLP-1910 · bounded in-memory vector indexes"]
+  p1214 --> p1215["#1215 · OPENNLP-1911 · vector search evaluation"]
   main --> huns["#1190 · OPENNLP-1893 · hunspell stemmer"]
   main --> cjk["#1191 · OPENNLP-1894 · CJK lattice tokenization"]
   main --> p1211["#1211 · OPENNLP-1909 · resource installer"]
@@ -76,9 +81,6 @@ flowchart LR
   p1182 --> p1236["#1236 · OPENNLP-547 · dependency parser"]
   p1236 --> p1237["#1237 · OPENNLP-1919 · dependency layer"]
   p1237 --> p1238["#1238 · OPENNLP-1920 · relation extraction"]
-
-  %% ---- filed upstream, pull request deliberately held ----
-  d1152 --> tq["OPENNLP-1895 · quantized embedding tables · in research arm, PR held"]
 
   %% ---- staged engines (this fork only) ----
   main --> fftag["ff-postagger · neural tagger"]
@@ -117,13 +119,12 @@ flowchart LR
 
   class merged mergedC;
   class d1165,huns,cjk,p1205,p1208 ready;
-  class d1152,d1154,d1155,d1166,d1167,p1211,p1212,p1236,p1237,p1238 draft;
+  class d1152,d1154,d1155,d1166,d1167,p1211,p1212,p1213,p1214,p1215,p1236,p1237,p1238 draft;
   class p1182 foundation;
-  class tq filed;
   class fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,geo,hier,rvote,emb cut;
 ```
 
-Green nodes are non-draft pull requests, including #1208 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), purple is filed in JIRA with the pull request deliberately held, and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13 and now arrive through apache main.
+Green nodes are non-draft pull requests, including #1208 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13 and now arrive through apache main.
 
 ## Open pull requests against apache/opennlp
 
@@ -138,7 +139,10 @@ fleet-wide review pass. Status records live GitHub review state as verified on
 | [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft, review required, GitHub BLOCKED; published head `c678d6579` | Manual: `wordnet.xml`, pinned by `WordNetUsageExampleTest`; later local WordNet work is not on this pull request |
 | [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, review required, GitHub BLOCKED; head `fa0d25354`, stacked on #1155 | Manual expansion section cites `LexicalExpansionUsageExampleTest`. On 2026-08-08 it was restacked onto the `wordnet-api` branch proper and its five carried morfologik `formats:`/`lemmatizer:` commits were dropped; their unique review improvements were reconciled into `morfologik-fsa` first |
 | [#1165](https://github.com/apache/opennlp/pull/1165) | OPENNLP-1885 | Pure-Java SentencePiece inference with exact original-text spans, plus a WordPiece encoder | Open, non-draft, review required, GitHub BLOCKED; head `45db4212d` | 6.47M pieces/s single-thread on the T5-small vocabulary, 1.42x the C++ reference measured through its Python binding. Tokenizer manual cites `SentencePieceUsageExampleTest` |
-| [#1152](https://github.com/apache/opennlp/pull/1152) | OPENNLP-1877 | Static text embeddings, pure JVM | Draft, no review decision, GitHub CLEAN; head `851196f4d`, stacked on #1165 | 12.9x single-thread and about 7x peak throughput of the Python reference at 0.22x the memory (potion-base-8M, output parity asserted first). Manual cites `StaticEmbeddingUsageExampleTest` |
+| [#1152](https://github.com/apache/opennlp/pull/1152) | OPENNLP-1877 | Static text embeddings, pure JVM | Draft, no review decision; head `f6f1bef48`, stacked on #1165 | 12.9x single-thread and about 7x peak throughput of the Python reference at 0.22x the memory (potion-base-8M, output parity asserted first). Manual cites `StaticEmbeddingUsageExampleTest`; the current tip loads self-contained Model2Vec Unigram tokenizers |
+| [#1213](https://github.com/apache/opennlp/pull/1213) | [OPENNLP-1895](https://issues.apache.org/jira/browse/OPENNLP-1895) | Quantized static embedding tables at 2 to 4 bits per dimension, including packed storage, bounded loading, pooling, scoring, and the `QuantizeModel` converter | Draft; head `05398bb67`; stacks on #1152 | The 2026-08-21 cascade adapted self-contained Unigram loading to the embedding-table abstraction after merging the latest #1152 tip |
+| [#1214](https://github.com/apache/opennlp/pull/1214) | [OPENNLP-1910](https://issues.apache.org/jira/browse/OPENNLP-1910) | Bounded in-memory flat-float and TurboQuant indexes behind one validation and query contract | Draft; head `8bb3e65b2`; stacks on #1213 | Intended for document-scale and small-corpus search, not a distributed search engine |
+| [#1215](https://github.com/apache/opennlp/pull/1215) | [OPENNLP-1911](https://issues.apache.org/jira/browse/OPENNLP-1911) | Reproducible vector-search evaluation with exact, TurboQuant, and test-scope Lucene HNSW baselines | Draft; head `5ccb70da3`; stacks on #1214 | Full top-of-stack embeddings verification is 547 tests green with one expected HNSW runner skip |
 | [#1154](https://github.com/apache/opennlp/pull/1154) | OPENNLP-1879 | Gazetteer and geocoder seam, bundled Natural Earth table, GeoNames and Overture loaders, place hierarchy, user-supplied overlay (additions, suppressions, bounding boxes) | Draft, review required, GitHub BLOCKED; head `458b53a1c` | Bring-your-own-gazetteer reference in test sources. Geocoder section cites `GeocoderUsageExampleTest` |
 | [#1190](https://github.com/apache/opennlp/pull/1190) | [OPENNLP-1893](https://issues.apache.org/jira/browse/OPENNLP-1893) | Hunspell `.dic`/`.aff` affix stemmer over user-supplied dictionaries, regex-free, fail-closed | Open, non-draft, changes requested, GitHub BLOCKED; head `39b576e45` | AF aliases, NEEDAFFIX / ONLYINCOMPOUND / FORBIDDENWORD / CIRCUMFIX, compound positioning incl. German linking forms. Manual: `stemmer.xml`, pinned by `HunspellManualExampleTest`. Review pass `872272560` added `{@inheritDoc}` to the stemmer overrides |
 | [#1191](https://github.com/apache/opennlp/pull/1191) | [OPENNLP-1894](https://issues.apache.org/jira/browse/OPENNLP-1894) | Viterbi lattice tokenization over user-supplied MeCab-format dictionaries (Japanese, Korean) plus a Chinese unigram segmenter | Open, non-draft, changes requested, GitHub BLOCKED; head `85cb63f50` | About 5M chars/s on real IPADIC; 392k entries load in under a second; segmentation matches the reference implementation on the cost-sensitive test sentences. Manual pinned by `LatticeUsageExampleTest`. Review pass `65579e9cd` fixed lexicon lines edged with Unicode whitespace, which previously failed to load when a line started with an ideographic space |
@@ -149,12 +153,6 @@ fleet-wide review pass. Status records live GitHub review state as verified on
 | [#1236](https://github.com/apache/opennlp/pull/1236) | [OPENNLP-547](https://issues.apache.org/jira/browse/OPENNLP-547) | Dependency parser API, immutable dependency graphs, event-model and pure-Java feedforward parser tiers, CoNLL-U input, training, evaluation, and model persistence | Draft, opened 2026-08-21; temporarily stacks on #1182; head `e69d29820` | The parser does not require the Document API. The temporary base keeps the review stack linear and can move to main after #1182 merges. Manual: `dependency.xml`, pinned by `ConlluDependencyParserUsageTest` |
 | [#1237](https://github.com/apache/opennlp/pull/1237) | [OPENNLP-1919](https://issues.apache.org/jira/browse/OPENNLP-1919) | Per-sentence dependency parses emitted as a typed `opennlp:dependencies` Document layer with document token indexes and graph-alignment validation | Draft, opened 2026-08-21; stacks on #1236 and #1182; head `d17b74a6b` | `dependency.xml` cites `DependencyAnnotatorPipelineTest` |
 | [#1238](https://github.com/apache/opennlp/pull/1238) | [OPENNLP-1920](https://issues.apache.org/jira/browse/OPENNLP-1920) | Deterministic relation extraction over ordered entity pairs and dependency paths, with optional pivot triggers and typed entity-index references | Draft, opened 2026-08-21; stacks on #1237; head `66f74f474` | 44 relation tests green. Manual: `relation.xml`, pinned by `RelationExtractionExampleTest` |
-
-## Filed upstream, pull request deliberately held
-
-| JIRA | Branch | What it offers | Status |
-|---|---|---|---|
-| [OPENNLP-1895](https://issues.apache.org/jira/browse/OPENNLP-1895) | `OPENNLP-1895-turboquant` | Quantized static embedding tables at 2 to 4 bits per dimension: a seeded randomized Hadamard rotation, per-bit Lloyd-Max grids solved at build time, packed codes with a self-describing on-disk format, pooling and scoring that stay in rotated space, and a `QuantizeModel` command-line converter that verifies by re-reading from disk | Filed 2026-07-23 as a New Feature, still Open, announced on dev@. Stacked on `static-embeddings`, cascaded with that stack onto `fc9824a97`; the 2026-08-10 maturity round converted every malformed-content path to the checked `InvalidFormatException` loader contract, bounded declared sizes before allocation, and corrected the quantized size numbers for power-of-two padding, full module suite 388 green. Admitted to the research arm 2026-08-10. No pull request is open: it waits until #1165 and #1152 move, as promised in that dev@ note; throughput numbers against the Rust reference are still outstanding |
 
 ## Staged feature branches (this fork only, not yet proposed upstream)
 
