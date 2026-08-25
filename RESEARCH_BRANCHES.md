@@ -60,10 +60,7 @@ Solid arrows are the verified git base of each branch. Dashed arrows are commits
 
 ```mermaid
 flowchart LR
-  main(["apache main 6fd56f5f4 · through OPENNLP-1916"])
-
-  merged["MERGED upstream: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1870 emoji annotations · OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers<br/>OPENNLP-1878 hot-path performance · OPENNLP-1883 stemmer factory<br/>OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile<br/>OPENNLP-1898 1876 review follow-ups · OPENNLP-1899 SymSpell deser harden<br/>OPENNLP-1904 locale-safe lemmatizers and CLI · OPENNLP-1905 locale-safe Morfologik<br/>OPENNLP-1906 linear abbreviation veto · OPENNLP-1916 normalizer docs and fail-loud chain"]
-  main --- merged
+  main(["apache main 6fd56f5f4"])
 
   %% ---- open pull requests against apache/opennlp ----
   main --> p1182["#1182 · OPENNLP-1888 · document container · FOUNDATION"]
@@ -117,21 +114,19 @@ flowchart LR
   rvote --> geo["geocode-annotator"]
   geo --> hier["hierarchy-annotator"]
 
-  classDef mergedC fill:#c8e6c9,stroke:#1b5e20,color:#000;
   classDef ready fill:#d4edda,stroke:#1b5e20,color:#000,stroke-width:2px;
   classDef draft fill:#fff2cc,stroke:#b8860b,color:#000;
   classDef foundation fill:#cfe2ff,stroke:#1c4fb3,color:#000,stroke-width:3px;
   classDef filed fill:#e6d9f2,stroke:#5b3a8e,color:#000,stroke-width:2px;
   classDef cut fill:#e8f0e8,stroke:#555,color:#000;
 
-  class merged mergedC;
   class d1165,huns,cjk,p1205 ready;
   class d1152,d1154,d1155,d1166,d1167,p1211,p1212,p1213,p1214,p1215,p1236,p1237,p1238 draft;
   class p1182 foundation;
   class fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,geo,hier,rvote,emb cut;
 ```
 
-Green nodes are non-draft pull requests, including #1205 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13, `#1208` on 2026-08-17, and `#1235` (OPENNLP-1916) on 2026-08-25; all four now arrive through apache main.
+Green nodes are non-draft pull requests, including #1205 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. Everything the graph builds on is merged upstream through OPENNLP-1916: case folding (1868), emoji normalization and annotations (1869/1870), UCD whitespace (1875), the de-regexed normalizers (1876, with 1898 follow-ups), hot-path performance (1878), the stemmer factory (1883), model-loading hardening (1890/1891), pattern precompile (1892), SymSpell deserialization hardening (1899), locale-safe lemmatizers and Morfologik (1904/1905), the linear abbreviation veto (1906), and the normalizer docs and fail-loud chain (1916). The EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade once 1870 landed.
 
 ## Open pull requests against apache/opennlp
 
