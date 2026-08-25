@@ -14,7 +14,7 @@ Nothing ever merges out of the research arm, and none of this touches the
 upstream project's own process. Read the warning at the top of
 [README.md](README.md) before using anything here.
 
-State below is as of 2026-08-23, measured against apache main `ea2ec5350`.
+State below is as of 2026-08-25, measured against apache main `6fd56f5f4`.
 On August 21 the dependency parser, its typed Document adapter, and dependency-path
 relation extraction moved from staged research branches to the draft pull request
 stack #1236, #1237, and #1238.
@@ -24,8 +24,15 @@ overrides), and on August 18 it was stacked on #1190 and #1191 with convergence
 commits that delete their per-PR download code; #1211 is out of draft. On
 August 19 the rung metaphor was retired: the sandbox gRPC surface renamed it to
 Normalizer end to end, and apache branch OPENNLP-1916-minor-normalizer-fix
-(in the regeneration list until it merges to main) carries the wording fix
-plus a fail-loud, defensively copied aggregate normalizer chain.
+carried the wording fix plus a fail-loud, defensively copied aggregate
+normalizer chain; it merged upstream on August 25 as #1235 (`6fd56f5f4`) and
+left the regeneration list the same day. Also on August 25 a retirement round
+removed the worktrees and local branches whose content had landed upstream or
+been superseded by a newer line: the merged 1868/1869/1870, 1875, 1876, 1883,
+1898, 1904-1906, and 1916 lines, the pre-filing staging lines for 1906 and the
+vector search stack, and the old document-api, modernization, and dl-deploy
+integration lines. All pull request heads below are unchanged and verified
+against GitHub on August 25.
 Every admitted tip received a fleet-wide review pass to the krickert-review
 standard. The August 10 maturity round surveyed every family, fixed defects
 test-first, extended tests and manual examples, and re-cascaded children onto
@@ -53,9 +60,9 @@ Solid arrows are the verified git base of each branch. Dashed arrows are commits
 
 ```mermaid
 flowchart LR
-  main(["apache main ea2ec5350 · through OPENNLP-1906"])
+  main(["apache main 6fd56f5f4 · through OPENNLP-1916"])
 
-  merged["MERGED upstream: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1870 emoji annotations · OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers<br/>OPENNLP-1878 hot-path performance · OPENNLP-1883 stemmer factory<br/>OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile<br/>OPENNLP-1898 1876 review follow-ups · OPENNLP-1899 SymSpell deser harden<br/>OPENNLP-1904 locale-safe lemmatizers and CLI · OPENNLP-1905 locale-safe Morfologik<br/>OPENNLP-1906 linear abbreviation veto"]
+  merged["MERGED upstream: OPENNLP-1868 case folding · OPENNLP-1869 emoji normalization<br/>OPENNLP-1870 emoji annotations · OPENNLP-1875 UCD whitespace · OPENNLP-1876 de-regex normalizers<br/>OPENNLP-1878 hot-path performance · OPENNLP-1883 stemmer factory<br/>OPENNLP-1890/1891 loading hardening · OPENNLP-1892 pattern precompile<br/>OPENNLP-1898 1876 review follow-ups · OPENNLP-1899 SymSpell deser harden<br/>OPENNLP-1904 locale-safe lemmatizers and CLI · OPENNLP-1905 locale-safe Morfologik<br/>OPENNLP-1906 linear abbreviation veto · OPENNLP-1916 normalizer docs and fail-loud chain"]
   main --- merged
 
   %% ---- open pull requests against apache/opennlp ----
@@ -124,17 +131,17 @@ flowchart LR
   class fftag,bilstm,morf,sjoin,dehyp,prof,glos,pii,coref,num,tart,asset,noiz,pred,geo,hier,rvote,emb cut;
 ```
 
-Green nodes are non-draft pull requests, including #1205 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13, and `#1208` on 2026-08-17; all three now arrive through apache main.
+Green nodes are non-draft pull requests, including #1205 which is explicitly marked approved; amber are drafts, blue is the document container every annotator needs (now marked ready for review), and pale green is staged in this fork only. The regeneration list also carries `preview-accept-major0-models`, a preview-line-only patch letting `BaseModel` accept the major-0 version stamps the `0.1.0-alpha*` coordinates produce; it is not a feature branch and is not drawn. `#1177` (OPENNLP-1870, emoji annotations) merged upstream on 2026-07-21 and has moved into the merged box; the EmojiFlags commits `geocode-annotator` carried as copies dropped by patch id in the 2026-08-08 cascade. `#1206` and `#1207` merged on 2026-08-13, `#1208` on 2026-08-17, and `#1235` (OPENNLP-1916) on 2026-08-25; all four now arrive through apache main.
 
 ## Open pull requests against apache/opennlp
 
 Every head below was cascaded onto `fc9824a97` on 2026-08-08 and given a
 fleet-wide review pass. Status records live GitHub review state as verified on
-2026-08-23. APPROVED means reviewer approval, not merge.
+2026-08-25. APPROVED means reviewer approval, not merge.
 
 | PR | JIRA | What it offers | Status | Notes |
 |---|---|---|---|---|
-| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Open, non-draft, review required, GitHub BLOCKED; head `f4dd343a9` | The foundation every staged annotator below builds on. The August hardening pinned merge semantics and KEEP_EQUAL rejection messages across implementations and named adapters by their simple class name |
+| [#1182](https://github.com/apache/opennlp/pull/1182) | OPENNLP-1888 | The document container: immutable `Document`, typed layers with positional/document scope, namespaced layer keys, adapters for the classic tools, manual chapter | Open, non-draft, review required, GitHub BLOCKED; head `f4dd343a9` | The foundation every staged annotator below builds on. The August hardening pinned merge semantics and KEEP_EQUAL rejection messages across implementations and named adapters by their simple class name. All 14 August 17 doc review threads were answered in the text and replied to on August 25; maintainer re-review is pending |
 | [#1166](https://github.com/apache/opennlp/pull/1166) | OPENNLP-1886 | Sixteen UniNE light/minimal stemmer tiers | Draft, review required, GitHub BLOCKED; head `ff681b393`. The 2026-08-08 rebase dropped the 13 OPENNLP-1883 commits it used to carry, now that #1163 is upstream as one squash, leaving 3 commits of its own | Parity fixtures regenerated from the original implementations. Manual cites `LightStemmerUsageExampleTest` |
 | [#1155](https://github.com/apache/opennlp/pull/1155) | OPENNLP-1880 | Lexical knowledge base seam with WN-LMF and WNDB readers and a Morphy lemmatizer | Draft, review required, GitHub BLOCKED; head `9c0e9a053` | Manual: `wordnet.xml`, pinned by `WordNetUsageExampleTest`. The complete WN-LMF 1.4 relation vocabulary, multi-lexicon coverage, and StringUtil lemma folding are now on the pull request; the `LexiconExtension` composition follow-up remains local only |
 | [#1167](https://github.com/apache/opennlp/pull/1167) | OPENNLP-1887 | Weighted lexical expansion, synset similarity, hypernym-anchored typing | Draft, review required, GitHub BLOCKED; head `a68762fe3`, stacked on #1155 | Manual expansion section cites `LexicalExpansionUsageExampleTest`. On 2026-08-08 it was restacked onto the `wordnet-api` branch proper and its five carried morfologik `formats:`/`lemmatizer:` commits were dropped; their unique review improvements were reconciled into `morfologik-fsa` first |
@@ -186,6 +193,7 @@ These branches exist as reviewed local work but are not members of
 | Branch | What it offers | Status |
 |---|---|---|
 | `OPENNLP-XXXX-wordnet-extension` | Caller-resolved WN-LMF `LexiconExtension` composition with exact base/version matching, immutable raw-model composition, cycle and depth limits, external entry/sense/synset validation, and mirrored manual usage | Clean local tip `3a4328e46`, three commits on local WordNet parent `5f1078a3e`; 357 WordNet tests green with 3 pre-existing OMW skips; not pushed, no JIRA key, not admitted |
+| paragraph-preserving whitespace normalizer (no branch yet) | Offset-aware `CharSequenceNormalizer` that unwraps hard-wrapped lines into paragraphs: a whitespace run with at most one line break collapses to a space, two or more to one newline; `whitespacePreservingParagraphs()` builder on `TextNormalizer` | JIRA filing and a small standalone PR planned next, in the OPENNLP-1875 mold. Until then the single commit `b878d3334` rides `OPENNLP-1833-grpc-helper-query` for the sandbox query workbench, which keeps it off the canonical helper per the open-PRs-only scope rule |
 
 ## The path upstream
 
