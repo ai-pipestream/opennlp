@@ -188,7 +188,7 @@ These branches exist as reviewed local work but are not members of
 | Branch | What it offers | Status |
 |---|---|---|
 | `OPENNLP-XXXX-wordnet-extension` | Caller-resolved WN-LMF `LexiconExtension` composition with exact base/version matching, immutable raw-model composition, cycle and depth limits, external entry/sense/synset validation, and mirrored manual usage | Clean local tip `3a4328e46`, three commits on local WordNet parent `5f1078a3e`; 357 WordNet tests green with 3 pre-existing OMW skips; not pushed, no JIRA key, not admitted |
-| paragraph-preserving whitespace normalizer (no branch yet) | Offset-aware `CharSequenceNormalizer` that unwraps hard-wrapped lines into paragraphs: a whitespace run with at most one line break collapses to a space, two or more to one newline; `whitespacePreservingParagraphs()` builder on `TextNormalizer` | JIRA filing and a small standalone PR planned next, in the OPENNLP-1875 mold. Until then the single commit `b878d3334` rides `OPENNLP-1833-grpc-helper-query` for the sandbox query workbench, which keeps it off the canonical helper per the open-PRs-only scope rule |
+| `OPENNLP-1921-paragraph-normalizer` | Offset-aware `CharSequenceNormalizer` that unwraps hard-wrapped lines into paragraphs: a whitespace run with at most one line break collapses to a space, two or more to one newline; `whitespacePreservingParagraphs()` builder on `TextNormalizer` | Filed as OPENNLP-1921 on 2026-08-25; branch on apache based directly on main (no PR stacking), commit `200ad4fa2`, normalizer package tests green; merged into `OPENNLP-1833-grpc-helper`, PR to follow. Once the PR is open, `OPENNLP-1833-grpc-helper-query` retires and the query workbench builds against the canonical helper |
 
 ## The path upstream
 
