@@ -30,7 +30,7 @@ import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
-import opennlp.tools.document.NameFinderAnnotator;
+import opennlp.tools.namefind.NameFinderAnnotator;
 import opennlp.tools.namefind.TokenNameFinder;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
