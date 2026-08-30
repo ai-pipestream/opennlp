@@ -125,20 +125,21 @@ public class CorefAnnotatorTest {
 
   @Test
   void testPronounWindowLimitsResolution() {
-    final String text = "Acme Corp won. Time passed. Markets moved. It changed.";
+    final String text = "Acme Corp won. Time passed. Markets moved. Prices rose. It changed.";
     final List<Annotation<String>> toks = tokens(text,
         "Acme", "Corp", "won", ".", "Time", "passed", ".",
-        "Markets", "moved", ".", "It", "changed", ".");
+        "Markets", "moved", ".", "Prices", "rose", ".", "It", "changed", ".");
     final Document document = new CorefAnnotator().annotate(Document.of(text)
         .with(Layers.SENTENCES, List.of(
             new Annotation<>(new Span(0, 14), "s"),
             new Annotation<>(new Span(15, 27), "s"),
             new Annotation<>(new Span(28, 42), "s"),
-            new Annotation<>(new Span(43, 54), "s")))
+            new Annotation<>(new Span(43, 55), "s"),
+            new Annotation<>(new Span(56, 67), "s")))
         .with(Layers.TOKENS, toks)
         .with(Layers.POS_TAGS, values(toks,
             "PROPN", "PROPN", "VERB", "PUNCT", "NOUN", "VERB", "PUNCT",
-            "NOUN", "VERB", "PUNCT", "PRON", "VERB", "PUNCT"))
+            "NOUN", "VERB", "PUNCT", "NOUN", "VERB", "PUNCT", "PRON", "VERB", "PUNCT"))
         .with(Layers.ENTITIES, List.of(
             new Annotation<>(new Span(0, 9), "organization"))));
 
@@ -315,10 +316,11 @@ public class CorefAnnotatorTest {
   }
 
   /**
-   * Nested entity mentions are legal layer content: the containment sieve links the
-   * inner mention to the outer one it prefixes, and the exact match sieve links the
-   * later repetition, so all three mentions form one chain. Mentions sharing a start
-   * offset keep their entity layer order.
+   * Nested entity mentions are legal layer content: no sieve links the inner mention to
+   * the outer one that contains it, the compound name {@code New York City} never
+   * absorbs the bare {@code New York}, and the exact match sieve links the later
+   * repetition of the bare name. Mentions sharing a start offset are ordered wider
+   * first.
    */
   @Test
   void testNestedEntityMentionsFormOneChain() {
@@ -340,9 +342,11 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(new Span(0, 13), chains.get(0).span());
     Assertions.assertEquals(new Span(0, 8), chains.get(1).span());
     Assertions.assertEquals(new Span(22, 30), chains.get(2).span());
-    for (final Annotation<CorefMention> mention : chains) {
-      Assertions.assertEquals(0, mention.value().chain());
-    }
+    // The compound name keeps its own chain: a city is not the state it is named after,
+    // and a mention never links to one that contains it. The bare name recurs.
+    Assertions.assertEquals(0, chains.get(0).value().chain());
+    Assertions.assertEquals(1, chains.get(1).value().chain());
+    Assertions.assertEquals(1, chains.get(2).value().chain());
   }
 
   /**
@@ -508,16 +512,16 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(0, orgChains.get(0).value().chain());
     Assertions.assertEquals(0, orgChains.get(1).value().chain());
 
-    final String personText = "Smith won. They cheered.";
+    final String personText = "Smiths won. They cheered.";
     final List<Annotation<String>> personToks = tokens(personText,
-        "Smith", "won", ".", "They", "cheered", ".");
+        "Smiths", "won", ".", "They", "cheered", ".");
     final Document personDocument = new CorefAnnotator().annotate(Document.of(personText)
         .with(Layers.SENTENCES, List.of(
-            new Annotation<>(new Span(0, 10), "s"),
-            new Annotation<>(new Span(11, 24), "s")))
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 25), "s")))
         .with(Layers.TOKENS, personToks)
-        .with(Layers.POS_TAGS, values(personToks, "NNP", "VBD", ".", "PRP", "VBD", "."))
-        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 5), "person"))));
+        .with(Layers.POS_TAGS, values(personToks, "NNPS", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 6), "person"))));
     final List<Annotation<CorefMention>> personChains =
         personDocument.get(CorefAnnotator.CHAINS);
     Assertions.assertEquals(2, personChains.size());

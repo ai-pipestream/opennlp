@@ -41,8 +41,14 @@ import opennlp.tools.util.StringUtil;
  */
 public record CorefMention(int chain, String kind, int entity) {
 
-  /** A mention lifted from the entity layer. */
+  /**
+   * A mention lifted from the entity layer. When a chunk layer is present the mention
+   * covers the noun phrase the entity heads, which may be wider than the entity span.
+   */
   public static final String KIND_ENTITY = "entity";
+
+  /** A noun phrase mention lifted from the chunk layer that no entity heads. */
+  public static final String KIND_NOMINAL = "nominal";
 
   /** A pronoun mention. */
   public static final String KIND_PRONOUN = "pronoun";

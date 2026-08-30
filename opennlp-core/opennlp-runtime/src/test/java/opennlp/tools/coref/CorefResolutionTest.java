@@ -1,0 +1,318 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package opennlp.tools.coref;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import opennlp.tools.chunker.ChunkerAnnotator;
+import opennlp.tools.document.Annotation;
+import opennlp.tools.document.Document;
+import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
+
+/**
+ * Pins the resolution decisions of the entity-centric sieves: agreement, nominal
+ * mentions from the chunk layer, non-referential {@code it}, and the precise
+ * constructs. Fixtures use Penn Treebank tags, the tag set the attribute rules read.
+ */
+public class CorefResolutionTest {
+
+  /** A fixture under construction: whitespace-tokenized sentences with tags. */
+  private static final class Fixture {
+    private final StringBuilder text = new StringBuilder();
+    private final List<Annotation<String>> sentences = new ArrayList<>();
+    private final List<Annotation<String>> tokens = new ArrayList<>();
+    private final List<Annotation<String>> tags = new ArrayList<>();
+    private final List<Annotation<String>> entities = new ArrayList<>();
+    private final List<Annotation<String>> chunks = new ArrayList<>();
+
+    /** Appends one sentence of {@code form/TAG} tokens. */
+    Fixture sentence(String... taggedTokens) {
+      if (text.length() > 0) {
+        text.append(' ');
+      }
+      final int start = text.length();
+      for (int i = 0; i < taggedTokens.length; i++) {
+        if (i > 0) {
+          text.append(' ');
+        }
+        final int slash = taggedTokens[i].lastIndexOf('/');
+        final String form = taggedTokens[i].substring(0, slash);
+        final Span span = new Span(text.length(), text.length() + form.length());
+        text.append(form);
+        tokens.add(new Annotation<>(span, form));
+        tags.add(new Annotation<>(span, taggedTokens[i].substring(slash + 1)));
+      }
+      sentences.add(new Annotation<>(new Span(start, text.length()), "s"));
+      return this;
+    }
+
+    /** Marks the first occurrence of a phrase after the cursor as an entity. */
+    Fixture entity(String phrase, String type) {
+      entities.add(new Annotation<>(find(phrase, entities), type));
+      return this;
+    }
+
+    /** Marks the first occurrence of a phrase after the cursor as a chunk. */
+    Fixture chunk(String phrase, String type) {
+      chunks.add(new Annotation<>(find(phrase, chunks), type));
+      return this;
+    }
+
+    private Span find(String phrase, List<Annotation<String>> after) {
+      final int from = after.isEmpty() ? 0 : after.get(after.size() - 1).span().getEnd();
+      final int start = text.indexOf(phrase, from);
+      Assertions.assertTrue(start >= 0, phrase + " is not in " + text);
+      return new Span(start, start + phrase.length());
+    }
+
+    Document document(boolean withChunks) {
+      Document document = Document.of(text.toString())
+          .with(Layers.SENTENCES, sentences)
+          .with(Layers.TOKENS, tokens)
+          .with(Layers.POS_TAGS, tags)
+          .with(Layers.ENTITIES, entities);
+      if (withChunks) {
+        document = document.with(ChunkerAnnotator.CHUNKS, chunks);
+      }
+      return document;
+    }
+  }
+
+  /** Resolves and renders every chain of two or more mentions as its surface forms. */
+  private static List<List<String>> chains(Document document) {
+    final Document resolved = new CorefAnnotator().annotate(document);
+    final List<Annotation<CorefMention>> layer = resolved.get(CorefAnnotator.CHAINS);
+    final List<List<String>> chains = new ArrayList<>();
+    for (final Annotation<CorefMention> mention : layer) {
+      while (chains.size() <= mention.value().chain()) {
+        chains.add(new ArrayList<>());
+      }
+      chains.get(mention.value().chain()).add(resolved.text().subSequence(
+          mention.span().getStart(), mention.span().getEnd()).toString());
+    }
+    return chains.stream().filter(chain -> chain.size() > 1).toList();
+  }
+
+  @Test
+  void testGenderedPronounSkipsNearerNameOfOtherGender() {
+    final Document document = new Fixture()
+        .sentence("John/NNP", "greeted/VBD", "Mary/NNP", "./.")
+        .sentence("He/PRP", "smiled/VBD", "./.")
+        .entity("John", "person").entity("Mary", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("John", "He")), chains(document));
+  }
+
+  @Test
+  void testFemininePronounSkipsNearerMaleName() {
+    final Document document = new Fixture()
+        .sentence("Mary/NNP", "greeted/VBD", "John/NNP", "./.")
+        .sentence("She/PRP", "smiled/VBD", "./.")
+        .entity("Mary", "person").entity("John", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Mary", "She")), chains(document));
+  }
+
+  @Test
+  void testTitleSetsGenderWhenFirstNameIsAbsent() {
+    final Document document = new Fixture()
+        .sentence("Mr./NNP", "Kowalczyk/NNP", "met/VBD", "Mrs./NNP", "Nowak/NNP", "./.")
+        .sentence("She/PRP", "spoke/VBD", "./.")
+        .entity("Mr. Kowalczyk", "person").entity("Mrs. Nowak", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Mrs. Nowak", "She")), chains(document));
+  }
+
+  @Test
+  void testUnknownGenderStaysCompatibleWithBothPronouns() {
+    final Document document = new Fixture()
+        .sentence("Kowalczyk/NNP", "arrived/VBD", "./.")
+        .sentence("She/PRP", "spoke/VBD", "./.")
+        .entity("Kowalczyk", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Kowalczyk", "She")), chains(document));
+  }
+
+  @Test
+  void testPluralPronounSkipsSingularPerson() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "senators/NNS", "met/VBD", "John/NNP", "./.")
+        .sentence("They/PRP", "voted/VBD", "./.")
+        .entity("John", "person")
+        .chunk("The senators", "NP").chunk("John", "NP").chunk("They", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("The senators", "They")), chains(document));
+  }
+
+  @Test
+  void testCompoundPlaceNameIsNotTheBareName() {
+    final Document document = new Fixture()
+        .sentence("Kansas/NNP", "City/NNP", "grew/VBD", "./.")
+        .sentence("Kansas/NNP", "voted/VBD", "./.")
+        .sentence("Kansas/NNP", "City/NNP", "won/VBD", "./.")
+        .entity("Kansas City", "location").entity("Kansas", "location")
+        .entity("Kansas City", "location")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Kansas City", "Kansas City")),
+        chains(document));
+  }
+
+  @Test
+  void testSurnameFindsFullPersonName() {
+    final Document document = new Fixture()
+        .sentence("Mary/NNP", "Jones/NNP", "spoke/VBD", "./.")
+        .sentence("Jones/NNP", "left/VBD", "./.")
+        .sentence("Mary/NNP", "returned/VBD", "./.")
+        .entity("Mary Jones", "person").entity("Jones", "person").entity("Mary", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Mary Jones", "Jones", "Mary")),
+        chains(document));
+  }
+
+  @Test
+  void testNominalMentionLinksByHeadToEntityCluster() {
+    final Document document = new Fixture()
+        .sentence("Aberdeen/NNP", "Grammar/NNP", "School/NNP", "opened/VBD", "./.")
+        .sentence("The/DT", "school/NN", "grew/VBD", "./.")
+        .entity("Aberdeen Grammar School", "organization")
+        .chunk("Aberdeen Grammar School", "NP").chunk("The school", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Aberdeen Grammar School", "The school")),
+        chains(document));
+  }
+
+  @Test
+  void testChunkHeadedByEntityWidensTheMention() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "poet/NN", "Byron/NNP", "wrote/VBD", "./.")
+        .sentence("He/PRP", "travelled/VBD", "./.")
+        .entity("Byron", "person")
+        .chunk("The poet Byron", "NP").chunk("He", "NP")
+        .document(true);
+    final Document resolved = new CorefAnnotator().annotate(document);
+    final List<Annotation<CorefMention>> layer = resolved.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, layer.size());
+    Assertions.assertEquals(new Span(0, 14), layer.get(0).span());
+    Assertions.assertEquals(CorefMention.KIND_ENTITY, layer.get(0).value().kind());
+    Assertions.assertEquals(0, layer.get(0).value().entity());
+    Assertions.assertEquals(List.of(List.of("The poet Byron", "He")), chains(document));
+  }
+
+  @Test
+  void testIndefiniteNounPhraseIsNeverAnaphoric() {
+    final Document document = new Fixture()
+        .sentence("A/DT", "student/NN", "arrived/VBD", "./.")
+        .sentence("A/DT", "student/NN", "left/VBD", "./.")
+        .sentence("The/DT", "student/NN", "waved/VBD", "./.")
+        .chunk("A student", "NP").chunk("A student", "NP").chunk("The student", "NP")
+        .document(true);
+    // The definite phrase links to the nearest indefinite antecedent; the two
+    // indefinites stay apart.
+    Assertions.assertEquals(List.of(List.of("A student", "The student")),
+        chains(document));
+  }
+
+  @Test
+  void testPleonasticItIsNoMention() {
+    final Document document = new Fixture()
+        .sentence("Acme/NNP", "grew/VBD", "./.")
+        .sentence("It/PRP", "is/VBZ", "clear/JJ", "that/IN", "it/PRP", "won/VBD", "./.")
+        .entity("Acme", "organization")
+        .document(false);
+    final Document resolved = new CorefAnnotator().annotate(document);
+    final List<Annotation<CorefMention>> layer = resolved.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, layer.size());
+    Assertions.assertEquals("it", resolved.text().subSequence(
+        layer.get(1).span().getStart(), layer.get(1).span().getEnd()).toString());
+    Assertions.assertEquals(List.of(List.of("Acme", "it")), chains(document));
+  }
+
+  @Test
+  void testPronounNeverLinksToPhraseContainingIt() {
+    final Document document = new Fixture()
+        .sentence("Byron/NNP", "wrote/VBD", "./.")
+        .sentence("His/PRP$", "mother/NN", "read/VBD", "./.")
+        .entity("Byron", "person")
+        .chunk("Byron", "NP").chunk("His mother", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Byron", "His")), chains(document));
+  }
+
+  @Test
+  void testReflexiveStaysInItsSentence() {
+    final Document document = new Fixture()
+        .sentence("Mary/NNP", "left/VBD", "./.")
+        .sentence("John/NNP", "hurt/VBD", "himself/PRP", "./.")
+        .entity("Mary", "person").entity("John", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("John", "himself")), chains(document));
+  }
+
+  @Test
+  void testAcronymFindsItsExpansion() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "World/NNP", "Health/NNP", "Organization/NNP", "met/VBD", "./.")
+        .sentence("WHO/NNP", "agreed/VBD", "./.")
+        .entity("World Health Organization", "organization").entity("WHO", "organization")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("World Health Organization", "WHO")),
+        chains(document));
+  }
+
+  @Test
+  void testSharedInstitutionHeadWithDifferentNamesStaysApart() {
+    final Document document = new Fixture()
+        .sentence("Harvard/NNP", "University/NNP", "grew/VBD", "./.")
+        .sentence("Stanford/NNP", "University/NNP", "grew/VBD", "./.")
+        .sentence("President/NNP", "Obama/NNP", "spoke/VBD", "./.")
+        .sentence("Barack/NNP", "Obama/NNP", "left/VBD", "./.")
+        .entity("Harvard University", "organization")
+        .entity("Stanford University", "organization")
+        .entity("President Obama", "person").entity("Barack Obama", "person")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("President Obama", "Barack Obama")),
+        chains(document));
+  }
+
+  @Test
+  void testPronounReachesThreeSentencesBack() {
+    final Document document = new Fixture()
+        .sentence("Acme/NNP", "won/VBD", "./.")
+        .sentence("Time/NN", "passed/VBD", "./.")
+        .sentence("Markets/NNS", "moved/VBD", "./.")
+        .sentence("It/PRP", "changed/VBD", "./.")
+        .entity("Acme", "organization")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("Acme", "It")), chains(document));
+  }
+
+  @Test
+  void testNeutralPronounSkipsPeopleAndAnimateNouns() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "company/NN", "hired/VBD", "the/DT", "teacher/NN", "./.")
+        .sentence("It/PRP", "grew/VBD", "./.")
+        .chunk("The company", "NP").chunk("the teacher", "NP").chunk("It", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("The company", "It")), chains(document));
+  }
+}
