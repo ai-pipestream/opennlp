@@ -174,15 +174,8 @@ final class MentionDetector {
         addNounPhrase(phrase, candidates, entityCount);
       }
     } else if (chunks != null) {
-      for (final Annotation<String> chunk : chunks) {
-        if (NOUN_PHRASE.equals(chunk.value())) {
-          final int first = firstToken(chunk.span());
-          final int last = lastToken(chunk.span());
-          if (first >= 0 && last >= first) {
-            addNounPhrase(new NounPhrase(chunk.span(), first, last, headToken(first, last)),
-                candidates, entityCount);
-          }
-        }
+      for (final NounPhrase phrase : chunkNounPhrases(chunks)) {
+        addNounPhrase(phrase, candidates, entityCount);
       }
     }
     addPronouns(candidates, entityCount);
@@ -194,6 +187,42 @@ final class MentionDetector {
       mentions.add(mention(candidate));
     }
     return mentions;
+  }
+
+  /**
+   * Reads the noun phrase chunks, joining a chunk that opens with a possessive marker to
+   * the noun phrase chunk right before it, since base chunking splits {@code Norton 's
+   * capital} into the possessor and the possessed while the mention is the whole phrase.
+   */
+  private List<NounPhrase> chunkNounPhrases(List<Annotation<String>> chunks) {
+    final List<NounPhrase> phrases = new ArrayList<>();
+    int pendingFirst = -1;
+    int pendingLast = -1;
+    for (final Annotation<String> chunk : chunks) {
+      final boolean nounPhrase = NOUN_PHRASE.equals(chunk.value());
+      final int first = nounPhrase ? firstToken(chunk.span()) : -1;
+      final int last = nounPhrase ? lastToken(chunk.span()) : -1;
+      final boolean valid = nounPhrase && first >= 0 && last >= first;
+      if (valid && pendingFirst >= 0 && first == pendingLast + 1
+          && ("POS".equals(tag[first]) || "'s".equals(lower[first]))) {
+        pendingLast = last;
+        continue;
+      }
+      if (pendingFirst >= 0) {
+        phrases.add(nounPhrase(pendingFirst, pendingLast));
+      }
+      pendingFirst = valid ? first : -1;
+      pendingLast = valid ? last : -1;
+    }
+    if (pendingFirst >= 0) {
+      phrases.add(nounPhrase(pendingFirst, pendingLast));
+    }
+    return phrases;
+  }
+
+  private NounPhrase nounPhrase(int first, int last) {
+    return new NounPhrase(new Span(tokens.get(first).span().getStart(),
+        tokens.get(last).span().getEnd()), first, last, headToken(first, last));
   }
 
   /**
@@ -275,6 +304,7 @@ final class MentionDetector {
     if (first == last && CorefLexicon.pronoun(lower[first]) != null) {
       return;
     }
+    addPossessors(first, last, candidates, entityCount);
     if (!tag[phrase.head()].startsWith(NOUN_TAG_PREFIX)) {
       return;
     }
@@ -282,6 +312,41 @@ final class MentionDetector {
         CorefMention.NO_ENTITY, null, first, last);
     nominal.head = phrase.head();
     candidates.add(nominal);
+  }
+
+  /**
+   * Adds the possessor inside a noun phrase as a mention of its own, {@code Norton 's}
+   * in {@code Norton 's capital}: the tokens up to a possessive marker, widening an
+   * entity that ends right before the marker to include it, as OntoNotes annotates.
+   */
+  private void addPossessors(int first, int last, List<Candidate> candidates,
+      int entityCount) {
+    for (int t = first + 1; t < last; t++) {
+      if (!"POS".equals(tag[t]) && !"'s".equals(lower[t])) {
+        continue;
+      }
+      final int head = headToken(first, t - 1);
+      boolean widened = false;
+      for (int e = 0; e < entityCount; e++) {
+        final Candidate entity = candidates.get(e);
+        if (entity.lastToken == t - 1 && entity.firstToken >= first) {
+          entity.lastToken = t;
+          entity.span = new Span(entity.span.getStart(), tokens.get(t).span().getEnd());
+          widened = true;
+        } else if (entity.firstToken <= t && entity.lastToken >= t) {
+          widened = true;
+        }
+      }
+      if (widened || !tag[head].startsWith(NOUN_TAG_PREFIX)
+          || CorefLexicon.pronoun(lower[head]) != null) {
+        continue;
+      }
+      final Candidate possessor = new Candidate(
+          new Span(tokens.get(first).span().getStart(), tokens.get(t).span().getEnd()),
+          CorefMention.KIND_NOMINAL, CorefMention.NO_ENTITY, null, first, t);
+      possessor.head = head;
+      candidates.add(possessor);
+    }
   }
 
   /** {@return whether a token range holds a coordinating {@code and}} */
@@ -456,18 +521,20 @@ final class MentionDetector {
   }
 
   /**
-   * Finds the head token of a token range: the last noun before the first
-   * {@code of}, comma, or possessive marker past the first token, falling back to the
-   * last token of that prefix.
+   * Finds the head token of a token range: the last noun before the first {@code of}
+   * or comma past the first token, leaving out a trailing possessive marker, and
+   * falling back to the last token of that prefix.
    */
   private int headToken(int first, int last) {
     int stop = last;
     for (int t = first + 1; t <= last; t++) {
-      if ("of".equals(lower[t]) || ",".equals(lower[t]) || "POS".equals(tag[t])
-          || "'s".equals(lower[t])) {
+      if ("of".equals(lower[t]) || ",".equals(lower[t])) {
         stop = t - 1;
         break;
       }
+    }
+    if (stop > first && ("POS".equals(tag[stop]) || "'s".equals(lower[stop]))) {
+      stop--;
     }
     for (int t = stop; t >= first; t--) {
       if (tag[t].startsWith(NOUN_TAG_PREFIX)) {
@@ -491,14 +558,15 @@ final class MentionDetector {
   }
 
   /**
-   * Checks whether a nominal mention is indefinite: opened by an indefinite word, or a
-   * bare plural without a definite opener.
+   * Checks whether a nominal mention is indefinite or generic: opened by an indefinite
+   * word, or a bare common noun, plural or singular, without a definite opener.
    */
   private boolean indefinite(int first, int headToken) {
     if (CorefLexicon.indefiniteWord(lower[first])) {
       return true;
     }
-    return PLURAL_TAGS.contains(tag[headToken])
+    return tag[headToken].startsWith(NOUN_TAG_PREFIX)
+        && !PROPER_TAGS.contains(tag[headToken])
         && !DEFINITE_OPENER_TAGS.contains(tag[first])
         && !"the".equals(lower[first]);
   }

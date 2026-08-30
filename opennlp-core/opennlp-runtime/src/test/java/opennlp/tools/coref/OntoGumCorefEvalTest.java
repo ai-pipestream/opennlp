@@ -226,6 +226,19 @@ public class OntoGumCorefEvalTest {
             .append('\n');
       }
     }
+    if (output.layers().contains(ChunkerAnnotator.CHUNKS)) {
+      for (final Annotation<String> chunk : output.get(ChunkerAnnotator.CHUNKS)) {
+        dump.append("CHUNK\t").append(chunk.value()).append('\t')
+            .append(text.subSequence(chunk.span().getStart(), chunk.span().getEnd()))
+            .append('\n');
+      }
+    }
+    for (final Annotation<CorefMention> mention : produced) {
+      dump.append("PRODUCED\t").append(mention.value().chain()).append('\t')
+          .append(mention.value().kind()).append('\t')
+          .append(text.subSequence(mention.span().getStart(), mention.span().getEnd()))
+          .append('\n');
+    }
   }
 
   private static List<Mention> sorted(Set<Mention> mentions) {
