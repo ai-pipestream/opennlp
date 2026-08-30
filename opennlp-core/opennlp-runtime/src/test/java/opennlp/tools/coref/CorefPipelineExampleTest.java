@@ -372,8 +372,10 @@ public class CorefPipelineExampleTest {
    * Runs the pipeline with an untyped name finder behind a {@link NameFinderAnnotator},
    * so every entity carries {@link NameFinderAnnotator#UNTYPED}. The coreference
    * annotator treats that label as an unknown type: the recurring name still chains
-   * through containment, and both the neutral and the gendered pronoun link to the
-   * nearest preceding entity mention instead of staying singletons.
+   * through head match, and the neutral pronoun links to the nearest preceding entity
+   * mention. That marks its chain as neutral, so the gendered pronoun passes it over for
+   * the other untyped entity instead of staying a singleton; no name is read for a
+   * gender when its type is unknown.
    */
   @Test
   void testUntypedEntitiesResolvePronouns() {
@@ -394,11 +396,12 @@ public class CorefPipelineExampleTest {
     Assertions.assertEquals(5, chains.size());
     Assertions.assertEquals(List.of("Ada Lovelace", "Orion Labs", "Lovelace", "its", "She"),
         surfaces(document, chains));
-    Assertions.assertArrayEquals(new int[] {0, 1, 0, 0, 0},
+    Assertions.assertArrayEquals(new int[] {0, 1, 0, 0, 1},
         chains.stream().mapToInt(a -> a.value().chain()).toArray());
-    Assertions.assertEquals(List.of("Ada Lovelace", "Lovelace", "its", "She"),
+    Assertions.assertEquals(List.of("Ada Lovelace", "Lovelace", "its"),
         chainSurfaces(document, chains, 0));
-    Assertions.assertEquals(List.of("Orion Labs"), chainSurfaces(document, chains, 1));
+    Assertions.assertEquals(List.of("Orion Labs", "She"),
+        chainSurfaces(document, chains, 1));
   }
 
   /**
