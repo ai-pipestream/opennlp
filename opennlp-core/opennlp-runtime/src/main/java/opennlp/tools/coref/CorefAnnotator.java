@@ -91,6 +91,14 @@ public class CorefAnnotator implements DocumentAnnotator {
       Layers.key("chains", CorefMention.class);
 
   /**
+   * Hand-annotated coreference chains, the gold counterpart of {@link #CHAINS} under
+   * the {@code gold:} convention, for corpus readers and trainers; the annotator never
+   * reads it.
+   */
+  public static final LayerKey<CorefMention> GOLD_CHAINS =
+      LayerKey.of("gold:" + CHAINS.id(), CorefMention.class);
+
+  /**
    * Speakers, an optional input layer: each annotation covers the text one speaker
    * utters, typically a sentence or a turn, and carries the speaker's label. First and
    * second person pronouns resolve per speaker; without the layer, quotation marks
