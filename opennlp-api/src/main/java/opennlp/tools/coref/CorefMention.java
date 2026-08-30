@@ -53,6 +53,9 @@ public record CorefMention(int chain, String kind, int entity) {
   /** A pronoun mention. */
   public static final String KIND_PRONOUN = "pronoun";
 
+  /** A mention read from a corpus annotation rather than detected. */
+  public static final String KIND_GOLD = "gold";
+
   /** The entity index of a mention that is not backed by an entity. */
   public static final int NO_ENTITY = -1;
 
