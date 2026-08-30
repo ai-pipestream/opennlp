@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -47,6 +48,7 @@ import opennlp.tools.coref.CorefScorer;
 import opennlp.tools.coref.CorefScores;
 import opennlp.tools.coref.CorefScores.Score;
 import opennlp.tools.coref.CorefTrainer;
+import opennlp.tools.coref.WordVectors;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
@@ -103,6 +105,11 @@ public class OntoGumCorefEvalTest {
   private static final String CUTOFF_PROPERTY = "opennlp.coref.cutoff";
   private static final String THRESHOLD_PROPERTY = "opennlp.coref.threshold";
   private static final String ALGORITHM_PROPERTY = "opennlp.coref.algorithm";
+  private static final String RANKING_PROPERTY = "opennlp.coref.ranking";
+  private static final String EPOCHS_PROPERTY = "opennlp.coref.epochs";
+  private static final String RATE_PROPERTY = "opennlp.coref.rate";
+  private static final String L2_PROPERTY = "opennlp.coref.l2";
+  private static final String VECTORS_PROPERTY = "opennlp.coref.vectors";
   private static final Path RESULTS_FILE = Path.of("target", "coref-eval-results.csv");
   private static final String[] NER_MODELS =
       {"en-ner-person.bin", "en-ner-location.bin", "en-ner-organization.bin"};
@@ -196,12 +203,16 @@ public class OntoGumCorefEvalTest {
     final String modelPath = System.getProperty(MODEL_PROPERTY);
     final double threshold = Double.parseDouble(
         System.getProperty(THRESHOLD_PROPERTY, Double.toString(CorefAnnotator.DEFAULT_THRESHOLD)));
+    final WordVectors vectors = System.getProperty(VECTORS_PROPERTY) == null
+        ? null : loadVectors(Path.of(System.getProperty(VECTORS_PROPERTY)));
+    final Set<String> personTypes = Set.of("person");
+    final Set<String> neutralTypes = Set.of("organization", "location");
     if (System.getProperty(TRAIN_PROPERTY) == null) {
       if (modelPath == null || !Files.exists(Path.of(modelPath))) {
         return new CorefAnnotator();
       }
-      return new CorefAnnotator(Set.of("person"), Set.of("organization", "location"),
-          new CorefModel(Path.of(modelPath)), threshold);
+      return new CorefAnnotator(personTypes, neutralTypes, new CorefModel(Path.of(modelPath)),
+          threshold, vectors);
     }
     final List<Document> training = new ArrayList<>();
     for (final String name : splitDocuments(gum.resolve("splits.md"), "train")) {
@@ -214,23 +225,57 @@ public class OntoGumCorefEvalTest {
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.key())));
     }
-    final TrainingParameters parameters = TrainingParameters.defaultParams();
-    parameters.put(TrainingParameters.ALGORITHM_PARAM,
-        System.getProperty(ALGORITHM_PROPERTY, "MAXENT"));
-    parameters.put(TrainingParameters.ITERATIONS_PARAM,
-        Integer.parseInt(System.getProperty(ITERATIONS_PROPERTY, "100")));
-    parameters.put(TrainingParameters.CUTOFF_PARAM,
-        Integer.parseInt(System.getProperty(CUTOFF_PROPERTY, "3")));
+    final CorefAnnotator rules = new CorefAnnotator(personTypes, neutralTypes, null,
+        threshold, vectors);
     final long started = System.nanoTime();
-    final CorefModel model = CorefTrainer.train("eng",
-        ObjectStreamUtils.createObjectStream(training), parameters);
+    final CorefModel model;
+    if (System.getProperty(RANKING_PROPERTY) != null) {
+      model = CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(training),
+          Integer.parseInt(System.getProperty(EPOCHS_PROPERTY, "10")),
+          Double.parseDouble(System.getProperty(RATE_PROPERTY, "0.1")),
+          Double.parseDouble(System.getProperty(L2_PROPERTY, "0.0")), rules);
+    } else {
+      final TrainingParameters parameters = TrainingParameters.defaultParams();
+      parameters.put(TrainingParameters.ALGORITHM_PARAM,
+          System.getProperty(ALGORITHM_PROPERTY, "MAXENT"));
+      parameters.put(TrainingParameters.ITERATIONS_PARAM,
+          Integer.parseInt(System.getProperty(ITERATIONS_PROPERTY, "100")));
+      parameters.put(TrainingParameters.CUTOFF_PARAM,
+          Integer.parseInt(System.getProperty(CUTOFF_PROPERTY, "3")));
+      model = CorefTrainer.train("eng", ObjectStreamUtils.createObjectStream(training),
+          parameters, rules);
+    }
     LOG.info("trained on {} documents in {} s", training.size(),
         String.format(Locale.ROOT, "%.1f", (System.nanoTime() - started) / 1e9));
     if (modelPath != null) {
       model.serialize(Path.of(modelPath));
     }
-    return new CorefAnnotator(Set.of("person"), Set.of("organization", "location"), model,
-        threshold);
+    return new CorefAnnotator(personTypes, neutralTypes, model, threshold, vectors);
+  }
+
+  /**
+   * Loads a GloVe-format text file, one lowercased word and its numbers per line, as
+   * word vectors.
+   */
+  private static WordVectors loadVectors(Path file) throws IOException {
+    final Map<String, float[]> table = new HashMap<>();
+    try (java.io.BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        final int space = line.indexOf(' ');
+        if (space <= 0) {
+          continue;
+        }
+        final String[] parts = line.substring(space + 1).trim().split(" ");
+        final float[] vector = new float[parts.length];
+        for (int d = 0; d < parts.length; d++) {
+          vector[d] = Float.parseFloat(parts[d]);
+        }
+        table.put(line.substring(0, space), vector);
+      }
+    }
+    LOG.info("loaded {} word vectors from {}", table.size(), file);
+    return table::get;
   }
 
   /** Turns a key partition into a gold chains layer in text order. */

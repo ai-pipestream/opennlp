@@ -25,9 +25,13 @@ thing, and it says how well it does so.
   CoNLL average over predicted mentions after Pradhan et al. (ACL 2014), pinned to the
   paper's worked example.
 - `CorefTrainer` and `CorefModel` add a learned antecedent ranker after Durrett and
-  Klein (EMNLP 2013): a maxent pair classifier over the sieve predicates, heads,
-  shapes, distance, and attribute pairs, decoded best-first above a floor tuned on
-  dev (0.1), after the speaker and string sieves. Documents train through the
+  Klein (EMNLP 2013) over the sieve predicates, heads, shapes, distance, attribute
+  pairs, cluster size, speaker equality, and optional `WordVectors` head similarity,
+  run after the speaker and string sieves. `trainRanking` is a latent-antecedent
+  softmax mention ranker (AdaGrad, weights stored in a `GISModel`) that links when
+  the best candidate outscores the new-chain option; `train` is the pairwise maxent
+  classifier with a dev-tuned floor (0.1). Anaphors whose gold antecedents the
+  detector missed are left out of training. Documents train through the
   `gold:opennlp:chains` layer; `ConlluCorefDocumentStream` (opennlp-formats) reads
   OntoGUM or Universal Anaphora CoNLL-U into such documents.
 - `OntoGumCorefEvalTest` (opennlp-formats tests) scores a GUM checkout
@@ -47,7 +51,8 @@ noun phrases:
 | Sieves with chunk mentions | 30.5 | 30.5 | 48.1 |
 | Speaker sieve | 45.8 | 42.8 | 63.6 |
 | Possessives and generic nouns | 49.5 | 46.5 | 67.8 |
-| Ranker (train split, floor 0.1) | 52.0 | 48.6 | 68.4 |
+| Pairwise ranker (train split, floor 0.1) | 52.0 | 48.6 | 68.4 |
+| Mention ranker (10 epochs, step 0.05, L2 1e-3) | 53.1 | 49.3 | 68.0 |
 
 Zhu, Pradhan, and Zeldes (ACL 2021) report 39.7 on the 2021 OntoGUM test set for the
 Stanford deterministic system with fully predicted input, and 58.0 for SpanBERT.
@@ -64,14 +69,17 @@ Stanford deterministic system with fully predicted input, and 58.0 for SpanBERT.
   Document container and typed layers.
 
 Ranker findings: L-BFGS and 300 GIS iterations match 100 GIS iterations (the model is
-feature-limited); a virtual "new chain" antecedent scored from anaphor-only features
-under-links because pair and anaphor probabilities are not calibrated against each
-other, so the floor stays; running the string sieves before the ranker is worth
-+1.1 dev over ranking everything.
+feature-limited); running the string sieves before the ranker is worth +1.1 dev over
+ranking everything; a virtual new-chain option inside the pairwise classifier
+under-links (uncalibrated), while the same option inside a softmax ranker works once
+unlearnable anaphors are excluded (51.4 to 52.1 dev before tuning); GloVe 6B head
+similarity adds nothing measurable (52.0 to 52.1 dev), so the `WordVectors` hook is
+kept for a stronger embedding but no vectors are bundled; step size matters (0.3 loses
+3 points, 0.05 gains 0.7), 20 epochs do not beat 10.
 
 ## Open
 
-- True softmax mention ranking and a static-embedding head similarity feature
-  (OPENNLP-1877) as the next accuracy levers; no shipped model yet, and the subset of
-  OntoGUM a distributable model may train on is undecided.
+- No shipped model yet; the subset of OntoGUM a distributable model may train on is
+  undecided. Model files are large (11 MB) because no feature cutoff is applied to the
+  ranker; pruning near-zero weights is an easy follow-up.
 - Demonstrative pronouns and appositive spans, which need the parse layer.

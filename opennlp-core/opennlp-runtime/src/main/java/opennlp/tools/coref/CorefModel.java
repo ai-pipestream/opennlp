@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.io.Serial;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Properties;
 
 import opennlp.tools.ml.model.AbstractModel;
 import opennlp.tools.ml.model.MaxentModel;
@@ -44,6 +45,9 @@ public class CorefModel extends BaseModel {
 
   private static final String COREF_MODEL_ENTRY_NAME = "coref.model";
 
+  /** The manifest property that marks a model trained by ranking. */
+  private static final String RANKING_PROPERTY = "coref.ranking";
+
   /**
    * Initializes a model from a trained pair classifier.
    *
@@ -54,12 +58,34 @@ public class CorefModel extends BaseModel {
    */
   public CorefModel(String languageCode, MaxentModel pairModel,
       Map<String, String> manifestInfoEntries) {
+    this(languageCode, pairModel, false, manifestInfoEntries);
+  }
+
+  /**
+   * Initializes a model from a trained pair classifier or ranker.
+   *
+   * @param languageCode The ISO language code of the training data.
+   * @param pairModel The pair model. Must not be {@code null}.
+   * @param ranking Whether the model was trained by ranking, so a candidate is linked
+   *                when it outscores the new-chain option rather than a threshold.
+   * @param manifestInfoEntries Additional manifest entries, or {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code pairModel} is {@code null}.
+   */
+  public CorefModel(String languageCode, MaxentModel pairModel, boolean ranking,
+      Map<String, String> manifestInfoEntries) {
     super(COMPONENT_NAME, languageCode, manifestInfoEntries);
     if (pairModel == null) {
       throw new IllegalArgumentException("pairModel must not be null");
     }
     artifactMap.put(COREF_MODEL_ENTRY_NAME, pairModel);
+    ((Properties) artifactMap.get(MANIFEST_ENTRY))
+        .setProperty(RANKING_PROPERTY, Boolean.toString(ranking));
     checkArtifactMap();
+  }
+
+  /** {@return whether the model was trained by ranking} */
+  public boolean isRanking() {
+    return Boolean.parseBoolean(getManifestProperty(RANKING_PROPERTY));
   }
 
   /**

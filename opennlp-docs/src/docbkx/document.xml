@@ -434,14 +434,19 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 		<para>
 			Given a <code>CorefModel</code>, the annotator ranks instead of applying the
 			head-match and pronoun sieves: after the speaker and string sieves, each
-			remaining mention takes the candidate antecedent whose pair the model scores
-			highest, if that link probability reaches the floor
-			<code>CorefAnnotator.DEFAULT_THRESHOLD</code>. The pair features follow Durrett
-			and Klein (EMNLP 2013): the sieve tests as predicates, head words, mention
-			shapes, distance, attribute pairs, and their conjunctions.
-			<code>CorefTrainer</code> trains the model from documents that carry the
-			annotator's input layers and a <code>CorefAnnotator.GOLD_CHAINS</code> layer,
-			the <code>gold:</code> counterpart of the chains layer;
+			remaining mention takes the candidate antecedent the model scores highest. A
+			model from <code>CorefTrainer.trainRanking</code> is a mention ranker after
+			Durrett and Klein (EMNLP 2013), trained by softmax over each mention's
+			candidates and the option of starting a new chain, and links when the best
+			candidate outscores that option; a model from <code>CorefTrainer.train</code>
+			is a pair classifier and links when the best link probability reaches the
+			floor <code>CorefAnnotator.DEFAULT_THRESHOLD</code>. The features are the
+			sieve tests as predicates, head words, mention shapes, distance, attribute
+			pairs, cluster size, speaker equality, their conjunctions, and, when the
+			annotator is given <code>WordVectors</code>, the bucketed cosine similarity
+			of the two heads. Training reads documents that carry the annotator's input
+			layers and a <code>CorefAnnotator.GOLD_CHAINS</code> layer, the
+			<code>gold:</code> counterpart of the chains layer;
 			<code>ConlluCorefDocumentStream</code> in <code>opennlp-formats</code> reads
 			such documents from CoNLL-U with <code>Entity</code> brackets, the encoding of
 			OntoGUM and the Universal Anaphora releases.
@@ -450,7 +455,7 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 				<![CDATA[
 ObjectStream<Document> gold = new ConlluCorefDocumentStream(inputStreamFactory, ConlluTagset.X);
 ObjectStream<Document> training = /* add entity and chunk layers to each document */;
-CorefModel model = CorefTrainer.train("eng", training, TrainingParameters.defaultParams());
+CorefModel model = CorefTrainer.trainRanking("eng", training, new CorefAnnotator());
 Document resolved = new CorefAnnotator(model).annotate(document);]]>
 		</programlisting>
 		<para>
@@ -459,9 +464,9 @@ Document resolved = new CorefAnnotator(model).annotate(document);]]>
 			Pradhan et al. (ACL 2014) does. Measured with it on the OntoGUM corpus with
 			gold sentences, tokens, and tags, predicted entities and chunks, and the corpus
 			speaker lines, the rule-based annotator reaches a CoNLL average of 46.5 on the
-			test split and the ranker trained on the train split 48.6, against the 39.7
-			that Zhu, Pradhan, and Zeldes (ACL 2021) report for the Stanford deterministic
-			system; the harness is <code>OntoGumCorefEvalTest</code>.
+			test split and the mention ranker trained on the train split 49.3, against the
+			39.7 that Zhu, Pradhan, and Zeldes (ACL 2021) report for the Stanford
+			deterministic system; the harness is <code>OntoGumCorefEvalTest</code>.
 			<code>CorefPipelineExampleTest</code> asserts the behavior shown here.
 		</para>
 		<programlisting language="java">

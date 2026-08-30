@@ -27,6 +27,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
@@ -147,6 +148,89 @@ public class CorefTrainerTest {
     final List<Annotation<CorefMention>> apartChains = apart.get(CorefAnnotator.CHAINS);
     Assertions.assertNotEquals(apartChains.get(0).value().chain(),
         apartChains.get(1).value().chain());
+  }
+
+  @Test
+  void testRankingModelRoundTripsAndLinksAgainstTheNewChainOption() throws IOException {
+    final CorefModel trained = CorefTrainer.trainRanking("eng",
+        ObjectStreamUtils.createObjectStream(corpus()), new CorefAnnotator());
+    Assertions.assertTrue(trained.isRanking());
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    trained.serialize(bytes);
+    final CorefModel model = new CorefModel(new ByteArrayInputStream(bytes.toByteArray()));
+    Assertions.assertTrue(model.isRanking());
+
+    final CorefAnnotator annotator = new CorefAnnotator(model);
+    final List<Annotation<CorefMention>> linked = annotator.annotate(
+        document("Cyberdyne", "organization", "expanded", "It", 0)).get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(linked.get(0).value().chain(), linked.get(1).value().chain());
+    final List<Annotation<CorefMention>> apart = annotator.annotate(
+        document("Cyberdyne", "organization", "expanded", "He", 1)).get(CorefAnnotator.CHAINS);
+    Assertions.assertNotEquals(apart.get(0).value().chain(), apart.get(1).value().chain());
+  }
+
+  @Test
+  void testPairwiseModelIsNotRanking() throws IOException {
+    final CorefModel model = CorefTrainer.train("eng",
+        ObjectStreamUtils.createObjectStream(corpus()), parameters());
+    Assertions.assertFalse(model.isRanking());
+  }
+
+  @Test
+  void testWordVectorsFeedSimilarityFeaturesForNominalAnaphors() {
+    final WordVectors vectors = word -> switch (word) {
+      case "acme", "firm" -> new float[] {1f, 0.1f};
+      default -> null;
+    };
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, vectors);
+    final String text = "Acme expanded. The firm grew.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    final List<Annotation<String>> tags = new ArrayList<>();
+    int cursor = 0;
+    for (final String[] token : new String[][] {{"Acme", "NNP"}, {"expanded", "VBD"},
+        {".", "."}, {"The", "DT"}, {"firm", "NN"}, {"grew", "VBD"}, {".", "."}}) {
+      final int start = text.indexOf(token[0], cursor);
+      final Span span = new Span(start, start + token[0].length());
+      tokens.add(new Annotation<>(span, token[0]));
+      tags.add(new Annotation<>(span, token[1]));
+      cursor = span.getEnd();
+    }
+    final Document document = Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 14), "s"),
+            new Annotation<>(new Span(15, 29), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, tags)
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "organization")))
+        .with(ChunkerAnnotator.CHUNKS,
+            List.of(new Annotation<>(new Span(0, 4), "NP"), new Annotation<>(new Span(15, 23), "NP")))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(new Span(0, 4), new CorefMention(0, CorefMention.KIND_GOLD, -1)),
+            new Annotation<>(new Span(15, 23), new CorefMention(0, CorefMention.KIND_GOLD, -1))));
+    final List<Event> events = CorefTrainer.pairs(document, annotator);
+    Assertions.assertEquals(1, events.size());
+    final List<String> features = List.of(events.get(0).getContext());
+    Assertions.assertTrue(features.contains("sim=same"), features.toString());
+    Assertions.assertTrue(features.contains("clusterSim=same"), features.toString());
+    // Without vectors the similarity features are absent.
+    final List<String> plain = List.of(CorefTrainer.pairs(document, new CorefAnnotator())
+        .get(0).getContext());
+    Assertions.assertFalse(plain.stream().anyMatch(f -> f.startsWith("sim=")), plain.toString());
+  }
+
+  @Test
+  void testRankingRejectsBadSettings() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
+            0, 0.1, 0.0, new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
+            1, 0.0, 0.0, new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
+            1, 0.1, -1.0, new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", null, new CorefAnnotator()));
   }
 
   @Test

@@ -18,7 +18,9 @@
 package opennlp.tools.coref;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Generates the features of one anaphor and candidate antecedent pair for the ranking
@@ -34,9 +36,14 @@ import java.util.List;
  */
 final class CorefContextGenerator {
 
+  /** The value of a similarity feature when a head has no vector. */
+  private static final String UNKNOWN_SIMILARITY = "unknown";
+
   private final SieveResolver resolver;
   private final List<Mention> mentions;
   private final Clusters clusters;
+  private final WordVectors vectors;
+  private final Map<String, float[]> vectorCache = new HashMap<>();
 
   /**
    * Initializes the generator over a resolver's mentions and clusters.
@@ -47,6 +54,34 @@ final class CorefContextGenerator {
     this.resolver = resolver;
     this.mentions = resolver.mentions();
     this.clusters = resolver.clusters();
+    this.vectors = resolver.vectors();
+  }
+
+  /**
+   * Generates the features of the option that starts a new chain: the anaphor's own
+   * shape and what precedes it, so the ranker learns which mentions are first mentions.
+   *
+   * @param j The anaphor's index.
+   * @return The feature strings. Never {@code null}.
+   */
+  String[] newChainFeatures(int j) {
+    final Mention anaphor = mentions.get(j);
+    final List<String> features = new ArrayList<>(16);
+    final String kind = "new|" + kind(anaphor);
+    features.add(kind);
+    features.add(kind + "|head=" + anaphor.head());
+    features.add(kind + "|first=" + first(anaphor));
+    features.add(kind + "|shape=" + shape(anaphor));
+    features.add(kind + "|length=" + bucket(anaphor.words().size()));
+    features.add(kind + "|type=" + anaphor.type());
+    features.add(kind + "|sentence=" + bucket(anaphor.sentence()));
+    features.add(kind + "|position=" + bucket(positionInSentence(j)));
+    features.add(kind + "|earlierHead=" + earlierHead(j));
+    features.add(kind + "|earlierExact=" + earlierExact(j));
+    if (anaphor.pronoun()) {
+      features.add(kind + "|form=" + anaphor.head());
+    }
+    return features.toArray(new String[0]);
   }
 
   /**
@@ -71,6 +106,21 @@ final class CorefContextGenerator {
     if (antecedent.pronoun()) {
       features.add("antForm=" + antecedent.head());
       features.add("antForm=" + antecedent.head() + "|anaHead=" + anaphor.head());
+    }
+    if (vectors != null && !anaphor.pronoun()) {
+      final String similarity = "sim=" + similarity(anaphor.head(), antecedent.head());
+      features.add(similarity);
+      features.add(kinds + '|' + similarity);
+      String best = UNKNOWN_SIMILARITY;
+      double bestCosine = -2.0;
+      for (final String head : clusters.heads(i)) {
+        final double cosine = cosine(anaphor.head(), head);
+        if (cosine > bestCosine) {
+          bestCosine = cosine;
+          best = similarityBucket(cosine);
+        }
+      }
+      features.add("clusterSim=" + best);
     }
 
     sieve(features, "exact", resolver.exactMatch(i, j), kinds);
@@ -130,6 +180,75 @@ final class CorefContextGenerator {
       features.add("bothProper=" + (anaphor.proper() && antecedent.proper()));
     }
     return features.toArray(new String[0]);
+  }
+
+  /** {@return whether an earlier mention shares the anaphor's head} */
+  private boolean earlierHead(int j) {
+    final String head = mentions.get(j).head();
+    for (int i = 0; i < j; i++) {
+      if (head.equals(mentions.get(i).head())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** {@return whether an earlier mention has the anaphor's normalized text} */
+  private boolean earlierExact(int j) {
+    final String normalized = mentions.get(j).normalized();
+    for (int i = 0; i < j; i++) {
+      if (normalized.equals(mentions.get(i).normalized())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** {@return the bucketed cosine similarity of two head words, or unknown} */
+  private String similarity(String a, String b) {
+    return similarityBucket(cosine(a, b));
+  }
+
+  /** Buckets a cosine into five ranges; {@code -2} stands for a missing vector. */
+  private String similarityBucket(double cosine) {
+    if (cosine < -1.0) {
+      return UNKNOWN_SIMILARITY;
+    }
+    if (cosine < 0.3) {
+      return "low";
+    }
+    if (cosine < 0.5) {
+      return "mid";
+    }
+    if (cosine < 0.7) {
+      return "high";
+    }
+    return cosine < 0.9 ? "higher" : "same";
+  }
+
+  /** {@return the cosine of two head words' vectors, or {@code -2} when one is missing} */
+  private double cosine(String a, String b) {
+    final float[] u = vector(a);
+    final float[] v = vector(b);
+    if (u == null || v == null || u.length != v.length) {
+      return -2.0;
+    }
+    double dot = 0.0;
+    double uu = 0.0;
+    double vv = 0.0;
+    for (int d = 0; d < u.length; d++) {
+      dot += u[d] * v[d];
+      uu += u[d] * u[d];
+      vv += v[d] * v[d];
+    }
+    return uu == 0.0 || vv == 0.0 ? -2.0 : dot / Math.sqrt(uu * vv);
+  }
+
+  private float[] vector(String word) {
+    if (word == null) {
+      return null;
+    }
+    return vectorCache.computeIfAbsent(word, vectors::vector);
   }
 
   /** {@return how many mentions precede a mention in its sentence} */
