@@ -50,6 +50,8 @@ final class Clusters {
   private final List<Set<Person>> persons;
   private final List<Set<String>> words;
   private final List<Set<String>> heads;
+  private final List<Set<String>> normalizedForms;
+  private final int[] size;
 
   /**
    * Initializes one singleton cluster per mention.
@@ -66,9 +68,15 @@ final class Clusters {
     persons = new java.util.ArrayList<>(size);
     words = new java.util.ArrayList<>(size);
     heads = new java.util.ArrayList<>(size);
+    normalizedForms = new java.util.ArrayList<>(size);
+    this.size = new int[size];
     for (int i = 0; i < size; i++) {
       final Mention mention = mentions.get(i);
       parent[i] = i;
+      this.size[i] = 1;
+      final Set<String> forms = new HashSet<>();
+      forms.add(mention.normalized());
+      normalizedForms.add(forms);
       type[i] = knownType(mention.type());
       numbers.add(known(Number.class, mention.number(), Number.UNKNOWN));
       genders.add(known(Gender.class, mention.gender(), Gender.UNKNOWN));
@@ -198,6 +206,16 @@ final class Clusters {
     return heads.get(find(i));
   }
 
+  /** {@return the normalized texts of the mentions in a mention's cluster} */
+  Set<String> normalizedForms(int i) {
+    return normalizedForms.get(find(i));
+  }
+
+  /** {@return how many mentions a mention's cluster holds} */
+  int size(int i) {
+    return size[find(i)];
+  }
+
   /**
    * Merges two mentions' clusters unless their known types differ. The earlier root
    * survives and takes the union of both attribute sets.
@@ -228,6 +246,8 @@ final class Clusters {
     persons.get(keep).addAll(persons.get(drop));
     words.get(keep).addAll(words.get(drop));
     heads.get(keep).addAll(heads.get(drop));
+    normalizedForms.get(keep).addAll(normalizedForms.get(drop));
+    size[keep] += size[drop];
     return true;
   }
 }

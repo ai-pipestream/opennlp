@@ -75,7 +75,10 @@ import opennlp.tools.util.StringUtil;
  * <p>Every mention is reported, including those that found no partner, as singleton
  * chains; consumers interested only in links filter by chain size. Chains are numbered
  * in order of first mention. The resolution is rule-based and needs no model or
- * training data.</p>
+ * training data; given a {@link CorefModel}, the sieves after the speaker sieve are
+ * replaced by a ranking of each anaphor's candidates with the sieve tests among the
+ * features, which trades the rules' fixed precision order for what the training corpus
+ * shows.</p>
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
@@ -92,8 +95,8 @@ public class CorefAnnotator implements DocumentAnnotator {
 
   /**
    * Hand-annotated coreference chains, the gold counterpart of {@link #CHAINS} under
-   * the {@code gold:} convention, for corpus readers and trainers; the annotator never
-   * reads it.
+   * the {@code gold:} convention; {@link CorefTrainer} reads it and the annotator never
+   * does.
    */
   public static final LayerKey<CorefMention> GOLD_CHAINS =
       LayerKey.of("gold:" + CHAINS.id(), CorefMention.class);
@@ -115,17 +118,31 @@ public class CorefAnnotator implements DocumentAnnotator {
   /** Lowercased entity type labels neutral pronouns may resolve to. */
   private final Set<String> neutralTypes;
 
+  /** The ranking model, or {@code null} for rule-based resolution. */
+  private final CorefModel model;
+
+  /** The least link probability at which the ranker links a pair. */
+  private final double threshold;
+
   /**
-   * Initializes the annotator for the conventional entity type names: {@code person}
-   * for gendered pronouns and {@code organization} and {@code location} for neutral
-   * pronouns.
+   * The link probability threshold of the model constructors. Pair classifiers see far
+   * more unlinked than linked pairs, so their link probabilities run low; this floor
+   * was chosen on the OntoGUM development split for models {@link CorefTrainer}
+   * produces.
+   */
+  public static final double DEFAULT_THRESHOLD = 0.1;
+
+  /**
+   * Initializes the rule-based annotator for the conventional entity type names:
+   * {@code person} for gendered pronouns and {@code organization} and {@code location}
+   * for neutral pronouns.
    */
   public CorefAnnotator() {
     this(Set.of("person"), Set.of("organization", "location"));
   }
 
   /**
-   * Initializes the annotator.
+   * Initializes the rule-based annotator.
    *
    * @param personTypes The entity type labels gendered pronouns may resolve to, matched
    *                    case-insensitively. Must not be {@code null} or empty.
@@ -135,8 +152,50 @@ public class CorefAnnotator implements DocumentAnnotator {
    *         contains a blank entry.
    */
   public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes) {
+    this(personTypes, neutralTypes, null, DEFAULT_THRESHOLD);
+  }
+
+  /**
+   * Initializes a ranking annotator for the conventional entity type names.
+   *
+   * @param model The ranking model. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code model} is {@code null}.
+   */
+  public CorefAnnotator(CorefModel model) {
+    this(Set.of("person"), Set.of("organization", "location"), requireModel(model),
+        DEFAULT_THRESHOLD);
+  }
+
+  /**
+   * Initializes a ranking annotator.
+   *
+   * @param personTypes The entity type labels gendered pronouns may resolve to, matched
+   *                    case-insensitively. Must not be {@code null} or empty.
+   * @param neutralTypes The entity type labels neutral pronouns may resolve to, matched
+   *                     case-insensitively. Must not be {@code null} or empty.
+   * @param model The ranking model. Must not be {@code null}.
+   * @param threshold The least link probability at which a pair is linked, in
+   *                  {@code [0, 1]}.
+   * @throws IllegalArgumentException Thrown if a set is {@code null}, empty, or
+   *         contains a blank entry, {@code model} is {@code null}, or
+   *         {@code threshold} lies outside {@code [0, 1]}.
+   */
+  public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
+      double threshold) {
     this.personTypes = lowered(personTypes, "personTypes");
     this.neutralTypes = lowered(neutralTypes, "neutralTypes");
+    this.model = model;
+    if (!(threshold >= 0.0 && threshold <= 1.0)) {
+      throw new IllegalArgumentException("threshold must lie in [0, 1]: " + threshold);
+    }
+    this.threshold = threshold;
+  }
+
+  private static CorefModel requireModel(CorefModel model) {
+    if (model == null) {
+      throw new IllegalArgumentException("model must not be null");
+    }
+    return model;
   }
 
   /**
@@ -183,6 +242,40 @@ public class CorefAnnotator implements DocumentAnnotator {
    */
   @Override
   public Document annotate(Document document) {
+    final SieveResolver resolver = resolver(document);
+    if (resolver == null) {
+      return document.with(CHAINS, List.of());
+    }
+    if (model == null) {
+      resolver.resolve();
+    } else {
+      resolver.resolve(model.getPairModel(), threshold);
+    }
+    final List<Mention> mentions = resolver.mentions();
+    final Clusters clusters = resolver.clusters();
+    final Map<Integer, Integer> chainIds = new HashMap<>();
+    final List<Annotation<CorefMention>> layer = new ArrayList<>(mentions.size());
+    for (int i = 0; i < mentions.size(); i++) {
+      final int root = clusters.find(i);
+      final int chain = chainIds.computeIfAbsent(root, key -> chainIds.size());
+      final Mention mention = mentions.get(i);
+      layer.add(new Annotation<>(mention.span(),
+          new CorefMention(chain, mention.kind(), mention.entity())));
+    }
+    return document.with(CHAINS, layer);
+  }
+
+  /**
+   * Validates a document, detects its mentions, and builds the resolver over them with
+   * every cluster still a singleton.
+   *
+   * @param document The document to annotate.
+   * @return The resolver, or {@code null} for a document without tokens, whose chains
+   *         layer is empty.
+   * @throws IllegalArgumentException Thrown if the document is invalid, as
+   *         {@link #annotate(Document)} documents.
+   */
+  SieveResolver resolver(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
@@ -208,7 +301,7 @@ public class CorefAnnotator implements DocumentAnnotator {
           + Layers.TOKENS + " and " + Layers.POS_TAGS + " layers");
     }
     if (tokens.isEmpty()) {
-      return document.with(CHAINS, List.of());
+      return null;
     }
     if (sentences.isEmpty()) {
       throw new IllegalArgumentException(
@@ -232,19 +325,8 @@ public class CorefAnnotator implements DocumentAnnotator {
         sentences, tokens, tags, sentenceOfToken, entities, chunks, phrases);
     final List<Annotation<String>> speakers = present.contains(SPEAKERS)
         ? document.get(SPEAKERS) : null;
-    final Clusters clusters = new Clusters(mentions);
-    new SieveResolver(mentions, clusters, forms, sentenceOfToken, speakers, personTypes,
-        neutralTypes).resolve();
-    final Map<Integer, Integer> chainIds = new HashMap<>();
-    final List<Annotation<CorefMention>> layer = new ArrayList<>(mentions.size());
-    for (int i = 0; i < mentions.size(); i++) {
-      final int root = clusters.find(i);
-      final int chain = chainIds.computeIfAbsent(root, key -> chainIds.size());
-      final Mention mention = mentions.get(i);
-      layer.add(new Annotation<>(mention.span(),
-          new CorefMention(chain, mention.kind(), mention.entity())));
-    }
-    return document.with(CHAINS, layer);
+    return new SieveResolver(mentions, new Clusters(mentions), forms, sentenceOfToken,
+        speakers, personTypes, neutralTypes);
   }
 
   /** {@inheritDoc} */
