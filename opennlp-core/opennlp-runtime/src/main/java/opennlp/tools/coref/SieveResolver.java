@@ -18,12 +18,17 @@
 package opennlp.tools.coref;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.IntPredicate;
 
 import opennlp.tools.coref.Mention.Gender;
+import opennlp.tools.coref.Mention.Number;
+import opennlp.tools.coref.Mention.Person;
+import opennlp.tools.document.Annotation;
 
 /**
  * Runs the precision-ranked sieves of
@@ -40,6 +45,16 @@ import opennlp.tools.coref.Mention.Gender;
  * test is linked, comparing the accumulated attributes of both clusters rather than the
  * two mentions alone. No sieve links a mention to one that contains it, and no sieve
  * merges clusters whose known entity types differ.</p>
+ *
+ * <p>Before the string sieves, the speaker sieve resolves first and second person
+ * pronouns, which refer to the speaker and the addressee rather than to an antecedent
+ * in the text. Each mention is assigned a speaker: the value of the speakers layer
+ * covering it when the document carries one, otherwise the narrator outside quotation
+ * marks and one anonymous speaker per quotation inside them. A quotation attributed by
+ * an adjacent verb of speech to a person mention takes that person as its speaker.
+ * All first person singular mentions of one speaker form one chain, joined to the
+ * speaker's own mention when known, and so do the first person plural and the second
+ * person mentions of one speaker.</p>
  */
 final class SieveResolver {
 
@@ -49,6 +64,12 @@ final class SieveResolver {
   /** No limit on how many sentences back an antecedent may lie. */
   private static final int UNLIMITED = Integer.MAX_VALUE;
 
+  /** The speaker of text outside every quotation when no speakers layer says otherwise. */
+  private static final String NARRATOR = "";
+
+  /** How many tokens a verb of speech may lie from the person it attributes a quote to. */
+  private static final int ATTRIBUTION_DISTANCE = 2;
+
   /** Tests whether the anaphor may link to the candidate antecedent. */
   private interface Link {
     boolean test(int antecedent, int anaphor);
@@ -57,6 +78,8 @@ final class SieveResolver {
   private final List<Mention> mentions;
   private final Clusters clusters;
   private final String[] forms;
+  private final int[] sentenceOfToken;
+  private final List<Annotation<String>> speakers;
   private final Set<String> personTypes;
   private final Set<String> neutralTypes;
   private final List<List<Integer>> bySentence;
@@ -67,14 +90,19 @@ final class SieveResolver {
    * @param mentions The mentions in text order.
    * @param clusters The clusters over the mentions, initially all singletons.
    * @param forms The original token forms.
+   * @param sentenceOfToken The sentence index of every token.
+   * @param speakers The speakers layer, or {@code null} when the document carries none.
    * @param personTypes The lowercased entity types gendered pronouns may resolve to.
    * @param neutralTypes The lowercased entity types neutral pronouns may resolve to.
    */
   SieveResolver(List<Mention> mentions, Clusters clusters, String[] forms,
-      Set<String> personTypes, Set<String> neutralTypes) {
+      int[] sentenceOfToken, List<Annotation<String>> speakers, Set<String> personTypes,
+      Set<String> neutralTypes) {
     this.mentions = mentions;
     this.clusters = clusters;
     this.forms = forms;
+    this.sentenceOfToken = sentenceOfToken;
+    this.speakers = speakers;
     this.personTypes = personTypes;
     this.neutralTypes = neutralTypes;
     bySentence = new ArrayList<>();
@@ -89,6 +117,7 @@ final class SieveResolver {
 
   /** Runs every sieve in precision order. */
   void resolve() {
+    speakerSieve();
     final IntPredicate nominal = j -> !mentions.get(j).pronoun()
         && !mentions.get(j).indefinite() && mentions.get(j).head() != null;
     pass(nominal, UNLIMITED, this::exactMatch);
@@ -99,7 +128,135 @@ final class SieveResolver {
     pass(nominal, UNLIMITED, (i, j) -> strictHeadMatch(i, j, false, true));
     pass(nominal, UNLIMITED, this::properHeadMatch);
     pass(nominal, UNLIMITED, this::relaxedHeadMatch);
-    pass(j -> mentions.get(j).pronoun(), PRONOUN_WINDOW, this::pronounMatch);
+    pass(j -> mentions.get(j).pronoun() && mentions.get(j).person() == Person.THIRD,
+        PRONOUN_WINDOW, this::pronounMatch);
+  }
+
+  /**
+   * Chains the first and second person mentions of each speaker and joins a speaker's
+   * first person singular chain to the speaker's own mention where a quotation is
+   * attributed to one.
+   */
+  private void speakerSieve() {
+    final String[] speakerOf = speakerOfMentions();
+    final Map<String, Integer> firstOfGroup = new HashMap<>();
+    for (int j = 0; j < mentions.size(); j++) {
+      final Mention mention = mentions.get(j);
+      if (!mention.pronoun() || mention.person() == Person.THIRD) {
+        continue;
+      }
+      final String group = speakerOf[j] + '\u0000' + mention.person() + '\u0000'
+          + (mention.person() == Person.FIRST && mention.number() == Number.PLURAL);
+      final Integer first = firstOfGroup.putIfAbsent(group, j);
+      if (first != null) {
+        clusters.union(first, j);
+      }
+    }
+  }
+
+  /**
+   * Assigns every mention its speaker: the covering speakers layer value, or without a
+   * layer the narrator outside quotations and, inside one, the person the quotation is
+   * attributed to or an anonymous speaker unique to that quotation. A quotation
+   * attributed to a person mention is keyed by that mention, so the quoted first person
+   * singular chain forms around it.
+   */
+  private String[] speakerOfMentions() {
+    final String[] speakerOf = new String[mentions.size()];
+    if (speakers != null) {
+      for (int j = 0; j < mentions.size(); j++) {
+        speakerOf[j] = NARRATOR;
+        for (final Annotation<String> speaker : speakers) {
+          if (speaker.span().contains(mentions.get(j).span().getStart())) {
+            speakerOf[j] = speaker.value();
+            break;
+          }
+        }
+      }
+      return speakerOf;
+    }
+    // quoteOf[t] is the index of the quotation token t lies in, or 0 outside every one
+    final int[] quoteOf = new int[forms.length];
+    final List<Integer> quoteStarts = new ArrayList<>();
+    final List<Integer> quoteEnds = new ArrayList<>();
+    int open = 0;
+    for (int t = 0; t < forms.length; t++) {
+      if (open == 0 && CorefLexicon.opensQuote(forms[t])) {
+        quoteStarts.add(t);
+        quoteEnds.add(forms.length - 1);
+        open = quoteStarts.size();
+      } else if (open > 0 && CorefLexicon.closesQuote(forms[t])) {
+        quoteEnds.set(open - 1, t);
+        open = 0;
+      } else if (open > 0) {
+        quoteOf[t] = open;
+      }
+    }
+    final Map<Integer, Integer> attributedTo = new HashMap<>();
+    for (int q = 0; q < quoteStarts.size(); q++) {
+      final int attributed = attribute(quoteStarts.get(q), quoteEnds.get(q), quoteOf);
+      if (attributed >= 0) {
+        attributedTo.put(q + 1, attributed);
+      }
+    }
+    for (int j = 0; j < mentions.size(); j++) {
+      final int first = mentions.get(j).firstToken();
+      final int quote = first < 0 ? 0 : quoteOf[first];
+      if (quote == 0) {
+        speakerOf[j] = NARRATOR;
+      } else if (attributedTo.containsKey(quote)) {
+        final int speaker = attributedTo.get(quote);
+        speakerOf[j] = "mention:" + speaker;
+        if (mentions.get(j).person() == Person.FIRST
+            && mentions.get(j).number() == Number.SINGULAR) {
+          clusters.union(speaker, j);
+        }
+      } else {
+        speakerOf[j] = "quote:" + quote;
+      }
+    }
+    return speakerOf;
+  }
+
+  /**
+   * Finds the person a quotation is attributed to: a person mention outside the
+   * quotation, in the sentence of its opening or closing mark, within a couple of
+   * tokens of a verb of speech.
+   *
+   * @return The mention index, or {@code -1} when no attribution is found.
+   */
+  private int attribute(int quoteStart, int quoteEnd, int[] quoteOf) {
+    for (int i = 0; i < mentions.size(); i++) {
+      final Mention mention = mentions.get(i);
+      if (mention.firstToken() < 0 || quoteOf[mention.firstToken()] != 0
+          || mention.pronoun() || mention.type() == null
+          || !personTypes.contains(mention.type())) {
+        continue;
+      }
+      final int sentence = mention.sentence();
+      if (sentence != sentenceOfToken[quoteStart] && sentence != sentenceOfToken[quoteEnd]) {
+        continue;
+      }
+      if (speechVerbNear(mention.firstToken() - 1, -1, quoteOf)
+          || speechVerbNear(mention.lastToken() + 1, 1, quoteOf)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** Looks a few tokens in one direction, outside quotations, for a verb of speech. */
+  private boolean speechVerbNear(int from, int step, int[] quoteOf) {
+    for (int t = from, seen = 0; t >= 0 && t < forms.length && seen < ATTRIBUTION_DISTANCE;
+        t += step, seen++) {
+      if (quoteOf[t] != 0) {
+        return false;
+      }
+      if (CorefLexicon.speechVerb(opennlp.tools.util.StringUtil.toLowerCase(forms[t]))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

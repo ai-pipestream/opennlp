@@ -530,11 +530,12 @@ public class CorefAnnotatorTest {
   }
 
   /**
-   * First and second person pronoun tokens never become mentions, even with a pronoun
-   * POS tag, so only the entity mention appears in the chains layer.
+   * First and second person pronouns are mentions of the speaker and the addressee:
+   * without a speakers layer or quotation they belong to the narrator, so they never
+   * link to an entity in the text and each person keeps its own chain.
    */
   @Test
-  void testFirstAndSecondPersonPronounsAreNotMentions() {
+  void testFirstAndSecondPersonPronounsChainPerSpeakerNotToEntities() {
     final String text = "John spoke. I listened. You nodded.";
     final List<Annotation<String>> toks = tokens(text,
         "John", "spoke", ".", "I", "listened", ".", "You", "nodded", ".");
@@ -549,9 +550,12 @@ public class CorefAnnotatorTest {
         .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "person"))));
 
     final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
-    Assertions.assertEquals(1, chains.size());
-    Assertions.assertEquals(0, chains.get(0).value().chain());
-    Assertions.assertEquals(CorefMention.KIND_ENTITY, chains.get(0).value().kind());
+    Assertions.assertEquals(3, chains.size());
+    Assertions.assertEquals(List.of(0, 1, 2),
+        chains.stream().map(a -> a.value().chain()).toList());
+    Assertions.assertEquals(List.of(CorefMention.KIND_ENTITY, CorefMention.KIND_PRONOUN,
+            CorefMention.KIND_PRONOUN),
+        chains.stream().map(a -> a.value().kind()).toList());
   }
 
   /**

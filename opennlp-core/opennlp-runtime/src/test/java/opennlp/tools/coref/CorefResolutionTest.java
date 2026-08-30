@@ -27,6 +27,8 @@ import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
+import opennlp.tools.parser.ParserAnnotator;
+import opennlp.tools.parser.ParserAnnotator.Phrase;
 import opennlp.tools.util.Span;
 
 /**
@@ -44,6 +46,7 @@ public class CorefResolutionTest {
     private final List<Annotation<String>> tags = new ArrayList<>();
     private final List<Annotation<String>> entities = new ArrayList<>();
     private final List<Annotation<String>> chunks = new ArrayList<>();
+    private final List<Annotation<Phrase>> phrases = new ArrayList<>();
 
     /** Appends one sentence of {@code form/TAG} tokens. */
     Fixture sentence(String... taggedTokens) {
@@ -76,6 +79,20 @@ public class CorefResolutionTest {
     Fixture chunk(String phrase, String type) {
       chunks.add(new Annotation<>(find(phrase, chunks), type));
       return this;
+    }
+
+    /** Adds a parse phrase over a text occurrence, headed by the given token. */
+    Fixture phrase(String label, int start, String text, String head) {
+      final int from = this.text.indexOf(text, start);
+      Assertions.assertTrue(from >= 0, text + " is not in " + this.text);
+      final int headStart = this.text.indexOf(head, from);
+      phrases.add(new Annotation<>(new Span(from, from + text.length()),
+          new Phrase(label, new Span(headStart, headStart + head.length()))));
+      return this;
+    }
+
+    Document parsed() {
+      return document(false).with(ParserAnnotator.PHRASES, phrases);
     }
 
     private Span find(String phrase, List<Annotation<String>> after) {
@@ -304,6 +321,81 @@ public class CorefResolutionTest {
         .entity("Acme", "organization")
         .document(false);
     Assertions.assertEquals(List.of(List.of("Acme", "It")), chains(document));
+  }
+
+  @Test
+  void testParsePhrasesGiveMaximalMentionsWithParserHeads() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "school/NN", "of/IN", "Dr./NNP", "Glennie/NNP", "opened/VBD", "./.")
+        .sentence("The/DT", "school/NN", "grew/VBD", "./.")
+        .sentence("Glennie/NNP", "left/VBD", "./.")
+        .entity("Dr. Glennie", "person").entity("Glennie", "person")
+        .phrase("NP", 0, "The school of Dr. Glennie", "school")
+        .phrase("NP", 0, "The school", "school")
+        .phrase("NP", 0, "Dr. Glennie", "Glennie")
+        .phrase("NP", 26, "The school", "school")
+        .phrase("NP", 38, "Glennie", "Glennie")
+        .parsed();
+    final Document resolved = new CorefAnnotator().annotate(document);
+    final List<Annotation<CorefMention>> layer = resolved.get(CorefAnnotator.CHAINS);
+    // The inner "The school" shares its head with the maximal phrase and is dropped;
+    // the nested person entity stays a mention of its own.
+    Assertions.assertEquals(List.of("The school of Dr. Glennie", "Dr. Glennie",
+            "The school", "Glennie"),
+        layer.stream().map(a -> resolved.text().subSequence(
+            a.span().getStart(), a.span().getEnd()).toString()).toList());
+    Assertions.assertEquals(List.of(
+            List.of("The school of Dr. Glennie", "The school"),
+            List.of("Dr. Glennie", "Glennie")),
+        chains(document));
+  }
+
+  @Test
+  void testFirstPersonChainsPerQuotedSpeaker() {
+    final Document document = new Fixture()
+        .sentence("\"/``", "I/PRP", "am/VBP", "tired/JJ", ",/,", "\"/''", "said/VBD",
+            "Mary/NNP", "./.")
+        .sentence("\"/``", "I/PRP", "agree/VBP", "./.", "\"/''")
+        .sentence("I/PRP", "left/VBD", "./.")
+        .entity("Mary", "person")
+        .document(false);
+    // The attributed quotation joins Mary; the unattributed one is its own speaker; the
+    // narrator's I is a third.
+    Assertions.assertEquals(List.of(List.of("I", "Mary")), chains(document));
+  }
+
+  @Test
+  void testSpeakersLayerChainsFirstAndSecondPersonPerSpeaker() {
+    final Fixture fixture = new Fixture()
+        .sentence("I/PRP", "think/VBP", "you/PRP", "know/VBP", "./.")
+        .sentence("I/PRP", "do/VBP", "./.")
+        .sentence("We/PRP", "agree/VBP", "./.")
+        .sentence("I/PRP", "hope/VBP", "so/RB", "./.");
+    final Document plain = fixture.document(false);
+    final List<Annotation<String>> sentences = plain.get(Layers.SENTENCES);
+    final Document document = plain.with(CorefAnnotator.SPEAKERS, List.of(
+        new Annotation<>(sentences.get(0).span(), "A"),
+        new Annotation<>(sentences.get(1).span(), "B"),
+        new Annotation<>(sentences.get(2).span(), "A"),
+        new Annotation<>(sentences.get(3).span(), "A")));
+    Assertions.assertEquals(List.of(List.of("I", "I")), chains(document));
+    final List<Annotation<CorefMention>> layer =
+        new CorefAnnotator().annotate(document).get(CorefAnnotator.CHAINS);
+    // A's two I mentions share a chain; B's I, A's you, and A's We stay apart.
+    Assertions.assertEquals(5, layer.size());
+    Assertions.assertEquals(layer.get(0).value().chain(), layer.get(4).value().chain());
+    Assertions.assertNotEquals(layer.get(0).value().chain(), layer.get(2).value().chain());
+    Assertions.assertNotEquals(layer.get(0).value().chain(), layer.get(3).value().chain());
+  }
+
+  @Test
+  void testNarratorFirstPersonChainsWithoutSpeakers() {
+    final Document document = new Fixture()
+        .sentence("I/PRP", "wrote/VBD", "./.")
+        .sentence("My/PRP$", "friend/NN", "read/VBD", "it/PRP", "./.")
+        .sentence("I/PRP", "smiled/VBD", "./.")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of("I", "My", "I")), chains(document));
   }
 
   @Test
