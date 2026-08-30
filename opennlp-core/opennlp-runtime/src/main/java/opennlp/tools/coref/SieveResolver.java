@@ -99,6 +99,7 @@ final class SieveResolver {
   private final List<Annotation<String>> speakers;
   private final Set<String> personTypes;
   private final Set<String> neutralTypes;
+  private final WordVectors vectors;
   private final List<List<Integer>> bySentence;
 
   /** The speaker of every mention, filled on first use. */
@@ -114,10 +115,12 @@ final class SieveResolver {
    * @param speakers The speakers layer, or {@code null} when the document carries none.
    * @param personTypes The lowercased entity types gendered pronouns may resolve to.
    * @param neutralTypes The lowercased entity types neutral pronouns may resolve to.
+   * @param vectors The word vectors for the ranker's similarity features, or
+   *                {@code null}.
    */
   SieveResolver(List<Mention> mentions, Clusters clusters, String[] forms,
       int[] sentenceOfToken, List<Annotation<String>> speakers, Set<String> personTypes,
-      Set<String> neutralTypes) {
+      Set<String> neutralTypes, WordVectors vectors) {
     this.mentions = mentions;
     this.clusters = clusters;
     this.forms = forms;
@@ -125,6 +128,7 @@ final class SieveResolver {
     this.speakers = speakers;
     this.personTypes = personTypes;
     this.neutralTypes = neutralTypes;
+    this.vectors = vectors;
     bySentence = new ArrayList<>();
     for (int i = 0; i < mentions.size(); i++) {
       final int sentence = mentions.get(i).sentence();
@@ -136,15 +140,16 @@ final class SieveResolver {
   }
 
   /**
-   * Resolves with the ranking model: the speaker sieve, then for each anaphor still
-   * first of its cluster the best-scoring admissible candidate, if its link probability
-   * exceeds the threshold.
+   * Resolves with a model: the speaker and string sieves, then for each anaphor still
+   * first of its cluster the best-scoring admissible candidate. A pair classifier links
+   * when the best link probability reaches the threshold; a ranking model links when
+   * the best candidate outscores the option of starting a new chain.
    *
-   * @param model The pair model with the {@link #LINK} and {@link #APART} outcomes.
-   * @param threshold The least link probability that makes a link; a candidate must
-   *                  also outscore the virtual antecedent that starts a new chain.
+   * @param model The model with the {@link #LINK} and {@link #APART} outcomes.
+   * @param ranking Whether the model was trained by ranking.
+   * @param threshold The least link probability that makes a pair classifier link.
    */
-  void resolve(MaxentModel model, double threshold) {
+  void resolve(MaxentModel model, boolean ranking, double threshold) {
     resolvePrecise();
     final CorefContextGenerator features = new CorefContextGenerator(this);
     final int link = model.getIndex(LINK);
@@ -153,7 +158,7 @@ final class SieveResolver {
         continue;
       }
       int best = -1;
-      double bestScore = threshold;
+      double bestScore = ranking ? model.eval(features.newChainFeatures(j))[link] : threshold;
       for (final int i : rankerCandidates(j)) {
         final double score = model.eval(features.features(i, j))[link];
         if (score > bestScore) {
@@ -229,6 +234,11 @@ final class SieveResolver {
   /** {@return the clusters over the mentions} */
   Clusters clusters() {
     return clusters;
+  }
+
+  /** {@return the word vectors for similarity features, or {@code null}} */
+  WordVectors vectors() {
+    return vectors;
   }
 
   /** Runs every sieve in precision order. */

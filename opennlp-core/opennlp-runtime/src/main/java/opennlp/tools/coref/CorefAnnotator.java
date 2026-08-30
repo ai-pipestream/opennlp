@@ -124,6 +124,9 @@ public class CorefAnnotator implements DocumentAnnotator {
   /** The least link probability at which the ranker links a pair. */
   private final double threshold;
 
+  /** Word vectors for the ranker's similarity features, or {@code null}. */
+  private final WordVectors vectors;
+
   /**
    * The link probability threshold of the model constructors. Pair classifiers see far
    * more unlinked than linked pairs, so their link probabilities run low; this floor
@@ -182,6 +185,27 @@ public class CorefAnnotator implements DocumentAnnotator {
    */
   public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
       double threshold) {
+    this(personTypes, neutralTypes, model, threshold, null);
+  }
+
+  /**
+   * Initializes an annotator with word vectors for the ranker's head similarity
+   * features. The vectors must be the ones the model was trained with; without a model
+   * they are unused.
+   *
+   * @param personTypes The entity type labels gendered pronouns may resolve to, matched
+   *                    case-insensitively. Must not be {@code null} or empty.
+   * @param neutralTypes The entity type labels neutral pronouns may resolve to, matched
+   *                     case-insensitively. Must not be {@code null} or empty.
+   * @param model The ranking model, or {@code null} for rule-based resolution.
+   * @param threshold The least link probability at which a pair classifier links, in
+   *                  {@code [0, 1]}.
+   * @param vectors The word vectors, or {@code null} for none.
+   * @throws IllegalArgumentException Thrown if a set is {@code null}, empty, or
+   *         contains a blank entry, or {@code threshold} lies outside {@code [0, 1]}.
+   */
+  public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
+      double threshold, WordVectors vectors) {
     this.personTypes = lowered(personTypes, "personTypes");
     this.neutralTypes = lowered(neutralTypes, "neutralTypes");
     this.model = model;
@@ -189,6 +213,7 @@ public class CorefAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("threshold must lie in [0, 1]: " + threshold);
     }
     this.threshold = threshold;
+    this.vectors = vectors;
   }
 
   private static CorefModel requireModel(CorefModel model) {
@@ -249,7 +274,7 @@ public class CorefAnnotator implements DocumentAnnotator {
     if (model == null) {
       resolver.resolve();
     } else {
-      resolver.resolve(model.getPairModel(), threshold);
+      resolver.resolve(model.getPairModel(), model.isRanking(), threshold);
     }
     final List<Mention> mentions = resolver.mentions();
     final Clusters clusters = resolver.clusters();
@@ -326,7 +351,7 @@ public class CorefAnnotator implements DocumentAnnotator {
     final List<Annotation<String>> speakers = present.contains(SPEAKERS)
         ? document.get(SPEAKERS) : null;
     return new SieveResolver(mentions, new Clusters(mentions), forms, sentenceOfToken,
-        speakers, personTypes, neutralTypes);
+        speakers, personTypes, neutralTypes, vectors);
   }
 
   /** {@inheritDoc} */
