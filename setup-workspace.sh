@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-workspace.sh — recreate the research workspace from this preview build.
+# setup-workspace.sh: recreate the research workspace from this preview build.
 #
 # This branch (kristian-3.x-features) is an integration line: apache main plus
 # every contributing research branch, recorded ref-by-ref in
@@ -11,7 +11,7 @@
 #
 #   workspace-dir  where the worktrees go; defaults to the parent directory
 #                  of this checkout (the krick layout: /work/worktrees/opennlp
-#                  contains uber/ plus one directory per branch).
+#                  contains apache/, research/, and uber/ role directories).
 #
 # Options:
 #   --pin      detach each worktree at the exact sha recorded in the
@@ -68,27 +68,40 @@ echo "workspace: $ws   remote: $remote   mode: $([ $pin = 1 ] && echo pinned-sha
 [ $dry = 1 ] || git fetch --quiet "$remote"
 
 added=0 kept=0 moved=0
-while read -r _ sha branch; do
-  dest="$ws/$branch"
+while read -r _ sha branch role; do
+  role="${role:-research}"
+  case "$role" in
+    apache|research) ;;
+    *) role=research ;;
+  esac
+  dest_name=${branch//\//-}
+  dest="$ws/$role/$dest_name"
   if [ -e "$dest" ]; then
     kept=$((kept+1)); continue
   fi
   if [ $dry = 1 ]; then
-    echo "would add  $branch"
+    echo "would add  $role/$dest_name  ($branch)"
     added=$((added+1)); continue
   fi
+  mkdir -p "$ws/$role"
   if [ $pin = 1 ]; then
     git worktree add --quiet --detach "$dest" "$sha"
-    echo "added   $branch  (pinned $sha)"
+    echo "added   $role/$dest_name  (pinned $sha)"
   else
-    git worktree add --quiet --track -b "$branch" "$dest" "$remote/$branch" 2>/dev/null \
-      || git worktree add --quiet "$dest" "$branch"
+    if git show-ref --verify --quiet "refs/remotes/$remote/$branch"; then
+      git worktree add --quiet --track -b "$branch" "$dest" "$remote/$branch" 2>/dev/null \
+        || git worktree add --quiet "$dest" "$branch"
+    elif git show-ref --verify --quiet "refs/heads/$branch"; then
+      git worktree add --quiet "$dest" "$branch"
+    else
+      git worktree add --quiet -b "$branch" "$dest" "$sha"
+    fi
     tip="$(git -C "$dest" rev-parse --short=9 HEAD)"
     if [ "$tip" != "$sha" ]; then
-      echo "added   $branch  (tip $tip; build used $sha — branch moved since, use --pin to reproduce)"
+      echo "added   $role/$dest_name  (tip $tip; build used $sha; use --pin to reproduce)"
       moved=$((moved+1))
     else
-      echo "added   $branch"
+      echo "added   $role/$dest_name"
     fi
   fi
   added=$((added+1))
