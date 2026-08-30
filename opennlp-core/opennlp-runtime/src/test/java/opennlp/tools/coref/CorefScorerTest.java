@@ -170,7 +170,7 @@ public class CorefScorerTest {
         }
       }
       Assertions.assertEquals(bestByPermutation(similarity, new boolean[n], 0),
-          CorefScorer.maximumAssignment(similarity), TOLERANCE);
+          new CorefScorer().maximumAssignment(similarity), TOLERANCE);
     }
   }
 

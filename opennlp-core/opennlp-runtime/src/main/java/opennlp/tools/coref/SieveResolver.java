@@ -29,6 +29,7 @@ import opennlp.tools.coref.Mention.Gender;
 import opennlp.tools.coref.Mention.Number;
 import opennlp.tools.coref.Mention.Person;
 import opennlp.tools.document.Annotation;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Runs the precision-ranked sieves of
@@ -252,7 +253,7 @@ final class SieveResolver {
       if (quoteOf[t] != 0) {
         return false;
       }
-      if (CorefLexicon.speechVerb(opennlp.tools.util.StringUtil.toLowerCase(forms[t]))) {
+      if (CorefLexicon.speechVerb(StringUtil.toLowerCase(forms[t]))) {
         return true;
       }
     }
@@ -283,7 +284,7 @@ final class SieveResolver {
   }
 
   /** {@return whether a pronoun is reflexive, so its antecedent shares its sentence} */
-  private static boolean reflexive(Mention mention) {
+  private boolean reflexive(Mention mention) {
     return mention.pronoun()
         && (mention.head().endsWith("self") || mention.head().endsWith("selves"));
   }
@@ -395,7 +396,7 @@ final class SieveResolver {
   }
 
   /** {@return a name's words without leading titles} */
-  private static List<String> nameWords(Mention mention) {
+  private List<String> nameWords(Mention mention) {
     final List<String> words = mention.words();
     int start = 0;
     while (start < words.size() - 1 && CorefLexicon.title(words.get(start))) {
@@ -424,7 +425,7 @@ final class SieveResolver {
   }
 
   /** Checks whether every non-stop word before the anaphor's head is in the antecedent. */
-  private static boolean modifiersAppearIn(Mention anaphor, Mention antecedent) {
+  private boolean modifiersAppearIn(Mention anaphor, Mention antecedent) {
     final List<String> words = anaphor.words();
     final Set<String> candidateWords = new HashSet<>(antecedent.words());
     for (final String word : words) {
@@ -459,13 +460,13 @@ final class SieveResolver {
         || modifiersAppearIn(antecedent, anaphor);
   }
 
-  private static boolean numbersDiffer(Mention a, Mention b) {
+  private boolean numbersDiffer(Mention a, Mention b) {
     final Set<String> numbersA = numerals(a);
     final Set<String> numbersB = numerals(b);
     return !numbersA.isEmpty() && !numbersB.isEmpty() && !numbersA.equals(numbersB);
   }
 
-  private static Set<String> numerals(Mention mention) {
+  private Set<String> numerals(Mention mention) {
     final Set<String> numerals = new HashSet<>();
     for (final String word : mention.words()) {
       if (!word.isEmpty() && Character.isDigit(word.charAt(0))) {
@@ -494,7 +495,7 @@ final class SieveResolver {
   }
 
   /** Checks whether one name ends in a compound head the other name lacks. */
-  private static boolean compoundDiffers(Mention compound, Mention other) {
+  private boolean compoundDiffers(Mention compound, Mention other) {
     return CorefLexicon.compoundNameHead(compound.head())
         && !other.words().contains(compound.head());
   }

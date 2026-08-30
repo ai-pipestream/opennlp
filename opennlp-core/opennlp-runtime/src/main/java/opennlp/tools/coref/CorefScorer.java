@@ -130,7 +130,7 @@ public final class CorefScorer {
    * @param <M> The mention identity type.
    * @return The mention index. Never {@code null}.
    */
-  private static <M> Map<M, Integer> index(Collection<? extends Set<M>> partition,
+  private <M> Map<M, Integer> index(Collection<? extends Set<M>> partition,
       String name) {
     if (partition == null) {
       throw new IllegalArgumentException(name + " must not be null");
@@ -164,7 +164,7 @@ public final class CorefScorer {
    * @param <M> The mention identity type.
    * @return The MUC numerator.
    */
-  private static <M> double mucNumerator(List<Set<M>> entities,
+  private <M> double mucNumerator(List<Set<M>> entities,
       Map<M, Integer> otherEntityOf) {
     double numerator = 0.0;
     for (final Set<M> entity : entities) {
@@ -184,7 +184,7 @@ public final class CorefScorer {
   }
 
   /** Sums the entity sizes minus one, the number of links each entity carries. */
-  private static <M> double mucDenominator(List<Set<M>> entities) {
+  private <M> double mucDenominator(List<Set<M>> entities) {
     double denominator = 0.0;
     for (final Set<M> entity : entities) {
       denominator += entity.size() - 1;
@@ -193,7 +193,7 @@ public final class CorefScorer {
   }
 
   /** Builds the matrix of mention overlaps between key and response entities. */
-  private static <M> double[][] overlaps(List<Set<M>> keys, List<Set<M>> responses) {
+  private <M> double[][] overlaps(List<Set<M>> keys, List<Set<M>> responses) {
     final double[][] overlap = new double[keys.size()][responses.size()];
     for (int i = 0; i < keys.size(); i++) {
       for (int j = 0; j < responses.size(); j++) {
@@ -218,7 +218,7 @@ public final class CorefScorer {
    * @param <M> The mention identity type.
    * @return The B-cubed numerator.
    */
-  private static <M> double bCubedNumerator(double[][] overlap, List<Set<M>> entities,
+  private <M> double bCubedNumerator(double[][] overlap, List<Set<M>> entities,
       boolean byRow) {
     double numerator = 0.0;
     for (int i = 0; i < overlap.length; i++) {
@@ -244,7 +244,7 @@ public final class CorefScorer {
    * @param <M> The mention identity type.
    * @return The similarity summed over the best alignment.
    */
-  private static <M> double bestAlignment(double[][] overlap, List<Set<M>> keys,
+  private <M> double bestAlignment(double[][] overlap, List<Set<M>> keys,
       List<Set<M>> responses, boolean entityBased) {
     final int size = Math.max(keys.size(), responses.size());
     if (size == 0) {
@@ -268,7 +268,7 @@ public final class CorefScorer {
    * @param similarity The square similarity matrix.
    * @return The largest total similarity of any perfect matching.
    */
-  static double maximumAssignment(double[][] similarity) {
+  double maximumAssignment(double[][] similarity) {
     final int n = similarity.length;
     final double[] u = new double[n + 1];
     final double[] v = new double[n + 1];
