@@ -234,6 +234,28 @@ final class CorefLexicon {
       "that", "to", "whether", "if", "how", "what", "why", "when", "where", "like",
       "as", "out", "because", "sense");
 
+  /** Verbs of speech and thought that attribute an adjacent quotation to a speaker. */
+  private static final Set<String> SPEECH_VERBS = Set.of(
+      "said", "says", "say", "saying", "wrote", "writes", "write", "asked", "asks",
+      "ask", "told", "tells", "tell", "replied", "replies", "reply", "added", "adds",
+      "noted", "notes", "explained", "explains", "recalled", "recalls", "argued",
+      "argues", "claimed", "claims", "stated", "states", "declared", "declares",
+      "insisted", "insists", "answered", "answers", "continued", "continues",
+      "remarked", "remarks", "observed", "observes", "admitted", "admits", "warned",
+      "warns", "suggested", "suggests", "thought", "thinks", "felt", "feels",
+      "believes", "believed", "shouted", "shouts", "whispered", "whispers", "cried",
+      "cries", "responded", "responds", "commented", "comments", "announced",
+      "announces", "concluded", "concludes", "agreed", "agrees", "joked", "jokes",
+      "muttered", "mutters", "exclaimed", "exclaims", "laughed", "laughs", "sighed",
+      "sighs", "promised", "promises", "complained", "complains", "quipped",
+      "recounts", "recounted", "describes", "described", "tweeted", "posted");
+
+  /** Tokens that open a quotation. */
+  private static final Set<String> OPENING_QUOTES = Set.of("\"", "\u201c", "``", "\u00ab");
+
+  /** Tokens that close a quotation. */
+  private static final Set<String> CLOSING_QUOTES = Set.of("\"", "\u201d", "''", "\u00bb");
+
   /** Lazily loads the first-name gender list on first use. */
   private static final class FirstNames {
     static final Map<String, Gender> BY_NAME = load();
@@ -344,6 +366,21 @@ final class CorefLexicon {
       i += Character.charCount(codePoint);
     }
     return true;
+  }
+
+  /** {@return whether the lowercased word is a verb of speech or thought} */
+  static boolean speechVerb(String word) {
+    return SPEECH_VERBS.contains(word);
+  }
+
+  /** {@return whether the token opens a quotation} */
+  static boolean opensQuote(String token) {
+    return OPENING_QUOTES.contains(token);
+  }
+
+  /** {@return whether the token closes a quotation} */
+  static boolean closesQuote(String token) {
+    return CLOSING_QUOTES.contains(token);
   }
 
   /** {@return whether the lowercased word opens an indefinite noun phrase} */

@@ -45,9 +45,13 @@ import opennlp.tools.chunker.ChunkerModel;
 import opennlp.tools.coref.CorefScores.Score;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.Layers;
 import opennlp.tools.namefind.NameFinderME;
 import opennlp.tools.namefind.TokenNameFinderModel;
+import opennlp.tools.parser.ParserAnnotator;
+import opennlp.tools.parser.ParserFactory;
+import opennlp.tools.parser.ParserModel;
 import opennlp.tools.util.Span;
 
 /**
@@ -61,10 +65,13 @@ import opennlp.tools.util.Span;
  * carry their own licenses, so check both before any use beyond measurement. Named
  * entities are predicted by the {@code en-ner-person}, {@code en-ner-location}, and
  * {@code en-ner-organization} models in {@code opennlp.coref.models.dir}, which
- * defaults to {@code ~/.opennlp}; noun phrase mentions come from the chunker model
- * {@code opennlp.coref.chunker} names, by default {@code en-chunker.bin} in the same
- * directory, and are absent when neither exists. {@code opennlp.coref.split} chooses
- * {@code dev} (the default), {@code test}, {@code test2}, or {@code train}.</p>
+ * defaults to {@code ~/.opennlp}; noun phrase mentions come from the constituency
+ * parser model {@code opennlp.coref.parser} names or, without one, from the chunker
+ * model {@code opennlp.coref.chunker} names, by default {@code en-chunker.bin} in the
+ * same directory, and are absent when none exists. The {@code # speaker} lines of the
+ * spoken genres become a speakers layer unless {@code opennlp.coref.speakers} is
+ * {@code false}. {@code opennlp.coref.split} chooses {@code dev} (the default),
+ * {@code test}, {@code test2}, or {@code train}.</p>
  *
  * <p>Sentences, tokens, and tags are gold, so the figures are not comparable one to
  * one with the fully predicted CoreNLP input of Zhu, Pradhan, and Zeldes (ACL 2021),
@@ -80,6 +87,9 @@ public class OntoGumCorefEvalTest {
   private static final String MODELS_DIR_PROPERTY = "opennlp.coref.models.dir";
   private static final String SPLIT_PROPERTY = "opennlp.coref.split";
   private static final String CHUNKER_PROPERTY = "opennlp.coref.chunker";
+  private static final String PARSER_PROPERTY = "opennlp.coref.parser";
+  private static final String DUMP_PROPERTY = "opennlp.coref.dump";
+  private static final String SPEAKERS_PROPERTY = "opennlp.coref.speakers";
   private static final Path RESULTS_FILE = Path.of("target", "coref-eval-results.csv");
   private static final String[] NER_MODELS =
       {"en-ner-person.bin", "en-ner-location.bin", "en-ner-organization.bin"};
@@ -113,13 +123,17 @@ public class OntoGumCorefEvalTest {
     }
     final Path chunkerModel = Path.of(System.getProperty(CHUNKER_PROPERTY,
         models.resolve("en-chunker.bin").toString()));
-    final ChunkerAnnotator chunker = Files.exists(chunkerModel)
-        ? new ChunkerAnnotator(new ChunkerME(new ChunkerModel(chunkerModel))) : null;
+    final String parserModel = System.getProperty(PARSER_PROPERTY);
+    final DocumentAnnotator phraser = parserModel != null
+        ? new ParserAnnotator(ParserFactory.create(new ParserModel(Path.of(parserModel))))
+        : Files.exists(chunkerModel)
+            ? new ChunkerAnnotator(new ChunkerME(new ChunkerModel(chunkerModel))) : null;
     final CorefAnnotator annotator = new CorefAnnotator();
     final CorefScorer all = new CorefScorer();
     final Map<String, CorefScorer> byGenre = new TreeMap<>();
     int documents = 0;
     long corefNanos = 0;
+    final StringBuilder dump = new StringBuilder();
     for (final String name : names) {
       final Path file = gum.resolve("coref/ontogum/conllu").resolve(name + ".conllu");
       if (!Files.exists(file)) {
@@ -128,11 +142,14 @@ public class OntoGumCorefEvalTest {
       }
       final GoldDocument gold = read(name, Files.readAllLines(file, StandardCharsets.UTF_8));
       final Document tagged = withEntities(gold.document(), finders);
-      final Document input = chunker == null ? tagged : chunker.annotate(tagged);
+      final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       final long started = System.nanoTime();
       final Document output = annotator.annotate(input);
       corefNanos += System.nanoTime() - started;
       final List<Set<Mention>> response = responsePartition(output);
+      if (System.getProperty(DUMP_PROPERTY) != null) {
+        dumpMentions(dump, gold, output, response);
+      }
       all.add(gold.key(), response);
       byGenre.computeIfAbsent(genre(name), key -> new CorefScorer())
           .add(gold.key(), response);
@@ -148,8 +165,74 @@ public class OntoGumCorefEvalTest {
       LOG.info("  {}: {}", genre.getKey(), describe(genre.getValue().scores()));
     }
     record(result);
+    if (System.getProperty(DUMP_PROPERTY) != null) {
+      Files.writeString(Path.of(System.getProperty(DUMP_PROPERTY)), dump.toString());
+    }
     Assertions.assertTrue(result.scores().conll() > 0.05,
         "CoNLL average collapsed: " + result.scores().conll());
+  }
+
+  /**
+   * Appends one document's mention diagnostics: every key mention the response lacks,
+   * every response mention the key lacks, and the mentions the annotator produced
+   * including singletons, each with its surface text.
+   */
+  private static void dumpMentions(StringBuilder dump, GoldDocument gold, Document output,
+      List<Set<Mention>> response) {
+    final CharSequence text = gold.document().text();
+    final Set<Mention> keyMentions = new HashSet<>();
+    gold.key().forEach(keyMentions::addAll);
+    final Set<Mention> responseMentions = new HashSet<>();
+    response.forEach(responseMentions::addAll);
+    final List<Annotation<CorefMention>> produced = output.get(CorefAnnotator.CHAINS);
+    final Set<Mention> all = new HashSet<>();
+    for (final Annotation<CorefMention> mention : produced) {
+      all.add(new Mention(mention.span().getStart(), mention.span().getEnd()));
+    }
+    dump.append("# ").append(gold.name()).append(": key ").append(keyMentions.size())
+        .append(", response ").append(responseMentions.size()).append(", produced ")
+        .append(produced.size()).append(", key-in-produced ")
+        .append(keyMentions.stream().filter(all::contains).count());
+    if (output.layers().contains(ParserAnnotator.PHRASES)) {
+      final Set<Mention> nounPhrases = new HashSet<>();
+      for (final Annotation<ParserAnnotator.Phrase> phrase : output.get(ParserAnnotator.PHRASES)) {
+        if ("NP".equals(phrase.value().label())) {
+          nounPhrases.add(new Mention(phrase.span().getStart(), phrase.span().getEnd()));
+        }
+      }
+      dump.append(", np-phrases ").append(nounPhrases.size()).append(", key-in-np ")
+          .append(keyMentions.stream().filter(nounPhrases::contains).count());
+    }
+    if (output.layers().contains(ChunkerAnnotator.CHUNKS)) {
+      final Set<Mention> chunks = new HashSet<>();
+      for (final Annotation<String> chunk : output.get(ChunkerAnnotator.CHUNKS)) {
+        if ("NP".equals(chunk.value())) {
+          chunks.add(new Mention(chunk.span().getStart(), chunk.span().getEnd()));
+        }
+      }
+      dump.append(", np-chunks ").append(chunks.size()).append(", key-in-chunk ")
+          .append(keyMentions.stream().filter(chunks::contains).count());
+    }
+    dump.append('\n');
+    for (final Mention mention : sorted(keyMentions)) {
+      if (!responseMentions.contains(mention)) {
+        dump.append(all.contains(mention) ? "MISSED-SINGLETON\t" : "MISSED\t")
+            .append(text.subSequence(mention.start(), mention.end())).append('\n');
+      }
+    }
+    for (final Mention mention : sorted(responseMentions)) {
+      if (!keyMentions.contains(mention)) {
+        dump.append("SPURIOUS\t").append(text.subSequence(mention.start(), mention.end()))
+            .append('\n');
+      }
+    }
+  }
+
+  private static List<Mention> sorted(Set<Mention> mentions) {
+    final List<Mention> sorted = new ArrayList<>(mentions);
+    sorted.sort((a, b) -> a.start() != b.start()
+        ? Integer.compare(a.start(), b.start()) : Integer.compare(b.end(), a.end()));
+    return sorted;
   }
 
   /** Formats the metric triples on one line. */
@@ -220,6 +303,8 @@ public class OntoGumCorefEvalTest {
     final List<Annotation<String>> sentences = new ArrayList<>();
     final List<Annotation<String>> tokens = new ArrayList<>();
     final List<Annotation<String>> tags = new ArrayList<>();
+    final List<Annotation<String>> speakers = new ArrayList<>();
+    String speaker = null;
     final Map<String, List<Integer>> openStarts = new HashMap<>();
     final Map<String, Set<Mention>> entities = new LinkedHashMap<>();
     int sentenceStart = -1;
@@ -229,13 +314,20 @@ public class OntoGumCorefEvalTest {
         if (sentenceStart >= 0) {
           sentences.add(new Annotation<>(new Span(sentenceStart, text.length()),
               text.substring(sentenceStart)));
+          if (speaker != null) {
+            speakers.add(new Annotation<>(new Span(sentenceStart, text.length()), speaker));
+          }
           text.append('\n');
           sentenceStart = -1;
+          speaker = null;
           glue = true;
         }
         continue;
       }
       if (line.charAt(0) == '#') {
+        if (line.startsWith("# speaker = ")) {
+          speaker = line.substring("# speaker = ".length()).trim();
+        }
         continue;
       }
       final String[] fields = fields(line);
@@ -263,13 +355,19 @@ public class OntoGumCorefEvalTest {
     if (sentenceStart >= 0) {
       sentences.add(new Annotation<>(new Span(sentenceStart, text.length()),
           text.substring(sentenceStart)));
+      if (speaker != null) {
+        speakers.add(new Annotation<>(new Span(sentenceStart, text.length()), speaker));
+      }
     }
     Assertions.assertTrue(openStarts.values().stream().allMatch(List::isEmpty),
         name + " leaves an entity bracket open");
-    final Document document = Document.of(text.toString())
+    Document document = Document.of(text.toString())
         .with(Layers.SENTENCES, sentences)
         .with(Layers.TOKENS, tokens)
         .with(Layers.POS_TAGS, tags);
+    if (!speakers.isEmpty() && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
+      document = document.with(CorefAnnotator.SPEAKERS, speakers);
+    }
     return new GoldDocument(name, document, disjoint(name, entities.values()));
   }
 

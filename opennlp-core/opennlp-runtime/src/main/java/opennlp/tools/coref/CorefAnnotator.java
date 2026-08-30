@@ -31,6 +31,8 @@ import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.namefind.NameFinderAnnotator;
+import opennlp.tools.parser.ParserAnnotator;
+import opennlp.tools.parser.ParserAnnotator.Phrase;
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -42,14 +44,18 @@ import opennlp.tools.util.StringUtil;
  * <p>The resolver follows the entity-centric, precision-ranked design of
  * <a href="https://aclanthology.org/J13-4004/">Lee et al. (Computational Linguistics
  * 2013), "Deterministic Coreference Resolution Based on Entity-Centric, Precision-Ranked
- * Rules"</a>. Mentions are the entity annotations, the noun phrase chunks of a
- * {@link ChunkerAnnotator#CHUNKS} layer when the document carries one, and the tokens
- * tagged as third-person pronouns; a chunk headed by an entity widens that entity's
- * mention to the full noun phrase, and a pleonastic {@code it} is no mention. Each
+ * Rules"</a>. Mentions are the entity annotations, the noun phrases of a
+ * {@link ParserAnnotator#PHRASES} layer or, without one, the noun phrase chunks of a
+ * {@link ChunkerAnnotator#CHUNKS} layer when the document carries either, and the
+ * tokens tagged as third-person pronouns; of parse phrases sharing a head only the
+ * largest counts, a phrase headed by an entity widens that entity's mention to the full
+ * noun phrase, and a pleonastic {@code it} is no mention. Each
  * mention carries the number, gender, animacy, and person the text supports: pronoun
  * forms, plural tags, name titles, a bundled first-name list, and a list of gendered and
- * animate nouns. First and second person pronouns are not resolved, since they refer to
- * speakers the text alone does not identify.</p>
+ * animate nouns. First and second person pronouns refer to the speaker and the
+ * addressee rather than to an antecedent in the text: they chain per speaker, read from
+ * an optional {@link #SPEAKERS} layer or, without one, from quotation marks, and a quoted
+ * first person joins the person a verb of speech attributes the quotation to.</p>
  *
  * <p>Nine sieves run in order of decreasing precision, each linking an anaphor to the
  * first candidate antecedent, in salience order, whose whole cluster passes: exact
@@ -83,6 +89,14 @@ public class CorefAnnotator implements DocumentAnnotator {
    */
   public static final LayerKey<CorefMention> CHAINS =
       Layers.key("chains", CorefMention.class);
+
+  /**
+   * Speakers, an optional input layer: each annotation covers the text one speaker
+   * utters, typically a sentence or a turn, and carries the speaker's label. First and
+   * second person pronouns resolve per speaker; without the layer, quotation marks
+   * delimit the speakers instead.
+   */
+  public static final LayerKey<String> SPEAKERS = Layers.key("speakers", String.class);
 
   /** The message prefix of every absent-required-layer rejection in this annotator. */
   private static final String MISSING_LAYER = "document lacks the required layer ";
@@ -146,9 +160,10 @@ public class CorefAnnotator implements DocumentAnnotator {
    * <p>The required layers must be present, but they may be empty, and the token and POS
    * tag layers must be aligned one to one. A document without tokens then yields a
    * present-but-empty chains layer; a document that has tokens needs a non-empty sentence
-   * layer to place its mentions in. A {@link ChunkerAnnotator#CHUNKS} layer is optional:
-   * with it, noun phrases become mentions; without it, only entities and pronouns
-   * do.</p>
+   * layer to place its mentions in. A {@link ParserAnnotator#PHRASES} or
+   * {@link ChunkerAnnotator#CHUNKS} layer is optional: with either, noun phrases become
+   * mentions, the parse taking precedence; without both, only entities and pronouns
+   * do. A {@link #SPEAKERS} layer is optional as well.</p>
    *
    * @param document The document to annotate. Must not be {@code null} and must carry the
    *                 {@link Layers#SENTENCES}, {@link Layers#TOKENS},
@@ -193,14 +208,25 @@ public class CorefAnnotator implements DocumentAnnotator {
     }
     final List<Annotation<String>> chunks = present.contains(ChunkerAnnotator.CHUNKS)
         ? document.get(ChunkerAnnotator.CHUNKS) : null;
+    final List<Annotation<Phrase>> phrases = present.contains(ParserAnnotator.PHRASES)
+        ? document.get(ParserAnnotator.PHRASES) : null;
     final List<Mention> mentions = MentionDetector.detect(personTypes, document.text(),
-        sentences, tokens, tags, entities, chunks);
+        sentences, tokens, tags, entities, chunks, phrases);
     final String[] forms = new String[tokens.size()];
-    for (int t = 0; t < forms.length; t++) {
+    final int[] sentenceOfToken = new int[tokens.size()];
+    for (int t = 0, sentence = 0; t < forms.length; t++) {
       forms[t] = tokens.get(t).value();
+      while (sentence < sentences.size() - 1
+          && tokens.get(t).span().getStart() >= sentences.get(sentence).span().getEnd()) {
+        sentence++;
+      }
+      sentenceOfToken[t] = sentence;
     }
+    final List<Annotation<String>> speakers = present.contains(SPEAKERS)
+        ? document.get(SPEAKERS) : null;
     final Clusters clusters = new Clusters(mentions);
-    new SieveResolver(mentions, clusters, forms, personTypes, neutralTypes).resolve();
+    new SieveResolver(mentions, clusters, forms, sentenceOfToken, speakers, personTypes,
+        neutralTypes).resolve();
     final Map<Integer, Integer> chainIds = new HashMap<>();
     final List<Annotation<CorefMention>> layer = new ArrayList<>(mentions.size());
     for (int i = 0; i < mentions.size(); i++) {
