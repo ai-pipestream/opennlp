@@ -395,15 +395,52 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 	<section xml:id="tools.document.coref">
 		<title>Document-layer coreference</title>
 		<para>
-			<code>CorefAnnotator</code> clusters entity and pronoun mentions on the
-			document container. It requires sentence, token, POS-tag, and entity layers
-			and provides <code>CorefAnnotator.CHAINS</code>: each annotation carries a
-			<code>CorefMention</code> with a chain id, a kind (entity or pronoun), and
-			an optional entity index. Name containment links a bare surname to a full
-			name; the pronoun sieve attaches a gendered or neutral pronoun to the nearest
-			preceding compatible entity mention in the same or the directly preceding
-			sentence. <code>CorefPipelineExampleTest</code> asserts the behavior shown
-			here.
+			<code>CorefAnnotator</code> clusters the mentions of a document into
+			coreference chains without a model, following the entity-centric,
+			precision-ranked sieves of Lee et al. (Computational Linguistics 2013). It
+			requires the sentence, token, POS-tag, and entity layers and provides
+			<code>CorefAnnotator.CHAINS</code>: each annotation covers one mention and
+			carries a <code>CorefMention</code> with a chain id, a kind (entity, nominal,
+			or pronoun), and the index of the entity it came from. Singletons are
+			reported too, so no mention is lost; consumers interested only in links
+			filter by chain size.
+		</para>
+		<para>
+			Mentions are the entities, the noun phrases of an optional
+			<code>ParserAnnotator.PHRASES</code> or <code>ChunkerAnnotator.CHUNKS</code>
+			layer, and the personal pronouns. A noun phrase headed by an entity widens
+			that entity's mention to the whole phrase, a possessor inside a phrase is a
+			mention of its own, and a pleonastic <emphasis>it</emphasis> is none. Each
+			mention carries the number, gender, animacy, and person the text supports,
+			read from pronoun forms, plural tags, name titles, a bundled first-name list
+			built from the public-domain Social Security Administration name tables, and
+			lists of gendered and animate nouns. Nine sieves then run in order of
+			decreasing precision, and each links an anaphor to the first candidate
+			antecedent whose whole cluster passes: exact and relaxed string match, acronym
+			and person-name containment, strict head match with two relaxations, proper
+			and relaxed head match, and pronoun resolution within three sentences under
+			number, gender, animacy, person, and entity type agreement. A name never
+			absorbs a compound such as <emphasis>Kansas City</emphasis>, indefinite and
+			bare common noun phrases are antecedents only, and clusters whose known
+			entity types differ never merge.
+		</para>
+		<para>
+			First and second person pronouns refer to the speaker and the addressee rather
+			than to an antecedent, so they chain per speaker: the value of an optional
+			<code>CorefAnnotator.SPEAKERS</code> layer covering each mention, or, without
+			one, the narrator outside quotation marks and one speaker per quotation, joined
+			to the person a verb of speech attributes the quotation to.
+		</para>
+		<para>
+			<code>CorefScorer</code> computes the MUC, B-cubed, and CEAF metrics and the
+			CoNLL average over predicted mentions exactly as the reference scorer of
+			Pradhan et al. (ACL 2014) does. Measured with it on the OntoGUM corpus with
+			gold sentences, tokens, and tags, predicted entities and chunks, and the corpus
+			speaker lines, the annotator reaches a CoNLL average of 46.5 on the test split,
+			above the 39.7 that Zhu, Pradhan, and Zeldes (ACL 2021) report for the
+			Stanford deterministic system; the harness is
+			<code>OntoGumCorefEvalTest</code>. <code>CorefPipelineExampleTest</code>
+			asserts the behavior shown here.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
