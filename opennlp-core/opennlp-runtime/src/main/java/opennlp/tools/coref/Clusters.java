@@ -89,7 +89,7 @@ final class Clusters {
     }
   }
 
-  private static <E extends Enum<E>> Set<E> known(Class<E> enumType, E value, E unknown) {
+  private <E extends Enum<E>> Set<E> known(Class<E> enumType, E value, E unknown) {
     final Set<E> set = EnumSet.noneOf(enumType);
     if (value != unknown) {
       set.add(value);
@@ -97,7 +97,7 @@ final class Clusters {
     return set;
   }
 
-  private static String knownType(String label) {
+  private String knownType(String label) {
     return label == null || NameFinderAnnotator.UNTYPED.equals(label) ? null : label;
   }
 
@@ -166,7 +166,7 @@ final class Clusters {
     return agree(numbers.get(find(a)), numbers.get(find(b)));
   }
 
-  private static <E> boolean agree(Set<E> a, Set<E> b) {
+  private <E> boolean agree(Set<E> a, Set<E> b) {
     if (a.isEmpty() || b.isEmpty()) {
       return true;
     }

@@ -210,8 +210,6 @@ public class CorefAnnotator implements DocumentAnnotator {
         ? document.get(ChunkerAnnotator.CHUNKS) : null;
     final List<Annotation<Phrase>> phrases = present.contains(ParserAnnotator.PHRASES)
         ? document.get(ParserAnnotator.PHRASES) : null;
-    final List<Mention> mentions = MentionDetector.detect(personTypes, document.text(),
-        sentences, tokens, tags, entities, chunks, phrases);
     final String[] forms = new String[tokens.size()];
     final int[] sentenceOfToken = new int[tokens.size()];
     for (int t = 0, sentence = 0; t < forms.length; t++) {
@@ -222,6 +220,8 @@ public class CorefAnnotator implements DocumentAnnotator {
       }
       sentenceOfToken[t] = sentence;
     }
+    final List<Mention> mentions = MentionDetector.detect(personTypes, document.text(),
+        sentences, tokens, tags, sentenceOfToken, entities, chunks, phrases);
     final List<Annotation<String>> speakers = present.contains(SPEAKERS)
         ? document.get(SPEAKERS) : null;
     final Clusters clusters = new Clusters(mentions);

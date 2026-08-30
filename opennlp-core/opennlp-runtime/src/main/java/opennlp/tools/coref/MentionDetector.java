@@ -65,6 +65,18 @@ final class MentionDetector {
   /** The chunk type of noun phrases. */
   private static final String NOUN_PHRASE = "NP";
 
+  /** The Penn Treebank tag of the possessive marker. */
+  private static final String POSSESSIVE_TAG = "POS";
+
+  /** The lowercased possessive marker, for tag sets that do not single it out. */
+  private static final String POSSESSIVE_MARKER = "'s";
+
+  /** The preposition that separates a name's head segment from a trailing qualifier. */
+  private static final String OF = "of";
+
+  /** The comma, which separates a head segment from an appositive or qualifier. */
+  private static final String COMMA = ",";
+
   /** Entity type labels of organizations, whose number is left open. */
   private static final Set<String> ORGANIZATION_TYPES = Set.of("organization", "org");
 
@@ -109,24 +121,18 @@ final class MentionDetector {
 
   private MentionDetector(Set<String> personTypes, CharSequence text,
       List<Annotation<String>> sentences, List<Annotation<String>> tokens,
-      List<Annotation<String>> tags) {
+      List<Annotation<String>> tags, int[] sentenceOfToken) {
     this.personTypes = personTypes;
     this.text = text;
     this.sentences = sentences;
     this.tokens = tokens;
+    this.sentenceOfToken = sentenceOfToken;
     lower = new String[tokens.size()];
     tag = new String[tokens.size()];
-    sentenceOfToken = new int[tokens.size()];
     sentenceEndToken = new int[tokens.size()];
-    int sentence = 0;
     for (int t = 0; t < tokens.size(); t++) {
       lower[t] = StringUtil.toLowerCase(tokens.get(t).value());
       tag[t] = tags.get(t).value();
-      while (sentence < sentences.size() - 1
-          && tokens.get(t).span().getStart() >= sentences.get(sentence).span().getEnd()) {
-        sentence++;
-      }
-      sentenceOfToken[t] = sentence;
     }
     for (int t = tokens.size() - 1, end = tokens.size() - 1; t >= 0; t--) {
       if (t < tokens.size() - 1 && sentenceOfToken[t] != sentenceOfToken[t + 1]) {
@@ -144,6 +150,7 @@ final class MentionDetector {
    * @param sentences The sentence layer. Must not be empty when tokens are present.
    * @param tokens The token layer.
    * @param tags The POS tag layer, aligned with the tokens.
+   * @param sentenceOfToken The sentence index of every token.
    * @param entities The entity layer.
    * @param chunks The chunk layer, or {@code null} when the document carries none.
    * @param phrases The parse layer, or {@code null} when the document carries none;
@@ -153,9 +160,10 @@ final class MentionDetector {
    */
   static List<Mention> detect(Set<String> personTypes, CharSequence text,
       List<Annotation<String>> sentences, List<Annotation<String>> tokens,
-      List<Annotation<String>> tags, List<Annotation<String>> entities,
-      List<Annotation<String>> chunks, List<Annotation<Phrase>> phrases) {
-    return new MentionDetector(personTypes, text, sentences, tokens, tags)
+      List<Annotation<String>> tags, int[] sentenceOfToken,
+      List<Annotation<String>> entities, List<Annotation<String>> chunks,
+      List<Annotation<Phrase>> phrases) {
+    return new MentionDetector(personTypes, text, sentences, tokens, tags, sentenceOfToken)
         .detect(entities, chunks, phrases);
   }
 
@@ -204,7 +212,7 @@ final class MentionDetector {
       final int last = nounPhrase ? lastToken(chunk.span()) : -1;
       final boolean valid = nounPhrase && first >= 0 && last >= first;
       if (valid && pendingFirst >= 0 && first == pendingLast + 1
-          && ("POS".equals(tag[first]) || "'s".equals(lower[first]))) {
+          && (POSSESSIVE_TAG.equals(tag[first]) || POSSESSIVE_MARKER.equals(lower[first]))) {
         pendingLast = last;
         continue;
       }
@@ -220,6 +228,7 @@ final class MentionDetector {
     return phrases;
   }
 
+  /** Builds a noun phrase over a token range, finding its head by rule. */
   private NounPhrase nounPhrase(int first, int last) {
     return new NounPhrase(new Span(tokens.get(first).span().getStart(),
         tokens.get(last).span().getEnd()), first, last, headToken(first, last));
@@ -243,7 +252,7 @@ final class MentionDetector {
       }
       // Head rules make the possessive marker the head of a possessive phrase; the
       // mention's head is the noun the marker follows.
-      if (head > first && ("POS".equals(tag[head]) || "'s".equals(lower[head]))) {
+      if (head > first && (POSSESSIVE_TAG.equals(tag[head]) || POSSESSIVE_MARKER.equals(lower[head]))) {
         head = headToken(first, head - 1);
       }
       nounPhrases.add(new NounPhrase(phrase.span(), first, last, head));
@@ -322,7 +331,7 @@ final class MentionDetector {
   private void addPossessors(int first, int last, List<Candidate> candidates,
       int entityCount) {
     for (int t = first + 1; t < last; t++) {
-      if (!"POS".equals(tag[t]) && !"'s".equals(lower[t])) {
+      if (!POSSESSIVE_TAG.equals(tag[t]) && !POSSESSIVE_MARKER.equals(lower[t])) {
         continue;
       }
       final int head = headToken(first, t - 1);
@@ -425,7 +434,7 @@ final class MentionDetector {
     final int headToken = candidate.head >= 0 ? candidate.head : headToken(first, last);
     final String head = lower[headToken];
     final String headPrefix = join(words, 0, headToken - first + 1);
-    final int end = "POS".equals(tag[last]) || "'s".equals(lower[last])
+    final int end = POSSESSIVE_TAG.equals(tag[last]) || POSSESSIVE_MARKER.equals(lower[last])
         || "'".equals(lower[last]) ? words.size() - 1 : words.size();
     final String normalized = join(words, 0, Math.max(end, 1));
     final boolean pronoun = CorefMention.KIND_PRONOUN.equals(candidate.kind);
@@ -506,7 +515,7 @@ final class MentionDetector {
     if (start >= 0) {
       words.add(normalized.substring(start));
     }
-    final int of = words.indexOf("of");
+    final int of = words.indexOf(OF);
     final int headIndex = of > 0 ? of - 1 : words.size() - 1;
     final String head = words.isEmpty() ? null : words.get(headIndex);
     final String type = NameFinderAnnotator.UNTYPED.equals(candidate.type)
@@ -528,12 +537,12 @@ final class MentionDetector {
   private int headToken(int first, int last) {
     int stop = last;
     for (int t = first + 1; t <= last; t++) {
-      if ("of".equals(lower[t]) || ",".equals(lower[t])) {
+      if (OF.equals(lower[t]) || COMMA.equals(lower[t])) {
         stop = t - 1;
         break;
       }
     }
-    if (stop > first && ("POS".equals(tag[stop]) || "'s".equals(lower[stop]))) {
+    if (stop > first && (POSSESSIVE_TAG.equals(tag[stop]) || POSSESSIVE_MARKER.equals(lower[stop]))) {
       stop--;
     }
     for (int t = stop; t >= first; t--) {
@@ -571,7 +580,7 @@ final class MentionDetector {
         && !"the".equals(lower[first]);
   }
 
-  private static String join(List<String> words, int from, int to) {
+  private String join(List<String> words, int from, int to) {
     final StringBuilder joined = new StringBuilder();
     for (int i = from; i < to && i < words.size(); i++) {
       if (i > from) {
