@@ -432,15 +432,37 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 			to the person a verb of speech attributes the quotation to.
 		</para>
 		<para>
+			Given a <code>CorefModel</code>, the annotator ranks instead of applying the
+			head-match and pronoun sieves: after the speaker and string sieves, each
+			remaining mention takes the candidate antecedent whose pair the model scores
+			highest, if that link probability reaches the floor
+			<code>CorefAnnotator.DEFAULT_THRESHOLD</code>. The pair features follow Durrett
+			and Klein (EMNLP 2013): the sieve tests as predicates, head words, mention
+			shapes, distance, attribute pairs, and their conjunctions.
+			<code>CorefTrainer</code> trains the model from documents that carry the
+			annotator's input layers and a <code>CorefAnnotator.GOLD_CHAINS</code> layer,
+			the <code>gold:</code> counterpart of the chains layer;
+			<code>ConlluCorefDocumentStream</code> in <code>opennlp-formats</code> reads
+			such documents from CoNLL-U with <code>Entity</code> brackets, the encoding of
+			OntoGUM and the Universal Anaphora releases.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+ObjectStream<Document> gold = new ConlluCorefDocumentStream(inputStreamFactory, ConlluTagset.X);
+ObjectStream<Document> training = /* add entity and chunk layers to each document */;
+CorefModel model = CorefTrainer.train("eng", training, TrainingParameters.defaultParams());
+Document resolved = new CorefAnnotator(model).annotate(document);]]>
+		</programlisting>
+		<para>
 			<code>CorefScorer</code> computes the MUC, B-cubed, and CEAF metrics and the
 			CoNLL average over predicted mentions exactly as the reference scorer of
 			Pradhan et al. (ACL 2014) does. Measured with it on the OntoGUM corpus with
 			gold sentences, tokens, and tags, predicted entities and chunks, and the corpus
-			speaker lines, the annotator reaches a CoNLL average of 46.5 on the test split,
-			above the 39.7 that Zhu, Pradhan, and Zeldes (ACL 2021) report for the
-			Stanford deterministic system; the harness is
-			<code>OntoGumCorefEvalTest</code>. <code>CorefPipelineExampleTest</code>
-			asserts the behavior shown here.
+			speaker lines, the rule-based annotator reaches a CoNLL average of 46.5 on the
+			test split and the ranker trained on the train split 48.6, against the 39.7
+			that Zhu, Pradhan, and Zeldes (ACL 2021) report for the Stanford deterministic
+			system; the harness is <code>OntoGumCorefEvalTest</code>.
+			<code>CorefPipelineExampleTest</code> asserts the behavior shown here.
 		</para>
 		<programlisting language="java">
 				<![CDATA[

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package opennlp.tools.coref;
+package opennlp.tools.formats.conllu;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -24,9 +24,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,7 +40,13 @@ import org.slf4j.LoggerFactory;
 import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.chunker.ChunkerME;
 import opennlp.tools.chunker.ChunkerModel;
+import opennlp.tools.coref.CorefAnnotator;
+import opennlp.tools.coref.CorefMention;
+import opennlp.tools.coref.CorefModel;
+import opennlp.tools.coref.CorefScorer;
+import opennlp.tools.coref.CorefScores;
 import opennlp.tools.coref.CorefScores.Score;
+import opennlp.tools.coref.CorefTrainer;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
@@ -52,7 +56,9 @@ import opennlp.tools.namefind.TokenNameFinderModel;
 import opennlp.tools.parser.ParserAnnotator;
 import opennlp.tools.parser.ParserFactory;
 import opennlp.tools.parser.ParserModel;
+import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.TrainingParameters;
 
 /**
  * Scores the coreference annotator on OntoGUM, the OntoNotes-scheme conversion of the
@@ -60,7 +66,8 @@ import opennlp.tools.util.Span;
  *
  * <p>Runs only when {@code opennlp.coref.gum.dir} names a GUM checkout: its
  * {@code splits.md} selects the documents and {@code coref/ontogum/conllu} supplies
- * gold sentences, tokens, Penn tags, and coreference chains. The data is fetched by the
+ * gold sentences, tokens, Penn tags, and coreference chains through
+ * {@link ConlluCorefDocumentStream}. The data is fetched by the
  * runner and never enters the repository; the annotations are CC-BY 4.0 and the texts
  * carry their own licenses, so check both before any use beyond measurement. Named
  * entities are predicted by the {@code en-ner-person}, {@code en-ner-location}, and
@@ -90,6 +97,12 @@ public class OntoGumCorefEvalTest {
   private static final String PARSER_PROPERTY = "opennlp.coref.parser";
   private static final String DUMP_PROPERTY = "opennlp.coref.dump";
   private static final String SPEAKERS_PROPERTY = "opennlp.coref.speakers";
+  private static final String TRAIN_PROPERTY = "opennlp.coref.train";
+  private static final String MODEL_PROPERTY = "opennlp.coref.model";
+  private static final String ITERATIONS_PROPERTY = "opennlp.coref.iterations";
+  private static final String CUTOFF_PROPERTY = "opennlp.coref.cutoff";
+  private static final String THRESHOLD_PROPERTY = "opennlp.coref.threshold";
+  private static final String ALGORITHM_PROPERTY = "opennlp.coref.algorithm";
   private static final Path RESULTS_FILE = Path.of("target", "coref-eval-results.csv");
   private static final String[] NER_MODELS =
       {"en-ner-person.bin", "en-ner-location.bin", "en-ner-organization.bin"};
@@ -128,7 +141,7 @@ public class OntoGumCorefEvalTest {
         ? new ParserAnnotator(ParserFactory.create(new ParserModel(Path.of(parserModel))))
         : Files.exists(chunkerModel)
             ? new ChunkerAnnotator(new ChunkerME(new ChunkerModel(chunkerModel))) : null;
-    final CorefAnnotator annotator = new CorefAnnotator();
+    final CorefAnnotator annotator = annotator(gum, finders, phraser);
     final CorefScorer all = new CorefScorer();
     final Map<String, CorefScorer> byGenre = new TreeMap<>();
     int documents = 0;
@@ -140,7 +153,7 @@ public class OntoGumCorefEvalTest {
         LOG.info("skipping {}: not in this checkout", name);
         continue;
       }
-      final GoldDocument gold = read(name, Files.readAllLines(file, StandardCharsets.UTF_8));
+      final GoldDocument gold = read(name, file);
       final Document tagged = withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       final long started = System.nanoTime();
@@ -170,6 +183,67 @@ public class OntoGumCorefEvalTest {
     }
     Assertions.assertTrue(result.scores().conll() > 0.05,
         "CoNLL average collapsed: " + result.scores().conll());
+  }
+
+  /**
+   * Chooses the annotator: rule-based by default, ranking with the model
+   * {@code opennlp.coref.model} names when it exists, or, with
+   * {@code opennlp.coref.train}, ranking with a model trained on the train split and
+   * saved to that path when one is given.
+   */
+  private static CorefAnnotator annotator(Path gum, List<NameFinderME> finders,
+      DocumentAnnotator phraser) throws IOException {
+    final String modelPath = System.getProperty(MODEL_PROPERTY);
+    final double threshold = Double.parseDouble(
+        System.getProperty(THRESHOLD_PROPERTY, Double.toString(CorefAnnotator.DEFAULT_THRESHOLD)));
+    if (System.getProperty(TRAIN_PROPERTY) == null) {
+      if (modelPath == null || !Files.exists(Path.of(modelPath))) {
+        return new CorefAnnotator();
+      }
+      return new CorefAnnotator(Set.of("person"), Set.of("organization", "location"),
+          new CorefModel(Path.of(modelPath)), threshold);
+    }
+    final List<Document> training = new ArrayList<>();
+    for (final String name : splitDocuments(gum.resolve("splits.md"), "train")) {
+      final Path file = gum.resolve("coref/ontogum/conllu").resolve(name + ".conllu");
+      if (!Files.exists(file)) {
+        continue;
+      }
+      final GoldDocument gold = read(name, file);
+      final Document tagged = withEntities(gold.document(), finders);
+      final Document input = phraser == null ? tagged : phraser.annotate(tagged);
+      training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.key())));
+    }
+    final TrainingParameters parameters = TrainingParameters.defaultParams();
+    parameters.put(TrainingParameters.ALGORITHM_PARAM,
+        System.getProperty(ALGORITHM_PROPERTY, "MAXENT"));
+    parameters.put(TrainingParameters.ITERATIONS_PARAM,
+        Integer.parseInt(System.getProperty(ITERATIONS_PROPERTY, "100")));
+    parameters.put(TrainingParameters.CUTOFF_PARAM,
+        Integer.parseInt(System.getProperty(CUTOFF_PROPERTY, "3")));
+    final long started = System.nanoTime();
+    final CorefModel model = CorefTrainer.train("eng",
+        ObjectStreamUtils.createObjectStream(training), parameters);
+    LOG.info("trained on {} documents in {} s", training.size(),
+        String.format(Locale.ROOT, "%.1f", (System.nanoTime() - started) / 1e9));
+    if (modelPath != null) {
+      model.serialize(Path.of(modelPath));
+    }
+    return new CorefAnnotator(Set.of("person"), Set.of("organization", "location"), model,
+        threshold);
+  }
+
+  /** Turns a key partition into a gold chains layer in text order. */
+  private static List<Annotation<CorefMention>> goldLayer(List<Set<Mention>> key) {
+    final List<Annotation<CorefMention>> layer = new ArrayList<>();
+    for (int chain = 0; chain < key.size(); chain++) {
+      for (final Mention mention : key.get(chain)) {
+        layer.add(new Annotation<>(new Span(mention.start(), mention.end()),
+            new CorefMention(chain, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)));
+      }
+    }
+    layer.sort((a, b) -> Integer.compare(a.span().getStart(), b.span().getStart()));
+    return layer;
   }
 
   /**
@@ -308,80 +382,29 @@ public class OntoGumCorefEvalTest {
   }
 
   /**
-   * Builds a document from the OntoGUM CoNLL-U lines: gold sentences, tokens, and Penn
-   * tags as layers, and the {@code Entity} brackets of the MISC column as the key.
+   * Reads one OntoGUM document through {@link ConlluCorefDocumentStream} with Penn tags,
+   * turning its gold chains layer into the key partition.
    */
-  private static GoldDocument read(String name, List<String> lines) {
-    final StringBuilder text = new StringBuilder();
-    final List<Annotation<String>> sentences = new ArrayList<>();
-    final List<Annotation<String>> tokens = new ArrayList<>();
-    final List<Annotation<String>> tags = new ArrayList<>();
-    final List<Annotation<String>> speakers = new ArrayList<>();
-    String speaker = null;
-    final Map<String, List<Integer>> openStarts = new HashMap<>();
-    final Map<String, Set<Mention>> entities = new LinkedHashMap<>();
-    int sentenceStart = -1;
-    boolean glue = false;
-    for (final String line : lines) {
-      if (line.isEmpty()) {
-        if (sentenceStart >= 0) {
-          sentences.add(new Annotation<>(new Span(sentenceStart, text.length()),
-              text.substring(sentenceStart)));
-          if (speaker != null) {
-            speakers.add(new Annotation<>(new Span(sentenceStart, text.length()), speaker));
-          }
-          text.append('\n');
-          sentenceStart = -1;
-          speaker = null;
-          glue = true;
-        }
-        continue;
+  private static GoldDocument read(String name, Path file) throws IOException {
+    try (ConlluCorefDocumentStream stream = new ConlluCorefDocumentStream(
+        () -> Files.newInputStream(file), ConlluTagset.X)) {
+      final Document document = stream.read();
+      Assertions.assertNotNull(document, name + " holds no document");
+      final Map<Integer, Set<Mention>> entities = new TreeMap<>();
+      for (final Annotation<CorefMention> mention : document.get(CorefAnnotator.GOLD_CHAINS)) {
+        entities.computeIfAbsent(mention.value().chain(), key -> new HashSet<>())
+            .add(new Mention(mention.span().getStart(), mention.span().getEnd()));
       }
-      if (line.charAt(0) == '#') {
-        if (line.startsWith("# speaker = ")) {
-          speaker = line.substring("# speaker = ".length()).trim();
-        }
-        continue;
+      Document input = Document.of(document.text())
+          .with(Layers.SENTENCES, document.get(Layers.SENTENCES))
+          .with(Layers.TOKENS, document.get(Layers.TOKENS))
+          .with(Layers.POS_TAGS, document.get(Layers.POS_TAGS));
+      if (document.layers().contains(CorefAnnotator.SPEAKERS)
+          && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
+        input = input.with(CorefAnnotator.SPEAKERS, document.get(CorefAnnotator.SPEAKERS));
       }
-      final String[] fields = fields(line);
-      if (fields.length < 10 || !isPlainId(fields[0])) {
-        continue;
-      }
-      if (sentenceStart < 0) {
-        sentenceStart = text.length();
-        glue = true;
-      }
-      if (!glue) {
-        text.append(' ');
-      }
-      final int start = text.length();
-      text.append(fields[1]);
-      final int end = text.length();
-      tokens.add(new Annotation<>(new Span(start, end), fields[1]));
-      tags.add(new Annotation<>(new Span(start, end), fields[4]));
-      glue = fields[9].contains("SpaceAfter=No");
-      final String entity = misc(fields[9], "Entity");
-      if (entity != null) {
-        brackets(entity, start, end, openStarts, entities);
-      }
+      return new GoldDocument(name, input, disjoint(name, entities.values()));
     }
-    if (sentenceStart >= 0) {
-      sentences.add(new Annotation<>(new Span(sentenceStart, text.length()),
-          text.substring(sentenceStart)));
-      if (speaker != null) {
-        speakers.add(new Annotation<>(new Span(sentenceStart, text.length()), speaker));
-      }
-    }
-    Assertions.assertTrue(openStarts.values().stream().allMatch(List::isEmpty),
-        name + " leaves an entity bracket open");
-    Document document = Document.of(text.toString())
-        .with(Layers.SENTENCES, sentences)
-        .with(Layers.TOKENS, tokens)
-        .with(Layers.POS_TAGS, tags);
-    if (!speakers.isEmpty() && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
-      document = document.with(CorefAnnotator.SPEAKERS, speakers);
-    }
-    return new GoldDocument(name, document, disjoint(name, entities.values()));
   }
 
   /**
@@ -410,90 +433,6 @@ public class OntoGumCorefEvalTest {
       LOG.info("{}: dropped {} key mention(s) filed under two entities", name, dropped);
     }
     return key;
-  }
-
-  /** Splits a CoNLL-U line on tabs. */
-  private static String[] fields(String line) {
-    final List<String> fields = new ArrayList<>(10);
-    int start = 0;
-    for (int i = 0; i <= line.length(); i++) {
-      if (i == line.length() || line.charAt(i) == '\t') {
-        fields.add(line.substring(start, i));
-        start = i + 1;
-      }
-    }
-    return fields.toArray(new String[0]);
-  }
-
-  /** Accepts a word id, rejecting multiword ranges and empty nodes. */
-  private static boolean isPlainId(String id) {
-    for (int i = 0; i < id.length(); i++) {
-      if (id.charAt(i) < '0' || id.charAt(i) > '9') {
-        return false;
-      }
-    }
-    return !id.isEmpty();
-  }
-
-  /** Reads one {@code key=value} attribute of a MISC column, or {@code null}. */
-  private static String misc(String misc, String key) {
-    int start = 0;
-    while (start < misc.length()) {
-      int end = misc.indexOf('|', start);
-      if (end < 0) {
-        end = misc.length();
-      }
-      final String attribute = misc.substring(start, end);
-      if (attribute.startsWith(key + "=")) {
-        return attribute.substring(key.length() + 1);
-      }
-      start = end + 1;
-    }
-    return null;
-  }
-
-  /**
-   * Applies the bracket notation of one token: {@code (id} opens a mention, {@code id)}
-   * closes the innermost open mention of that id, and {@code (id)} does both on the
-   * token. Rich GUM ids carry hyphenated attributes after the numeric id.
-   */
-  private static void brackets(String entity, int start, int end,
-      Map<String, List<Integer>> openStarts, Map<String, Set<Mention>> entities) {
-    int i = 0;
-    while (i < entity.length()) {
-      if (entity.charAt(i) == '(') {
-        int j = i + 1;
-        while (j < entity.length() && entity.charAt(j) != '(' && entity.charAt(j) != ')') {
-          j++;
-        }
-        final String id = canonicalId(entity.substring(i + 1, j));
-        if (j < entity.length() && entity.charAt(j) == ')') {
-          entities.computeIfAbsent(id, key -> new HashSet<>()).add(new Mention(start, end));
-          j++;
-        } else {
-          openStarts.computeIfAbsent(id, key -> new ArrayList<>()).add(start);
-        }
-        i = j;
-      } else {
-        int j = i;
-        while (j < entity.length() && entity.charAt(j) != ')') {
-          j++;
-        }
-        final String id = canonicalId(entity.substring(i, j));
-        final List<Integer> starts = openStarts.get(id);
-        Assertions.assertTrue(starts != null && !starts.isEmpty(),
-            "close without open for entity " + id);
-        entities.computeIfAbsent(id, key -> new HashSet<>())
-            .add(new Mention(starts.remove(starts.size() - 1), end));
-        i = j + 1;
-      }
-    }
-  }
-
-  /** Strips the attribute tail of a rich GUM entity id. */
-  private static String canonicalId(String id) {
-    final int hyphen = id.indexOf('-');
-    return hyphen < 0 ? id : id.substring(0, hyphen);
   }
 
   /**
