@@ -51,6 +51,7 @@ final class Clusters {
   private final List<Set<String>> words;
   private final List<Set<String>> heads;
   private final List<Set<String>> normalizedForms;
+  private final List<List<Integer>> members;
   private final int[] size;
 
   /**
@@ -69,10 +70,14 @@ final class Clusters {
     words = new java.util.ArrayList<>(size);
     heads = new java.util.ArrayList<>(size);
     normalizedForms = new java.util.ArrayList<>(size);
+    members = new java.util.ArrayList<>(size);
     this.size = new int[size];
     for (int i = 0; i < size; i++) {
       final Mention mention = mentions.get(i);
       parent[i] = i;
+      final List<Integer> own = new java.util.ArrayList<>(1);
+      own.add(i);
+      members.add(own);
       this.size[i] = 1;
       final Set<String> forms = new HashSet<>();
       forms.add(mention.normalized());
@@ -216,6 +221,11 @@ final class Clusters {
     return size[find(i)];
   }
 
+  /** {@return the indexes of the mentions in a mention's cluster, in merge order} */
+  List<Integer> members(int i) {
+    return members.get(find(i));
+  }
+
   /**
    * Merges two mentions' clusters unless their known types differ. The earlier root
    * survives and takes the union of both attribute sets.
@@ -247,6 +257,7 @@ final class Clusters {
     words.get(keep).addAll(words.get(drop));
     heads.get(keep).addAll(heads.get(drop));
     normalizedForms.get(keep).addAll(normalizedForms.get(drop));
+    members.get(keep).addAll(members.get(drop));
     size[keep] += size[drop];
     return true;
   }

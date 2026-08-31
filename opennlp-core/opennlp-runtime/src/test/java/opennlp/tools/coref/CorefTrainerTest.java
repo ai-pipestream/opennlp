@@ -218,6 +218,120 @@ public class CorefTrainerTest {
     Assertions.assertFalse(plain.stream().anyMatch(f -> f.startsWith("sim=")), plain.toString());
   }
 
+  /** Builds the two-sentence "Acme expanded. The firm grew." document with chunks and gold. */
+  private static Document firmDocument() {
+    final String text = "Acme expanded. The firm grew.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    final List<Annotation<String>> tags = new ArrayList<>();
+    int cursor = 0;
+    for (final String[] token : new String[][] {{"Acme", "NNP"}, {"expanded", "VBD"},
+        {".", "."}, {"The", "DT"}, {"firm", "NN"}, {"grew", "VBD"}, {".", "."}}) {
+      final int start = text.indexOf(token[0], cursor);
+      final Span span = new Span(start, start + token[0].length());
+      tokens.add(new Annotation<>(span, token[0]));
+      tags.add(new Annotation<>(span, token[1]));
+      cursor = span.getEnd();
+    }
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 14), "s"),
+            new Annotation<>(new Span(15, 29), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, tags)
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "organization")))
+        .with(ChunkerAnnotator.CHUNKS,
+            List.of(new Annotation<>(new Span(0, 4), "NP"), new Annotation<>(new Span(15, 23), "NP")))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(new Span(0, 4), new CorefMention(0, CorefMention.KIND_GOLD, -1)),
+            new Annotation<>(new Span(15, 23), new CorefMention(0, CorefMention.KIND_GOLD, -1))));
+  }
+
+  /**
+   * A two-dimensional stand-in for a contextual encoder: organization names and the
+   * neutral pronoun point one way, person names and the male pronoun the other.
+   */
+  private static final TokenVectors ENCODER = tokens -> {
+    final float[][] vectors = new float[tokens.length][];
+    for (int t = 0; t < tokens.length; t++) {
+      final String word = tokens[t];
+      if (word.equals("It") || word.equals("Acme") || word.equals("firm")
+          || word.equals("Cyberdyne") || word.equals("Globex") || word.equals("Initech")
+          || word.equals("Umbrella") || word.equals("Hooli") || word.equals("Vandelay")) {
+        vectors[t] = new float[] {1f, 0f};
+      } else if (word.equals("He") || Character.isUpperCase(word.charAt(0))) {
+        vectors[t] = new float[] {0f, 1f};
+      } else {
+        vectors[t] = new float[] {0.5f, 0.5f};
+      }
+    }
+    return vectors;
+  };
+
+  @Test
+  void testTokenVectorsAddSpanFeaturesWithValues() {
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ENCODER);
+    final List<Event> events = CorefTrainer.pairs(firmDocument(), annotator);
+    Assertions.assertEquals(1, events.size());
+    final Event event = events.get(0);
+    final List<String> names = List.of(event.getContext());
+    final float[] values = event.getValues();
+    Assertions.assertNotNull(values);
+    Assertions.assertEquals(names.size(), values.length);
+    // "The firm" averages {0, 1} and {1, 0} to {0.5, 0.5}; "Acme" is {1, 0}: the
+    // cosine 0.707 falls in the eighth tenth, and the products and differences follow
+    Assertions.assertTrue(names.contains("ctx=7"), names.toString());
+    Assertions.assertTrue(names.contains("ctxCluster=7"), names.toString());
+    Assertions.assertEquals(0.5f, values[names.indexOf("vp0")], 1e-6f);
+    Assertions.assertEquals(0f, values[names.indexOf("vp1")], 1e-6f);
+    Assertions.assertEquals(0.5f, values[names.indexOf("vd0")], 1e-6f);
+    Assertions.assertEquals(0.5f, values[names.indexOf("vd1")], 1e-6f);
+    Assertions.assertEquals(1f, values[names.indexOf("kinds=nominal>entity")], 1e-6f);
+    // Without an encoder the features are binary and carry no values.
+    Assertions.assertNull(CorefTrainer.pairs(firmDocument(), new CorefAnnotator())
+        .get(0).getValues());
+  }
+
+  @Test
+  void testRankingModelTrainsAndDecodesWithTokenVectors() throws IOException {
+    final CorefAnnotator rules = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ENCODER);
+    final CorefModel trained = CorefTrainer.trainRanking("eng",
+        ObjectStreamUtils.createObjectStream(corpus()), rules);
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    trained.serialize(bytes);
+    final CorefModel model = new CorefModel(new ByteArrayInputStream(bytes.toByteArray()));
+    Assertions.assertTrue(model.isRanking());
+    Assertions.assertTrue(model.getPairModel().eval(new String[] {"vp0"}, new float[] {1f})
+        [model.getPairModel().getIndex(SieveResolver.LINK)] > 0.5,
+        "a shared direction should favor linking");
+
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), model, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ENCODER);
+    final List<Annotation<CorefMention>> linked = annotator.annotate(
+        document("Cyberdyne", "organization", "expanded", "It", 0)).get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(linked.get(0).value().chain(), linked.get(1).value().chain());
+    final List<Annotation<CorefMention>> apart = annotator.annotate(
+        document("Cyberdyne", "organization", "expanded", "He", 1)).get(CorefAnnotator.CHAINS);
+    Assertions.assertNotEquals(apart.get(0).value().chain(), apart.get(1).value().chain());
+  }
+
+  @Test
+  void testEncoderMustReturnOneVectorPerToken() {
+    final TokenVectors short1 = tokens -> new float[][] {{1f}};
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null, short1);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> annotator.annotate(firmDocument()));
+    final TokenVectors none = tokens -> null;
+    final CorefAnnotator nullAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null, none);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> nullAnnotator.annotate(firmDocument()));
+  }
+
   @Test
   void testRankingRejectsBadSettings() {
     Assertions.assertThrows(IllegalArgumentException.class,
