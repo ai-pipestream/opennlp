@@ -408,9 +408,14 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 		<para>
 			Mentions are the entities, the noun phrases of an optional
 			<code>ParserAnnotator.PHRASES</code> or <code>ChunkerAnnotator.CHUNKS</code>
-			layer, and the personal pronouns. A noun phrase headed by an entity widens
+			layer, the personal pronouns, and the demonstratives that stand alone
+			(<emphasis>That was costly</emphasis>). A noun phrase headed by an entity widens
 			that entity's mention to the whole phrase, a possessor inside a phrase is a
-			mention of its own, and a pleonastic <emphasis>it</emphasis> is none. Each
+			mention of its own, two chunks joined by <emphasis>of</emphasis> or
+			<emphasis>and</emphasis> are a candidate beside their parts (<emphasis>the law
+			of negligence</emphasis>, <emphasis>Kim and Lee</emphasis>), and a pleonastic
+			<emphasis>it</emphasis> is none. The rule sieves do not resolve demonstratives,
+			which mostly point at clauses; a ranker decides them. Each
 			mention carries the number, gender, animacy, and person the text supports,
 			read from pronoun forms, plural tags, name titles, a bundled first-name list
 			built from the public-domain Social Security Administration name tables, and
@@ -444,12 +449,20 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 			sieve tests as predicates, head words, mention shapes, distance, attribute
 			pairs, cluster size, speaker equality, their conjunctions, and, when the
 			annotator is given <code>WordVectors</code>, the bucketed cosine similarity
-			of the two heads. Training reads documents that carry the annotator's input
-			layers and a <code>CorefAnnotator.GOLD_CHAINS</code> layer, the
-			<code>gold:</code> counterpart of the chains layer;
-			<code>ConlluCorefDocumentStream</code> in <code>opennlp-formats</code> reads
-			such documents from CoNLL-U with <code>Entity</code> brackets, the encoding of
-			OntoGUM and the Universal Anaphora releases.
+			of the two heads. Given <code>TokenVectors</code>, an encoder that returns one
+			contextual vector per token of a sentence, each mention also has a span vector
+			and the model adds the bucketed cosine of two span vectors and real-valued
+			features, their elementwise product and absolute difference, and the anaphor's
+			vector for the new-chain option; <code>TokenVectorsDL</code> in
+			<code>opennlp-dl</code> wraps a BERT-style ONNX encoder for that purpose. A
+			model trained with an encoder must be decoded with the same one. Training reads
+			documents that carry the annotator's input layers and a
+			<code>CorefAnnotator.GOLD_CHAINS</code> layer, the <code>gold:</code>
+			counterpart of the chains layer; <code>ConlluCorefDocumentStream</code> in
+			<code>opennlp-formats</code> reads such documents from CoNLL-U with
+			<code>Entity</code> brackets, the encoding of OntoGUM, the Universal Anaphora
+			releases, and the CorefUD collection, including its rich entity ids and
+			discontinuous mention parts.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -464,9 +477,11 @@ Document resolved = new CorefAnnotator(model).annotate(document);]]>
 			Pradhan et al. (ACL 2014) does. Measured with it on the OntoGUM corpus with
 			gold sentences, tokens, and tags, predicted entities and chunks, and the corpus
 			speaker lines, the rule-based annotator reaches a CoNLL average of 46.5 on the
-			test split and the mention ranker trained on the train split 49.3, against the
+			test split and the mention ranker trained on the train split 49.8, against the
 			39.7 that Zhu, Pradhan, and Zeldes (ACL 2021) report for the Stanford
-			deterministic system; the harness is <code>OntoGumCorefEvalTest</code>.
+			deterministic system; without the two reddit documents per split, whose text
+			GUM withholds, the ranker reaches 51.9. The harness is
+			<code>OntoGumCorefEvalTest</code>, which also reads any CorefUD file.
 			<code>CorefPipelineExampleTest</code> asserts the behavior shown here.
 		</para>
 		<programlisting language="java">

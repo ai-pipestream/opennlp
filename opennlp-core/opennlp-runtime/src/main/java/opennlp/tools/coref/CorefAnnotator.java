@@ -127,6 +127,9 @@ public class CorefAnnotator implements DocumentAnnotator {
   /** Word vectors for the ranker's similarity features, or {@code null}. */
   private final WordVectors vectors;
 
+  /** The contextual token encoder for the ranker's span features, or {@code null}. */
+  private final TokenVectors encoder;
+
   /**
    * The link probability threshold of the model constructors. Pair classifiers see far
    * more unlinked than linked pairs, so their link probabilities run low; this floor
@@ -206,6 +209,26 @@ public class CorefAnnotator implements DocumentAnnotator {
    */
   public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
       double threshold, WordVectors vectors) {
+    this(personTypes, neutralTypes, model, threshold, vectors, null);
+  }
+
+  /**
+   * Initializes the annotator with a model, word vectors, and a contextual token
+   * encoder. The encoder runs once per sentence when a document is annotated or read
+   * for training; a model trained with an encoder must be decoded with the same one.
+   *
+   * @param personTypes The entity types gendered pronouns may resolve to.
+   * @param neutralTypes The entity types neutral pronouns may resolve to.
+   * @param model The ranking model, or {@code null} for rule-based resolution.
+   * @param threshold The least link probability at which a pair classifier links, in
+   *                  {@code [0, 1]}.
+   * @param vectors The word vectors, or {@code null} for none.
+   * @param encoder The token encoder, or {@code null} for none.
+   * @throws IllegalArgumentException Thrown if a set is {@code null}, empty, or
+   *         contains a blank entry, or {@code threshold} lies outside {@code [0, 1]}.
+   */
+  public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
+      double threshold, WordVectors vectors, TokenVectors encoder) {
     this.personTypes = lowered(personTypes, "personTypes");
     this.neutralTypes = lowered(neutralTypes, "neutralTypes");
     this.model = model;
@@ -214,6 +237,7 @@ public class CorefAnnotator implements DocumentAnnotator {
     }
     this.threshold = threshold;
     this.vectors = vectors;
+    this.encoder = encoder;
   }
 
   private static CorefModel requireModel(CorefModel model) {
@@ -299,6 +323,8 @@ public class CorefAnnotator implements DocumentAnnotator {
    *         layer is empty.
    * @throws IllegalArgumentException Thrown if the document is invalid, as
    *         {@link #annotate(Document)} documents.
+   * @throws IllegalStateException Thrown if the token encoder returns a vector count
+   *         that differs from the sentence's token count.
    */
   SieveResolver resolver(Document document) {
     if (document == null) {
@@ -351,7 +377,31 @@ public class CorefAnnotator implements DocumentAnnotator {
     final List<Annotation<String>> speakers = present.contains(SPEAKERS)
         ? document.get(SPEAKERS) : null;
     return new SieveResolver(mentions, new Clusters(mentions), forms, sentenceOfToken,
-        speakers, personTypes, neutralTypes, vectors);
+        speakers, personTypes, neutralTypes, vectors,
+        encoder == null ? null : encode(forms, sentenceOfToken));
+  }
+
+  /** Runs the encoder over each sentence and lines the vectors up with the tokens. */
+  private float[][] encode(String[] forms, int[] sentenceOfToken) {
+    final float[][] tokenVectors = new float[forms.length][];
+    int start = 0;
+    while (start < forms.length) {
+      int end = start + 1;
+      while (end < forms.length && sentenceOfToken[end] == sentenceOfToken[start]) {
+        end++;
+      }
+      final String[] sentence = new String[end - start];
+      System.arraycopy(forms, start, sentence, 0, sentence.length);
+      final float[][] vectors = encoder.vectors(sentence);
+      if (vectors == null || vectors.length != sentence.length) {
+        throw new IllegalStateException("token encoder returned "
+            + (vectors == null ? "null" : vectors.length + " vectors") + " for "
+            + sentence.length + " tokens");
+      }
+      System.arraycopy(vectors, 0, tokenVectors, start, sentence.length);
+      start = end;
+    }
+    return tokenVectors;
   }
 
   /** {@inheritDoc} */

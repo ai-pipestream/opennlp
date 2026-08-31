@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -34,10 +35,11 @@ import java.util.TreeMap;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import opennlp.dl.vectors.TokenVectorsDL;
 import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.chunker.ChunkerME;
 import opennlp.tools.chunker.ChunkerModel;
@@ -48,6 +50,7 @@ import opennlp.tools.coref.CorefScorer;
 import opennlp.tools.coref.CorefScores;
 import opennlp.tools.coref.CorefScores.Score;
 import opennlp.tools.coref.CorefTrainer;
+import opennlp.tools.coref.TokenVectors;
 import opennlp.tools.coref.WordVectors;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
@@ -82,6 +85,19 @@ import opennlp.tools.util.TrainingParameters;
  * {@code false}. {@code opennlp.coref.split} chooses {@code dev} (the default),
  * {@code test}, {@code test2}, or {@code train}.</p>
  *
+ * <p>Any corpus in the same CoNLL-U encoding, such as the CorefUD collection, replaces
+ * the GUM split when {@code opennlp.coref.eval} names its files, comma separated, each
+ * holding any number of {@code # newdoc} documents; {@code opennlp.coref.train.data}
+ * names the training files the same way. Documents are named by their
+ * {@code # newdoc id}. {@code opennlp.coref.encoder} names a directory holding an ONNX
+ * encoder as {@code model.onnx} and {@code vocab.txt}, whose contextual token vectors
+ * feed the ranker's span features at training and decoding time. With
+ * {@code opennlp.coref.skip.redacted}, documents whose word forms GUM withholds, the
+ * reddit texts shipped as underscores, are left out of scoring and training and the
+ * split is recorded with a {@code -clean} suffix. Singleton entities of
+ * the key are dropped before scoring, as the CoNLL-2012 scorer does, so corpora that
+ * annotate singletons score on the same footing as OntoGUM, which has none.</p>
+ *
  * <p>Sentences, tokens, and tags are gold, so the figures are not comparable one to
  * one with the fully predicted CoreNLP input of Zhu, Pradhan, and Zeldes (ACL 2021),
  * who report a CoNLL average of 39.7 for the deterministic Stanford system on the 2021
@@ -110,6 +126,14 @@ public class OntoGumCorefEvalTest {
   private static final String RATE_PROPERTY = "opennlp.coref.rate";
   private static final String L2_PROPERTY = "opennlp.coref.l2";
   private static final String VECTORS_PROPERTY = "opennlp.coref.vectors";
+  private static final String EVAL_PROPERTY = "opennlp.coref.eval";
+  private static final String TRAIN_DATA_PROPERTY = "opennlp.coref.train.data";
+  private static final String ENCODER_PROPERTY = "opennlp.coref.encoder";
+  private static final String SKIP_REDACTED_PROPERTY = "opennlp.coref.skip.redacted";
+
+  /** The share of underscore-only tokens beyond which a document counts as redacted. */
+  private static final double REDACTED_SHARE = 0.3;
+  private static final String NEWDOC_ID = "# newdoc id =";
   private static final Path RESULTS_FILE = Path.of("target", "coref-eval-results.csv");
   private static final String[] NER_MODELS =
       {"en-ner-person.bin", "en-ner-location.bin", "en-ner-organization.bin"};
@@ -127,15 +151,22 @@ public class OntoGumCorefEvalTest {
       double corefSeconds) {
   }
 
+  /** Runs when a GUM checkout or evaluation files are configured. */
+  static boolean configured() {
+    return System.getProperty(GUM_DIR_PROPERTY) != null
+        || System.getProperty(EVAL_PROPERTY) != null;
+  }
+
   @Test
-  @EnabledIfSystemProperty(named = GUM_DIR_PROPERTY, matches = ".+")
+  @EnabledIf("configured")
   void testScoresOntoGumSplit() throws IOException {
-    final Path gum = Path.of(System.getProperty(GUM_DIR_PROPERTY));
+    final Path gum = System.getProperty(GUM_DIR_PROPERTY) == null
+        ? null : Path.of(System.getProperty(GUM_DIR_PROPERTY));
     final Path models = Path.of(System.getProperty(MODELS_DIR_PROPERTY,
         System.getProperty("user.home") + "/.opennlp"));
-    final String split = System.getProperty(SPLIT_PROPERTY, "dev");
-    final List<String> names = splitDocuments(gum.resolve("splits.md"), split);
-    Assertions.assertFalse(names.isEmpty(), "split " + split + " lists no documents");
+    final String evalFiles = System.getProperty(EVAL_PROPERTY);
+    final String split = evalFiles != null ? "eval" : System.getProperty(SPLIT_PROPERTY, "dev");
+    final String label = split + (skipRedacted() ? "-clean" : "");
 
     final List<NameFinderME> finders = new ArrayList<>();
     for (final String model : NER_MODELS) {
@@ -154,13 +185,15 @@ public class OntoGumCorefEvalTest {
     int documents = 0;
     long corefNanos = 0;
     final StringBuilder dump = new StringBuilder();
-    for (final String name : names) {
-      final Path file = gum.resolve("coref/ontogum/conllu").resolve(name + ".conllu");
-      if (!Files.exists(file)) {
-        LOG.info("skipping {}: not in this checkout", name);
+    final List<GoldDocument> golds = evalFiles != null
+        ? readFiles(evalFiles) : gumDocuments(gum, split);
+    Assertions.assertFalse(golds.isEmpty(), "no documents to score for " + split);
+    for (final GoldDocument gold : golds) {
+      final String name = gold.name();
+      if (skipRedacted() && redacted(gold.document())) {
+        LOG.info("skipping {}: redacted text", name);
         continue;
       }
-      final GoldDocument gold = read(name, file);
       final Document tagged = withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       final long started = System.nanoTime();
@@ -175,10 +208,8 @@ public class OntoGumCorefEvalTest {
           .add(gold.key(), response);
       documents++;
     }
-    Assertions.assertTrue(documents > 0, "no OntoGUM documents found for split " + split);
-
-    final Result result = new Result(split, documents, all.scores(), corefNanos / 1e9);
-    LOG.info("OntoGUM {} ({} documents): {}", split, documents, describe(result.scores()));
+    final Result result = new Result(label, documents, all.scores(), corefNanos / 1e9);
+    LOG.info("{} ({} documents): {}", label, documents, describe(result.scores()));
     LOG.info("coreference pass: {} documents/second",
         String.format(Locale.ROOT, "%.0f", documents / Math.max(result.corefSeconds(), 1e-9)));
     for (final Map.Entry<String, CorefScorer> genre : byGenre.entrySet()) {
@@ -205,6 +236,7 @@ public class OntoGumCorefEvalTest {
         System.getProperty(THRESHOLD_PROPERTY, Double.toString(CorefAnnotator.DEFAULT_THRESHOLD)));
     final WordVectors vectors = System.getProperty(VECTORS_PROPERTY) == null
         ? null : loadVectors(Path.of(System.getProperty(VECTORS_PROPERTY)));
+    final TokenVectors encoder = encoder();
     final Set<String> personTypes = Set.of("person");
     final Set<String> neutralTypes = Set.of("organization", "location");
     if (System.getProperty(TRAIN_PROPERTY) == null) {
@@ -212,28 +244,33 @@ public class OntoGumCorefEvalTest {
         return new CorefAnnotator();
       }
       return new CorefAnnotator(personTypes, neutralTypes, new CorefModel(Path.of(modelPath)),
-          threshold, vectors);
+          threshold, vectors, encoder);
     }
     final List<Document> training = new ArrayList<>();
-    for (final String name : splitDocuments(gum.resolve("splits.md"), "train")) {
-      final Path file = gum.resolve("coref/ontogum/conllu").resolve(name + ".conllu");
-      if (!Files.exists(file)) {
+    final String trainFiles = System.getProperty(TRAIN_DATA_PROPERTY);
+    final List<GoldDocument> golds = trainFiles != null
+        ? readFiles(trainFiles) : gumDocuments(gum, "train");
+    Assertions.assertFalse(golds.isEmpty(), "no training documents");
+    for (final GoldDocument gold : golds) {
+      if (skipRedacted() && redacted(gold.document())) {
         continue;
       }
-      final GoldDocument gold = read(name, file);
       final Document tagged = withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.key())));
     }
     final CorefAnnotator rules = new CorefAnnotator(personTypes, neutralTypes, null,
-        threshold, vectors);
+        threshold, vectors, encoder);
     final long started = System.nanoTime();
     final CorefModel model;
     if (System.getProperty(RANKING_PROPERTY) != null) {
       model = CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(training),
-          Integer.parseInt(System.getProperty(EPOCHS_PROPERTY, "10")),
-          Double.parseDouble(System.getProperty(RATE_PROPERTY, "0.1")),
-          Double.parseDouble(System.getProperty(L2_PROPERTY, "0.0")), rules);
+          Integer.parseInt(System.getProperty(EPOCHS_PROPERTY,
+              Integer.toString(CorefTrainer.DEFAULT_EPOCHS))),
+          Double.parseDouble(System.getProperty(RATE_PROPERTY,
+              Double.toString(CorefTrainer.DEFAULT_LEARNING_RATE))),
+          Double.parseDouble(System.getProperty(L2_PROPERTY,
+              Double.toString(CorefTrainer.DEFAULT_L2))), rules);
     } else {
       final TrainingParameters parameters = TrainingParameters.defaultParams();
       parameters.put(TrainingParameters.ALGORITHM_PARAM,
@@ -250,7 +287,45 @@ public class OntoGumCorefEvalTest {
     if (modelPath != null) {
       model.serialize(Path.of(modelPath));
     }
-    return new CorefAnnotator(personTypes, neutralTypes, model, threshold, vectors);
+    return new CorefAnnotator(personTypes, neutralTypes, model, threshold, vectors, encoder);
+  }
+
+  private static boolean skipRedacted() {
+    return Boolean.parseBoolean(System.getProperty(SKIP_REDACTED_PROPERTY));
+  }
+
+  /** {@return whether more than {@value #REDACTED_SHARE} of the tokens are underscores only} */
+  private static boolean redacted(Document document) {
+    final List<Annotation<String>> tokens = document.get(Layers.TOKENS);
+    int underscores = 0;
+    for (final Annotation<String> token : tokens) {
+      boolean all = !token.value().isEmpty();
+      for (int i = 0; all && i < token.value().length(); i++) {
+        all = token.value().charAt(i) == '_';
+      }
+      if (all) {
+        underscores++;
+      }
+    }
+    return !tokens.isEmpty() && underscores > REDACTED_SHARE * tokens.size();
+  }
+
+  /** Opens the ONNX token encoder {@code opennlp.coref.encoder} names, or {@code null}. */
+  private static TokenVectors encoder() throws IOException {
+    final String directory = System.getProperty(ENCODER_PROPERTY);
+    if (directory == null) {
+      return null;
+    }
+    try {
+      final long started = System.nanoTime();
+      final TokenVectorsDL encoder = new TokenVectorsDL(
+          Path.of(directory, "model.onnx").toFile(), Path.of(directory, "vocab.txt").toFile());
+      LOG.info("encoder loaded in {} s",
+          String.format(Locale.ROOT, "%.1f", (System.nanoTime() - started) / 1e9));
+      return encoder;
+    } catch (ai.onnxruntime.OrtException e) {
+      throw new IOException("cannot load the encoder in " + directory, e);
+    }
   }
 
   /**
@@ -401,8 +476,11 @@ public class OntoGumCorefEvalTest {
         score.precision(), score.recall(), score.f1());
   }
 
-  /** The genre is the middle segment of a GUM document name. */
+  /** The genre is the middle segment of a GUM document name; other corpora are one genre. */
   private static String genre(String name) {
+    if (!name.startsWith("GUM_")) {
+      return "corpus";
+    }
     final int first = name.indexOf('_');
     final int second = name.indexOf('_', first + 1);
     return second < 0 ? name : name.substring(first + 1, second);
@@ -427,34 +505,85 @@ public class OntoGumCorefEvalTest {
   }
 
   /**
-   * Reads one OntoGUM document through {@link ConlluCorefDocumentStream} with Penn tags,
-   * turning its gold chains layer into the key partition.
+   * Reads the OntoGUM documents of one {@code splits.md} split that the checkout holds.
    */
-  private static GoldDocument read(String name, Path file) throws IOException {
+  private static List<GoldDocument> gumDocuments(Path gum, String split) throws IOException {
+    Assertions.assertNotNull(gum, GUM_DIR_PROPERTY + " is required for split " + split);
+    final List<String> names = splitDocuments(gum.resolve("splits.md"), split);
+    Assertions.assertFalse(names.isEmpty(), "split " + split + " lists no documents");
+    final List<GoldDocument> golds = new ArrayList<>();
+    for (final String name : names) {
+      final Path file = gum.resolve("coref/ontogum/conllu").resolve(name + ".conllu");
+      if (!Files.exists(file)) {
+        LOG.info("skipping {}: not in this checkout", name);
+        continue;
+      }
+      final List<GoldDocument> read = readAll(file);
+      Assertions.assertEquals(1, read.size(), name + " should hold one document");
+      golds.add(new GoldDocument(name, read.get(0).document(), read.get(0).key()));
+    }
+    return golds;
+  }
+
+  /** Reads every document of the comma separated CoNLL-U files. */
+  private static List<GoldDocument> readFiles(String files) throws IOException {
+    final List<GoldDocument> golds = new ArrayList<>();
+    for (final String file : files.split(",")) {
+      if (!file.isBlank()) {
+        golds.addAll(readAll(Path.of(file.trim())));
+      }
+    }
+    return golds;
+  }
+
+  /**
+   * Reads every document of one CoNLL-U file through {@link ConlluCorefDocumentStream}
+   * with Penn tags, naming each by its {@code # newdoc id} and turning its gold chains
+   * layer into the key partition without singletons.
+   */
+  private static List<GoldDocument> readAll(Path file) throws IOException {
+    final Iterator<String> ids = documentIds(file).iterator();
+    final List<GoldDocument> golds = new ArrayList<>();
     try (ConlluCorefDocumentStream stream = new ConlluCorefDocumentStream(
         () -> Files.newInputStream(file), ConlluTagset.X)) {
-      final Document document = stream.read();
-      Assertions.assertNotNull(document, name + " holds no document");
-      final Map<Integer, Set<Mention>> entities = new TreeMap<>();
-      for (final Annotation<CorefMention> mention : document.get(CorefAnnotator.GOLD_CHAINS)) {
-        entities.computeIfAbsent(mention.value().chain(), key -> new HashSet<>())
-            .add(new Mention(mention.span().getStart(), mention.span().getEnd()));
+      Document document;
+      while ((document = stream.read()) != null) {
+        final String name = ids.hasNext() ? ids.next()
+            : file.getFileName().toString() + "#" + golds.size();
+        final Map<Integer, Set<Mention>> entities = new TreeMap<>();
+        for (final Annotation<CorefMention> mention : document.get(CorefAnnotator.GOLD_CHAINS)) {
+          entities.computeIfAbsent(mention.value().chain(), key -> new HashSet<>())
+              .add(new Mention(mention.span().getStart(), mention.span().getEnd()));
+        }
+        Document input = Document.of(document.text())
+            .with(Layers.SENTENCES, document.get(Layers.SENTENCES))
+            .with(Layers.TOKENS, document.get(Layers.TOKENS))
+            .with(Layers.POS_TAGS, document.get(Layers.POS_TAGS));
+        if (document.layers().contains(CorefAnnotator.SPEAKERS)
+            && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
+          input = input.with(CorefAnnotator.SPEAKERS, document.get(CorefAnnotator.SPEAKERS));
+        }
+        golds.add(new GoldDocument(name, input, disjoint(name, entities.values())));
       }
-      Document input = Document.of(document.text())
-          .with(Layers.SENTENCES, document.get(Layers.SENTENCES))
-          .with(Layers.TOKENS, document.get(Layers.TOKENS))
-          .with(Layers.POS_TAGS, document.get(Layers.POS_TAGS));
-      if (document.layers().contains(CorefAnnotator.SPEAKERS)
-          && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
-        input = input.with(CorefAnnotator.SPEAKERS, document.get(CorefAnnotator.SPEAKERS));
-      }
-      return new GoldDocument(name, input, disjoint(name, entities.values()));
     }
+    return golds;
+  }
+
+  /** Lists the {@code # newdoc id} values of a file in order. */
+  private static List<String> documentIds(Path file) throws IOException {
+    final List<String> ids = new ArrayList<>();
+    for (final String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+      if (line.startsWith(NEWDOC_ID)) {
+        ids.add(line.substring(NEWDOC_ID.length()).trim());
+      }
+    }
+    return ids;
   }
 
   /**
    * Keeps the first entity's claim on a span the conversion filed under two ids, so the
-   * key stays a partition; the scorer rejects overlapping entities.
+   * key stays a partition; the scorer rejects overlapping entities. Singleton entities
+   * are dropped, following the CoNLL-2012 scorer.
    */
   private static List<Set<Mention>> disjoint(String name,
       Collection<Set<Mention>> entities) {
@@ -470,7 +599,7 @@ public class OntoGumCorefEvalTest {
           dropped++;
         }
       }
-      if (!kept.isEmpty()) {
+      if (kept.size() > 1) {
         key.add(kept);
       }
     }

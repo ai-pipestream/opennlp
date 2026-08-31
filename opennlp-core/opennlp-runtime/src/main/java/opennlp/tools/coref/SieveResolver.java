@@ -100,6 +100,7 @@ final class SieveResolver {
   private final Set<String> personTypes;
   private final Set<String> neutralTypes;
   private final WordVectors vectors;
+  private final float[][] tokenVectors;
   private final List<List<Integer>> bySentence;
 
   /** The speaker of every mention, filled on first use. */
@@ -117,10 +118,12 @@ final class SieveResolver {
    * @param neutralTypes The lowercased entity types neutral pronouns may resolve to.
    * @param vectors The word vectors for the ranker's similarity features, or
    *                {@code null}.
+   * @param tokenVectors One contextual vector per token for the ranker's span features,
+   *                     or {@code null}.
    */
   SieveResolver(List<Mention> mentions, Clusters clusters, String[] forms,
       int[] sentenceOfToken, List<Annotation<String>> speakers, Set<String> personTypes,
-      Set<String> neutralTypes, WordVectors vectors) {
+      Set<String> neutralTypes, WordVectors vectors, float[][] tokenVectors) {
     this.mentions = mentions;
     this.clusters = clusters;
     this.forms = forms;
@@ -129,6 +132,7 @@ final class SieveResolver {
     this.personTypes = personTypes;
     this.neutralTypes = neutralTypes;
     this.vectors = vectors;
+    this.tokenVectors = tokenVectors;
     bySentence = new ArrayList<>();
     for (int i = 0; i < mentions.size(); i++) {
       final int sentence = mentions.get(i).sentence();
@@ -158,9 +162,10 @@ final class SieveResolver {
         continue;
       }
       int best = -1;
-      double bestScore = ranking ? model.eval(features.newChainFeatures(j))[link] : threshold;
+      double bestScore = ranking
+          ? score(model, features, features.newChainFeatures(j), link) : threshold;
       for (final int i : rankerCandidates(j)) {
-        final double score = model.eval(features.features(i, j))[link];
+        final double score = score(model, features, features.features(i, j), link);
         if (score > bestScore) {
           bestScore = score;
           best = i;
@@ -170,6 +175,12 @@ final class SieveResolver {
         clusters.union(best, j);
       }
     }
+  }
+
+  /** {@return the link probability of one option under the model} */
+  private static double score(MaxentModel model, CorefContextGenerator features,
+      CorefContextGenerator.Features option, int link) {
+    return model.eval(features.names(option), features.values(option))[link];
   }
 
   /**
@@ -241,6 +252,11 @@ final class SieveResolver {
     return vectors;
   }
 
+  /** {@return one contextual vector per token, or {@code null}} */
+  float[][] tokenVectors() {
+    return tokenVectors;
+  }
+
   /** Runs every sieve in precision order. */
   void resolve() {
     resolvePrecise();
@@ -250,7 +266,9 @@ final class SieveResolver {
     pass(nominal, UNLIMITED, (i, j) -> strictHeadMatch(i, j, false, true));
     pass(nominal, UNLIMITED, this::properHeadMatch);
     pass(nominal, UNLIMITED, this::relaxedHeadMatch);
-    pass(j -> mentions.get(j).pronoun() && mentions.get(j).person() == Person.THIRD,
+    // Demonstratives mostly point at clauses and events; the rules leave them to a ranker.
+    pass(j -> mentions.get(j).pronoun() && mentions.get(j).person() == Person.THIRD
+        && CorefLexicon.demonstrative(mentions.get(j).head()) == null,
         PRONOUN_WINDOW, this::pronounMatch);
   }
 

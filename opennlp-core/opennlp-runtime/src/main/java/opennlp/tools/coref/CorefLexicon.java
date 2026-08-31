@@ -70,6 +70,20 @@ final class CorefLexicon {
   private static final Pronoun YOU =
       new Pronoun(Person.SECOND, Number.UNKNOWN, Gender.UNKNOWN, Animacy.ANIMATE);
 
+  private static final Pronoun THIS =
+      new Pronoun(Person.THIRD, Number.SINGULAR, Gender.NEUTRAL, Animacy.INANIMATE);
+  private static final Pronoun THESE =
+      new Pronoun(Person.THIRD, Number.PLURAL, Gender.NEUTRAL, Animacy.INANIMATE);
+
+  /**
+   * The demonstratives that stand alone as pronouns, {@code That was costly}. They are
+   * kept apart from {@link #PRONOUNS} because they mostly point at clauses and events,
+   * which the rule sieves do not resolve, while a ranker may learn when they refer to
+   * an entity.
+   */
+  private static final Map<String, Pronoun> DEMONSTRATIVES = Map.of(
+      "this", THIS, "that", THIS, "these", THESE, "those", THESE);
+
   private static final Map<String, Pronoun> PRONOUNS = Map.ofEntries(
       Map.entry("he", HE), Map.entry("him", HE), Map.entry("his", HE),
       Map.entry("himself", HE),
@@ -299,6 +313,16 @@ final class CorefLexicon {
    */
   static Pronoun pronoun(String word) {
     return PRONOUNS.get(word);
+  }
+
+  /**
+   * Looks up a demonstrative used as a pronoun.
+   *
+   * @param word The lowercased word.
+   * @return Its attributes, or {@code null} if the word is not a demonstrative.
+   */
+  static Pronoun demonstrative(String word) {
+    return DEMONSTRATIVES.get(word);
   }
 
   /**

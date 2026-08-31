@@ -53,9 +53,33 @@ noun phrases:
 | Possessives and generic nouns | 49.5 | 46.5 | 67.8 |
 | Pairwise ranker (train split, floor 0.1) | 52.0 | 48.6 | 68.4 |
 | Mention ranker (10 epochs, step 0.05, L2 1e-3) | 53.1 | 49.3 | 68.0 |
+| Ranker with MiniLM-L6 contextual span features | 53.1 | | |
+| Wider candidates: demonstratives, `X of Y`, `X and Y` | 53.0 | 49.8 | 68.6 |
 
 Zhu, Pradhan, and Zeldes (ACL 2021) report 39.7 on the 2021 OntoGUM test set for the
 Stanford deterministic system with fully predicted input, and 58.0 for SpanBERT.
+
+Two documents per split are reddit texts that GUM ships as underscores, so no system
+can score them; `-Dopennlp.coref.skip.redacted=true` leaves them out. On the other 30
+documents the current ranker reaches dev 55.6 and test 51.9 (rules 52.4 dev).
+
+Other corpora, read from CorefUD 1.2 with the same reader (dev CoNLL, no singletons):
+
+| Training data | OntoGUM dev | CorefUD GUM dev | LitBank dev |
+| --- | --- | --- | --- |
+| Rules | 49.5 | 47.7 | 36.9 |
+| OntoGUM train | 53.1 | 50.0 | 49.4 |
+| CorefUD GUM train (native scheme) | 50.7 | 50.8 | |
+| CorefUD GUM + LitBank train | 48.6 | 48.2 | 51.6 |
+| LitBank train | 48.4 | | 51.4 |
+
+The OntoNotes-scheme conversion is the better training target even for GUM's own
+development set; LitBank, which annotates only ACE entity types, helps LitBank alone.
+CorefUD labels English-GUM CC BY-NC-SA 4.0 and English-ParCorFull CC BY-NC 4.0 after
+their most restrictive texts; English-LitBank is CC BY 4.0. Within GUM, the academic,
+court, news, and interview texts are CC BY, bio and voyage CC BY-SA, and essay,
+fiction, letter, podcast, whow, and reddit non-commercial; the annotations are CC BY 4.0
+throughout.
 
 ## Prior art and comparable products
 
@@ -77,9 +101,29 @@ similarity adds nothing measurable (52.0 to 52.1 dev), so the `WordVectors` hook
 kept for a stronger embedding but no vectors are bundled; step size matters (0.3 loses
 3 points, 0.05 gains 0.7), 20 epochs do not beat 10.
 
+Contextual vectors: `TokenVectors` supplies one vector per token of a sentence and
+`TokenVectorsDL` (opennlp-dl) implements it over a BERT-style ONNX encoder, aligning
+wordpieces to words and windowing long sentences. With all-MiniLM-L6-v2 the ranker
+gets bucketed span cosines and real-valued product, difference, and new-chain features;
+the weights train (the cosine buckets come out monotone, +0.55 at cosine 0.9 or more to
+-0.5 at 0.1) but dev CoNLL stays at 53.1, so a linear head over frozen sentence-encoder
+vectors is redundant with the string features. The hook stays for a nonlinear scorer or
+a coreference-tuned encoder; no encoder is bundled. Training keeps one span vector per
+mention and derives the dense terms on the fly; materializing them per option runs out
+of heap.
+
+Wider candidates: standalone demonstratives, `X of Y`, and `X and Y` phrases cut the
+missed key mentions on dev from 1007 to 813 while the ranker's new-chain option acts as
+the span scorer, since response singletons are dropped. The gain is small (test 49.3 to
+49.8) because the demonstratives mostly point at clauses and the new spans also produce
+new wrong links (spurious 511 to 574).
+
 ## Open
 
 - No shipped model yet; the subset of OntoGUM a distributable model may train on is
   undecided. Model files are large (11 MB) because no feature cutoff is applied to the
   ranker; pruning near-zero weights is an easy follow-up.
-- Demonstrative pronouns and appositive spans, which need the parse layer.
+- Appositive spans and NP + relative clause spans, which need the parse layer; verbal
+  (event) mentions, which OntoNotes annotates and the detector does not produce.
+- A nonlinear pair scorer over the contextual span vectors, the form in which frozen
+  encoders help in the literature; the linear head measured here does not.

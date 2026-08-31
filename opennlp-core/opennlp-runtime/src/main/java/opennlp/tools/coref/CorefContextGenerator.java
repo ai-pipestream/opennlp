@@ -33,17 +33,59 @@ import java.util.Map;
  * <p>Features are opaque strings of the form {@code name=value}; the model learns a
  * weight per string. Head words and pronoun forms are lexical features and so make the
  * model corpus-specific; every other feature is closed-class.</p>
+ *
+ * <p>With contextual token vectors, each mention also has a span vector, the mean of its
+ * token vectors, and a pair carries their bucketed cosine as strings plus real-valued
+ * features: the elementwise product and absolute difference of the two span vectors,
+ * so the model learns a bilinear comparison after
+ * <a href="https://aclanthology.org/D17-1018/">Lee et al. (EMNLP 2017)</a>; the
+ * new-chain option carries the anaphor's span vector, so the model learns which
+ * mentions in context start a chain.</p>
  */
 final class CorefContextGenerator {
 
   /** The value of a similarity feature when a head has no vector. */
   private static final String UNKNOWN_SIMILARITY = "unknown";
 
+  /** Name prefix of the real-valued features holding the product of two span vectors. */
+  static final String PRODUCT = "vp";
+
+  /** Name prefix of the real-valued features holding the absolute difference of two span vectors. */
+  static final String DIFFERENCE = "vd";
+
+  /** Name prefix of the real-valued features holding the anaphor's span vector for the new-chain option. */
+  static final String NEW_CHAIN = "vn";
+
   private final SieveResolver resolver;
   private final List<Mention> mentions;
   private final Clusters clusters;
   private final WordVectors vectors;
   private final Map<String, float[]> vectorCache = new HashMap<>();
+  private final float[][] tokenVectors;
+  private final float[][] spanVectors;
+  private String[] productNames;
+  private String[] differenceNames;
+  private String[] newChainNames;
+
+  /**
+   * The features of one option: the binary features by name and, with contextual
+   * vectors, the anaphor's span vector and, for a pair, the candidate's. The
+   * real-valued features derive from the vectors: the elementwise product and absolute
+   * difference of the two for a pair, the anaphor's vector alone for the new-chain
+   * option. Options that carry no vectors have {@code null} vectors.
+   *
+   * @param names The binary features.
+   * @param anaphor The anaphor's span vector, or {@code null}.
+   * @param antecedent The candidate's span vector, or {@code null} for the new-chain
+   *                   option and without vectors.
+   */
+  record Features(String[] names, float[] anaphor, float[] antecedent) {
+
+    /** {@return the dimension of the real-valued features, zero without vectors} */
+    int dimension() {
+      return anaphor == null ? 0 : anaphor.length;
+    }
+  }
 
   /**
    * Initializes the generator over a resolver's mentions and clusters.
@@ -55,6 +97,8 @@ final class CorefContextGenerator {
     this.mentions = resolver.mentions();
     this.clusters = resolver.clusters();
     this.vectors = resolver.vectors();
+    this.tokenVectors = resolver.tokenVectors();
+    this.spanVectors = tokenVectors == null ? null : new float[mentions.size()][];
   }
 
   /**
@@ -62,9 +106,9 @@ final class CorefContextGenerator {
    * shape and what precedes it, so the ranker learns which mentions are first mentions.
    *
    * @param j The anaphor's index.
-   * @return The feature strings. Never {@code null}.
+   * @return The features. Never {@code null}.
    */
-  String[] newChainFeatures(int j) {
+  Features newChainFeatures(int j) {
     final Mention anaphor = mentions.get(j);
     final List<String> features = new ArrayList<>(16);
     final String kind = "new|" + kind(anaphor);
@@ -81,7 +125,8 @@ final class CorefContextGenerator {
     if (anaphor.pronoun()) {
       features.add(kind + "|form=" + anaphor.head());
     }
-    return features.toArray(new String[0]);
+    return new Features(features.toArray(new String[0]),
+        spanVectors == null ? null : spanVector(j), null);
   }
 
   /**
@@ -89,9 +134,9 @@ final class CorefContextGenerator {
    *
    * @param i The candidate antecedent's index.
    * @param j The anaphor's index.
-   * @return The feature strings. Never {@code null}.
+   * @return The features. Never {@code null}.
    */
-  String[] features(int i, int j) {
+  Features features(int i, int j) {
     final Mention antecedent = mentions.get(i);
     final Mention anaphor = mentions.get(j);
     final List<String> features = new ArrayList<>(80);
@@ -179,8 +224,149 @@ final class CorefContextGenerator {
       features.add("antIndefinite=" + antecedent.indefinite());
       features.add("bothProper=" + (anaphor.proper() && antecedent.proper()));
     }
-    return features.toArray(new String[0]);
+    if (spanVectors == null) {
+      return new Features(features.toArray(new String[0]), null, null);
+    }
+    final float[] u = spanVector(j);
+    final float[] v = spanVector(i);
+    final String context = "ctx=" + contextBucket(cosine(u, v));
+    features.add(context);
+    features.add(kinds + '|' + context);
+    features.add("ctxCluster=" + contextBucket(cosine(u, clusterVector(i))));
+    return new Features(features.toArray(new String[0]), u, v);
   }
+
+  /**
+   * Expands an option's features into the names a {@link opennlp.tools.ml.model.MaxentModel}
+   * evaluates: the binary features followed by the real-valued ones.
+   *
+   * @param option The option.
+   * @return The names. Never {@code null}.
+   */
+  String[] names(Features option) {
+    final int dimension = option.dimension();
+    if (dimension == 0) {
+      return option.names();
+    }
+    final boolean pair = option.antecedent() != null;
+    final String[] names = new String[option.names().length + (pair ? 2 : 1) * dimension];
+    System.arraycopy(option.names(), 0, names, 0, option.names().length);
+    int n = option.names().length;
+    if (pair) {
+      productNames = names(productNames, PRODUCT, dimension);
+      differenceNames = names(differenceNames, DIFFERENCE, dimension);
+      for (int d = 0; d < dimension; d++) {
+        names[n++] = productNames[d];
+        names[n++] = differenceNames[d];
+      }
+    } else {
+      newChainNames = names(newChainNames, NEW_CHAIN, dimension);
+      for (int d = 0; d < dimension; d++) {
+        names[n++] = newChainNames[d];
+      }
+    }
+    return names;
+  }
+
+  /**
+   * Expands an option's features into the values matching {@link #names(Features)}:
+   * one for every binary feature, then the real-valued ones.
+   *
+   * @param option The option.
+   * @return The values, or {@code null} when every feature counts one.
+   */
+  float[] values(Features option) {
+    final int dimension = option.dimension();
+    if (dimension == 0) {
+      return null;
+    }
+    final float[] u = option.anaphor();
+    final float[] v = option.antecedent();
+    final float[] values = new float[option.names().length + (v != null ? 2 : 1) * dimension];
+    int n = 0;
+    while (n < option.names().length) {
+      values[n++] = 1f;
+    }
+    for (int d = 0; d < dimension; d++) {
+      if (v != null) {
+        values[n++] = u[d] * v[d];
+        values[n++] = Math.abs(u[d] - v[d]);
+      } else {
+        values[n++] = u[d];
+      }
+    }
+    return values;
+  }
+
+  /** {@return the mean of a mention's token vectors, computed once} */
+  private float[] spanVector(int m) {
+    if (spanVectors[m] == null) {
+      final Mention mention = mentions.get(m);
+      spanVectors[m] = mean(tokenVectors, mention.firstToken(), mention.lastToken() + 1);
+    }
+    return spanVectors[m];
+  }
+
+  /** {@return the mean of the span vectors of a candidate's cluster} */
+  private float[] clusterVector(int i) {
+    final List<Integer> members = clusters.members(i);
+    final float[][] spans = new float[members.size()][];
+    for (int m = 0; m < spans.length; m++) {
+      spans[m] = spanVector(members.get(m));
+    }
+    return mean(spans, 0, spans.length);
+  }
+
+  /** {@return the componentwise mean of the vectors in a range} */
+  private static float[] mean(float[][] vectors, int from, int to) {
+    final float[] mean = new float[vectors[from].length];
+    for (int t = from; t < to; t++) {
+      for (int d = 0; d < mean.length; d++) {
+        mean[d] += vectors[t][d];
+      }
+    }
+    for (int d = 0; d < mean.length; d++) {
+      mean[d] /= to - from;
+    }
+    return mean;
+  }
+
+  /** {@return the cosine of two vectors, or {@code -2} when one is all zeros} */
+  private static double cosine(float[] u, float[] v) {
+    double dot = 0.0;
+    double uu = 0.0;
+    double vv = 0.0;
+    for (int d = 0; d < u.length; d++) {
+      dot += u[d] * v[d];
+      uu += u[d] * u[d];
+      vv += v[d] * v[d];
+    }
+    return uu == 0.0 || vv == 0.0 ? -2.0 : dot / Math.sqrt(uu * vv);
+  }
+
+  /** Buckets a contextual cosine by tenths, with one bucket for negatives and one for unknown. */
+  private static String contextBucket(double cosine) {
+    if (cosine < -1.0) {
+      return UNKNOWN_SIMILARITY;
+    }
+    if (cosine < 0.0) {
+      return "neg";
+    }
+    return Integer.toString(Math.min(9, (int) (cosine * 10)));
+  }
+
+  /** {@return the names of the real-valued features with a prefix, built once per dimension} */
+  private static String[] names(String[] names, String prefix, int dimension) {
+    if (names != null && names.length == dimension) {
+      return names;
+    }
+    final String[] built = new String[dimension];
+    for (int d = 0; d < dimension; d++) {
+      built[d] = prefix + d;
+    }
+    return built;
+  }
+
 
   /** {@return whether an earlier mention shares the anaphor's head} */
   private boolean earlierHead(int j) {

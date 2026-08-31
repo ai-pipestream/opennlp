@@ -85,8 +85,29 @@ public final class CorefTrainer {
   /** The AdaGrad smoothing term. */
   private static final double ADAGRAD_EPSILON = 1e-8;
 
-  /** One anaphor's options for ranking: feature ids per option, the last being new chain. */
-  private record RankingInstance(int[][] options, boolean[] gold) {
+  /**
+   * One anaphor's options for ranking: the binary feature ids per option, the last
+   * being new chain, and with contextual vectors the anaphor's span vector and each
+   * candidate's, from which the real-valued features derive as
+   * {@link CorefContextGenerator.Features} describes.
+   */
+  private record RankingInstance(int[][] options, float[] anaphor, float[][] antecedents,
+      boolean[] gold) {
+  }
+
+  /** The weights of the ranker: one per binary feature and three dense blocks. */
+  private static final class Weights {
+    final double[] sparse;
+    final double[] product;
+    final double[] difference;
+    final double[] newChain;
+
+    Weights(int features, int dimension) {
+      sparse = new double[features];
+      product = new double[dimension];
+      difference = new double[dimension];
+      newChain = new double[dimension];
+    }
   }
 
   /** Reads training pairs from documents. */
@@ -214,12 +235,18 @@ public final class CorefTrainer {
     }
     final Map<String, Integer> featureIds = new HashMap<>();
     final List<RankingInstance> instances = new ArrayList<>();
+    int dimension = 0;
     Document document;
     while ((document = documents.read()) != null) {
-      instances.addAll(rankingInstances(document, annotator, featureIds));
+      for (final RankingInstance instance : rankingInstances(document, annotator, featureIds)) {
+        instances.add(instance);
+        if (instance.anaphor() != null) {
+          dimension = instance.anaphor().length;
+        }
+      }
     }
-    final double[] weights = new double[featureIds.size()];
-    final double[] squares = new double[featureIds.size()];
+    final Weights weights = new Weights(featureIds.size(), dimension);
+    final Weights squares = new Weights(featureIds.size(), dimension);
     final double[] gradient = new double[featureIds.size()];
     final Random random = new Random(SHUFFLE_SEED);
     final List<RankingInstance> order = new ArrayList<>(instances);
@@ -229,13 +256,24 @@ public final class CorefTrainer {
         step(instance, weights, squares, gradient, learningRate, l2);
       }
     }
-    final String[] predicates = new String[featureIds.size()];
+    final String[] predicates = new String[featureIds.size() + 3 * dimension];
+    final double[] all = new double[predicates.length];
     for (final Map.Entry<String, Integer> feature : featureIds.entrySet()) {
       predicates[feature.getValue()] = feature.getKey();
+      all[feature.getValue()] = weights.sparse[feature.getValue()];
     }
-    final Context[] parameters = new Context[weights.length];
-    for (int f = 0; f < weights.length; f++) {
-      parameters[f] = new Context(new int[] {0}, new double[] {weights[f]});
+    for (int d = 0; d < dimension; d++) {
+      final int p = featureIds.size() + 3 * d;
+      predicates[p] = CorefContextGenerator.PRODUCT + d;
+      all[p] = weights.product[d];
+      predicates[p + 1] = CorefContextGenerator.DIFFERENCE + d;
+      all[p + 1] = weights.difference[d];
+      predicates[p + 2] = CorefContextGenerator.NEW_CHAIN + d;
+      all[p + 2] = weights.newChain[d];
+    }
+    final Context[] parameters = new Context[all.length];
+    for (int f = 0; f < all.length; f++) {
+      parameters[f] = new Context(new int[] {0}, new double[] {all[f]});
     }
     final GISModel model = new GISModel(parameters, predicates,
         new String[] {SieveResolver.LINK, SieveResolver.APART});
@@ -246,16 +284,20 @@ public final class CorefTrainer {
    * Takes one AdaGrad step up the log probability of the gold options: the gradient is
    * the expected feature count under the gold options minus that under all options.
    */
-  private static void step(RankingInstance instance, double[] weights, double[] squares,
+  private static void step(RankingInstance instance, Weights weights, Weights squares,
       double[] gradient, double learningRate, double l2) {
     final int[][] options = instance.options();
+    final float[] u = instance.anaphor();
     final double[] scores = new double[options.length];
     double max = Double.NEGATIVE_INFINITY;
     double goldMax = Double.NEGATIVE_INFINITY;
     for (int o = 0; o < options.length; o++) {
       double score = 0.0;
       for (final int f : options[o]) {
-        score += weights[f];
+        score += weights.sparse[f];
+      }
+      if (u != null) {
+        score += dense(weights, u, instance.antecedents()[o]);
       }
       scores[o] = score;
       max = Math.max(max, score);
@@ -272,6 +314,10 @@ public final class CorefTrainer {
       }
     }
     final List<Integer> touched = new ArrayList<>();
+    final int dimension = u == null ? 0 : u.length;
+    final double[] productGradient = new double[dimension];
+    final double[] differenceGradient = new double[dimension];
+    final double[] newChainGradient = new double[dimension];
     for (int o = 0; o < options.length; o++) {
       final double expected = Math.exp(scores[o] - max) / all;
       final double goldExpected = instance.gold()[o] ? Math.exp(scores[o] - goldMax) / gold : 0.0;
@@ -285,13 +331,48 @@ public final class CorefTrainer {
         }
         gradient[f] += delta;
       }
+      if (u != null) {
+        final float[] v = instance.antecedents()[o];
+        for (int d = 0; d < dimension; d++) {
+          if (v != null) {
+            productGradient[d] += delta * u[d] * v[d];
+            differenceGradient[d] += delta * Math.abs(u[d] - v[d]);
+          } else {
+            newChainGradient[d] += delta * u[d];
+          }
+        }
+      }
     }
     for (final int f : touched) {
-      final double g = gradient[f] - l2 * weights[f];
-      squares[f] += g * g;
-      weights[f] += learningRate * g / (Math.sqrt(squares[f]) + ADAGRAD_EPSILON);
+      update(weights.sparse, squares.sparse, f, gradient[f], learningRate, l2);
       gradient[f] = 0.0;
     }
+    for (int d = 0; d < dimension; d++) {
+      update(weights.product, squares.product, d, productGradient[d], learningRate, l2);
+      update(weights.difference, squares.difference, d, differenceGradient[d], learningRate, l2);
+      update(weights.newChain, squares.newChain, d, newChainGradient[d], learningRate, l2);
+    }
+  }
+
+  /** {@return the dense part of an option's score: a pair's, or the new-chain option's} */
+  private static double dense(Weights weights, float[] u, float[] v) {
+    double score = 0.0;
+    for (int d = 0; d < u.length; d++) {
+      if (v != null) {
+        score += weights.product[d] * u[d] * v[d] + weights.difference[d] * Math.abs(u[d] - v[d]);
+      } else {
+        score += weights.newChain[d] * u[d];
+      }
+    }
+    return score;
+  }
+
+  /** Applies one AdaGrad update to a weight from its gradient and L2 penalty. */
+  private static void update(double[] weights, double[] squares, int f, double gradient,
+      double learningRate, double l2) {
+    final double g = gradient - l2 * weights[f];
+    squares[f] += g * g;
+    weights[f] += learningRate * g / (Math.sqrt(squares[f]) + ADAGRAD_EPSILON);
   }
 
   /**
@@ -322,12 +403,15 @@ public final class CorefTrainer {
       }
       final List<Integer> candidates = resolver.rankerCandidates(j);
       final int[][] options = new int[candidates.size() + 1][];
+      final float[][] antecedents = new float[options.length][];
       final boolean[] goldOptions = new boolean[options.length];
       int nearest = -1;
       boolean anyGold = false;
       for (int o = 0; o < candidates.size(); o++) {
         final int i = candidates.get(o);
-        options[o] = ids(features.features(i, j), featureIds);
+        final CorefContextGenerator.Features pair = features.features(i, j);
+        options[o] = ids(pair.names(), featureIds);
+        antecedents[o] = pair.antecedent();
         goldOptions[o] = gold[j] >= 0 && gold[i] == gold[j];
         anyGold |= goldOptions[o];
         if (goldOptions[o] && i > nearest) {
@@ -337,9 +421,10 @@ public final class CorefTrainer {
       if (!anyGold && unlearnable(mentions.get(j), gold[j], chainStarts)) {
         continue;
       }
-      options[candidates.size()] = ids(features.newChainFeatures(j), featureIds);
+      final CorefContextGenerator.Features newChain = features.newChainFeatures(j);
+      options[candidates.size()] = ids(newChain.names(), featureIds);
       goldOptions[candidates.size()] = !anyGold;
-      instances.add(new RankingInstance(options, goldOptions));
+      instances.add(new RankingInstance(options, newChain.anaphor(), antecedents, goldOptions));
       if (nearest >= 0) {
         clusters.union(nearest, j);
       }
@@ -400,8 +485,9 @@ public final class CorefTrainer {
         if (i < antecedent) {
           continue;
         }
+        final CorefContextGenerator.Features pair = features.features(i, j);
         events.add(new Event(i == antecedent ? SieveResolver.LINK : SieveResolver.APART,
-            features.features(i, j)));
+            features.names(pair), features.values(pair)));
       }
       if (antecedent >= 0) {
         clusters.union(antecedent, j);

@@ -106,9 +106,22 @@ final class MentionDetector {
     }
   }
 
-  /** One noun phrase of the parse layer with its token range and head. */
-  private record NounPhrase(Span span, int first, int last, int head) {
+  /**
+   * One noun phrase with its token range and head. A merged phrase joins two chunks
+   * across {@code of} or {@code and}; it is a candidate beside its parts and never
+   * widens an entity.
+   */
+  private record NounPhrase(Span span, int first, int last, int head, boolean merged) {
   }
+
+  /** The tag of a coordinating conjunction. */
+  private static final String CONJUNCTION_TAG = "CC";
+
+  /** The conjunction that joins two noun phrases into a plural mention. */
+  private static final String AND = "and";
+
+  /** The tag of a determiner, which a standalone demonstrative carries. */
+  private static final String DETERMINER_TAG = "DT";
 
   private final Set<String> personTypes;
   private final CharSequence text;
@@ -225,13 +238,44 @@ final class MentionDetector {
     if (pendingFirst >= 0) {
       phrases.add(nounPhrase(pendingFirst, pendingLast));
     }
-    return phrases;
+    return withMergedPhrases(phrases);
+  }
+
+  /**
+   * Adds, for two chunks a lone {@code of} or {@code and} separates, the phrase spanning
+   * both: OntoNotes annotates {@code the law of negligence} and {@code Kim and Lee} as
+   * mentions where base chunking stops at the preposition or conjunction. The phrase
+   * takes the first chunk's head; its parts stay candidates of their own.
+   */
+  private List<NounPhrase> withMergedPhrases(List<NounPhrase> phrases) {
+    final List<NounPhrase> all = new ArrayList<>(phrases.size() * 2);
+    for (int p = 0; p < phrases.size(); p++) {
+      final NounPhrase phrase = phrases.get(p);
+      all.add(phrase);
+      if (p + 1 >= phrases.size()) {
+        continue;
+      }
+      final NounPhrase next = phrases.get(p + 1);
+      final int between = phrase.last() + 1;
+      if (next.first() != between + 1
+          || sentenceOfToken[phrase.first()] != sentenceOfToken[next.last()]) {
+        continue;
+      }
+      final boolean of = OF.equals(lower[between]);
+      final boolean and = AND.equals(lower[between]) && CONJUNCTION_TAG.equals(tag[between]);
+      if (of || and) {
+        all.add(new NounPhrase(new Span(tokens.get(phrase.first()).span().getStart(),
+            tokens.get(next.last()).span().getEnd()), phrase.first(), next.last(),
+            phrase.head(), true));
+      }
+    }
+    return all;
   }
 
   /** Builds a noun phrase over a token range, finding its head by rule. */
   private NounPhrase nounPhrase(int first, int last) {
     return new NounPhrase(new Span(tokens.get(first).span().getStart(),
-        tokens.get(last).span().getEnd()), first, last, headToken(first, last));
+        tokens.get(last).span().getEnd()), first, last, headToken(first, last), false);
   }
 
   /**
@@ -255,7 +299,7 @@ final class MentionDetector {
       if (head > first && (POSSESSIVE_TAG.equals(tag[head]) || POSSESSIVE_MARKER.equals(lower[head]))) {
         head = headToken(first, head - 1);
       }
-      nounPhrases.add(new NounPhrase(phrase.span(), first, last, head));
+      nounPhrases.add(new NounPhrase(phrase.span(), first, last, head, false));
     }
     final List<NounPhrase> maximal = new ArrayList<>();
     for (final NounPhrase phrase : nounPhrases) {
@@ -304,16 +348,21 @@ final class MentionDetector {
     // A phrase headed by an entity is that entity's full mention, unless the phrase
     // coordinates it with others, in which case the coordination is a mention of its own.
     if (headedBy != null && !(touching > 1 && coordinated(first, last))) {
-      headedBy.span = span;
-      headedBy.firstToken = first;
-      headedBy.lastToken = last;
-      headedBy.head = phrase.head();
+      if (!phrase.merged()) {
+        headedBy.span = span;
+        headedBy.firstToken = first;
+        headedBy.lastToken = last;
+        headedBy.head = phrase.head();
+      }
       return;
     }
-    if (first == last && CorefLexicon.pronoun(lower[first]) != null) {
+    if (first == last && (CorefLexicon.pronoun(lower[first]) != null
+        || CorefLexicon.demonstrative(lower[first]) != null)) {
       return;
     }
-    addPossessors(first, last, candidates, entityCount);
+    if (!phrase.merged()) {
+      addPossessors(first, last, candidates, entityCount);
+    }
     if (!tag[phrase.head()].startsWith(NOUN_TAG_PREFIX)) {
       return;
     }
@@ -368,13 +417,18 @@ final class MentionDetector {
     return false;
   }
 
-  /** Adds every personal pronoun token no entity covers as a pronoun mention. */
+  /**
+   * Adds every personal pronoun token no entity covers as a pronoun mention, and every
+   * demonstrative determiner that stands alone, {@code That was costly}, rather than
+   * opening a noun phrase.
+   */
   private void addPronouns(List<Candidate> candidates, int entityCount) {
     for (int t = 0; t < tokens.size(); t++) {
-      if (!PRONOUN_TAGS.contains(tag[t])) {
-        continue;
-      }
-      if (CorefLexicon.pronoun(lower[t]) == null) {
+      if (PRONOUN_TAGS.contains(tag[t])) {
+        if (CorefLexicon.pronoun(lower[t]) == null) {
+          continue;
+        }
+      } else if (!standaloneDemonstrative(t)) {
         continue;
       }
       final Span span = tokens.get(t).span();
@@ -384,6 +438,23 @@ final class MentionDetector {
       candidates.add(new Candidate(span, CorefMention.KIND_PRONOUN,
           CorefMention.NO_ENTITY, null, t, t));
     }
+  }
+
+  /**
+   * {@return whether a token is a demonstrative determiner with no noun phrase to open:
+   * the next token, if any in the sentence, is neither a noun, an adjective, a number,
+   * nor another determiner}
+   */
+  private boolean standaloneDemonstrative(int t) {
+    if (!DETERMINER_TAG.equals(tag[t]) || CorefLexicon.demonstrative(lower[t]) == null) {
+      return false;
+    }
+    if (t == sentenceEndToken[t]) {
+      return true;
+    }
+    final String next = tag[t + 1];
+    return !(next.startsWith(NOUN_TAG_PREFIX) || next.startsWith("JJ") || "CD".equals(next)
+        || DETERMINER_TAG.equals(next) || "PRP$".equals(next));
   }
 
   private boolean coveredByEntity(Span span, List<Candidate> candidates, int entityCount) {
@@ -452,7 +523,8 @@ final class MentionDetector {
     Animacy animacy = Animacy.UNKNOWN;
     Person grammaticalPerson = Person.THIRD;
     if (pronoun) {
-      final Pronoun form = CorefLexicon.pronoun(head);
+      final Pronoun form = CorefLexicon.pronoun(head) != null
+          ? CorefLexicon.pronoun(head) : CorefLexicon.demonstrative(head);
       number = form.number();
       gender = form.gender();
       animacy = form.animacy();

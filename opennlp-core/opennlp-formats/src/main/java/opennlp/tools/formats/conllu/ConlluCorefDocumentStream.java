@@ -42,7 +42,8 @@ import opennlp.tools.util.Span;
  * attribute of the MISC column, the encoding of the Universal Anaphora and OntoGUM
  * releases: {@code (3} opens a mention of entity 3 on the token, {@code 3)} closes the
  * innermost open mention of that entity, and {@code (3)} does both. A rich id such as
- * {@code 3-person-new-...} counts by the part before its first hyphen.
+ * {@code 3-person-new-...} counts by the part before its first hyphen, and each part of a
+ * discontinuous mention such as {@code (e5[1/2]-person} is read as a mention of {@code e5}.
  *
  * <p>Each {@code # newdoc} comment starts a document; a file without one is a single
  * document. The document text is rebuilt from the word forms, separated by single
@@ -310,9 +311,19 @@ public class ConlluCorefDocumentStream implements ObjectStream<Document> {
     }
   }
 
-  /** Strips the attribute tail of a rich entity id. */
+  /**
+   * Strips the attribute tail of a rich entity id and the part marker of a
+   * discontinuous mention, so {@code e5[1/2]-person} and {@code e5[2/2]} are entity
+   * {@code e5} and each part becomes a mention of it.
+   */
   private String canonicalId(String id) {
-    final int hyphen = id.indexOf('-');
-    return hyphen < 0 ? id : id.substring(0, hyphen);
+    int end = id.length();
+    for (int i = 0; i < id.length(); i++) {
+      if (id.charAt(i) == '-' || id.charAt(i) == '[') {
+        end = i;
+        break;
+      }
+    }
+    return id.substring(0, end);
   }
 }

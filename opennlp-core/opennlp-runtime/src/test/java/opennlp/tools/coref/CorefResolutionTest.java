@@ -236,6 +236,50 @@ public class CorefResolutionTest {
   }
 
   @Test
+  void testStandaloneDemonstrativeIsAPronounMentionTheRulesLeaveAlone() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "plan/NN", "failed/VBD", "./.")
+        .sentence("That/DT", "was/VBD", "costly/JJ", "./.")
+        .sentence("That/DT", "plan/NN", "hurt/VBD", "./.")
+        .chunk("The plan", "NP").chunk("That", "NP").chunk("That plan", "NP")
+        .document(true);
+    final List<Annotation<CorefMention>> layer =
+        new CorefAnnotator().annotate(document).get(CorefAnnotator.CHAINS);
+    final List<String> forms = layer.stream().map(m -> document.text().subSequence(
+        m.span().getStart(), m.span().getEnd()).toString()).toList();
+    Assertions.assertEquals(List.of("The plan", "That", "That plan"), forms);
+    Assertions.assertEquals(CorefMention.KIND_PRONOUN, layer.get(1).value().kind());
+    // The rule-based pronoun sieve does not guess what a demonstrative refers to; the
+    // head match links the two plans.
+    Assertions.assertEquals(List.of(List.of("The plan", "That plan")), chains(document));
+  }
+
+  @Test
+  void testNounPhraseWithOfPhraseIsACandidateBesideItsParts() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "law/NN", "of/IN", "negligence/NN", "applies/VBZ", "./.")
+        .sentence("The/DT", "law/NN", "of/IN", "negligence/NN", "is/VBZ", "old/JJ", "./.")
+        .chunk("The law", "NP").chunk("of", "PP").chunk("negligence", "NP")
+        .chunk("The law", "NP").chunk("of", "PP").chunk("negligence", "NP")
+        .document(true);
+    final List<List<String>> chains = chains(document);
+    Assertions.assertTrue(chains.contains(
+        List.of("The law of negligence", "The law of negligence")), chains.toString());
+    Assertions.assertTrue(chains.contains(List.of("The law", "The law")), chains.toString());
+  }
+
+  @Test
+  void testCoordinatedNounPhrasesFormAPluralMention() {
+    final Document document = new Fixture()
+        .sentence("Kim/NNP", "and/CC", "Lee/NNP", "arrived/VBD", "./.")
+        .sentence("They/PRP", "left/VBD", "./.")
+        .entity("Kim", "person").entity("Lee", "person")
+        .chunk("Kim", "NP").chunk("Lee", "NP").chunk("They", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Kim and Lee", "They")), chains(document));
+  }
+
+  @Test
   void testIndefiniteNounPhraseIsNeverAnaphoric() {
     final Document document = new Fixture()
         .sentence("A/DT", "student/NN", "arrived/VBD", "./.")

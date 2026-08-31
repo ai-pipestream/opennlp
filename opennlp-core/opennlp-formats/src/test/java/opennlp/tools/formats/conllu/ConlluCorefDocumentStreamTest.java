@@ -116,6 +116,19 @@ public class ConlluCorefDocumentStreamTest {
   }
 
   @Test
+  void testDiscontinuousMentionPartsJoinTheirEntity() throws IOException {
+    final String parts = "1\tKim\tKim\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(e5[1/2]-person-1)\n"
+        + "2\tand\tand\tCCONJ\tCC\t_\t3\tcc\t_\t_\n"
+        + "3\tLee\tLee\tPROPN\tNNP\t_\t1\tconj\t_\tEntity=(e5[2/2]-person-1)\n";
+    try (ConlluCorefDocumentStream stream = stream(parts, ConlluTagset.X)) {
+      final List<Annotation<CorefMention>> chains =
+          stream.read().get(CorefAnnotator.GOLD_CHAINS);
+      Assertions.assertEquals(2, chains.size());
+      Assertions.assertEquals(chains.get(0).value().chain(), chains.get(1).value().chain());
+    }
+  }
+
+  @Test
   void testRejectsUnbalancedBracketsAndShortLines() throws IOException {
     try (ConlluCorefDocumentStream open = stream(
         "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(3\n", ConlluTagset.X)) {
