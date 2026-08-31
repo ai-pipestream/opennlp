@@ -56,8 +56,8 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.Layers;
+import opennlp.tools.formats.CorefEvalSupport;
 import opennlp.tools.namefind.NameFinderME;
-import opennlp.tools.namefind.TokenNameFinderModel;
 import opennlp.tools.parser.ParserAnnotator;
 import opennlp.tools.parser.ParserFactory;
 import opennlp.tools.parser.ParserModel;
@@ -109,7 +109,6 @@ public class OntoGumCorefEvalTest {
   private static final Logger LOG = LoggerFactory.getLogger(OntoGumCorefEvalTest.class);
 
   private static final String GUM_DIR_PROPERTY = "opennlp.coref.gum.dir";
-  private static final String MODELS_DIR_PROPERTY = "opennlp.coref.models.dir";
   private static final String SPLIT_PROPERTY = "opennlp.coref.split";
   private static final String CHUNKER_PROPERTY = "opennlp.coref.chunker";
   private static final String PARSER_PROPERTY = "opennlp.coref.parser";
@@ -135,8 +134,6 @@ public class OntoGumCorefEvalTest {
   private static final double REDACTED_SHARE = 0.3;
   private static final String NEWDOC_ID = "# newdoc id =";
   private static final Path RESULTS_FILE = Path.of("target", "coref-eval-results.csv");
-  private static final String[] NER_MODELS =
-      {"en-ner-person.bin", "en-ner-location.bin", "en-ner-organization.bin"};
 
   /** A mention identity: the character span it covers. */
   private record Mention(int start, int end) {
@@ -162,16 +159,12 @@ public class OntoGumCorefEvalTest {
   void testScoresOntoGumSplit() throws IOException {
     final Path gum = System.getProperty(GUM_DIR_PROPERTY) == null
         ? null : Path.of(System.getProperty(GUM_DIR_PROPERTY));
-    final Path models = Path.of(System.getProperty(MODELS_DIR_PROPERTY,
-        System.getProperty("user.home") + "/.opennlp"));
+    final Path models = CorefEvalSupport.modelsDirectory();
     final String evalFiles = System.getProperty(EVAL_PROPERTY);
     final String split = evalFiles != null ? "eval" : System.getProperty(SPLIT_PROPERTY, "dev");
     final String label = split + (skipRedacted() ? "-clean" : "");
 
-    final List<NameFinderME> finders = new ArrayList<>();
-    for (final String model : NER_MODELS) {
-      finders.add(new NameFinderME(new TokenNameFinderModel(models.resolve(model))));
-    }
+    final List<NameFinderME> finders = CorefEvalSupport.nameFinders(models);
     final Path chunkerModel = Path.of(System.getProperty(CHUNKER_PROPERTY,
         models.resolve("en-chunker.bin").toString()));
     final String parserModel = System.getProperty(PARSER_PROPERTY);
@@ -194,7 +187,7 @@ public class OntoGumCorefEvalTest {
         LOG.info("skipping {}: redacted text", name);
         continue;
       }
-      final Document tagged = withEntities(gold.document(), finders);
+      final Document tagged = CorefEvalSupport.withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       final long started = System.nanoTime();
       final Document output = annotator.annotate(input);
@@ -255,7 +248,7 @@ public class OntoGumCorefEvalTest {
       if (skipRedacted() && redacted(gold.document())) {
         continue;
       }
-      final Document tagged = withEntities(gold.document(), finders);
+      final Document tagged = CorefEvalSupport.withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
       training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.key())));
     }
@@ -607,47 +600,6 @@ public class OntoGumCorefEvalTest {
       LOG.info("{}: dropped {} key mention(s) filed under two entities", name, dropped);
     }
     return key;
-  }
-
-  /**
-   * Runs the name finders over each sentence and adds the entity layer, keeping the
-   * first-found span wherever two finders overlap.
-   */
-  private static Document withEntities(Document document, List<NameFinderME> finders) {
-    final List<Annotation<String>> sentences = document.get(Layers.SENTENCES);
-    final List<Annotation<String>> tokens = document.get(Layers.TOKENS);
-    final List<Annotation<String>> entities = new ArrayList<>();
-    int first = 0;
-    for (final Annotation<String> sentence : sentences) {
-      int last = first;
-      while (last < tokens.size()
-          && tokens.get(last).span().getStart() < sentence.span().getEnd()) {
-        last++;
-      }
-      final String[] words = new String[last - first];
-      for (int t = first; t < last; t++) {
-        words[t - first] = tokens.get(t).value();
-      }
-      final List<Span> found = new ArrayList<>();
-      for (final NameFinderME finder : finders) {
-        for (final Span span : finder.find(words)) {
-          if (found.stream().noneMatch(span::intersects)) {
-            found.add(span);
-          }
-        }
-      }
-      found.sort((a, b) -> Integer.compare(a.getStart(), b.getStart()));
-      for (final Span span : found) {
-        entities.add(new Annotation<>(new Span(
-            tokens.get(first + span.getStart()).span().getStart(),
-            tokens.get(first + span.getEnd() - 1).span().getEnd()), span.getType()));
-      }
-      first = last;
-    }
-    for (final NameFinderME finder : finders) {
-      finder.clearAdaptiveData();
-    }
-    return document.with(Layers.ENTITIES, entities);
   }
 
   /** Groups the chains layer into entities of two or more mentions. */

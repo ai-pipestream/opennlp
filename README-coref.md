@@ -83,6 +83,27 @@ throughout. A ranker trained on the 59 CC BY training documents alone reaches de
 test 49.3, on the 133 documents outside the non-commercial genres 52.5 / 49.9, against
 53.0 / 49.8 on all 213, so a licence-clean model costs about half a point.
 
+GAP (Webster et al. 2018; 2,000 Wikipedia snippets per split, one pronoun and two names
+each, every layer predicted, harness `GapCorefEvalTest`), F1 over both labels with the
+paper's masculine/feminine bias ratio:
+
+| System | development F1 (M / F, bias) | test F1 (M / F, bias) |
+| --- | --- | --- |
+| Rules | 24.5 (25.5 / 23.5, 0.92) | 25.7 (23.9 / 27.4, 1.15) |
+| Mention ranker | 42.5 (44.1 / 40.9, 0.93) | 43.1 (44.4 / 41.8, 0.94) |
+
+The paper reports on development, full snippets: Random 41.5, Stanford dcoref (Lee et
+al. 2013) 50.5, Clark and Manning 2015 55.0, Lee et al. 2017 64.7. The ranker sits at the
+random baseline here: the pronoun links to some mention in 1,984 of 2,000 snippets, but
+only 318 of 797 predicted name links are right. The names are mostly not found by the
+entity models (an entity appears in 521 pronoun chains), so they enter as untyped proper
+noun phrases with no gender or animacy, and any pronoun may take them or a nearer common
+noun (`Simon's class` for `her`). Reading the first-name list for untyped proper phrases
+is the obvious next fix; GAP measures exactly the regime OntoGUM's gold tokens hide.
+
+Widening the pronoun window from three to six sentences changes nothing (ranker 53.0,
+rules 49.8 dev), so the window is not what limits pronoun recall.
+
 ## Prior art and comparable products
 
 - [Stanford CoreNLP dcoref](https://www-nlp.stanford.edu/software/dcoref.html), the
@@ -129,3 +150,6 @@ new wrong links (spurious 511 to 574).
   (event) mentions, which OntoNotes annotates and the detector does not produce.
 - A nonlinear pair scorer over the contextual span vectors, the form in which frozen
   encoders help in the literature; the linear head measured here does not.
+- Gender and animacy for untyped proper noun phrases from the first-name list, and a
+  stronger person name finder, which GAP shows to be the pronoun bottleneck on text
+  without gold entities.
