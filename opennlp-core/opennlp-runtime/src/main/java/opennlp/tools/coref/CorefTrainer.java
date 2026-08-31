@@ -66,6 +66,12 @@ import opennlp.tools.util.TrainingParameters;
  * monotone function of the score, so the annotator compares candidates and the
  * new-chain option through the same model interface.</p>
  *
+ * <p>A corpus that annotates singleton entities annotates every mention of its scheme,
+ * so a detected mention absent from such a document's gold layer lies outside the scheme
+ * (LitBank, for one, marks entities of the ACE types only) and is neither taught as a
+ * first mention nor as an anaphor; in a corpus without singletons, OntoNotes style, an
+ * unannotated mention is a true singleton and is taught to start a chain.</p>
+ *
  * @since 3.0.0
  */
 public final class CorefTrainer {
@@ -396,9 +402,10 @@ public final class CorefTrainer {
     final Clusters clusters = resolver.clusters();
     final int[] gold = goldChains(document, mentions);
     final int[] chainStarts = chainStarts(document);
+    final boolean partial = annotatesSingletons(document);
     final CorefContextGenerator features = new CorefContextGenerator(resolver);
     for (int j = 0; j < mentions.size(); j++) {
-      if (clusters.find(j) != j || !resolver.rankable(j)) {
+      if (clusters.find(j) != j || !resolver.rankable(j) || partial && gold[j] < 0) {
         continue;
       }
       final List<Integer> candidates = resolver.rankerCandidates(j);
@@ -464,9 +471,10 @@ public final class CorefTrainer {
     final Clusters clusters = resolver.clusters();
     final int[] gold = goldChains(document, mentions);
     final int[] chainStarts = chainStarts(document);
+    final boolean partial = annotatesSingletons(document);
     final CorefContextGenerator features = new CorefContextGenerator(resolver);
     for (int j = 0; j < mentions.size(); j++) {
-      if (clusters.find(j) != j || !resolver.rankable(j)) {
+      if (clusters.find(j) != j || !resolver.rankable(j) || partial && gold[j] < 0) {
         continue;
       }
       final List<Integer> candidates = resolver.rankerCandidates(j);
@@ -494,6 +502,15 @@ public final class CorefTrainer {
       }
     }
     return events;
+  }
+
+  /** {@return whether any gold chain of the document has a single mention} */
+  private static boolean annotatesSingletons(Document document) {
+    final Map<Integer, Integer> sizes = new HashMap<>();
+    for (final Annotation<CorefMention> mention : document.get(CorefAnnotator.GOLD_CHAINS)) {
+      sizes.merge(mention.value().chain(), 1, Integer::sum);
+    }
+    return sizes.containsValue(1);
   }
 
   /**

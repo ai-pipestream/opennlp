@@ -55,6 +55,7 @@ noun phrases:
 | Mention ranker (10 epochs, step 0.05, L2 1e-3) | 53.1 | 49.3 | 68.0 |
 | Ranker with MiniLM-L6 contextual span features | 53.1 | | |
 | Wider candidates: demonstratives, `X of Y`, `X and Y` | 53.0 | 49.8 | 68.6 |
+| Scheme-aware training (unannotated mentions of singleton-annotating corpora skipped) | 53.3 | 50.0 | 68.7 |
 
 Zhu, Pradhan, and Zeldes (ACL 2021) report 39.7 on the 2021 OntoGUM test set for the
 Stanford deterministic system with fully predicted input, and 58.0 for SpanBERT.
@@ -75,13 +76,29 @@ Other corpora, read from CorefUD 1.2 with the same reader (dev CoNLL, no singlet
 
 The OntoNotes-scheme conversion is the better training target even for GUM's own
 development set; LitBank, which annotates only ACE entity types, helps LitBank alone.
+Those first runs taught every detected mention outside LitBank's gold as "never link",
+which is wrong for a corpus that annotates only some mention types. The trainer now
+treats a document with gold singletons as annotating every mention of its scheme and
+skips the unannotated ones. That lifts LitBank-only transfer to OntoGUM from 48.4 to
+50.4 and makes OntoGUM + LitBank neutral rather than costly, but still not a gain:
+
+| Training data (scheme-aware) | OntoGUM dev | OntoGUM test | LitBank dev |
+| --- | --- | --- | --- |
+| OntoGUM, all 213 | 53.3 | 50.0 | 49.4 |
+| OntoGUM + LitBank | 53.0 | 49.7 | 49.8 |
+| OntoGUM CC BY genres, 59 | 52.6 | 49.4 | |
+| OntoGUM CC BY genres + LitBank | 52.0 | 48.1 | 49.6 |
+
+So LitBank does not recover what the licence-clean subset loses, and the shipped model
+should train on the CC BY OntoGUM documents alone, 0.7 / 0.6 under the full set.
 CorefUD labels English-GUM CC BY-NC-SA 4.0 and English-ParCorFull CC BY-NC 4.0 after
 their most restrictive texts; English-LitBank is CC BY 4.0. Within GUM, the academic,
 court, news, and interview texts are CC BY, bio and voyage CC BY-SA, and essay,
 fiction, letter, podcast, whow, and reddit non-commercial; the annotations are CC BY 4.0
 throughout. A ranker trained on the 59 CC BY training documents alone reaches dev 52.4 /
 test 49.3, on the 133 documents outside the non-commercial genres 52.5 / 49.9, against
-53.0 / 49.8 on all 213, so a licence-clean model costs about half a point.
+53.0 / 49.8 on all 213 before scheme-aware training (52.6 / 49.4 against 53.3 / 50.0
+after), so a licence-clean model costs about half a point.
 
 GAP (Webster et al. 2018; 2,000 Wikipedia snippets per split, one pronoun and two names
 each, every layer predicted, harness `GapCorefEvalTest`), F1 over both labels with the

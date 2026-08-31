@@ -462,7 +462,10 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 			<code>opennlp-formats</code> reads such documents from CoNLL-U with
 			<code>Entity</code> brackets, the encoding of OntoGUM, the Universal Anaphora
 			releases, and the CorefUD collection, including its rich entity ids and
-			discontinuous mention parts.
+			discontinuous mention parts. A document whose gold layer holds singleton
+			entities is taken to annotate every mention of its scheme, so detected mentions
+			it leaves unannotated are not taught, which lets corpora that mark only some
+			mention types, such as LitBank, train beside OntoNotes-style data.
 		</para>
 		<programlisting language="java">
 				<![CDATA[

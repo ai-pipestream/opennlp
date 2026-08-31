@@ -332,6 +332,48 @@ public class CorefTrainerTest {
         () -> nullAnnotator.annotate(firmDocument()));
   }
 
+  /** Three sentences: an entity, a definite phrase, and a second definite phrase. */
+  private static Document threeMentions(List<Annotation<CorefMention>> gold) {
+    final String text = "Acme expanded. The firm grew. The company hired.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    final List<Annotation<String>> tags = new ArrayList<>();
+    int cursor = 0;
+    for (final String[] token : new String[][] {{"Acme", "NNP"}, {"expanded", "VBD"},
+        {".", "."}, {"The", "DT"}, {"firm", "NN"}, {"grew", "VBD"}, {".", "."},
+        {"The", "DT"}, {"company", "NN"}, {"hired", "VBD"}, {".", "."}}) {
+      final int start = text.indexOf(token[0], cursor);
+      final Span span = new Span(start, start + token[0].length());
+      tokens.add(new Annotation<>(span, token[0]));
+      tags.add(new Annotation<>(span, token[1]));
+      cursor = span.getEnd();
+    }
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 14), "s"),
+            new Annotation<>(new Span(15, 29), "s"), new Annotation<>(new Span(30, 48), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, tags)
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 4), "organization")))
+        .with(ChunkerAnnotator.CHUNKS, List.of(new Annotation<>(new Span(0, 4), "NP"),
+            new Annotation<>(new Span(15, 23), "NP"), new Annotation<>(new Span(30, 41), "NP")))
+        .with(CorefAnnotator.GOLD_CHAINS, gold);
+  }
+
+  @Test
+  void testGoldSingletonsMarkPartialAnnotationSoUnannotatedMentionsAreNotTaught() {
+    // OntoNotes style: no singletons, so the unannotated "The company" is a true
+    // non-mention or singleton and is taught to start a chain: 1 + 2 pairs.
+    final Document complete = threeMentions(List.of(
+        new Annotation<>(new Span(0, 4), new CorefMention(0, CorefMention.KIND_GOLD, -1)),
+        new Annotation<>(new Span(15, 23), new CorefMention(0, CorefMention.KIND_GOLD, -1))));
+    Assertions.assertEquals(3, CorefTrainer.pairs(complete, new CorefAnnotator()).size());
+    // A corpus that annotates singletons annotates every mention of its scheme, so
+    // "The company", absent from the gold layer, lies outside the scheme and is skipped.
+    final Document partial = threeMentions(List.of(
+        new Annotation<>(new Span(0, 4), new CorefMention(0, CorefMention.KIND_GOLD, -1)),
+        new Annotation<>(new Span(15, 23), new CorefMention(1, CorefMention.KIND_GOLD, -1))));
+    Assertions.assertEquals(1, CorefTrainer.pairs(partial, new CorefAnnotator()).size());
+  }
+
   @Test
   void testRankingRejectsBadSettings() {
     Assertions.assertThrows(IllegalArgumentException.class,

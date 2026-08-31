@@ -139,8 +139,12 @@ public class OntoGumCorefEvalTest {
   private record Mention(int start, int end) {
   }
 
-  /** One gold-annotated document with its coreference key. */
-  private record GoldDocument(String name, Document document, List<Set<Mention>> key) {
+  /**
+   * One gold-annotated document with its coreference key, the entities of two or more
+   * mentions the scorer sees, and every gold entity including singletons for training.
+   */
+  private record GoldDocument(String name, Document document, List<Set<Mention>> key,
+      List<Set<Mention>> gold) {
   }
 
   /** A read-only view over the per-split and per-genre scorers. */
@@ -250,7 +254,7 @@ public class OntoGumCorefEvalTest {
       }
       final Document tagged = CorefEvalSupport.withEntities(gold.document(), finders);
       final Document input = phraser == null ? tagged : phraser.annotate(tagged);
-      training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.key())));
+      training.add(input.with(CorefAnnotator.GOLD_CHAINS, goldLayer(gold.gold())));
     }
     final CorefAnnotator rules = new CorefAnnotator(personTypes, neutralTypes, null,
         threshold, vectors, encoder);
@@ -513,7 +517,8 @@ public class OntoGumCorefEvalTest {
       }
       final List<GoldDocument> read = readAll(file);
       Assertions.assertEquals(1, read.size(), name + " should hold one document");
-      golds.add(new GoldDocument(name, read.get(0).document(), read.get(0).key()));
+      golds.add(new GoldDocument(name, read.get(0).document(), read.get(0).key(),
+          read.get(0).gold()));
     }
     return golds;
   }
@@ -556,7 +561,8 @@ public class OntoGumCorefEvalTest {
             && !"false".equals(System.getProperty(SPEAKERS_PROPERTY))) {
           input = input.with(CorefAnnotator.SPEAKERS, document.get(CorefAnnotator.SPEAKERS));
         }
-        golds.add(new GoldDocument(name, input, disjoint(name, entities.values())));
+        final List<Set<Mention>> gold = disjoint(name, entities.values(), true);
+        golds.add(new GoldDocument(name, input, disjoint(name, gold, false), gold));
       }
     }
     return golds;
@@ -576,10 +582,10 @@ public class OntoGumCorefEvalTest {
   /**
    * Keeps the first entity's claim on a span the conversion filed under two ids, so the
    * key stays a partition; the scorer rejects overlapping entities. Singleton entities
-   * are dropped, following the CoNLL-2012 scorer.
+   * are dropped unless kept, following the CoNLL-2012 scorer.
    */
   private static List<Set<Mention>> disjoint(String name,
-      Collection<Set<Mention>> entities) {
+      Collection<Set<Mention>> entities, boolean keepSingletons) {
     final Set<Mention> seen = new HashSet<>();
     final List<Set<Mention>> key = new ArrayList<>();
     int dropped = 0;
@@ -592,7 +598,7 @@ public class OntoGumCorefEvalTest {
           dropped++;
         }
       }
-      if (kept.size() > 1) {
+      if (kept.size() > 1 || keepSingletons && !kept.isEmpty()) {
         key.add(kept);
       }
     }
