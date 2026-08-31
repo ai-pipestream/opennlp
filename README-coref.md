@@ -79,7 +79,9 @@ CorefUD labels English-GUM CC BY-NC-SA 4.0 and English-ParCorFull CC BY-NC 4.0 a
 their most restrictive texts; English-LitBank is CC BY 4.0. Within GUM, the academic,
 court, news, and interview texts are CC BY, bio and voyage CC BY-SA, and essay,
 fiction, letter, podcast, whow, and reddit non-commercial; the annotations are CC BY 4.0
-throughout.
+throughout. A ranker trained on the 59 CC BY training documents alone reaches dev 52.4 /
+test 49.3, on the 133 documents outside the non-commercial genres 52.5 / 49.9, against
+53.0 / 49.8 on all 213, so a licence-clean model costs about half a point.
 
 ## Prior art and comparable products
 
