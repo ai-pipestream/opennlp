@@ -159,10 +159,10 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | [#1152](https://github.com/apache/opennlp/pull/1152) | Static embeddings | `OPENNLP-1885-sentencepiece` | `f6f1bef48e` | `18b3426767` | Draft, no decision | Via #1215 |
 | [#1154](https://github.com/apache/opennlp/pull/1154) | Gazetteer and geocoder API | `main` | `b81d0eb978` | `2b72aa1a66` | Draft, review required | Direct |
-| [#1155](https://github.com/apache/opennlp/pull/1155) | WordNet API and readers | `main` | `9c0e9a0533` | `19117b0315` | Draft, review required | Direct |
+| [#1155](https://github.com/apache/opennlp/pull/1155) | WordNet API and readers | `main` | `9c0e9a0533` | `19117b0315` | Draft, review required, conflicting | Direct |
 | [#1165](https://github.com/apache/opennlp/pull/1165) | Subword API and WordPiece | `main` | `96d2781cb2` | `d2c216e749` | Ready, review required | Via #1215 |
 | [#1166](https://github.com/apache/opennlp/pull/1166) | UniNE light and minimal stemmers | `main` | `ff681b3934` | `e0a46ee89d` | Draft, review required | Direct |
-| [#1167](https://github.com/apache/opennlp/pull/1167) | WordNet expansion | `main` | `a68762fe35` | `e6fad91bf2` | Draft, review required | Direct |
+| [#1167](https://github.com/apache/opennlp/pull/1167) | WordNet expansion | `main` | `a68762fe35` | `e6fad91bf2` | Draft, review required, conflicting | Direct |
 | [#1190](https://github.com/apache/opennlp/pull/1190) | Hunspell stemming | `main` | `c833264c1c` | `b2b5bd9da1` | Ready, changes requested | Direct |
 | [#1191](https://github.com/apache/opennlp/pull/1191) | CJK lattice tokenization | `main` | `dba1353580` | `01c1875d23` | Ready, changes requested | Direct |
 | [#1211](https://github.com/apache/opennlp/pull/1211) | Verified resource installer | `main` | `b1b38039f7` | `79dd6ec5f4` | Ready, review required | Direct |
