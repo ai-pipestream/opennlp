@@ -62,14 +62,16 @@ import static opennlp.tools.stemmer.light.StemmerUtil.endsWith;
 /**
  * Light Stemmer for Norwegian.
  *
- * <p>Parts of this stemmer are adapted from the {@link SwedishLightStemmer}; while the Swedish
- * algorithm has a pre-defined rule set and a corresponding corpus to validate against, the
- * Norwegian one is hand crafted.
+ * <p>Parts of this stemmer derive from {@link SwedishLightStemmer}. The Lucene source does not
+ * identify a published Norwegian reference corpus.
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are immutable and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are immutable, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/no/NorwegianLightStemmer.java">
+ *     Apache Lucene NorwegianLightStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class NorwegianLightStemmer extends AbstractCharArrayStemmer
@@ -92,14 +94,16 @@ public final class NorwegianLightStemmer extends AbstractCharArrayStemmer
     useNynorsk = varieties.contains(NorwegianVariety.NYNORSK);
   }
 
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+  /** Initializes a stemmer from validated variety flags. */
+  private NorwegianLightStemmer(boolean useBokmaal, boolean useNynorsk) {
+    this.useBokmaal = useBokmaal;
+    this.useNynorsk = useNynorsk;
+  }
+
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new NorwegianLightStemmer(useBokmaal, useNynorsk);
   }
 
   /** {@inheritDoc} */

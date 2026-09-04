@@ -64,26 +64,27 @@ import static opennlp.tools.stemmer.light.StemmerUtil.isVowel;
  *
  * <p>This stemmer implements the algorithm described in:
  * <a href="https://ceur-ws.org/Vol-1169/CLEF2003wn-adhoc-Savoy2003b.pdf"><i>Report on CLEF-2003
- * Monolingual Tracks</i></a> by Jacques Savoy (CLEF 2003 working notes). The inline suffix
- * literals mirror the suffix tables of the cited paper and are kept inline for fidelity to the
- * published algorithm.
+ * Monolingual Tracks</i></a> by Jacques Savoy (CLEF 2003 working notes). The suffix literals
+ * implement the tables in the paper.
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are stateless and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are stateless, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/fi/FinnishLightStemmer.java">
+ *     Apache Lucene FinnishLightStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     implements StemmerFactory {
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+
+  private static final String LLA_SUFFIX = "lla";
+
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new FinnishLightStemmer();
   }
 
   /** {@inheritDoc} */
@@ -110,6 +111,7 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the first suffix-removal pass and returns the remaining length. */
   private int step1(char[] s, int len) {
     if (len > 8) {
       if (endsWith(s, len, "kin")) return step1(s, len - 3);
@@ -123,9 +125,10 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the second suffix-removal pass and returns the remaining length. */
   private int step2(char[] s, int len) {
     if (len > 5) {
-      if (endsWith(s, len, "lla") || endsWith(s, len, "tse") || endsWith(s, len, "sti"))
+      if (endsWith(s, len, LLA_SUFFIX) || endsWith(s, len, "tse") || endsWith(s, len, "sti"))
         return len - 3;
 
       if (endsWith(s, len, "ni")) return len - 2;
@@ -136,6 +139,7 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the final suffix-removal pass and returns the remaining length. */
   private int step3(char[] s, int len) {
     if (len > 8) {
       if (endsWith(s, len, "nnen")) {
@@ -174,7 +178,7 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
 
       if (endsWith(s, len, "ssa")
           || endsWith(s, len, "sta")
-          || endsWith(s, len, "lla")
+          || endsWith(s, len, LLA_SUFFIX)
           || endsWith(s, len, "lta")
           || endsWith(s, len, "tta")
           || endsWith(s, len, "ksi")
@@ -200,6 +204,7 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the first terminal-character normalization and returns the remaining length. */
   private int norm1(char[] s, int len) {
     if (len > 5 && endsWith(s, len, "hde")) {
       s[len - 3] = 'k';
@@ -225,6 +230,7 @@ public final class FinnishLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the final terminal-character normalization and returns the remaining length. */
   private int norm2(char[] s, int len) {
     if (len > 8) {
       if (s[len - 1] == 'e' || s[len - 1] == 'o' || s[len - 1] == 'u') len--;

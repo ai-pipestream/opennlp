@@ -62,26 +62,24 @@ import static opennlp.tools.stemmer.light.StemmerUtil.endsWith;
  *
  * <p>This stemmer implements the "UniNE" algorithm in:
  * <a href="https://doi.org/10.1145/1141277.1141523"><i>Light Stemming Approaches for the French,
- * Portuguese, German and Hungarian Languages</i></a> by Jacques Savoy (ACM SAC 2006). The inline
- * suffix literals mirror the suffix tables of the cited paper and are kept inline for fidelity
- * to the published algorithm.
+ * Portuguese, German and Hungarian Languages</i></a> by Jacques Savoy (ACM SAC 2006). The suffix
+ * literals implement the tables in the paper.
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are stateless and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are stateless, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/pt/PortugueseLightStemmer.java">
+ *     Apache Lucene PortugueseLightStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class PortugueseLightStemmer extends AbstractCharArrayStemmer
     implements StemmerFactory {
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new PortugueseLightStemmer();
   }
 
   /** {@inheritDoc} */
@@ -144,6 +142,7 @@ public final class PortugueseLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Removes a plural suffix and returns the remaining length. */
   private int removeSuffix(char[] s, int len) {
     if (len > 4 && endsWith(s, len, "es"))
       switch (s[len - 3]) {
@@ -194,6 +193,7 @@ public final class PortugueseLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Normalizes feminine endings and returns the remaining length. */
   private int normFeminine(char[] s, int len) {
     if (len > 7
         && (endsWith(s, len, "inha") || endsWith(s, len, "iaca") || endsWith(s, len, "eira"))) {

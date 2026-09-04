@@ -266,9 +266,10 @@ distributed under the BSD license:
 	OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 The following license applies to the UniNE light and minimal stemmer
-algorithms in opennlp-core/opennlp-runtime, package
-opennlp.tools.stemmer.light. They are adapted from Apache Lucene, which
-based them on code by Jacques Savoy
+algorithms and their CLEF-derived parity fixtures in opennlp-core/opennlp-runtime,
+under opennlp.tools.stemmer.light. The English minimal and Spanish minimal
+stemmers and fixtures are excluded. The UniNE code is adapted from Apache
+Lucene, which based it on code by Jacques Savoy
 (http://members.unine.ch/jacques.savoy/clef/index.html), distributed
 under the BSD license:
 
@@ -692,20 +693,3 @@ opennlp/tools/util/normalizer/emoji-annotations.txt:
     not be used in advertising or otherwise to promote the sale, use or other
     dealings in these Data Files or Software without prior written
     authorization of the copyright holder.
-
-The following applies to the gazetteer data bundled inside the opennlp-geo
-jar (opennlp/geo/naturalearth-populated-places.txt). This table is a
-derivation of the Natural Earth "Populated Places" dataset
-(https://www.naturalearthdata.com/), which is dedicated to the public domain
-by its terms of use (https://www.naturalearthdata.com/about/terms-of-use/):
-
-    All versions of Natural Earth raster + vector map data found on this
-    website are in the public domain. You may use the maps in any manner,
-    including modifying the content and design, electronic dissemination,
-    and offset printing. The primary authors, Tom Patterson and Nathaniel
-    Vaughn Kelso, and all other contributors renounce all financial claim
-    to the maps and invites you to use them for personal, educational, and
-    commercial purposes.
-
-    No permission is needed to use Natural Earth. Crediting the authors is
-    unnecessary.

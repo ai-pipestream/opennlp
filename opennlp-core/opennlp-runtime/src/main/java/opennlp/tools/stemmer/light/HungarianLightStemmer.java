@@ -63,26 +63,24 @@ import static opennlp.tools.stemmer.light.StemmerUtil.isVowel;
  *
  * <p>This stemmer implements the "UniNE" algorithm in:
  * <a href="https://doi.org/10.1145/1141277.1141523"><i>Light Stemming Approaches for the French,
- * Portuguese, German and Hungarian Languages</i></a> by Jacques Savoy (ACM SAC 2006). The inline
- * suffix literals mirror the suffix tables of the cited paper and are kept inline for fidelity
- * to the published algorithm.
+ * Portuguese, German and Hungarian Languages</i></a> by Jacques Savoy (ACM SAC 2006). The suffix
+ * literals implement the tables in the paper.
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are stateless and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are stateless, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/hu/HungarianLightStemmer.java">
+ *     Apache Lucene HungarianLightStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class HungarianLightStemmer extends AbstractCharArrayStemmer
     implements StemmerFactory {
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new HungarianLightStemmer();
   }
 
   /** {@inheritDoc} */
@@ -121,6 +119,7 @@ public final class HungarianLightStemmer extends AbstractCharArrayStemmer
     return normalize(s, len);
   }
 
+  /** Removes case endings and returns the remaining length. */
   private int removeCase(char[] s, int len) {
     if (len > 6 && endsWith(s, len, "kent")) return len - 4;
 
@@ -174,6 +173,7 @@ public final class HungarianLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Removes possessive endings and returns the remaining length. */
   private int removePossessive(char[] s, int len) {
     if (len > 6) {
       if (!isVowel(s[len - 5])
@@ -229,6 +229,7 @@ public final class HungarianLightStemmer extends AbstractCharArrayStemmer
   }
 
   @SuppressWarnings("fallthrough")
+  /** Removes plural endings and returns the remaining length. */
   private int removePlural(char[] s, int len) {
     if (len > 3 && s[len - 1] == 'k')
       switch (s[len - 2]) {
@@ -242,6 +243,7 @@ public final class HungarianLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Normalizes terminal vowels and returns the remaining length. */
   private int normalize(char[] s, int len) {
     if (len > 3)
       switch (s[len - 1]) {

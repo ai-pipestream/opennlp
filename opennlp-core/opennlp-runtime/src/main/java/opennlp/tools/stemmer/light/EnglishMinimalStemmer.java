@@ -28,22 +28,21 @@ import opennlp.tools.stemmer.StemmerFactory;
  * <a href="https://doi.org/10.1002/(SICI)1097-4571(199101)42:1%3C7::AID-ASI2%3E3.0.CO;2-P">
  * <i>How Effective Is Suffixing?</i></a> by Donna Harman (JASIS 42(1), 1991).
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are stateless and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are stateless, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/en/EnglishMinimalStemmer.java">
+ *     Apache Lucene EnglishMinimalStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class EnglishMinimalStemmer extends AbstractCharArrayStemmer
     implements StemmerFactory {
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new EnglishMinimalStemmer();
   }
 
   /** {@inheritDoc} */

@@ -62,22 +62,21 @@ import opennlp.tools.stemmer.StemmerFactory;
  * <a href="https://doi.org/10.1145/1141277.1141523"><i>Light Stemming Approaches for the French,
  * Portuguese, German and Hungarian Languages</i></a> by Jacques Savoy (ACM SAC 2006).
  *
- * <p>Adapted from the identically named algorithm in Apache Lucene's analysis-common module.
- * Instances are stateless and safe for concurrent use by multiple threads; each instance is also
- * its own {@link StemmerFactory}. Input is expected to be lowercase, as produced by a
- * case-folding normalization step; the stemmer does not fold case itself.</p>
+ * <p>Based on Apache Lucene's implementation. Instances are stateless, thread-safe, and implement
+ * {@link StemmerFactory}. Input must use lowercase NFC; the stemmer does not apply case folding or
+ * Unicode normalization.</p>
+ *
+ * @see <a href="https://github.com/apache/lucene/blob/4965e8d4d960445a0522fae512c60c6d8f11fc29/lucene/analysis/common/src/java/org/apache/lucene/analysis/de/GermanLightStemmer.java">
+ *     Apache Lucene GermanLightStemmer</a>
+ * @since 3.0.0
  */
 @ThreadSafe
 public final class GermanLightStemmer extends AbstractCharArrayStemmer
     implements StemmerFactory {
-  /**
-   * {@inheritDoc}
-   *
-   * <p>Returns this instance rather than a new one; the stemmer is thread-safe.</p>
-   */
+  /** {@inheritDoc} */
   @Override
   public Stemmer newStemmer() {
-    return this;
+    return new GermanLightStemmer();
   }
 
   /** {@inheritDoc} */
@@ -115,6 +114,7 @@ public final class GermanLightStemmer extends AbstractCharArrayStemmer
     return step2(s, len);
   }
 
+  /** Returns whether {@code ch} can precede the suffix {@code st}. */
   private boolean stEnding(char ch) {
     switch (ch) {
       case 'b':
@@ -133,6 +133,7 @@ public final class GermanLightStemmer extends AbstractCharArrayStemmer
     }
   }
 
+  /** Applies the first suffix-removal pass and returns the remaining length. */
   private int step1(char[] s, int len) {
     if (len > 5 && s[len - 3] == 'e' && s[len - 2] == 'r' && s[len - 1] == 'n') return len - 3;
 
@@ -152,6 +153,7 @@ public final class GermanLightStemmer extends AbstractCharArrayStemmer
     return len;
   }
 
+  /** Applies the second suffix-removal pass and returns the remaining length. */
   private int step2(char[] s, int len) {
     if (len > 5 && s[len - 3] == 'e' && s[len - 2] == 's' && s[len - 1] == 't') return len - 3;
 
