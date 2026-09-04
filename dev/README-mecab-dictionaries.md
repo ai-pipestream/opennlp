@@ -17,7 +17,7 @@
 
 # CJK dictionaries for the lattice tokenizer
 
-The lattice tokenizer (`opennlp.tools.tokenize.lattice`) segments Japanese and Korean over a MeCab-format dictionary, and the unigram segmenter handles Chinese over a plain word-frequency lexicon. Apache OpenNLP bundles no dictionary data: you download a dictionary from the project of your choice, and each dictionary carries its own license. Read the license file inside the archive before use.
+The lattice tokenizer (`opennlp.tools.tokenize.lattice`) segments Japanese and Korean over a MeCab-format dictionary, and the unigram segmenter handles Chinese over a plain word-frequency lexicon. Apache OpenNLP bundles no dictionary data: you download a dictionary from the project of your choice, and each dictionary contains its own license. Read the license file inside the archive before use.
 
 ## Known MeCab-format dictionary projects
 
@@ -26,22 +26,21 @@ The lattice tokenizer (`opennlp.tools.tokenize.lattice`) segments Japanese and K
 | `mecab.ipadic` | IPADIC 2.7.0 | Japanese | EUC-JP |
 | `mecab.ko-dic` | mecab-ko-dic 2.1.1 | Korean | UTF-8 |
 
-Pinned download URLs and SHA-512 digests for those ids live in
-`opennlp/tools/util/dictionary-catalog.properties`. Both archives are
+Example download URLs and SHA-512 digests for those ids live in the test resource
+`opennlp-core/opennlp-runtime/src/test/resources/opennlp/tools/util/dictionary-catalog.properties`. Both archives are
 gzip-compressed tars; `MecabDictionaryInstaller` reads the ustar, pax, and GNU
 formats through `ResourceInstaller`.
 
 The installer extracts only the dictionary payload: the `*.csv` and `*.def` files a
 `MecabDictionary` reads, plus the `dicrc` configuration file the distributions ship
-alongside them. It flattens the entries into the target directory, and by the same
-flattening makes it impossible for an archive path to escape that directory. The
-returned count is the number of dictionary files extracted.
+alongside them. `ResourceInstaller` rejects paths outside the staging directory,
+then `MecabDictionaryInstaller` flattens the selected files into the target. The
+returned value is the number of dictionary files installed.
 
 ## Option A: opt-in catalog install
 
-Catalog URLs stay inactive until you set `-Dopennlp.download.remote=true` (or the
-equivalent system property in code). Applications supply the catalog, and OpenNLP
-never fetches its entries by default.
+Applications supply the catalog. Catalog URLs are inactive until you set
+`-Dopennlp.download.remote=true` or the equivalent system property in code.
 
 ```java
 import java.nio.file.Path;
@@ -70,7 +69,7 @@ int files = MecabDictionaryInstaller.install(
 
 A local `file:` URI may omit the digest:
 `MecabDictionaryInstaller.install(localArchive.toUri(), targetDirectory)`.
-Any other URI scheme requires the digest.
+HTTP and HTTPS sources require a digest. Other URI schemes are rejected.
 
 ## Size budgets for larger dictionaries
 
@@ -78,7 +77,7 @@ Fetching and unpacking go through `ResourceInstaller` and are bounded so a craft
 archive cannot fill the disk: by default one download is capped at 1 GiB, the
 unpacked payload at 4 GiB, and the archive at 100000 entries. IPADIC and
 mecab-ko-dic fit comfortably. For larger dictionaries, such as UniDic, raise the
-ceilings at JVM startup:
+limits at JVM startup:
 
 ```bash
 -Dopennlp.download.max.bytes=4294967296 \
@@ -86,8 +85,7 @@ ceilings at JVM startup:
 -Dopennlp.install.max.entries=200000
 ```
 
-Values must be positive counts; anything absent or invalid falls back to the
-default.
+Missing, invalid, and nonpositive property values use the default limits.
 
 ## Load and tokenize
 
@@ -125,4 +123,4 @@ UnigramSegmenter segmenter = UnigramSegmenter.load(Path.of("words.txt"));
 String[] tokens = segmenter.tokenize("\u6211\u6765\u5230\u5317\u4EAC\u5929\u5B89\u95E8");
 ```
 
-As with the dictionaries, the lexicon carries its own license; nothing is bundled.
+The lexicon archive includes its license; OpenNLP bundles no data.

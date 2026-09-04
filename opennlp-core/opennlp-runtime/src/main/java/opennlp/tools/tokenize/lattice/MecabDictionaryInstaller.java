@@ -38,10 +38,10 @@ import opennlp.tools.util.ResourceInstaller;
  * Fetches and unpacks a MeCab-format dictionary archive into a local directory, so the
  * dictionary is acquired by the user at install time and never ships with this library.
  * No dictionary data is bundled. Fetching, verification, and unpacking are done by
- * {@link ResourceInstaller} under {@link ResourceInstaller.Limits#DEFAULT} and its
- * startup property overrides: an {@code http} or {@code https} archive requires an
- * expected checksum, and the ustar, pax, and GNU tar formats are all read. Built-in
- * catalog URLs are opt-in via
+ * {@link ResourceInstaller} under {@link ResourceInstaller.Limits#DEFAULT}, including
+ * startup property overrides. An {@code http} or {@code https} archive requires an
+ * expected checksum, and the ustar, pax, and GNU tar formats are all read. Catalog
+ * installs are opt-in via
  * {@link #installFromCatalog(DictionaryCatalog, String, Path)}.
  *
  * <p>Only the dictionary payload is installed: the {@code *.csv} lexicon files and
@@ -51,8 +51,9 @@ import opennlp.tools.util.ResourceInstaller;
  * mecab-ko-dic, for example, nests {@code user-dic} templates whose numeric fields are
  * empty because they are input for {@code mecab-dict-index}, not loadable lexicon
  * data. Installed files are flattened to their base names. A file whose base name
- * already exists in the target is refused, so refreshing a dictionary means removing
- * its old files first.</p>
+ * already exists in the target is not replaced, so it must be removed before refreshing
+ * a dictionary. The archive unpacks into a hidden scratch directory beneath the target,
+ * on the target's filesystem, which is removed when the installation ends.</p>
  *
  * @since 3.0.0
  */
@@ -61,8 +62,11 @@ public final class MecabDictionaryInstaller {
   /** The deepest entry path, relative to the archive root, that holds payload. */
   private static final int MAX_PAYLOAD_DEPTH = 2;
 
+  /** The hidden scratch directory beneath the target that the archive unpacks into. */
+  private static final String SCRATCH_PREFIX = ".mecab-dict-";
+
+  /** Prevents construction of this utility class. */
   private MecabDictionaryInstaller() {
-    // This class exposes only static methods and is never instantiated.
   }
 
   /**
@@ -78,7 +82,7 @@ public final class MecabDictionaryInstaller {
    *         dictionary file, an installation limit is exceeded, or the target already
    *         contains one of the files.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null} or
-   *         {@code archive} is not a readable {@code file:} URI.
+   *         {@code archive} does not use the {@code file} scheme.
    */
   public static int install(URI archive, Path targetDirectory) throws IOException {
     return install(archive, targetDirectory, null);
@@ -87,7 +91,7 @@ public final class MecabDictionaryInstaller {
   /**
    * Downloads a dictionary archive when needed, verifies its checksum, and unpacks it
    * through {@link ResourceInstaller#install(URI, Path, String)}. A {@code file:} URI
-   * may omit the checksum and is then opened as trusted caller input.
+   * may omit the checksum.
    *
    * @param archive The archive location, a gzip-compressed tar. Must not be
    *                {@code null}.
@@ -103,7 +107,7 @@ public final class MecabDictionaryInstaller {
    *         exceeded, or the target already contains one of the files.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the URI is
    *         not supported by {@link ResourceInstaller}, or an http or https source
-   *         carries no checksum.
+   *         has no checksum.
    */
   public static int install(URI archive, Path targetDirectory, String expectedChecksum)
       throws IOException {
@@ -113,7 +117,7 @@ public final class MecabDictionaryInstaller {
     if (targetDirectory == null) {
       throw new IllegalArgumentException("targetDirectory must not be null");
     }
-    final Path unpacked = Files.createTempDirectory("mecab-dict-");
+    final Path unpacked = createScratch(targetDirectory);
     try {
       ResourceInstaller.install(archive, unpacked, expectedChecksum);
       return promoteDictionaryFiles(unpacked, targetDirectory);
@@ -148,7 +152,7 @@ public final class MecabDictionaryInstaller {
     if (targetDirectory == null) {
       throw new IllegalArgumentException("targetDirectory must not be null");
     }
-    final Path unpacked = Files.createTempDirectory("mecab-dict-");
+    final Path unpacked = createScratch(targetDirectory);
     try {
       catalog.install(dictionaryId, unpacked);
       return promoteDictionaryFiles(unpacked, targetDirectory);
@@ -158,8 +162,32 @@ public final class MecabDictionaryInstaller {
   }
 
   /**
+   * Creates the scratch directory the archive unpacks into. It lives beneath the target
+   * so the download, the unpacked tree, and the installed files share one filesystem
+   * and a large dictionary cannot fill the system temporary directory. Scratch
+   * directories that an earlier installation left behind, because its process ended
+   * before cleanup, are removed first.
+   *
+   * @param targetDirectory The directory to install into; created when absent.
+   * @return The new scratch directory. Not {@code null}.
+   * @throws IOException Thrown if a directory cannot be created or a stale one removed.
+   */
+  private static Path createScratch(Path targetDirectory) throws IOException {
+    Files.createDirectories(targetDirectory);
+    final List<Path> stale;
+    try (Stream<Path> entries = Files.list(targetDirectory)) {
+      stale = entries.filter(entry -> entry.getFileName().toString().startsWith(SCRATCH_PREFIX)
+          && Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)).toList();
+    }
+    for (final Path entry : stale) {
+      deleteRecursively(entry);
+    }
+    return Files.createTempDirectory(targetDirectory, SCRATCH_PREFIX);
+  }
+
+  /**
    * Moves the dictionary payload files from an unpacked archive tree into the target
-   * directory, flattened to their base names. Every destination is checked before the
+   * directory, flattened to their base names. All destinations are checked before the
    * first move, so a collision leaves the target unchanged.
    *
    * @param unpacked The directory the archive was unpacked into.
@@ -171,7 +199,6 @@ public final class MecabDictionaryInstaller {
    */
   private static int promoteDictionaryFiles(Path unpacked, Path targetDirectory)
       throws IOException {
-    Files.createDirectories(targetDirectory);
     final List<Path> candidates;
     try (Stream<Path> files = Files.walk(unpacked, MAX_PAYLOAD_DEPTH)) {
       candidates = files.filter(Files::isRegularFile).toList();

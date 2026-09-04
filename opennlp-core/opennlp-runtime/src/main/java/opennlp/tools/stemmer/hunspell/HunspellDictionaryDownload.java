@@ -32,14 +32,15 @@ import opennlp.tools.util.DictionaryCatalog;
  */
 public final class HunspellDictionaryDownload {
 
+  /** Prevents construction of this utility class. */
   private HunspellDictionaryDownload() {
   }
 
   /**
    * Downloads the cataloged {@code .aff}, {@code .dic}, and readme files for
-   * {@code dictionaryId} into {@code targetDirectory}, each stored under its source
-   * name, for example {@code en_US.aff}. A file that already exists in the target is
-   * refused, so refreshing a dictionary means removing its old files first.
+   * {@code dictionaryId} into {@code targetDirectory}. Each file uses its configured
+   * name or source name, for example {@code en_US.aff}. Existing target files are not
+   * replaced, so they must be removed before refreshing a dictionary.
    *
    * @param catalog The application-supplied catalog. Must not be {@code null}.
    * @param dictionaryId The catalog dictionary name, for example {@code en_US}.

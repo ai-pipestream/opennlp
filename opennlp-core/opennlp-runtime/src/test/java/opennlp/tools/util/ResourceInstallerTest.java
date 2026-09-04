@@ -21,6 +21,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
@@ -28,6 +31,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
@@ -42,6 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.archive.TarArchives;
 
@@ -62,14 +67,20 @@ public class ResourceInstallerTest {
       "checksum must be 64 (SHA-256) or 128 (SHA-512) hex characters; pass null to skip";
   private static final String ESCAPE_ERROR =
       "archive entry escapes the target directory: ";
-  private static final String EXPANSION_CEILING_ERROR =
-      "expanded content exceeds the ceiling of " + KIBIBYTE + " bytes";
-  private static final String ENTRY_CEILING_ERROR =
-      "archive entry count exceeds the ceiling of 2 entries";
+  private static final String EXPANSION_LIMIT_ERROR =
+      "expanded content exceeds the limit of " + KIBIBYTE + " bytes";
+  private static final String ENTRY_LIMIT_ERROR =
+      "archive entry count exceeds the limit of 2 entries";
   private static final String COLLISION_ERROR = "target already contains: ";
+  private static final String DUPLICATE_ENTRY_ERROR =
+      "archive contains duplicate file entry: ";
+  private static final String RATIO_ERROR =
+      "content expands beyond 100 times its compressed size";
+  private static final String ZIP_MISMATCH_ERROR =
+      "zip local headers and central directory list different files";
 
   /** The property name used by the parser tests; never read by the installer. */
-  private static final String TEST_CEILING_PROPERTY = "opennlp.test.ceiling";
+  private static final String TEST_LIMIT_PROPERTY = "opennlp.test.limit";
 
   /**
    * Installs the given file under the default limits and asserts that it fails with the
@@ -120,25 +131,20 @@ public class ResourceInstallerTest {
 
   /**
    * Builds installation limits with generous timeouts and redirect allowance but the
-   * given size ceilings, so ceiling tests state only the values they exercise.
+   * given size limits, so limit tests state only the values they exercise.
    *
-   * @param maxDownloadBytes The download ceiling in bytes.
-   * @param maxExpandedBytes The expansion ceiling in bytes.
+   * @param maxDownloadBytes The download limit in bytes.
+   * @param maxExpandedBytes The expansion limit in bytes.
    * @return The limits. Never {@code null}.
    */
-  private static ResourceInstaller.Limits ceilings(long maxDownloadBytes,
+  private static ResourceInstaller.Limits limits(long maxDownloadBytes,
       long maxExpandedBytes) {
     return new ResourceInstaller.Limits(Duration.ofSeconds(10), Duration.ofSeconds(10),
         5, maxDownloadBytes, maxExpandedBytes,
-        ResourceInstaller.Limits.DEFAULT.maxEntries());
+        ResourceInstaller.Limits.DEFAULT.maxEntries(),
+        ResourceInstaller.Limits.DEFAULT.maxExpansionRatio());
   }
 
-  /**
-   * Demonstrates the intended end-to-end flow: package a small corpus as tar.gz,
-   * compute its real SHA-256, install it through the public API, and verify that
-   * exactly the archived files, and nothing else, appear on disk with their exact
-   * content.
-   */
   @Test
   void testInstallEndToEndUsageExample(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -195,10 +201,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that the hex digest comparison is case-insensitive: an uppercase rendering
-   * of the correct digest passes verification and the archive is unpacked.
-   */
   @Test
   void testChecksumComparisonIgnoresHexLetterCase(@TempDir Path source,
       @TempDir Path target) throws Exception {
@@ -216,6 +218,21 @@ public class ResourceInstallerTest {
   }
 
   @Test
+  void testChecksumIgnoresUnicodeWhitespace(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final byte[] archive = tarGz(new String[][] {{"corpus/data.txt", "verified"}});
+    final Path file = source.resolve("unicode-space.tar.gz");
+    Files.write(file, archive);
+    final String emSpace = Character.toString(0x2003);
+
+    ResourceInstaller.install(file.toUri(), target,
+        emSpace + sha256(archive) + emSpace);
+
+    Assertions.assertEquals("verified",
+        Files.readString(target.resolve("corpus/data.txt")));
+  }
+
+  @Test
   void testEscapingEntriesAreRejected(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final byte[] archive = tarGz(new String[][] {{"../escape.txt", "bad"}});
@@ -226,10 +243,6 @@ public class ResourceInstallerTest {
     Assertions.assertTrue(Files.notExists(target.getParent().resolve("escape.txt")));
   }
 
-  /**
-   * Proves that a tar entry with an absolute name is rejected before anything is
-   * written, so a hostile archive cannot place files at arbitrary locations.
-   */
   @Test
   void testAbsoluteTarEntryIsRejected(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -243,10 +256,18 @@ public class ResourceInstallerTest {
     Assertions.assertTrue(Files.notExists(Path.of("/absolute-escape-attempt")));
   }
 
-  /**
-   * Proves that the escape guard also covers zip content: an entry whose name climbs
-   * out of the target directory is rejected and nothing is written.
-   */
+  @Test
+  void testEscapingTarDirectoryEntryIsRejected(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    TarArchives.entry(tar, "../outside/", new byte[0], TarArchives.TYPE_DIRECTORY);
+    tar.write(new byte[TERMINATOR_SIZE]);
+    final Path file = source.resolve("directory-escape.tar.gz");
+    Files.write(file, gzip(tar.toByteArray()));
+
+    assertInstallFails(file, target, ESCAPE_ERROR + "../outside/");
+  }
+
   @Test
   void testZipEntryWithTraversalIsRejected(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -261,6 +282,20 @@ public class ResourceInstallerTest {
 
     assertInstallFails(file, target, ESCAPE_ERROR + "../zip-escape.txt");
     Assertions.assertTrue(Files.notExists(target.getParent().resolve("zip-escape.txt")));
+  }
+
+  @Test
+  void testEscapingZipDirectoryEntryIsRejected(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("../outside/"));
+      zip.closeEntry();
+    }
+    final Path file = source.resolve("directory-escape.zip");
+    Files.write(file, out.toByteArray());
+
+    assertInstallFails(file, target, ESCAPE_ERROR + "../outside/");
   }
 
   @Test
@@ -281,11 +316,36 @@ public class ResourceInstallerTest {
   }
 
   /**
-   * Proves the OpenNLP model convention: a source named {@code *.bin} is stored
-   * verbatim even though every OpenNLP model file is itself a zip archive, so
-   * the install delivers the packed model a {@code *Model} loader expects, not
-   * its unpacked innards.
+   * Checks that ZIP validation works when the target uses a non-default file system.
+   *
+   * @param source The directory containing the source ZIP file.
+   * @param scratch The directory containing the target file system.
+   * @throws IOException Thrown if the fixture or installation cannot be read or written.
    */
+  @Test
+  void testZipUnpacksIntoANonDefaultFileSystem(@TempDir Path source,
+      @TempDir Path scratch) throws IOException {
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+      zip.putNextEntry(new ZipEntry("payload/data.txt"));
+      zip.write("content".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    final Path archive = source.resolve("payload.zip");
+    Files.write(archive, bytes.toByteArray());
+    final URI targetUri = URI.create("jar:" + scratch.resolve("target.zip").toUri());
+
+    try (FileSystem fileSystem =
+             FileSystems.newFileSystem(targetUri, Map.of("create", "true"))) {
+      final Path target = fileSystem.getPath("/installed");
+
+      ResourceInstaller.install(archive.toUri(), target);
+
+      Assertions.assertEquals("content",
+          Files.readString(target.resolve("payload/data.txt")));
+    }
+  }
+
   @Test
   void testModelBinIsStoredPacked(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -322,6 +382,18 @@ public class ResourceInstallerTest {
   }
 
   @Test
+  void testPlainGzipWithoutABaseNameUsesResource(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final Path file = source.resolve(".gz");
+    Files.write(file, gzip("word\tlemma\n".getBytes(StandardCharsets.UTF_8)));
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertEquals("word\tlemma\n",
+        Files.readString(target.resolve("resource")));
+  }
+
+  @Test
   void testPlainFilesAreStoredUnderTheirSourceName(@TempDir Path source,
       @TempDir Path target) throws Exception {
     final Path file = source.resolve("frequencies.txt");
@@ -333,24 +405,28 @@ public class ResourceInstallerTest {
   }
 
   /**
-   * Proves that every argument the public API rejects is rejected with its own message,
-   * before anything is fetched.
+   * Checks each required installation parameter.
+   *
+   * @param argument The invalid method parameter.
+   * @param target A scratch directory managed by the test framework.
    */
-  @Test
-  void testInvalidArguments(@TempDir Path target) {
-    // assertAll so an unvalidated argument does not hide the others.
-    Assertions.assertAll(
-        () -> assertArgumentError("source must not be null",
-            () -> ResourceInstaller.install(null, target)),
-        () -> assertArgumentError("targetDirectory must not be null",
-            () -> ResourceInstaller.install(target.toUri(), null)),
-        () -> assertArgumentError("limits must not be null",
-            () -> ResourceInstaller.install(target.toUri(), target, null, null)));
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"source", "targetDirectory", "limits"})
+  void testInvalidArguments(String argument, @TempDir Path target) {
+    final Executable call = switch (argument) {
+      case "source" -> () -> ResourceInstaller.install(null, target);
+      case "targetDirectory" -> () -> ResourceInstaller.install(target.toUri(), null);
+      case "limits" ->
+          () -> ResourceInstaller.install(target.toUri(), target, null, null);
+      default -> throw new IllegalArgumentException("unknown argument: " + argument);
+    };
+
+    assertArgumentError(argument + " must not be null", call);
   }
 
   /**
-   * Enumerates checksum arguments that are neither a valid SHA-256 nor a valid SHA-512
-   * digest, so a typo cannot masquerade as a checksum mismatch.
+   * Supplies checksum arguments that are neither a valid SHA-256 nor a valid SHA-512
+   * digest.
    *
    * @return One case per rejected digest. Never {@code null}.
    */
@@ -382,10 +458,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(message, thrown.getMessage());
   }
 
-  /**
-   * Proves that a 128-character hex digest selects SHA-512 verification: the correct
-   * SHA-512 of the archive passes and the content is installed.
-   */
   @Test
   void testSha512ChecksumVerifies(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -414,10 +486,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves staged installation for tar content: when a later entry escapes the target
-   * directory, the earlier entry that already unpacked cleanly must not appear either.
-   */
   @Test
   void testFailedTarUnpackLeavesTargetEmpty(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -430,10 +498,6 @@ public class ResourceInstallerTest {
     assertInstallFails(file, target, ESCAPE_ERROR + "../escape.txt");
   }
 
-  /**
-   * Proves staged installation for zip content: a traversal entry after a clean one
-   * leaves the target without the clean entry as well.
-   */
   @Test
   void testFailedZipUnpackLeavesTargetEmpty(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -452,10 +516,142 @@ public class ResourceInstallerTest {
     assertInstallFails(file, target, ESCAPE_ERROR + "../zip-escape.txt");
   }
 
-  /**
-   * Proves staged installation for a truncated archive: the tar breaks off inside its
-   * second entry header, and the first entry that unpacked cleanly must not appear.
-   */
+  @Test
+  void testDuplicateTarFileEntryIsRejected(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    tarEntry(tar, "corpus/data.txt", "first".getBytes(StandardCharsets.UTF_8));
+    tarEntry(tar, "corpus/data.txt", "second".getBytes(StandardCharsets.UTF_8));
+    tar.write(new byte[TERMINATOR_SIZE]);
+    final Path file = source.resolve("duplicate.tar.gz");
+    Files.write(file, gzip(tar.toByteArray()));
+
+    assertInstallFails(file, target, DUPLICATE_ENTRY_ERROR + "corpus/data.txt");
+  }
+
+  @Test
+  void testEquivalentZipFileEntriesAreRejected(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("corpus/data.txt"));
+      zip.write("first".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+      zip.putNextEntry(new ZipEntry("corpus/./data.txt"));
+      zip.write("second".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    final Path file = source.resolve("duplicate.zip");
+    Files.write(file, out.toByteArray());
+
+    assertInstallFails(file, target, DUPLICATE_ENTRY_ERROR + "corpus/./data.txt");
+  }
+
+  @Test
+  void testPlainFileBeginningWithPkIsStored(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final byte[] content = "PK plain dictionary".getBytes(StandardCharsets.UTF_8);
+    final Path file = source.resolve("dictionary.dat");
+    Files.write(file, content);
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertArrayEquals(content,
+        Files.readAllBytes(target.resolve("dictionary.dat")));
+  }
+
+  @Test
+  void testTruncatedZipHeaderIsRejected(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final Path file = source.resolve("truncated.zip");
+    Files.write(file, new byte[] {'P', 'K', 3, 4});
+
+    assertInstallFails(file, target, "malformed zip archive");
+  }
+
+  @Test
+  void testZipWithoutCentralDirectoryIsRejected(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("corpus/data.txt"));
+      zip.write("content".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    final byte[] complete = out.toByteArray();
+    int centralDirectory = -1;
+    for (int i = 0; i <= complete.length - 4; i++) {
+      if (complete[i] == 'P' && complete[i + 1] == 'K'
+          && complete[i + 2] == 1 && complete[i + 3] == 2) {
+        centralDirectory = i;
+        break;
+      }
+    }
+    Assertions.assertTrue(centralDirectory > 0);
+    final Path file = source.resolve("missing-central-directory.zip");
+    Files.write(file, Arrays.copyOf(complete, centralDirectory));
+
+    final IOException thrown = Assertions.assertThrows(IOException.class,
+        () -> ResourceInstaller.install(file.toUri(), target));
+    Assertions.assertEquals("malformed zip archive", thrown.getMessage());
+    Assertions.assertEquals(List.of(), installedFiles(target));
+  }
+
+  @Test
+  void testTruncatedEmptyZipHeaderIsRejected(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final Path file = source.resolve("truncated-empty.zip");
+    Files.write(file, new byte[] {'P', 'K', 5, 6});
+
+    assertInstallFails(file, target, "malformed zip archive");
+  }
+
+  @Test
+  void testValidEmptyZipInstallsNothing(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final byte[] endHeader = new byte[22];
+    endHeader[0] = 'P';
+    endHeader[1] = 'K';
+    endHeader[2] = 5;
+    endHeader[3] = 6;
+    final Path file = source.resolve("empty.zip");
+    Files.write(file, endHeader);
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertEquals(List.of(), installedFiles(target));
+  }
+
+  @Test
+  void testValidEmptyTarGzInstallsNothing(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final Path file = source.resolve("empty.tar.gz");
+    Files.write(file, gzip(new byte[TERMINATOR_SIZE]));
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertEquals(List.of(), installedFiles(target));
+  }
+
+  @Test
+  void testInvalidZipEntryPathLeavesNoStagingFiles(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("good.txt"));
+      zip.write("good".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+      zip.putNextEntry(new ZipEntry("bad\0name.txt"));
+      zip.write("bad".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    final Path file = source.resolve("invalid-path.zip");
+    Files.write(file, out.toByteArray());
+
+    assertInstallFails(file, target,
+        "archive entry has an invalid path: bad\0name.txt");
+  }
+
   @Test
   void testTruncatedTarLeavesTargetEmpty(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -473,10 +669,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a failed installation does not disturb files that already existed in
-   * the target directory before the attempt.
-   */
   @Test
   void testFailedInstallKeepsPreexistingTargetContent(@TempDir Path source,
       @TempDir Path target) throws Exception {
@@ -493,10 +685,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals("keep", Files.readString(target.resolve("existing.txt")));
   }
 
-  /**
-   * Proves that neither a successful nor a failed installation leaves hidden staging
-   * directories behind in the target.
-   */
   @Test
   void testInstallationLeavesNoStagingResidue(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -518,7 +706,7 @@ public class ResourceInstallerTest {
   }
 
   /**
-   * Enumerates invalid {@code Limits} constructions with the argument error each one
+   * Supplies invalid {@code Limits} constructions with the argument error each one
    * must raise.
    *
    * @return One case per invalid argument. Never {@code null}.
@@ -527,29 +715,50 @@ public class ResourceInstallerTest {
     final Duration valid = Duration.ofSeconds(10);
     return Stream.of(
         Arguments.of("null connectTimeout", (Executable)
-            () -> new ResourceInstaller.Limits(null, valid, 5, 1024, 1024, 10),
-            "connectTimeout must be positive"),
+            () -> new ResourceInstaller.Limits(null, valid, 5, 1024, 1024, 10, 100),
+            "connectTimeout must not be null"),
         Arguments.of("zero connectTimeout", (Executable)
-            () -> new ResourceInstaller.Limits(Duration.ZERO, valid, 5, 1024, 1024, 10),
+            () -> new ResourceInstaller.Limits(Duration.ZERO, valid, 5, 1024, 1024, 10, 100),
             "connectTimeout must be positive"),
         Arguments.of("null readTimeout", (Executable)
-            () -> new ResourceInstaller.Limits(valid, null, 5, 1024, 1024, 10),
-            "readTimeout must be positive"),
+            () -> new ResourceInstaller.Limits(valid, null, 5, 1024, 1024, 10, 100),
+            "readTimeout must not be null"),
         Arguments.of("negative readTimeout", (Executable)
             () -> new ResourceInstaller.Limits(valid, Duration.ofSeconds(-1),
-                5, 1024, 1024, 10),
+                5, 1024, 1024, 10, 100),
             "readTimeout must be positive"),
         Arguments.of("negative maxRedirects", (Executable)
-            () -> new ResourceInstaller.Limits(valid, valid, -1, 1024, 1024, 10),
+            () -> new ResourceInstaller.Limits(valid, valid, -1, 1024, 1024, 10, 100),
             "maxRedirects must not be negative"),
         Arguments.of("zero maxDownloadBytes", (Executable)
-            () -> new ResourceInstaller.Limits(valid, valid, 5, 0, 1024, 10),
+            () -> new ResourceInstaller.Limits(valid, valid, 5, 0, 1024, 10, 100),
             "maxDownloadBytes must be positive"),
         Arguments.of("zero maxExpandedBytes", (Executable)
-            () -> new ResourceInstaller.Limits(valid, valid, 5, 1024, 0, 10),
+            () -> new ResourceInstaller.Limits(valid, valid, 5, 1024, 0, 10, 100),
             "maxExpandedBytes must be positive"),
         Arguments.of("zero maxEntries", (Executable)
-            () -> new ResourceInstaller.Limits(valid, valid, 5, 1024, 1024, 0),
+            () -> new ResourceInstaller.Limits(valid, valid, 5, 1024, 1024, 0, 100),
+            "maxEntries must be positive"),
+        Arguments.of("zero maxExpansionRatio", (Executable)
+            () -> new ResourceInstaller.Limits(valid, valid, 5, 1024, 1024, 10, 0),
+            "maxExpansionRatio must be positive"),
+        Arguments.of("builder zero connectTimeout", (Executable) () ->
+            ResourceInstaller.Limits.builder().connectTimeout(Duration.ZERO).build(),
+            "connectTimeout must be positive"),
+        Arguments.of("builder null readTimeout", (Executable) () ->
+            ResourceInstaller.Limits.builder().readTimeout(null).build(),
+            "readTimeout must not be null"),
+        Arguments.of("builder negative maxRedirects", (Executable) () ->
+            ResourceInstaller.Limits.builder().maxRedirects(-1).build(),
+            "maxRedirects must not be negative"),
+        Arguments.of("builder zero maxDownloadBytes", (Executable) () ->
+            ResourceInstaller.Limits.builder().maxDownloadBytes(0).build(),
+            "maxDownloadBytes must be positive"),
+        Arguments.of("builder negative maxExpandedBytes", (Executable) () ->
+            ResourceInstaller.Limits.builder().maxExpandedBytes(-1).build(),
+            "maxExpandedBytes must be positive"),
+        Arguments.of("builder zero maxEntries", (Executable) () ->
+            ResourceInstaller.Limits.builder().maxEntries(0).build(),
             "maxEntries must be positive"));
   }
 
@@ -562,26 +771,18 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(message, thrown.getMessage());
   }
 
-  /**
-   * Proves the download ceiling on a file source: a fetch larger than the configured
-   * ceiling is rejected and nothing is installed.
-   */
   @Test
-  void testDownloadCeilingRejectsOversizedSource(@TempDir Path source,
+  void testDownloadLimitRejectsOversizedSource(@TempDir Path source,
       @TempDir Path target) throws Exception {
     final Path file = source.resolve("large.txt");
     Files.write(file, new byte[8192]);
 
-    assertInstallFails(file, target, ceilings(KIBIBYTE, MEBIBYTE),
-        "download exceeds the ceiling of " + KIBIBYTE + " bytes");
+    assertInstallFails(file, target, limits(KIBIBYTE, MEBIBYTE),
+        "download exceeds the limit of " + KIBIBYTE + " bytes");
   }
 
-  /**
-   * Proves the expansion ceiling on tar content: a small compressed archive whose
-   * entries expand beyond the ceiling is rejected and nothing is installed.
-   */
   @Test
-  void testTarExpansionCeilingRejectsArchive(@TempDir Path source, @TempDir Path target)
+  void testTarExpansionLimitRejectsArchive(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final ByteArrayOutputStream tar = new ByteArrayOutputStream();
     tarEntry(tar, "bomb/zeros.bin", new byte[64 * 1024]);
@@ -589,17 +790,43 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("bomb.tar.gz");
     Files.write(file, gzip(tar.toByteArray()));
 
-    assertInstallFails(file, target, ceilings(MEBIBYTE, KIBIBYTE),
-        EXPANSION_CEILING_ERROR);
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
   }
 
-  /**
-   * Proves that tar metadata is part of the expanded stream budget. A gzip stream made
-   * only of highly compressible pax metadata must not bypass the expansion ceiling just
-   * because it installs no regular-file content.
-   */
   @Test
-  void testTarMetadataCountsTowardExpansionCeiling(@TempDir Path source,
+  void testTarExpansionLimitCountsBytesAfterTheTerminator(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    tarEntry(tar, "corpus/data.txt", "content".getBytes(StandardCharsets.UTF_8));
+    tar.write(new byte[TERMINATOR_SIZE]);
+    tar.write(new byte[64 * 1024]);
+    final Path file = source.resolve("trailing-data.tar.gz");
+    Files.write(file, gzip(tar.toByteArray()));
+
+    assertInstallFails(file, target, limits(MEBIBYTE, 16 * KIBIBYTE),
+        "expanded content exceeds the limit of " + 16 * KIBIBYTE + " bytes");
+  }
+
+  @Test
+  void testTarGzipTrailerIsVerified(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    tarEntry(tar, "corpus/data.txt", "content".getBytes(StandardCharsets.UTF_8));
+    tar.write(new byte[TERMINATOR_SIZE]);
+    tar.write(new byte[64 * 1024]);
+    final byte[] archive = gzip(tar.toByteArray());
+    archive[archive.length - 8] ^= 1;
+    final Path file = source.resolve("bad-trailer.tar.gz");
+    Files.write(file, archive);
+
+    Assertions.assertThrows(IOException.class,
+        () -> ResourceInstaller.install(file.toUri(), target));
+    Assertions.assertEquals(List.of(), installedFiles(target));
+  }
+
+  @Test
+  void testTarMetadataCountsTowardExpansionLimit(@TempDir Path source,
       @TempDir Path target) throws Exception {
     final ByteArrayOutputStream tar = new ByteArrayOutputStream();
     TarArchives.entry(tar, "pax_global_header",
@@ -608,16 +835,12 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("metadata-bomb.tar.gz");
     Files.write(file, gzip(tar.toByteArray()));
 
-    assertInstallFails(file, target, ceilings(MEBIBYTE, KIBIBYTE),
-        EXPANSION_CEILING_ERROR);
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
   }
 
-  /**
-   * Proves the expansion ceiling on zip content: highly compressible entries that
-   * expand beyond the ceiling are rejected and nothing is installed.
-   */
   @Test
-  void testZipExpansionCeilingRejectsArchive(@TempDir Path source, @TempDir Path target)
+  void testZipExpansionLimitRejectsArchive(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     try (ZipOutputStream zip = new ZipOutputStream(out)) {
@@ -628,47 +851,49 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("bomb.zip");
     Files.write(file, out.toByteArray());
 
-    assertInstallFails(file, target, ceilings(MEBIBYTE, KIBIBYTE),
-        EXPANSION_CEILING_ERROR);
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
   }
 
-  /**
-   * Proves the expansion ceiling on plain gzip content: a small gzip file whose
-   * decompressed form exceeds the ceiling is rejected and nothing is installed.
-   */
   @Test
-  void testPlainGzipExpansionCeilingRejectsFile(@TempDir Path source,
+  void testZipDirectoryContentCountsTowardExpansionLimit(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("payload/"));
+      zip.write(new byte[64 * 1024]);
+      zip.closeEntry();
+    }
+    final Path file = source.resolve("directory-content.zip");
+    Files.write(file, out.toByteArray());
+
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
+  }
+
+  @Test
+  void testPlainGzipExpansionLimitRejectsFile(@TempDir Path source,
       @TempDir Path target) throws Exception {
     final Path file = source.resolve("zeros.bin.gz");
     Files.write(file, gzip(new byte[64 * 1024]));
 
-    assertInstallFails(file, target, ceilings(MEBIBYTE, KIBIBYTE),
-        EXPANSION_CEILING_ERROR);
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
   }
 
-  /**
-   * Proves that an installation within custom ceilings succeeds, so the limits
-   * overload is usable for its intended purpose and not only for rejection.
-   */
   @Test
-  void testInstallWithinCustomCeilingsSucceeds(@TempDir Path source, @TempDir Path target)
+  void testInstallWithinCustomLimitsSucceeds(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final byte[] archive = tarGz(new String[][] {{"corpus/data.txt", "small"}});
     final Path file = source.resolve("small.tar.gz");
     Files.write(file, archive);
 
     ResourceInstaller.install(file.toUri(), target, sha256(archive),
-        ceilings(MEBIBYTE, MEBIBYTE));
+        limits(MEBIBYTE, MEBIBYTE));
 
     Assertions.assertEquals("small", Files.readString(target.resolve("corpus/data.txt")));
   }
 
-  /**
-   * Pins the default limits the two- and three-argument {@code install} methods
-   * apply, so a change to them cannot slip through unnoticed. The three ceiling
-   * defaults read their system properties once at class load; the build sets none of
-   * them, so the built-in values are what this test observes.
-   */
   @Test
   void testDefaultLimitsArePinned() {
     final ResourceInstaller.Limits defaults = ResourceInstaller.Limits.DEFAULT;
@@ -678,45 +903,39 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(1L << 30, defaults.maxDownloadBytes());
     Assertions.assertEquals(4L << 30, defaults.maxExpandedBytes());
     Assertions.assertEquals(100_000L, defaults.maxEntries());
+    Assertions.assertEquals(100L, defaults.maxExpansionRatio());
   }
 
-  /**
-   * Pins the system property names an operator can set at startup to override the
-   * default ceilings, so a rename cannot silently orphan deployed configurations.
-   */
   @Test
-  void testCeilingPropertyNamesArePinned() {
+  void testLimitPropertyNames() {
     Assertions.assertEquals("opennlp.download.max.bytes",
         ResourceInstaller.Limits.MAX_DOWNLOAD_BYTES_PROPERTY);
     Assertions.assertEquals("opennlp.install.max.total.bytes",
         ResourceInstaller.Limits.MAX_EXPANDED_BYTES_PROPERTY);
     Assertions.assertEquals("opennlp.install.max.entries",
         ResourceInstaller.Limits.MAX_ENTRIES_PROPERTY);
+    Assertions.assertEquals("opennlp.install.max.expansion.ratio",
+        ResourceInstaller.Limits.MAX_EXPANSION_RATIO_PROPERTY);
   }
 
-  /**
-   * Proves that a set ceiling property is read, with surrounding whitespace accepted,
-   * through the parser behind the {@code DEFAULT} ceilings. The parser is tested
-   * directly because {@code DEFAULT} captures its properties once at class load.
-   */
   @Test
-  void testCeilingPropertyOverrideIsRead() {
-    System.setProperty(TEST_CEILING_PROPERTY, " 123 ");
+  void testLimitPropertyOverrideIsRead() {
+    System.setProperty(TEST_LIMIT_PROPERTY, " 123 ");
     try {
       Assertions.assertEquals(123L,
-          ResourceInstaller.Limits.longProperty(TEST_CEILING_PROPERTY, 7L));
+          ResourceInstaller.Limits.longProperty(TEST_LIMIT_PROPERTY, 7L));
     } finally {
-      System.clearProperty(TEST_CEILING_PROPERTY);
+      System.clearProperty(TEST_LIMIT_PROPERTY);
     }
   }
 
   /**
-   * Enumerates property values that must fall back to the built-in default: absent,
+   * Supplies property values that must fall back to the built-in default: absent,
    * not a number, zero, negative, and empty.
    *
    * @return One case per unusable value. Never {@code null}.
    */
-  static Stream<Arguments> unusableCeilingProperties() {
+  static Stream<Arguments> unusableLimitProperties() {
     return Stream.of(
         Arguments.of("absent", null),
         Arguments.of("not a number", "abc"),
@@ -726,38 +945,34 @@ public class ResourceInstallerTest {
   }
 
   @ParameterizedTest(name = "{0}")
-  @MethodSource("unusableCeilingProperties")
-  void testCeilingPropertyFallsBackOnUnusableValues(String label, String value) {
+  @MethodSource("unusableLimitProperties")
+  void testLimitPropertyFallsBackOnUnusableValues(String label, String value) {
     if (value == null) {
-      System.clearProperty(TEST_CEILING_PROPERTY);
+      System.clearProperty(TEST_LIMIT_PROPERTY);
     } else {
-      System.setProperty(TEST_CEILING_PROPERTY, value);
+      System.setProperty(TEST_LIMIT_PROPERTY, value);
     }
     try {
       Assertions.assertEquals(7L,
-          ResourceInstaller.Limits.longProperty(TEST_CEILING_PROPERTY, 7L));
+          ResourceInstaller.Limits.longProperty(TEST_LIMIT_PROPERTY, 7L));
     } finally {
-      System.clearProperty(TEST_CEILING_PROPERTY);
+      System.clearProperty(TEST_LIMIT_PROPERTY);
     }
   }
 
   /**
-   * Builds installation limits with the given entry ceiling and otherwise default
+   * Builds installation limits with the given entry limit and otherwise default
    * values, so entry-count tests state only the value they exercise.
    *
-   * @param maxEntries The entry ceiling.
+   * @param maxEntries The entry limit.
    * @return The limits. Never {@code null}.
    */
-  private static ResourceInstaller.Limits entryCeiling(long maxEntries) {
+  private static ResourceInstaller.Limits entryLimit(long maxEntries) {
     return ResourceInstaller.Limits.builder().maxEntries(maxEntries).build();
   }
 
-  /**
-   * Proves the entry-count ceiling on tar content: an archive with more entries than
-   * the ceiling is rejected and nothing is installed.
-   */
   @Test
-  void testTarEntryCountCeilingRejectsArchive(@TempDir Path source, @TempDir Path target)
+  void testTarEntryCountLimitRejectsArchive(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final byte[] archive = tarGz(new String[][] {
         {"corpus/one.txt", "1"},
@@ -766,15 +981,35 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("many.tar.gz");
     Files.write(file, archive);
 
-    assertInstallFails(file, target, entryCeiling(2),
-        ENTRY_CEILING_ERROR);
+    assertInstallFails(file, target, entryLimit(2),
+        ENTRY_LIMIT_ERROR);
   }
 
   /**
-   * Proves the entry-count ceiling on zip content, matching the tar behavior.
+   * Checks that tar extension headers count toward the archive entry limit.
+   *
+   * @param source A scratch directory for the source archive.
+   * @param target A scratch installation directory.
+   * @throws Exception Thrown if the fixture cannot be created or installed.
    */
   @Test
-  void testZipEntryCountCeilingRejectsArchive(@TempDir Path source, @TempDir Path target)
+  void testTarEntryCountLimitIncludesMetadata(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    TarArchives.entry(tar, "PaxHeaders/one",
+        TarArchives.paxRecord("comment", "first"), 'x');
+    TarArchives.entry(tar, "PaxHeaders/b",
+        TarArchives.paxRecord("comment", "right"), 'x');
+    tarEntry(tar, "payload/data.txt", "content".getBytes(StandardCharsets.UTF_8));
+    tar.write(new byte[TERMINATOR_SIZE]);
+    final Path file = source.resolve("metadata-entries.tar.gz");
+    Files.write(file, gzip(tar.toByteArray()));
+
+    assertInstallFails(file, target, entryLimit(2), ENTRY_LIMIT_ERROR);
+  }
+
+  @Test
+  void testZipEntryCountLimitRejectsArchive(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     try (ZipOutputStream zip = new ZipOutputStream(out)) {
@@ -787,16 +1022,12 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("many.zip");
     Files.write(file, out.toByteArray());
 
-    assertInstallFails(file, target, entryCeiling(2),
-        ENTRY_CEILING_ERROR);
+    assertInstallFails(file, target, entryLimit(2),
+        ENTRY_LIMIT_ERROR);
   }
 
-  /**
-   * Proves the accept side of the entry-count ceiling: an archive with exactly as many
-   * entries as the ceiling installs, so the boundary is exclusive of failure.
-   */
   @Test
-  void testEntryCountExactlyAtCeilingSucceeds(@TempDir Path source, @TempDir Path target)
+  void testEntryCountExactlyAtLimitSucceeds(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final byte[] archive = tarGz(new String[][] {
         {"corpus/one.txt", "1"},
@@ -804,16 +1035,12 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("exact.tar.gz");
     Files.write(file, archive);
 
-    ResourceInstaller.install(file.toUri(), target, sha256(archive), entryCeiling(2));
+    ResourceInstaller.install(file.toUri(), target, sha256(archive), entryLimit(2));
 
     Assertions.assertEquals(List.of("corpus/one.txt", "corpus/two.txt"),
         installedFiles(target));
   }
 
-  /**
-   * Proves that SHA-512 comparison is case-insensitive like SHA-256: an uppercase
-   * rendering of the correct digest passes verification.
-   */
   @Test
   void testSha512ChecksumComparisonIgnoresHexLetterCase(@TempDir Path source,
       @TempDir Path target) throws Exception {
@@ -829,28 +1056,20 @@ public class ResourceInstallerTest {
         Files.readString(target.resolve("data/entry.txt")));
   }
 
-  /**
-   * Proves the accept side of the download ceiling: a source exactly at the ceiling
-   * installs, so the boundary is exclusive of failure.
-   */
   @Test
-  void testDownloadExactlyAtCeilingSucceeds(@TempDir Path source, @TempDir Path target)
+  void testDownloadExactlyAtLimitSucceeds(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final Path file = source.resolve("exact.dat");
     Files.write(file, new byte[1024]);
 
-    ResourceInstaller.install(file.toUri(), target, null, ceilings(KIBIBYTE, MEBIBYTE));
+    ResourceInstaller.install(file.toUri(), target, null, limits(KIBIBYTE, MEBIBYTE));
 
     Assertions.assertEquals(List.of("exact.dat"), installedFiles(target));
     Assertions.assertEquals(1024, Files.size(target.resolve("exact.dat")));
   }
 
-  /**
-   * Proves the accept side of the expansion ceiling: a gzip stream that expands to
-   * exactly the ceiling installs, so the boundary is exclusive of failure.
-   */
   @Test
-  void testExpansionExactlyAtCeilingSucceeds(@TempDir Path source, @TempDir Path target)
+  void testExpansionExactlyAtLimitSucceeds(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final ByteArrayOutputStream tar = new ByteArrayOutputStream();
     tarEntry(tar, "corpus/exact.bin", new byte[1024]);
@@ -859,19 +1078,14 @@ public class ResourceInstallerTest {
     Files.write(file, gzip(tar.toByteArray()));
 
     ResourceInstaller.install(file.toUri(), target, null,
-        ceilings(MEBIBYTE, tar.size()));
+        limits(MEBIBYTE, tar.size()));
 
     Assertions.assertEquals(List.of("corpus/exact.bin"), installedFiles(target));
     Assertions.assertEquals(1024, Files.size(target.resolve("corpus/exact.bin")));
   }
 
-  /**
-   * Proves that the expansion budget is shared across all archive entries: two
-   * entries that each fit under the ceiling but cross it together are rejected, and
-   * nothing is installed.
-   */
   @Test
-  void testCumulativeExpansionAcrossEntriesHitsCeiling(@TempDir Path source,
+  void testCumulativeExpansionAcrossEntriesHitsLimit(@TempDir Path source,
       @TempDir Path target) throws Exception {
     final ByteArrayOutputStream tar = new ByteArrayOutputStream();
     tarEntry(tar, "corpus/first.bin", new byte[768]);
@@ -880,17 +1094,12 @@ public class ResourceInstallerTest {
     final Path file = source.resolve("cumulative.tar.gz");
     Files.write(file, gzip(tar.toByteArray()));
 
-    assertInstallFails(file, target, ceilings(MEBIBYTE, KIBIBYTE),
-        EXPANSION_CEILING_ERROR);
+    assertInstallFails(file, target, limits(MEBIBYTE, KIBIBYTE),
+        EXPANSION_LIMIT_ERROR);
   }
 
-  /**
-   * Proves that promotion refuses to replace a file that already exists in the target:
-   * the second installation fails naming the file, the first installation's content
-   * survives, and after the operator removes it the reinstall succeeds.
-   */
   @Test
-  void testReinstallOverAnExistingFileIsRefused(@TempDir Path source, @TempDir Path target)
+  void testReinstallOverAnExistingFileIsRejected(@TempDir Path source, @TempDir Path target)
       throws Exception {
     final byte[] first = tarGz(new String[][] {{"corpus/data.txt", "version one"}});
     final byte[] second = tarGz(new String[][] {{"corpus/data.txt", "version two"}});
@@ -915,11 +1124,6 @@ public class ResourceInstallerTest {
         Files.readString(target.resolve("corpus/data.txt")));
   }
 
-  /**
-   * Proves that a collision is detected before anything is promoted: an archive whose
-   * first entry is new and whose second entry collides installs neither, so a failed
-   * installation never leaves a mix of old and new files.
-   */
   @Test
   void testCollidingInstallPromotesNothing(@TempDir Path source, @TempDir Path target)
       throws Exception {
@@ -942,15 +1146,9 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(List.of("corpus/data.txt"), installedFiles(target));
   }
 
-  /**
-   * Proves that promotion refuses to follow a symbolic link that already exists below
-   * the target. Every archive entry here stays inside the staging directory, so the
-   * entry-name guard never fires; without a check at promotion time the content lands
-   * wherever the link points.
-   */
   @Test
   @DisabledOnOs(OS.WINDOWS)
-  void testPromotionRefusesToFollowASymlinkedDirectory(@TempDir Path source,
+  void testPromotionRejectsToFollowASymlinkedDirectory(@TempDir Path source,
       @TempDir Path target, @TempDir Path outside) throws Exception {
     final Path link = target.resolve("link");
     Files.createSymbolicLink(link, outside);
@@ -967,10 +1165,6 @@ public class ResourceInstallerTest {
     Assertions.assertTrue(Files.notExists(outside.resolve("planted.txt")));
   }
 
-  /**
-   * Proves that an ordinary directory of the same shape still installs, so the symlink
-   * guard rejects the link rather than nested paths in general.
-   */
   @Test
   void testNestedDirectoryThatIsNotASymlinkStillInstalls(@TempDir Path source,
       @TempDir Path target) throws Exception {
@@ -986,9 +1180,8 @@ public class ResourceInstallerTest {
   }
 
   /**
-   * Enumerates source schemes the installer refuses, each of which would otherwise be
-   * handed to whatever URL handler the runtime has installed, outside the timeouts and
-   * ceilings this class enforces.
+   * Supplies source schemes the installer rejects because they are outside the bounded
+   * HTTP and local-file paths.
    *
    * @return One case per rejected scheme. Never {@code null}.
    */
@@ -1009,10 +1202,6 @@ public class ResourceInstallerTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that the scheme is rejected before the target directory is touched, so an
-   * unusable location cannot leave an empty directory behind.
-   */
   @Test
   void testUnsupportedSourceSchemeIsRejectedBeforeCreatingTheTarget(@TempDir Path parent) {
     final Path target = parent.resolve("not-created-yet");
@@ -1026,20 +1215,12 @@ public class ResourceInstallerTest {
 
 
 
-  /**
-   * Proves that a builder with nothing set produces exactly the default limits, so
-   * {@code builder()} is a safe starting point rather than a second set of defaults.
-   */
   @Test
   void testBuilderWithoutOverridesEqualsTheDefaults() {
     Assertions.assertEquals(ResourceInstaller.Limits.DEFAULT,
         ResourceInstaller.Limits.builder().build());
   }
 
-  /**
-   * Proves that each builder setter changes its own value and leaves the others at
-   * their defaults.
-   */
   @Test
   void testBuilderOverridesOnlyWhatIsSet() {
     final ResourceInstaller.Limits limits = ResourceInstaller.Limits.builder()
@@ -1059,34 +1240,6 @@ public class ResourceInstallerTest {
         limits.maxEntries());
   }
 
-  /**
-   * Proves that the builder validates exactly as the canonical constructor does, so it
-   * cannot be used to sneak past a limit check.
-   */
-  @Test
-  void testBuilderRejectsInvalidValues() {
-    Assertions.assertAll(
-        () -> assertArgumentError("connectTimeout must be positive",
-            () -> ResourceInstaller.Limits.builder().connectTimeout(Duration.ZERO).build()),
-        () -> assertArgumentError("readTimeout must be positive",
-            () -> ResourceInstaller.Limits.builder().readTimeout(null).build()),
-        () -> assertArgumentError("maxRedirects must not be negative",
-            () -> ResourceInstaller.Limits.builder().maxRedirects(-1).build()),
-        () -> assertArgumentError("maxDownloadBytes must be positive",
-            () -> ResourceInstaller.Limits.builder().maxDownloadBytes(0).build()),
-        () -> assertArgumentError("maxExpandedBytes must be positive",
-            () -> ResourceInstaller.Limits.builder().maxExpandedBytes(-1).build()),
-        () -> assertArgumentError("maxEntries must be positive",
-            () -> ResourceInstaller.Limits.builder().maxEntries(0).build()));
-  }
-
-  /**
-   * Proves that the download is written on the target's filesystem rather than in the
-   * system temporary directory, where a 1 GiB default ceiling could exhaust a small
-   * {@code /tmp} while the target has room. The file is hidden and deleted before
-   * {@code install} returns, so a leak surfaces in
-   * {@link #testInstallationLeavesNoStagingResidue} instead.
-   */
   @Test
   void testDownloadFileIsCreatedInTheTargetDirectory(@TempDir Path target)
       throws Exception {
@@ -1099,5 +1252,161 @@ public class ResourceInstallerTest {
     } finally {
       Files.deleteIfExists(downloaded);
     }
+  }
+
+  static Stream<Arguments> expansionBombs() throws IOException {
+    // Four mebibytes of repeated text compress to a few kibibytes in either format: far
+    // beyond the ratio ceiling, far below the absolute expansion limit. Repeated text
+    // rather than zeros, because a gzip stream of zeros reads as an empty tar archive.
+    final byte[] repetitive =
+        "opennlp ".repeat(512 * 1024).getBytes(StandardCharsets.UTF_8);
+    return Stream.of(
+        Arguments.of("corpus.txt.gz", gzip(repetitive)),
+        Arguments.of("corpus.zip", zipOf("corpus.txt", repetitive)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("expansionBombs")
+  void testExpansionRatioIsBounded(String name, byte[] content, @TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final Path file = source.resolve(name);
+    Files.write(file, content);
+
+    assertInstallFails(file, target, RATIO_ERROR);
+  }
+
+  @ParameterizedTest
+  @MethodSource("expansionBombs")
+  void testRaisingTheExpansionRatioAcceptsWhatTheDefaultRejects(String name,
+      byte[] content, @TempDir Path source, @TempDir Path target) throws Exception {
+    final Path file = source.resolve(name);
+    Files.write(file, content);
+
+    // Raising the byte limit alone cannot lift the ratio: the tighter budget wins.
+    final ResourceInstaller.Limits raised = ResourceInstaller.Limits.builder()
+        .maxExpansionRatio(2000)
+        .build();
+    ResourceInstaller.install(file.toUri(), target, null, raised);
+
+    Assertions.assertEquals(4 << 20, Files.size(target.resolve("corpus.txt")));
+  }
+
+  @Test
+  void testMoveIntoPlaceDoesNotReplaceAnExistingFile(@TempDir Path directory)
+      throws Exception {
+    final Path staged = directory.resolve("staged.txt");
+    final Path destination = directory.resolve("installed.txt");
+    Files.writeString(staged, "new");
+    Files.writeString(destination, "old");
+
+    Assertions.assertThrows(FileAlreadyExistsException.class,
+        () -> ResourceInstaller.moveIntoPlace(staged, destination));
+
+    Assertions.assertEquals("old", Files.readString(destination));
+    Assertions.assertEquals("new", Files.readString(staged));
+  }
+
+  @Test
+  void testModelSuffixIsMatchedIgnoringCase(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry("manifest.properties"));
+      zip.write("OpenNLP-Version: 0.0.0\n".getBytes(StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    final Path file = source.resolve("en-ner-person.BIN");
+    Files.write(file, out.toByteArray());
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertEquals(List.of("en-ner-person.BIN"), installedFiles(target));
+  }
+
+  @Test
+  void testGzipSuffixIsStrippedIgnoringCase(@TempDir Path source, @TempDir Path target)
+      throws Exception {
+    final Path file = source.resolve("lexicon.tsv.GZ");
+    Files.write(file, gzip("word\tlemma\n".getBytes(StandardCharsets.UTF_8)));
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    Assertions.assertEquals(List.of("lexicon.tsv"), installedFiles(target));
+  }
+
+  @Test
+  void testStaleWorkFilesOfAKilledInstallAreRemoved(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    final Path staleStaging = Files.createDirectory(target.resolve(".opennlp-stagingOLD"));
+    Files.writeString(staleStaging.resolve("partial.txt"), "half");
+    Files.writeString(target.resolve(".opennlp-downloadOLD.part"), "half");
+    final Path file = source.resolve("corpus.tar.gz");
+    Files.write(file, tarGz(new String[][] {{"corpus/data.txt", "content"}}));
+
+    ResourceInstaller.install(file.toUri(), target);
+
+    try (Stream<Path> entries = Files.list(target)) {
+      Assertions.assertEquals(List.of("corpus"),
+          entries.map(path -> path.getFileName().toString()).sorted().toList());
+    }
+  }
+
+  @Test
+  void testFailedInstallRemovesTheTargetDirectoryItCreated(@TempDir Path source,
+      @TempDir Path parent) throws Exception {
+    final byte[] archive = tarGz(new String[][] {{"corpus/data.txt", "content"}});
+    final Path file = source.resolve("corpus.tar.gz");
+    Files.write(file, archive);
+    final Path target = parent.resolve("fresh");
+
+    Assertions.assertThrows(IOException.class, () -> ResourceInstaller.install(
+        file.toUri(), target, sha256("other".getBytes(StandardCharsets.UTF_8))));
+
+    Assertions.assertTrue(Files.notExists(target));
+  }
+
+  @Test
+  void testZipLocalHeadersMustMatchTheCentralDirectory(@TempDir Path source,
+      @TempDir Path target) throws Exception {
+    // The same content under two names, so the local file sections are the same size and
+    // one archive's central directory fits the other's local headers.
+    final byte[] first = zipOf("a.txt", "content");
+    final byte[] second = zipOf("b.txt", "content");
+    final int centralFirst = centralDirectoryStart(first);
+    final int centralSecond = centralDirectoryStart(second);
+    final byte[] hybrid = new byte[centralFirst + second.length - centralSecond];
+    System.arraycopy(first, 0, hybrid, 0, centralFirst);
+    System.arraycopy(second, centralSecond, hybrid, centralFirst,
+        second.length - centralSecond);
+    final Path file = source.resolve("hybrid.zip");
+    Files.write(file, hybrid);
+
+    assertInstallFails(file, target, ZIP_MISMATCH_ERROR);
+  }
+
+  /** Builds a zip archive holding one text entry. */
+  private static byte[] zipOf(String name, String content) throws IOException {
+    return zipOf(name, content.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /** Builds a zip archive holding one entry with the given bytes. */
+  private static byte[] zipOf(String name, byte[] content) throws IOException {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(out)) {
+      zip.putNextEntry(new ZipEntry(name));
+      zip.write(content);
+      zip.closeEntry();
+    }
+    return out.toByteArray();
+  }
+
+  /** Finds the first central directory header signature in a zip archive. */
+  private static int centralDirectoryStart(byte[] zip) {
+    for (int i = 0; i + 3 < zip.length; i++) {
+      if (zip[i] == 'P' && zip[i + 1] == 'K' && zip[i + 2] == 1 && zip[i + 3] == 2) {
+        return i;
+      }
+    }
+    throw new AssertionError("no central directory");
   }
 }

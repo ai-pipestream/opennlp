@@ -24,21 +24,28 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystem;
 import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.ProviderNotFoundException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 import opennlp.tools.util.archive.TarStream;
@@ -53,27 +60,31 @@ import opennlp.tools.util.archive.TarStream;
  * It is verified against the downloaded bytes before anything is unpacked: a
  * 64-character hex digest selects SHA-256, a 128-character one SHA-512.
  * The content format is detected from the bytes, not from the name: gzip-compressed
- * tar archives and zip archives are unpacked with their relative structure, entries
- * that would escape the target directory are rejected, plain gzip files are
- * decompressed, and anything else is stored as a file under its source name. One name
- * rule overrides byte detection: a {@code *.bin} source is always stored packed,
- * because an OpenNLP model file is itself a zip archive that its consumers load
- * packed.</p>
+ * tar archives and zip archives are unpacked with their relative structure. Invalid,
+ * escaping, and duplicate file paths are rejected. Plain gzip files are decompressed,
+ * and other content is stored as a file under the source name. One name rule overrides
+ * byte detection: a {@code *.bin} source is always stored packed because an OpenNLP
+ * model file is itself a zip archive that its consumers load packed.</p>
  *
- * <p>Every installation is bounded by {@link Limits}: http and https fetches carry
- * connection and read timeouts, follow at most a fixed number of redirects, refuse
+ * <p>Each installation is bounded by {@link Limits}: http and https fetches use
+ * connection and read timeouts, follow at most a fixed number of redirects, reject
  * redirects that leave the http and https schemes or downgrade https to http, and
- * abort once the download or the expanded content crosses its size ceiling or the
- * archive crosses its entry ceiling. The defaults in {@link Limits#DEFAULT} apply when
- * no limits are given, and {@link Limits#builder()} starts from them.</p>
+ * abort once the download or the expanded content crosses its size limit or the
+ * archive crosses its entry limit. Compressed content, gzip and zip alike, may
+ * expand to at most {@link Limits#maxExpansionRatio()} times its compressed size,
+ * with a floor of {@value #MIN_EXPANSION_BYTES} bytes for small sources. The defaults in
+ * {@link Limits#DEFAULT} apply when no limits are given, and {@link Limits#builder()}
+ * starts from them.</p>
  *
  * <p>Installation is staged: content is unpacked into a hidden staging directory on
  * the same filesystem and moved into the target only after the download was verified
  * and every entry unpacked cleanly. A fetch, verification, or unpacking failure
- * therefore leaves the target directory as it was, without partially written files.
- * Promotion refuses to replace a file that already exists in the target and detects
+ * promotes no files into the target directory.
+ * Promotion does not replace a file that already exists in the target and detects
  * the collision before moving anything, so refreshing a resource means removing its
- * old files first.</p>
+ * old files first. Work files left in the target by an installation that was killed
+ * are removed at the start of the next installation into that target, so concurrent
+ * installations into one target directory are not supported.</p>
  *
  * @see DownloadUtil
  * @since 3.0.0
@@ -93,26 +104,45 @@ public final class ResourceInstaller {
   private static final String DOWNLOAD_PREFIX = ".opennlp-download";
   private static final String DOWNLOAD_SUFFIX = ".part";
   private static final int BUFFER_SIZE = 8192;
-  private static final int MAGIC_LENGTH = 2;
+  private static final int MAGIC_LENGTH = 4;
   private static final int GZIP_MAGIC_FIRST = 0x1F;
   private static final int GZIP_MAGIC_SECOND = 0x8B;
   private static final int ZIP_MAGIC_FIRST = 'P';
   private static final int ZIP_MAGIC_SECOND = 'K';
+  private static final int ZIP_LOCAL_HEADER_THIRD = 3;
+  private static final int ZIP_LOCAL_HEADER_FOURTH = 4;
+  private static final int ZIP_END_HEADER_THIRD = 5;
+  private static final int ZIP_END_HEADER_FOURTH = 6;
+  private static final int ZIP_END_HEADER_LENGTH = 22;
+  private static final int ZIP_DISK_OFFSET = 4;
+  private static final int ZIP_CENTRAL_DISK_OFFSET = 6;
+  private static final int ZIP_DISK_ENTRIES_OFFSET = 8;
+  private static final int ZIP_TOTAL_ENTRIES_OFFSET = 10;
+  private static final int ZIP_CENTRAL_SIZE_OFFSET = 12;
+  private static final int ZIP_CENTRAL_OFFSET_OFFSET = 16;
+  private static final int ZIP_COMMENT_LENGTH_OFFSET = 20;
+  private static final int TAR_END_BLOCKS_LENGTH = 1024;
+
+  /** The expanded size every compressed source may reach regardless of the ratio. */
+  private static final long MIN_EXPANSION_BYTES = 1L << 20;
   private static final int HTTP_TEMPORARY_REDIRECT = 307;
   private static final int HTTP_PERMANENT_REDIRECT = 308;
   private static final String SCHEME_HTTP = "http";
   private static final String SCHEME_HTTPS = "https";
   private static final String SCHEME_FILE = "file";
+  private static final String MALFORMED_ZIP_ERROR = "malformed zip archive";
+  private static final String ZIP_MISMATCH_ERROR =
+      "zip local headers and central directory list different files";
 
   /**
-   * Safety ceilings and network behavior for one installation.
+   * Safety limits and network behavior for one installation.
    *
    * @param connectTimeout How long to wait for a connection to be established. Must
    *                       be positive.
    * @param readTimeout How long to wait for data on an established connection. Must
    *                    be positive.
    * @param maxRedirects How many http redirects to follow before failing. Must not be
-   *                     negative; zero refuses all redirects.
+   *                     negative; zero rejects all redirects.
    * @param maxDownloadBytes The largest download accepted, in bytes. Must be positive.
    * @param maxExpandedBytes The largest expanded byte count accepted. For gzip content,
    *                         this counts the entire decompressed stream; otherwise, it
@@ -120,27 +150,38 @@ public final class ResourceInstaller {
    * @param maxEntries The largest number of archive entries accepted, counting every
    *                   entry including directories, so an archive of many tiny files
    *                   cannot exhaust directory entries while staying under the byte
-   *                   ceilings. Must be positive.
+   *                   limits. Must be positive.
+   * @param maxExpansionRatio The largest expanded size accepted per compressed byte of
+   *                          a source, so a small archive cannot expand to the whole
+   *                          expansion limit. Applies to gzip and zip content; a source
+   *                          may always expand to {@value #MIN_EXPANSION_BYTES} bytes
+   *                          regardless of it. Must be positive.
    */
   public record Limits(Duration connectTimeout, Duration readTimeout, int maxRedirects,
-                       long maxDownloadBytes, long maxExpandedBytes, long maxEntries) {
+                       long maxDownloadBytes, long maxExpandedBytes, long maxEntries,
+                       long maxExpansionRatio) {
 
-    /** The system property overriding the default download ceiling in bytes. */
+    /** The system property overriding the default download limit in bytes. */
     public static final String MAX_DOWNLOAD_BYTES_PROPERTY = "opennlp.download.max.bytes";
 
-    /** The system property overriding the default expansion ceiling in bytes. */
+    /** The system property overriding the default expansion limit in bytes. */
     public static final String MAX_EXPANDED_BYTES_PROPERTY =
         "opennlp.install.max.total.bytes";
 
-    /** The system property overriding the default archive entry ceiling. */
+    /** The system property overriding the default archive entry limit. */
     public static final String MAX_ENTRIES_PROPERTY = "opennlp.install.max.entries";
+
+    /** The system property overriding the default expansion ratio. */
+    public static final String MAX_EXPANSION_RATIO_PROPERTY =
+        "opennlp.install.max.expansion.ratio";
 
     /**
      * The limits applied when none are given: 20 second connect timeout, 60 second
-     * read timeout, at most 5 redirects, a 1 GiB download ceiling, a 4 GiB expansion
-     * ceiling, and 100000 archive entries. Each ceiling can be raised or lowered at
-     * startup through its system property ({@link #MAX_DOWNLOAD_BYTES_PROPERTY},
-     * {@link #MAX_EXPANDED_BYTES_PROPERTY}, {@link #MAX_ENTRIES_PROPERTY}), read once
+     * read timeout, at most 5 redirects, a 1 GiB download limit, a 4 GiB expansion
+     * limit, 100000 archive entries, and an expansion ratio of 100. Each limit can be
+     * raised or lowered at startup through its system property
+     * ({@link #MAX_DOWNLOAD_BYTES_PROPERTY}, {@link #MAX_EXPANDED_BYTES_PROPERTY},
+     * {@link #MAX_ENTRIES_PROPERTY}, {@link #MAX_EXPANSION_RATIO_PROPERTY}), read once
      * at class load; a value that is absent, not a number, or not positive falls back
      * to the built-in default.
      */
@@ -148,10 +189,11 @@ public final class ResourceInstaller {
         Duration.ofSeconds(60), 5,
         longProperty(MAX_DOWNLOAD_BYTES_PROPERTY, 1L << 30),
         longProperty(MAX_EXPANDED_BYTES_PROPERTY, 4L << 30),
-        longProperty(MAX_ENTRIES_PROPERTY, 100_000L));
+        longProperty(MAX_ENTRIES_PROPERTY, 100_000L),
+        longProperty(MAX_EXPANSION_RATIO_PROPERTY, 100L));
 
     /**
-     * Reads a ceiling override from a system property, trimmed before parsing.
+     * Reads a limit override from a system property, trimmed before parsing.
      *
      * @param name The property name.
      * @param fallback The built-in default.
@@ -181,16 +223,24 @@ public final class ResourceInstaller {
      * @param maxDownloadBytes The largest download accepted, in bytes.
      * @param maxExpandedBytes The largest expanded byte count accepted.
      * @param maxEntries The largest number of archive entries accepted.
+     * @param maxExpansionRatio The largest expanded size accepted per compressed byte.
      * @throws IllegalArgumentException Thrown if either timeout is {@code null}, zero,
-     *         or negative, a ceiling is not positive, or the redirect limit is
+     *         or negative, a limit is not positive, or the redirect limit is
      *         negative.
      */
     public Limits(Duration connectTimeout, Duration readTimeout, int maxRedirects,
-        long maxDownloadBytes, long maxExpandedBytes, long maxEntries) {
-      if (connectTimeout == null || connectTimeout.isZero() || connectTimeout.isNegative()) {
+        long maxDownloadBytes, long maxExpandedBytes, long maxEntries,
+        long maxExpansionRatio) {
+      if (connectTimeout == null) {
+        throw new IllegalArgumentException("connectTimeout must not be null");
+      }
+      if (connectTimeout.isZero() || connectTimeout.isNegative()) {
         throw new IllegalArgumentException("connectTimeout must be positive");
       }
-      if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
+      if (readTimeout == null) {
+        throw new IllegalArgumentException("readTimeout must not be null");
+      }
+      if (readTimeout.isZero() || readTimeout.isNegative()) {
         throw new IllegalArgumentException("readTimeout must be positive");
       }
       if (maxRedirects < 0) {
@@ -205,19 +255,23 @@ public final class ResourceInstaller {
       if (maxEntries <= 0) {
         throw new IllegalArgumentException("maxEntries must be positive");
       }
+      if (maxExpansionRatio <= 0) {
+        throw new IllegalArgumentException("maxExpansionRatio must be positive");
+      }
       this.connectTimeout = connectTimeout;
       this.readTimeout = readTimeout;
       this.maxRedirects = maxRedirects;
       this.maxDownloadBytes = maxDownloadBytes;
       this.maxExpandedBytes = maxExpandedBytes;
       this.maxEntries = maxEntries;
+      this.maxExpansionRatio = maxExpansionRatio;
     }
 
     /**
      * Starts from {@link #DEFAULT} so a caller can state only the limits that differ
-     * from it, instead of repeating all six in the canonical constructor.
+     * from it, instead of repeating all seven in the canonical constructor.
      *
-     * @return A builder holding the default limits. Never {@code null}.
+     * @return A builder holding the default limits. Not {@code null}.
      */
     public static Builder builder() {
       return new Builder();
@@ -235,7 +289,9 @@ public final class ResourceInstaller {
       private long maxDownloadBytes = DEFAULT.maxDownloadBytes();
       private long maxExpandedBytes = DEFAULT.maxExpandedBytes();
       private long maxEntries = DEFAULT.maxEntries();
+      private long maxExpansionRatio = DEFAULT.maxExpansionRatio();
 
+      /** Initializes a builder with {@link Limits#DEFAULT}. */
       private Builder() {
       }
 
@@ -244,7 +300,7 @@ public final class ResourceInstaller {
        *
        * @param connectTimeout How long to wait for a connection to be established.
        *                       Must be positive.
-       * @return This builder. Never {@code null}.
+       * @return This builder. Not {@code null}.
        */
       public Builder connectTimeout(Duration connectTimeout) {
         this.connectTimeout = connectTimeout;
@@ -256,7 +312,7 @@ public final class ResourceInstaller {
        *
        * @param readTimeout How long to wait for data on an established connection.
        *                    Must be positive.
-       * @return This builder. Never {@code null}.
+       * @return This builder. Not {@code null}.
        */
       public Builder readTimeout(Duration readTimeout) {
         this.readTimeout = readTimeout;
@@ -267,8 +323,8 @@ public final class ResourceInstaller {
        * Sets how many http redirects to follow before failing.
        *
        * @param maxRedirects How many http redirects to follow before failing. Must not
-       *                     be negative; zero refuses all redirects.
-       * @return This builder. Never {@code null}.
+       *                     be negative; zero rejects all redirects.
+       * @return This builder. Not {@code null}.
        */
       public Builder maxRedirects(int maxRedirects) {
         this.maxRedirects = maxRedirects;
@@ -280,7 +336,7 @@ public final class ResourceInstaller {
        *
        * @param maxDownloadBytes The largest download accepted, in bytes. Must be
        *                         positive.
-       * @return This builder. Never {@code null}.
+       * @return This builder. Not {@code null}.
        */
       public Builder maxDownloadBytes(long maxDownloadBytes) {
         this.maxDownloadBytes = maxDownloadBytes;
@@ -294,7 +350,7 @@ public final class ResourceInstaller {
        *                         content, this counts the entire decompressed stream;
        *                         otherwise, it counts installed file content. Must be
        *                         positive.
-       * @return This builder. Never {@code null}.
+       * @return This builder. Not {@code null}.
        */
       public Builder maxExpandedBytes(long maxExpandedBytes) {
         this.maxExpandedBytes = maxExpandedBytes;
@@ -306,7 +362,7 @@ public final class ResourceInstaller {
        *
        * @param maxEntries The largest number of archive entries accepted, counting
        *                   every entry including directories. Must be positive.
-       * @return This builder. Never {@code null}.
+       * @return This builder. Not {@code null}.
        */
       public Builder maxEntries(long maxEntries) {
         this.maxEntries = maxEntries;
@@ -314,19 +370,32 @@ public final class ResourceInstaller {
       }
 
       /**
+       * Sets the largest expanded size accepted per compressed byte of a source.
+       *
+       * @param maxExpansionRatio The largest expanded size accepted per compressed
+       *                          byte of a source. Must be positive.
+       * @return This builder. Not {@code null}.
+       */
+      public Builder maxExpansionRatio(long maxExpansionRatio) {
+        this.maxExpansionRatio = maxExpansionRatio;
+        return this;
+      }
+
+      /**
        * Builds the limits.
        *
-       * @return The limits collected so far. Never {@code null}.
+       * @return The limits collected so far. Not {@code null}.
        * @throws IllegalArgumentException Thrown if any value is outside its documented
-       *         range, exactly as the canonical constructor rejects it.
+       *         range.
        */
       public Limits build() {
         return new Limits(connectTimeout, readTimeout, maxRedirects, maxDownloadBytes,
-            maxExpandedBytes, maxEntries);
+            maxExpandedBytes, maxEntries, maxExpansionRatio);
       }
     }
   }
 
+  /** Prevents construction of this utility class. */
   private ResourceInstaller() {
   }
 
@@ -336,14 +405,15 @@ public final class ResourceInstaller {
    * cryptographic integrity verification, so it accepts only {@code file} sources; an
    * http or https source must go through an overload that takes its checksum.
    *
-   * @param source The resource location, a {@code file} URI. Must not be {@code null}.
+   * @param source The resource location, a {@code file} URI. Not {@code null}.
    * @param targetDirectory The directory to install into; created when absent. Must
    *                        not be {@code null}.
-   * @return The target directory. Never {@code null}.
+   * @return The target directory. Not {@code null}.
    * @throws IOException Thrown if fetching or unpacking fails.
    * @throws IllegalArgumentException Thrown if {@code source} or
-   *         {@code targetDirectory} is {@code null}, or {@code source} carries a scheme
-   *         other than {@code file}.
+   *         {@code targetDirectory} is {@code null}, {@code source} contains a scheme
+   *         other than {@code file}, or its last path segment is not a valid local file
+   *         name.
    */
   public static Path install(URI source, Path targetDirectory) throws IOException {
     return install(source, targetDirectory, null);
@@ -353,7 +423,7 @@ public final class ResourceInstaller {
    * Fetches, verifies, and unpacks a resource under {@link Limits#DEFAULT}.
    *
    * @param source The resource location, an {@code http}, {@code https}, or
-   *               {@code file} URI. Must not be {@code null}.
+   *               {@code file} URI. Not {@code null}.
    * @param targetDirectory The directory to install into; created when absent. Must
    *                        not be {@code null}.
    * @param checksum The expected digest of the downloaded bytes as a hex string,
@@ -361,14 +431,15 @@ public final class ResourceInstaller {
    *                 whitespace: 64 characters select SHA-256, 128 characters SHA-512.
    *                 Required for an http or https source; pass {@code null} to skip
    *                 verification for a {@code file} source.
-   * @return The target directory. Never {@code null}.
+   * @return The target directory. Not {@code null}.
    * @throws IOException Thrown if fetching fails, the checksum does not match, or
    *         unpacking fails.
    * @throws IllegalArgumentException Thrown if {@code source} or
-   *         {@code targetDirectory} is {@code null}, {@code source} carries a scheme
+   *         {@code targetDirectory} is {@code null}, {@code source} contains a scheme
    *         other than {@code http}, {@code https}, or {@code file}, {@code checksum}
-   *         is neither a 64-character nor a 128-character hex string, or an http or
-   *         https source carries no checksum.
+   *         is not a 64-character or 128-character hex string, an http or https source
+   *         contains no checksum, or the source does not provide a valid local file
+   *         name.
    */
   public static Path install(URI source, Path targetDirectory, String checksum)
       throws IOException {
@@ -379,7 +450,7 @@ public final class ResourceInstaller {
    * Fetches, verifies, and unpacks a resource under the given {@link Limits}.
    *
    * @param source The resource location, an {@code http}, {@code https}, or
-   *               {@code file} URI. Must not be {@code null}.
+   *               {@code file} URI. Not {@code null}.
    * @param targetDirectory The directory to install into; created when absent. Must
    *                        not be {@code null}.
    * @param checksum The expected digest of the downloaded bytes as a hex string,
@@ -387,16 +458,17 @@ public final class ResourceInstaller {
    *                 whitespace: 64 characters select SHA-256, 128 characters SHA-512.
    *                 Required for an http or https source; pass {@code null} to skip
    *                 verification for a {@code file} source.
-   * @param limits The timeouts, redirect allowance, and size and entry ceilings to
-   *               enforce. Must not be {@code null}.
-   * @return The target directory. Never {@code null}.
+   * @param limits The timeouts, redirect allowance, and size and entry limits to
+   *               enforce. Not {@code null}.
+   * @return The target directory. Not {@code null}.
    * @throws IOException Thrown if fetching fails, a limit is exceeded, the checksum
    *         does not match, or unpacking fails.
    * @throws IllegalArgumentException Thrown if {@code source}, {@code targetDirectory},
-   *         or {@code limits} is {@code null}, {@code source} carries a scheme other
+   *         or {@code limits} is {@code null}, {@code source} contains a scheme other
    *         than {@code http}, {@code https}, or {@code file}, {@code checksum} is
-   *         neither a 64-character nor a 128-character hex string, or an http or https
-   *         source carries no checksum.
+   *         not a 64-character or 128-character hex string, an http or https source
+   *         contains no checksum, or the source does not provide a valid local file
+   *         name.
    */
   public static Path install(URI source, Path targetDirectory, String checksum,
       Limits limits) throws IOException {
@@ -405,6 +477,14 @@ public final class ResourceInstaller {
 
   /**
    * Installs a catalog entry under its preferred file name when it is not an archive.
+   *
+   * @param source The resource location.
+   * @param targetDirectory The directory to install into.
+   * @param checksum The expected digest, or {@code null} for a file source.
+   * @param name The preferred name for non-archive content.
+   * @return The target directory.
+   * @throws IOException Thrown if fetching, verification, or unpacking fails.
+   * @throws IllegalArgumentException Thrown if an argument is invalid.
    */
   static Path installNamed(URI source, Path targetDirectory, String checksum,
       String name) throws IOException {
@@ -414,6 +494,20 @@ public final class ResourceInstaller {
     return install(source, targetDirectory, checksum, name, Limits.DEFAULT);
   }
 
+  /**
+   * Validates the request, downloads and verifies the resource, and installs it from a
+   * staging directory.
+   *
+   * @param source The resource location.
+   * @param targetDirectory The directory to install into.
+   * @param checksum The expected digest, or {@code null} for a file source.
+   * @param name The preferred name for non-archive content, or {@code null} to use the
+   *             source name.
+   * @param limits The limits to enforce.
+   * @return The target directory. Not {@code null}.
+   * @throws IOException Thrown if fetching, verification, or installation fails.
+   * @throws IllegalArgumentException Thrown if an argument is invalid.
+   */
   private static Path install(URI source, Path targetDirectory, String checksum,
       String name, Limits limits) throws IOException {
     if (source == null) {
@@ -431,30 +525,88 @@ public final class ResourceInstaller {
       throw new IllegalArgumentException(
           "checksum must be given for an http or https source: " + source);
     }
+    final String resourceName = validateSourceName(
+        name == null ? sourceName(source) : name);
+    final boolean createdTarget = Files.notExists(targetDirectory);
     Files.createDirectories(targetDirectory);
+    removeStaleWorkFiles(targetDirectory);
     final Path downloaded = createDownloadFile(targetDirectory);
     try {
       download(source, downloaded, limits);
       if (expected != null) {
         verify(downloaded, expected);
       }
-      installStaged(downloaded,
-          name == null ? sourceName(source) : validateSourceName(name),
-          targetDirectory, limits);
+      installStaged(downloaded, resourceName, targetDirectory, limits);
       return targetDirectory;
+    } catch (IOException e) {
+      Files.deleteIfExists(downloaded);
+      if (createdTarget) {
+        removeIfEmpty(targetDirectory, e);
+      }
+      throw e;
     } finally {
       Files.deleteIfExists(downloaded);
     }
   }
 
   /**
+   * Removes download files and staging directories that an earlier installation left in
+   * the target because its process ended before cleanup. Only entries with the hidden
+   * work-file prefixes are touched.
+   *
+   * @param targetDirectory The directory to install into.
+   * @throws IOException Thrown if listing or deleting fails.
+   */
+  private static void removeStaleWorkFiles(Path targetDirectory) throws IOException {
+    final List<Path> stale;
+    try (Stream<Path> entries = Files.list(targetDirectory)) {
+      stale = entries.filter(ResourceInstaller::isWorkFile).toList();
+    }
+    for (final Path entry : stale) {
+      if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+        deleteRecursively(entry);
+      } else {
+        Files.deleteIfExists(entry);
+      }
+    }
+  }
+
+  /**
+   * Classifies a target directory entry as a work file of this class.
+   *
+   * @param entry The entry to inspect.
+   * @return {@code true} if the entry name carries a work-file prefix.
+   */
+  private static boolean isWorkFile(Path entry) {
+    final String fileName = entry.getFileName().toString();
+    return fileName.startsWith(STAGING_PREFIX) || fileName.startsWith(DOWNLOAD_PREFIX);
+  }
+
+  /**
+   * Removes a target directory this installation created when the failed installation
+   * left nothing in it, so a failed first attempt leaves the filesystem as it was.
+   *
+   * @param targetDirectory The directory this installation created.
+   * @param failure The failure being reported; a cleanup error is added to it.
+   */
+  private static void removeIfEmpty(Path targetDirectory, IOException failure) {
+    try (Stream<Path> entries = Files.list(targetDirectory)) {
+      if (entries.findAny().isEmpty()) {
+        Files.deleteIfExists(targetDirectory);
+      }
+    } catch (IOException cleanup) {
+      failure.addSuppressed(cleanup);
+    }
+  }
+
+  /**
    * Creates the file the download is written to. It is placed on the target's
    * filesystem, not in the system temporary directory, so a large download cannot
-   * exhaust the system temporary directory while the target has room. It is hidden, so
-   * a leaked one is visible as residue rather than as an installed file.
+   * exhaust the system temporary directory while the target has room. Its hidden prefix
+   * distinguishes it from installed content.
    *
    * @param targetDirectory The directory to install into. Must already exist.
-   * @return The newly created, empty download file. Never {@code null}.
+   * @return The newly created, empty download file. Not {@code null}.
    * @throws IOException Thrown if the file cannot be created.
    */
   static Path createDownloadFile(Path targetDirectory) throws IOException {
@@ -465,15 +617,15 @@ public final class ResourceInstaller {
    * Validates the checksum argument and normalizes it for comparison.
    *
    * @param checksum The digest as given by the caller, or {@code null} to skip.
-   * @return The trimmed digest, or {@code null} when verification is skipped.
-   * @throws IllegalArgumentException Thrown if the digest is neither a 64-character
-   *         nor a 128-character hex string.
+   * @return The stripped digest, or {@code null} when verification is skipped.
+   * @throws IllegalArgumentException Thrown if the digest is not a 64-character or
+   *         128-character hex string.
    */
   private static String validateChecksum(String checksum) {
     if (checksum == null) {
       return null;
     }
-    final String trimmed = checksum.trim();
+    final String trimmed = checksum.strip();
     if ((trimmed.length() == SHA_256_HEX_LENGTH || trimmed.length() == SHA_512_HEX_LENGTH)
         && isHex(trimmed)) {
       return trimmed;
@@ -502,7 +654,7 @@ public final class ResourceInstaller {
   }
 
   /**
-   * Fetches the source into the given file, bounded by the download ceiling. Http and
+   * Fetches the source into the given file, bounded by the download limit. Http and
    * https locations are fetched with timeouts and the redirect policy; a {@code file}
    * location is read directly. The scheme was accepted by {@link #validateSource(URI)}
    * at the public boundary.
@@ -514,7 +666,7 @@ public final class ResourceInstaller {
    */
   private static void download(URI source, Path file, Limits limits) throws IOException {
     final Budget budget = new Budget(limits.maxDownloadBytes(),
-        "download exceeds the ceiling of " + limits.maxDownloadBytes() + " bytes");
+        "download exceeds the limit of " + limits.maxDownloadBytes() + " bytes");
     if (isHttp(source.getScheme())) {
       downloadHttp(source, file, limits, budget);
     } else {
@@ -526,7 +678,7 @@ public final class ResourceInstaller {
 
   /**
    * Rejects a source the installer will not fetch. Only {@code http}, {@code https}, and
-   * {@code file} are accepted: any other scheme would be handed to whichever URL handler
+   * {@code file} are accepted: any other scheme would be passed to any URL handler
    * the runtime happens to have installed, outside the connection timeout, read timeout,
    * and redirect policy this class enforces.
    *
@@ -555,7 +707,7 @@ public final class ResourceInstaller {
    * Resolves a {@code file} location to a path on the default filesystem.
    *
    * @param source The {@code file} location, already validated as such.
-   * @return The local path. Never {@code null}.
+   * @return The local path. Not {@code null}.
    * @throws IOException Thrown if the location does not name a file this runtime can
    *         open, such as a {@code file} URI naming a remote host.
    */
@@ -570,8 +722,8 @@ public final class ResourceInstaller {
   /**
    * Fetches an http or https source with connection and read timeouts, following at
    * most the allowed number of redirects under the redirect policy, checking any
-   * declared content length against the download ceiling before reading the body, and
-   * bounding the transferred bytes against the same ceiling.
+   * declared content length against the download limit before reading the body, and
+   * bounding the transferred bytes against the same limit.
    *
    * @param source The resource location as requested by the caller.
    * @param file The file receiving the downloaded bytes.
@@ -608,7 +760,7 @@ public final class ResourceInstaller {
         final long declared = connection.getContentLengthLong();
         if (declared > limits.maxDownloadBytes()) {
           throw new IOException("declared content length " + declared
-              + " exceeds the download ceiling of " + limits.maxDownloadBytes()
+              + " exceeds the download limit of " + limits.maxDownloadBytes()
               + " bytes");
         }
         try (InputStream in = connection.getInputStream()) {
@@ -641,23 +793,23 @@ public final class ResourceInstaller {
    * redirect policy: the target must be an http or https location, and an https
    * request must not be redirected to plain http.
    *
-   * @param from The location that answered with the redirect.
+   * @param from The location that returned the redirect.
    * @param location The Location header value, absolute or relative, or {@code null}
    *                 when the header is absent.
-   * @return The resolved redirect target. Never {@code null}.
+   * @return The resolved redirect target. Not {@code null}.
    * @throws IOException Thrown if the location is absent or malformed, leaves the
    *         http and https schemes, or downgrades https to http.
    */
   static URI resolveRedirect(URI from, String location) throws IOException {
     if (location == null || location.isEmpty()) {
-      throw new IOException("redirect from " + from + " carries no Location header");
+      throw new IOException("redirect from " + from + " contains no Location header");
     }
     final URI target;
     try {
       target = from.resolve(location);
     } catch (IllegalArgumentException e) {
       throw new IOException(
-          "redirect from " + from + " carries a malformed Location: " + location, e);
+          "redirect from " + from + " contains a malformed Location: " + location, e);
     }
     final String scheme = target.getScheme();
     final boolean https = SCHEME_HTTPS.equalsIgnoreCase(scheme);
@@ -673,9 +825,9 @@ public final class ResourceInstaller {
 
   /**
    * Converts a timeout to the millisecond form the connection setters take. A positive
-   * timeout shorter than a millisecond becomes one millisecond rather than zero, because
-   * {@link HttpURLConnection#setReadTimeout(int) zero means no timeout at all}, and a
-   * timeout too large for the int range is capped instead of overflowing.
+   * timeout shorter than a millisecond becomes one millisecond because
+   * {@link HttpURLConnection#setReadTimeout(int) zero disables the timeout}. A timeout
+   * too large for the int range is capped.
    *
    * @param timeout The timeout as a duration. Must be positive.
    * @return The timeout in milliseconds, at least {@code 1} and at most
@@ -754,11 +906,10 @@ public final class ResourceInstaller {
   }
 
   /**
-   * Moves every staged regular file to its relative location beneath the target,
-   * refusing to replace anything that already exists there. All destinations are
+   * Moves all staged regular files to their relative locations beneath the target
+   * without replacing anything that already exists there. All destinations are
    * checked before the first move, so a collision leaves the target without a mix of
-   * old and new files. Moves are attempted atomically and fall back to a plain move
-   * where the filesystem does not support it.
+   * old and new files, and the move itself refuses an existing destination as well.
    *
    * @param staging The staging directory holding the fully unpacked content.
    * @param target The directory to install into.
@@ -774,21 +925,26 @@ public final class ResourceInstaller {
       ensureVacant(target, staging.relativize(file));
     }
     for (final Path file : files) {
-      final Path destination = destination(target, staging.relativize(file));
-      try {
-        Files.move(file, destination, StandardCopyOption.ATOMIC_MOVE);
-      } catch (AtomicMoveNotSupportedException e) {
-        Files.move(file, destination);
-      }
+      moveIntoPlace(file, destination(target, staging.relativize(file)));
     }
   }
 
   /**
+   * Moves one staged file to its destination without replacing an existing file. The
+   * move is not requested atomically: on POSIX filesystems an atomic move renames over
+   * an existing destination, which would void the vacancy check.
+   *
+   * @param file The staged file.
+   * @param destination The destination beneath the target.
+   * @throws IOException Thrown if the destination exists or the move fails.
+   */
+  static void moveIntoPlace(Path file, Path destination) throws IOException {
+    Files.move(file, destination);
+  }
+
+  /**
    * Checks that one staged file's destination is free to receive it, without creating
-   * anything: an existing filesystem object at the destination is a collision, and a
-   * symbolic link or a non-directory on the way to it is refused exactly as
-   * {@link #destination(Path, Path)} refuses it during the move pass. A missing
-   * directory on the way proves the destination vacant.
+   * anything. A missing directory on the way proves the destination vacant.
    *
    * @param target The directory to install into.
    * @param relative The staged file's path relative to the staging directory.
@@ -796,43 +952,46 @@ public final class ResourceInstaller {
    *         the way is a symbolic link or exists as something other than a directory.
    */
   private static void ensureVacant(Path target, Path relative) throws IOException {
-    Path directory = target;
-    for (int i = 0; i < relative.getNameCount() - 1; i++) {
-      directory = directory.resolve(relative.getName(i));
-      if (Files.isSymbolicLink(directory)) {
-        throw new IOException(
-            "installation path crosses a symbolic link: " + directory);
-      }
-      if (!Files.exists(directory)) {
-        return;
-      }
-      if (!Files.isDirectory(directory)) {
-        throw new IOException(
-            "installation path crosses an existing file: " + directory);
-      }
-    }
-    final Path destination = directory.resolve(relative.getFileName());
-    if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
+    final Path destination = destination(target, relative, false);
+    if (destination != null && Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
       throw new IOException("target already contains: " + destination);
     }
   }
 
   /**
    * Resolves one staged file's destination beneath the target, creating the directories
-   * leading to it one at a time and refusing to descend through a symbolic link that is
-   * already there. An entry name that stays inside the staging directory can still land
-   * outside the target if a directory below the target is a link to somewhere else.
+   * leading to it one at a time.
+   *
+   * @param target The directory to install into.
+   * @param relative The staged file's path relative to the staging directory.
+   * @return The destination path beneath the target. Not {@code null}.
+   * @throws IOException Thrown if a directory on the way is a symbolic link or exists as
+   *         something other than a directory, or if a directory cannot be created.
+   */
+  private static Path destination(Path target, Path relative) throws IOException {
+    return destination(target, relative, true);
+  }
+
+  /**
+   * Walks the directories leading to one staged file's destination without descending
+   * through a symbolic link that is already there. An entry name that stays inside the
+   * staging directory can still land outside the target if a directory below the target
+   * is a link to somewhere else.
    *
    * <p>This covers links present when the installation runs. It is not a defense against
    * a link created concurrently, between the check here and the move that follows.</p>
    *
    * @param target The directory to install into.
    * @param relative The staged file's path relative to the staging directory.
-   * @return The destination path beneath the target. Never {@code null}.
+   * @param create Whether to create a missing directory on the way; when {@code false},
+   *               a missing directory ends the walk.
+   * @return The destination path beneath the target, or {@code null} when a directory
+   *         on the way is missing and {@code create} is {@code false}.
    * @throws IOException Thrown if a directory on the way is a symbolic link or exists as
    *         something other than a directory, or if a directory cannot be created.
    */
-  private static Path destination(Path target, Path relative) throws IOException {
+  private static Path destination(Path target, Path relative, boolean create)
+      throws IOException {
     Path directory = target;
     for (int i = 0; i < relative.getNameCount() - 1; i++) {
       directory = directory.resolve(relative.getName(i));
@@ -841,6 +1000,9 @@ public final class ResourceInstaller {
             "installation path crosses a symbolic link: " + directory);
       }
       if (!Files.exists(directory)) {
+        if (!create) {
+          return null;
+        }
         Files.createDirectory(directory);
       } else if (!Files.isDirectory(directory)) {
         throw new IOException(
@@ -868,39 +1030,44 @@ public final class ResourceInstaller {
 
   /**
    * Detects the content format from its leading bytes and unpacks accordingly,
-   * bounding the total expanded bytes against the expansion ceiling. One exception: a
-   * source named {@code *.bin} is stored verbatim even when its bytes are a zip
-   * archive, because that is exactly what an OpenNLP model file is: a zipped artifact
-   * that consumers load packed. Unpacking it would deliver its innards
-   * ({@code manifest.properties}, {@code *.model}) where the operator asked for the
-   * model.
+   * bounding the total expanded bytes against the expansion limit. One exception: a
+   * source named {@code *.bin}, in any letter case, is stored verbatim even when its
+   * bytes are a zip archive. OpenNLP model consumers load the packed zip artifact. Unpacking it would
+   * place the internal entries ({@code manifest.properties}, {@code *.model}) in the
+   * target instead of the model.
    *
    * @param downloaded The fetched file.
    * @param name The file name derived from the source location.
    * @param staging The staging directory to unpack into.
    * @param limits The limits to enforce.
-   * @throws IOException Thrown if reading or unpacking fails or the expansion ceiling
+   * @throws IOException Thrown if reading or unpacking fails or the expansion limit
    *         is exceeded.
    */
   private static void unpack(Path downloaded, String name, Path staging, Limits limits)
       throws IOException {
     final Budget budget = new Budget(limits.maxExpandedBytes(),
-        "expanded content exceeds the ceiling of " + limits.maxExpandedBytes()
+        "expanded content exceeds the limit of " + limits.maxExpandedBytes()
             + " bytes");
     final Budget entryBudget = new Budget(limits.maxEntries(),
-        "archive entry count exceeds the ceiling of " + limits.maxEntries()
+        "archive entry count exceeds the limit of " + limits.maxEntries()
             + " entries");
     try (InputStream raw = new BufferedInputStream(Files.newInputStream(downloaded))) {
       raw.mark(MAGIC_LENGTH);
-      final int first = raw.read();
-      final int second = raw.read();
+      final byte[] magic = raw.readNBytes(MAGIC_LENGTH);
       raw.reset();
-      if (name.endsWith(MODEL_SUFFIX)) {
+      if (endsWithIgnoreCase(name, MODEL_SUFFIX)) {
         copyBounded(raw, safeChild(staging, name), budget);
-      } else if (first == GZIP_MAGIC_FIRST && second == GZIP_MAGIC_SECOND) {
-        unpackGzip(raw, name, staging, budget, entryBudget);
-      } else if (first == ZIP_MAGIC_FIRST && second == ZIP_MAGIC_SECOND) {
-        unpackZip(raw, staging, budget, entryBudget);
+      } else if (hasMagic(magic, GZIP_MAGIC_FIRST, GZIP_MAGIC_SECOND)) {
+        unpackGzip(raw, name, staging,
+            expansionBudget(Files.size(downloaded), limits, budget), entryBudget);
+      } else if (hasMagic(magic, ZIP_MAGIC_FIRST, ZIP_MAGIC_SECOND,
+          ZIP_LOCAL_HEADER_THIRD, ZIP_LOCAL_HEADER_FOURTH)) {
+        final Set<String> unpacked = unpackZip(raw, staging,
+            expansionBudget(Files.size(downloaded), limits, budget), entryBudget);
+        validateZip(downloaded, unpacked);
+      } else if (hasMagic(magic, ZIP_MAGIC_FIRST, ZIP_MAGIC_SECOND,
+          ZIP_END_HEADER_THIRD, ZIP_END_HEADER_FOURTH)) {
+        validateEmptyZip(raw);
       } else {
         copyBounded(raw, safeChild(staging, name), budget);
       }
@@ -908,27 +1075,214 @@ public final class ResourceInstaller {
   }
 
   /**
+   * Bounds expansion by the ratio as well as the absolute limit, so a small source
+   * cannot expand to the whole absolute limit. Deflate reaches roughly 1000 to 1, so
+   * the absolute limit alone lets a few megabytes fill the target filesystem.
+   *
+   * @param compressedSize The size of the compressed source in bytes.
+   * @param limits The limits holding the accepted expansion ratio.
+   * @param budget The expansion budget under the absolute limit.
+   * @return The tighter of the two budgets. Not {@code null}.
+   */
+  private static Budget expansionBudget(long compressedSize, Limits limits,
+      Budget budget) {
+    final long ratio = limits.maxExpansionRatio();
+    final long ratioCeiling = compressedSize > Long.MAX_VALUE / ratio
+        ? Long.MAX_VALUE
+        : Math.max(MIN_EXPANSION_BYTES, compressedSize * ratio);
+    if (ratioCeiling >= budget.limit()) {
+      return budget;
+    }
+    return new Budget(ratioCeiling, "content expands beyond "
+        + ratio + " times its compressed size");
+  }
+
+  /**
+   * Compares a name's ending with a suffix, ignoring letter case.
+   *
+   * @param name The file name.
+   * @param suffix The suffix to look for.
+   * @return {@code true} if the name ends with the suffix in any letter case.
+   */
+  private static boolean endsWithIgnoreCase(String name, String suffix) {
+    return name.length() >= suffix.length() && name.regionMatches(true,
+        name.length() - suffix.length(), suffix, 0, suffix.length());
+  }
+
+  /**
+   * Checks whether the bytes at the start of a resource match the given signature.
+   *
+   * @param actual The bytes read from the resource.
+   * @param expected The unsigned byte values in the signature.
+   * @return {@code true} when the resource begins with the expected values.
+   */
+  private static boolean hasMagic(byte[] actual, int... expected) {
+    if (actual.length < expected.length) {
+      return false;
+    }
+    for (int i = 0; i < expected.length; i++) {
+      if ((actual[i] & 0xFF) != expected[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Checks that a zip archive contains a valid central directory listing the same files
+   * the local headers delivered, before staged content is promoted. The two listings
+   * can disagree in a crafted archive, and the local headers are what was unpacked.
+   *
+   * @param archive The downloaded archive.
+   * @param unpacked The names of the file entries read from the local headers.
+   * @throws IOException Thrown if the archive is malformed, the listings differ, or the
+   *         archive cannot be read.
+   */
+  private static void validateZip(Path archive, Set<String> unpacked) throws IOException {
+    final Set<String> listed = new HashSet<>();
+    try (ZipFile zip = new ZipFile(archive.toFile())) {
+      final Enumeration<? extends ZipEntry> entries = zip.entries();
+      while (entries.hasMoreElements()) {
+        final ZipEntry entry = entries.nextElement();
+        if (!entry.isDirectory()) {
+          listed.add(entry.getName());
+        }
+      }
+    } catch (UnsupportedOperationException e) {
+      listed.addAll(listZipOnNonDefaultFileSystem(archive));
+    } catch (ZipException e) {
+      throw new IOException(MALFORMED_ZIP_ERROR, e);
+    }
+    if (!listed.equals(unpacked)) {
+      throw new IOException(ZIP_MISMATCH_ERROR);
+    }
+  }
+
+  /**
+   * Lists the file entries of an archive stored by a file-system provider that cannot
+   * supply a {@link java.io.File} to {@link ZipFile}.
+   *
+   * @param archive The downloaded archive.
+   * @return The file entry names from the central directory. Not {@code null}.
+   * @throws IOException Thrown if the archive is malformed or cannot be read.
+   */
+  private static Set<String> listZipOnNonDefaultFileSystem(Path archive)
+      throws IOException {
+    final Set<String> listed = new HashSet<>();
+    try (FileSystem zip = FileSystems.newFileSystem(archive)) {
+      for (final Path root : zip.getRootDirectories()) {
+        try (Stream<Path> walk = Files.walk(root)) {
+          walk.filter(Files::isRegularFile)
+              .map(path -> root.relativize(path).toString())
+              .forEach(listed::add);
+        }
+      }
+    } catch (ZipException | ProviderNotFoundException e) {
+      throw new IOException(MALFORMED_ZIP_ERROR, e);
+    }
+    return listed;
+  }
+
+  /**
+   * Validates an empty zip archive from its end-of-central-directory record. An empty
+   * archive has no local entry headers for {@link ZipInputStream} to validate.
+   *
+   * @param raw The zip content, positioned at its first byte.
+   * @throws IOException Thrown if the record is truncated, declares entries or central
+   *         directory data, or has bytes beyond its declared comment.
+   */
+  private static void validateEmptyZip(InputStream raw) throws IOException {
+    final byte[] header = raw.readNBytes(ZIP_END_HEADER_LENGTH);
+    if (header.length != ZIP_END_HEADER_LENGTH
+        || littleEndianShort(header, ZIP_DISK_OFFSET) != 0
+        || littleEndianShort(header, ZIP_CENTRAL_DISK_OFFSET) != 0
+        || littleEndianShort(header, ZIP_DISK_ENTRIES_OFFSET) != 0
+        || littleEndianShort(header, ZIP_TOTAL_ENTRIES_OFFSET) != 0
+        || littleEndianInt(header, ZIP_CENTRAL_SIZE_OFFSET) != 0
+        || littleEndianInt(header, ZIP_CENTRAL_OFFSET_OFFSET) != 0) {
+      throw new IOException(MALFORMED_ZIP_ERROR);
+    }
+    final int commentLength = littleEndianShort(header, ZIP_COMMENT_LENGTH_OFFSET);
+    if (raw.readNBytes(commentLength).length != commentLength || raw.read() >= 0) {
+      throw new IOException(MALFORMED_ZIP_ERROR);
+    }
+  }
+
+  /**
+   * Reads an unsigned 16-bit little-endian value.
+   *
+   * @param bytes The source bytes.
+   * @param offset The first byte to read.
+   * @return The decoded value.
+   */
+  private static int littleEndianShort(byte[] bytes, int offset) {
+    return bytes[offset] & 0xFF | (bytes[offset + 1] & 0xFF) << 8;
+  }
+
+  /**
+   * Reads an unsigned 32-bit little-endian value.
+   *
+   * @param bytes The source bytes.
+   * @param offset The first byte to read.
+   * @return The decoded value.
+   */
+  private static long littleEndianInt(byte[] bytes, int offset) {
+    return littleEndianShort(bytes, offset)
+        | (long) littleEndianShort(bytes, offset + 2) << 16;
+  }
+
+  /**
    * Unpacks gzip content: a tar archive inside when present, a plain file otherwise. A
-   * plain file loses the {@code .gz} suffix of its source name.
+   * plain file omits the {@code .gz} suffix of its source name, in any letter case. If the source name is
+   * only that suffix, the installed file is named {@value #DEFAULT_RESOURCE_NAME}.
    *
    * @param raw The gzip-compressed content.
    * @param name The file name derived from the source location.
    * @param staging The staging directory to unpack into.
    * @param budget The expansion budget.
    * @param entryBudget The entry-count budget.
-   * @throws IOException Thrown if decompressing or unpacking fails or a ceiling is
+   * @throws IOException Thrown if decompressing or unpacking fails or a limit is
    *         exceeded.
    */
   private static void unpackGzip(InputStream raw, String name, Path staging,
       Budget budget, Budget entryBudget) throws IOException {
     final InputStream decompressed = new BufferedInputStream(
         new BudgetInputStream(new GZIPInputStream(raw), budget), BUFFER_SIZE);
-    if (TarStream.startsWithHeader(decompressed)) {
+    if (TarStream.startsWithHeader(decompressed) || startsWithEmptyTar(decompressed)) {
       unpackTar(decompressed, staging, entryBudget);
+      decompressed.transferTo(OutputStream.nullOutputStream());
     } else {
-      final String plainName = name.endsWith(GZIP_SUFFIX)
+      final String strippedName = endsWithIgnoreCase(name, GZIP_SUFFIX)
           ? name.substring(0, name.length() - GZIP_SUFFIX.length()) : name;
+      final String plainName = strippedName.isEmpty()
+          ? DEFAULT_RESOURCE_NAME : strippedName;
       copy(decompressed, safeChild(staging, plainName));
+    }
+  }
+
+  /**
+   * Checks for the two zero blocks that make up an empty tar archive. There is no entry
+   * header for {@link TarStream#startsWithHeader(InputStream)} to recognize in this case.
+   *
+   * @param in The decompressed content. Must support mark and reset.
+   * @return {@code true} when the content starts with two zero tar blocks.
+   * @throws IOException Thrown if reading or resetting the stream fails.
+   */
+  private static boolean startsWithEmptyTar(InputStream in) throws IOException {
+    in.mark(TAR_END_BLOCKS_LENGTH);
+    try {
+      final byte[] blocks = in.readNBytes(TAR_END_BLOCKS_LENGTH);
+      if (blocks.length != TAR_END_BLOCKS_LENGTH) {
+        return false;
+      }
+      for (final byte b : blocks) {
+        if (b != 0) {
+          return false;
+        }
+      }
+      return true;
+    } finally {
+      in.reset();
     }
   }
 
@@ -938,21 +1292,19 @@ public final class ResourceInstaller {
    *
    * @param decompressed The uncompressed tar content.
    * @param staging The staging directory to unpack into.
-   * @param entryBudget The entry-count budget, charged for every entry including
-   *                    directories.
+   * @param entryBudget The archive-header limit.
    * @throws IOException Thrown if the archive is malformed, an entry escapes the
-   *         staging directory, or the entry ceiling is exceeded.
+   *         staging directory, or the entry limit is exceeded.
    */
   private static void unpackTar(InputStream decompressed, Path staging,
       Budget entryBudget) throws IOException {
-    final TarStream entries = new TarStream(decompressed);
+    final TarStream entries = new TarStream(decompressed, entryBudget.limit());
     while (entries.next()) {
-      entryBudget.spend(1);
       if (!entries.isFile()) {
+        safeChild(staging, entries.name());
         continue;
       }
-      final Path file = safeChild(staging, entries.name());
-      Files.createDirectories(file.getParent());
+      final Path file = newArchiveFile(staging, entries.name());
       copy(entries.entryStream(), file);
     }
   }
@@ -966,27 +1318,56 @@ public final class ResourceInstaller {
    * @param budget The expansion budget.
    * @param entryBudget The entry-count budget, charged for every entry including
    *                    directories.
+   * @return The names of the file entries unpacked. Not {@code null}.
    * @throws IOException Thrown if the archive is malformed, an entry escapes the
-   *         staging directory, or a ceiling is exceeded.
+   *         staging directory, or a limit is exceeded.
    */
-  private static void unpackZip(InputStream raw, Path staging, Budget budget,
+  private static Set<String> unpackZip(InputStream raw, Path staging, Budget budget,
       Budget entryBudget) throws IOException {
     final ZipInputStream zip = new ZipInputStream(raw);
+    final Set<String> unpacked = new HashSet<>();
+    boolean foundEntry = false;
     ZipEntry entry;
     while ((entry = zip.getNextEntry()) != null) {
+      foundEntry = true;
       entryBudget.spend(1);
       if (entry.isDirectory()) {
+        safeChild(staging, entry.getName());
+        consumeBounded(zip, budget);
         continue;
       }
-      final Path file = safeChild(staging, entry.getName());
-      Files.createDirectories(file.getParent());
+      final Path file = newArchiveFile(staging, entry.getName());
       copyBounded(zip, file, budget);
+      unpacked.add(entry.getName());
     }
+    if (!foundEntry) {
+      throw new IOException(MALFORMED_ZIP_ERROR);
+    }
+    return unpacked;
+  }
+
+  /**
+   * Resolves a file entry beneath the staging directory and creates its parent
+   * directories. A second entry that normalizes to the same path is rejected.
+   *
+   * @param staging The staging directory.
+   * @param entryName The path stored in the archive.
+   * @return The new file path. Not {@code null}.
+   * @throws IOException Thrown if the path escapes the staging directory, duplicates
+   *         another file entry, or its parent directories cannot be created.
+   */
+  private static Path newArchiveFile(Path staging, String entryName) throws IOException {
+    final Path file = safeChild(staging, entryName);
+    if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IOException("archive contains duplicate file entry: " + entryName);
+    }
+    Files.createDirectories(file.getParent());
+    return file;
   }
 
   /**
    * Copies the stream into the file, charging every byte against the budget before it
-   * is written, so an oversized transfer aborts within one buffer of its ceiling.
+   * is written, so an oversized transfer aborts within one buffer of its limit.
    *
    * @param in The content to copy.
    * @param file The file to write.
@@ -996,18 +1377,24 @@ public final class ResourceInstaller {
   private static void copyBounded(InputStream in, Path file, Budget budget)
       throws IOException {
     try (OutputStream out = Files.newOutputStream(file)) {
-      final byte[] buffer = new byte[BUFFER_SIZE];
-      int read;
-      while ((read = in.read(buffer)) >= 0) {
-        budget.spend(read);
-        out.write(buffer, 0, read);
-      }
+      new BudgetInputStream(in, budget).transferTo(out);
     }
   }
 
   /**
-   * Copies the stream into the file. The caller is responsible for applying any byte
-   * ceiling to the input stream.
+   * Reads and discards an entry while charging each byte against the expansion limit.
+   *
+   * @param in The entry content.
+   * @param budget The byte budget to charge.
+   * @throws IOException Thrown if reading fails or the budget is exceeded.
+   */
+  private static void consumeBounded(InputStream in, Budget budget) throws IOException {
+    new BudgetInputStream(in, budget).transferTo(OutputStream.nullOutputStream());
+  }
+
+  /**
+   * Copies the stream into the file. The input stream must already enforce any byte
+   * limit.
    *
    * @param in The content to copy.
    * @param file The file to write.
@@ -1024,11 +1411,16 @@ public final class ResourceInstaller {
    *
    * @param staging The staging directory to unpack into.
    * @param entryName The entry name as stored in the archive.
-   * @return The resolved path beneath the staging directory. Never {@code null}.
+   * @return The resolved path beneath the staging directory. Not {@code null}.
    * @throws IOException Thrown if the entry resolves outside the staging directory.
    */
   private static Path safeChild(Path staging, String entryName) throws IOException {
-    final Path resolved = staging.resolve(entryName).normalize();
+    final Path resolved;
+    try {
+      resolved = staging.resolve(entryName).normalize();
+    } catch (InvalidPathException e) {
+      throw new IOException("archive entry has an invalid path: " + entryName, e);
+    }
     if (!resolved.startsWith(staging.normalize())) {
       throw new IOException("archive entry escapes the target directory: " + entryName);
     }
@@ -1051,7 +1443,14 @@ public final class ResourceInstaller {
     return name.isEmpty() ? DEFAULT_RESOURCE_NAME : name;
   }
 
-  private static String validateSourceName(String name) {
+  /**
+   * Rejects names that are empty, path-like, or contain a NUL character.
+   *
+   * @param name The candidate local file name.
+   * @return The validated name.
+   * @throws IllegalArgumentException Thrown if {@code name} is not a file name.
+   */
+  static String validateSourceName(String name) {
     if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
       throw new IllegalArgumentException("name must be a file name");
     }
@@ -1066,34 +1465,39 @@ public final class ResourceInstaller {
 
   /**
    * A unit budget, counting bytes or archive entries: {@link #spend(long)} accumulates
-   * spent units and fails once the ceiling is crossed.
+   * spent units and fails once the limit is crossed.
    */
   private static final class Budget {
 
-    private final long ceiling;
+    private final long limit;
     private final String message;
     private long used;
 
     /**
-     * Creates a budget that has spent nothing yet.
+     * Creates a budget that has spent zero units.
      *
-     * @param ceiling The largest total number of units accepted.
-     * @param message The failure message raised when the ceiling is crossed.
+     * @param limit The largest total number of units accepted.
+     * @param message The failure message raised when the limit is crossed.
      */
-    Budget(long ceiling, String message) {
-      this.ceiling = ceiling;
+    Budget(long limit, String message) {
+      this.limit = limit;
       this.message = message;
+    }
+
+    /** {@return the maximum number of units accepted} */
+    long limit() {
+      return limit;
     }
 
     /**
      * Charges the given number of units against the budget.
      *
      * @param units The number of units to charge.
-     * @throws IOException Thrown if the total charged units exceed the ceiling.
+     * @throws IOException Thrown if the total charged units exceed the limit.
      */
     void spend(long units) throws IOException {
       used += units;
-      if (used > ceiling) {
+      if (used > limit) {
         throw new IOException(message);
       }
     }

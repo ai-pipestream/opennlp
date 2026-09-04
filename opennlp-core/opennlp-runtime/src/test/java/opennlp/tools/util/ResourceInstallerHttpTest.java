@@ -55,11 +55,17 @@ import static opennlp.tools.util.InstallerTestSupport.tarGz;
 /**
  * Exercises {@link ResourceInstaller} against a local scripted HTTP server: happy
  * downloads, redirect handling and its policy, error statuses, stalled responses
- * against the read timeout, and download ceilings against lying or oversized bodies.
+ * against the read timeout, and download limits against incorrect or oversized bodies.
  */
 public class ResourceInstallerHttpTest {
 
   private static final Duration GENEROUS = Duration.ofSeconds(10);
+
+  /** The limits these tests never exercise, kept at their defaults. */
+  private static final long DEFAULT_ENTRIES =
+      ResourceInstaller.Limits.DEFAULT.maxEntries();
+  private static final long DEFAULT_RATIO =
+      ResourceInstaller.Limits.DEFAULT.maxExpansionRatio();
 
   /** Long enough that a stalled route outlives any timeout a test configures. */
   private static final Duration STALL = Duration.ofSeconds(30);
@@ -91,7 +97,7 @@ public class ResourceInstallerHttpTest {
    */
   private static ResourceInstaller.Limits withReadTimeout(Duration readTimeout) {
     return new ResourceInstaller.Limits(GENEROUS, readTimeout, 5, MEBIBYTE, MEBIBYTE,
-        ResourceInstaller.Limits.DEFAULT.maxEntries());
+        DEFAULT_ENTRIES, DEFAULT_RATIO);
   }
 
   /**
@@ -103,19 +109,19 @@ public class ResourceInstallerHttpTest {
    */
   private static ResourceInstaller.Limits withMaxRedirects(int maxRedirects) {
     return new ResourceInstaller.Limits(GENEROUS, GENEROUS, maxRedirects,
-        MEBIBYTE, MEBIBYTE, ResourceInstaller.Limits.DEFAULT.maxEntries());
+        MEBIBYTE, MEBIBYTE, DEFAULT_ENTRIES, DEFAULT_RATIO);
   }
 
   /**
-   * Builds installation limits with the given download ceiling and otherwise generous
+   * Builds installation limits with the given download limit and otherwise generous
    * values.
    *
-   * @param maxDownloadBytes The download ceiling in bytes.
+   * @param maxDownloadBytes The download limit in bytes.
    * @return The limits. Never {@code null}.
    */
-  private static ResourceInstaller.Limits withDownloadCeiling(long maxDownloadBytes) {
+  private static ResourceInstaller.Limits withDownloadLimit(long maxDownloadBytes) {
     return new ResourceInstaller.Limits(GENEROUS, GENEROUS, 5, maxDownloadBytes,
-        MEBIBYTE, ResourceInstaller.Limits.DEFAULT.maxEntries());
+        MEBIBYTE, DEFAULT_ENTRIES, DEFAULT_RATIO);
   }
 
   /**
@@ -133,11 +139,6 @@ public class ResourceInstallerHttpTest {
         thrown.getMessage());
   }
 
-  /**
-   * Proves that an http source without a checksum is rejected as an argument error on
-   * every overload that could omit one, before any connection is opened, so bytes that
-   * can never be verified are never fetched.
-   */
   @Test
   void testHttpSourceWithoutChecksumIsRejectedBeforeFetching(@TempDir Path target)
       throws Exception {
@@ -159,11 +160,6 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that the checksum requirement covers https and fires before the target
-   * directory is created, so a checksum-less call cannot leave an empty directory
-   * behind.
-   */
   @Test
   void testHttpsSourceWithoutChecksumIsRejectedBeforeCreatingTheTarget(
       @TempDir Path parent) {
@@ -183,6 +179,27 @@ public class ResourceInstallerHttpTest {
 
     Assertions.assertEquals("over http",
         Files.readString(target.resolve("corpus/data.txt")));
+  }
+
+  @Test
+  void testInvalidSourceNameIsRejectedBeforeFetching(@TempDir Path parent)
+      throws Exception {
+    final AtomicBoolean fetched = new AtomicBoolean();
+    final byte[] content = "dictionary".getBytes(StandardCharsets.UTF_8);
+    server.route("/bad%00name.dat", out -> {
+      fetched.set(true);
+      StubServer.ok(out, content);
+    });
+    final Path target = parent.resolve("not-created-yet");
+
+    final IllegalArgumentException thrown = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> ResourceInstaller.install(server.uri("/bad%00name.dat"), target,
+            sha256(content)));
+
+    Assertions.assertEquals("name must be a file name", thrown.getMessage());
+    Assertions.assertFalse(fetched.get());
+    Assertions.assertTrue(Files.notExists(target));
   }
 
   @Test
@@ -212,10 +229,6 @@ public class ResourceInstallerHttpTest {
         Files.readString(target.resolve("corpus/data.txt")));
   }
 
-  /**
-   * Proves that every redirect status the installer claims to follow (301, 302, 303,
-   * 307, 308) is actually followed.
-   */
   @ParameterizedTest(name = "{0}")
   @ValueSource(strings = {"301 Moved Permanently", "302 Found", "303 See Other",
       "307 Temporary Redirect", "308 Permanent Redirect"})
@@ -231,12 +244,8 @@ public class ResourceInstallerHttpTest {
         Files.readString(target.resolve("corpus/data.txt")));
   }
 
-  /**
-   * Proves the boundary of the redirect cap: an allowance of zero refuses the very
-   * first redirect.
-   */
   @Test
-  void testZeroRedirectAllowanceRefusesTheFirstRedirect(@TempDir Path target)
+  void testZeroRedirectAllowanceRejectsTheFirstRedirect(@TempDir Path target)
       throws Exception {
     server.route("/once", out -> StubServer.redirect(out,
         server.uri("/anywhere.tar.gz").toString()));
@@ -248,10 +257,6 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a Location header that cannot be parsed as a URI fails loud with the
-   * offending value instead of surfacing a bare parse exception.
-   */
   @Test
   void testMalformedRedirectLocationFails() {
     final URI from = URI.create("http://example.invalid/archive.tar.gz");
@@ -259,14 +264,10 @@ public class ResourceInstallerHttpTest {
     final IOException thrown = Assertions.assertThrows(IOException.class,
         () -> ResourceInstaller.resolveRedirect(from, "http://mirror.invalid/bad path"));
     Assertions.assertEquals("redirect from " + from
-        + " carries a malformed Location: http://mirror.invalid/bad path",
+        + " contains a malformed Location: http://mirror.invalid/bad path",
         thrown.getMessage());
   }
 
-  /**
-   * Proves the redirect cap: a location that keeps redirecting to itself fails once
-   * the configured allowance is exhausted, and nothing is installed.
-   */
   @Test
   void testRedirectChainBeyondLimitFails(@TempDir Path target) throws Exception {
     server.route("/loop", out -> StubServer.redirect(out, "/loop"));
@@ -278,10 +279,6 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a redirect status without a Location header fails loud instead of
-   * installing the redirect response body as if it were the resource.
-   */
   @Test
   void testRedirectWithoutLocationFails(@TempDir Path target) throws Exception {
     server.route("/broken", out -> StubServer.head(out, "302 Found",
@@ -290,21 +287,17 @@ public class ResourceInstallerHttpTest {
     final URI source = server.uri("/broken");
     final IOException thrown = Assertions.assertThrows(IOException.class,
         () -> ResourceInstaller.install(source, target, UNREACHED_CHECKSUM));
-    Assertions.assertEquals("redirect from " + source + " carries no Location header",
+    Assertions.assertEquals("redirect from " + source + " contains no Location header",
         thrown.getMessage());
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a redirect leaving the http and https schemes is rejected, so a
-   * hostile mirror cannot steer the installer at local files.
-   */
   @Test
   void testRedirectToNonHttpSchemeFails(@TempDir Path target) throws Exception {
-    server.route("/hostile", out -> StubServer.redirect(out, "file:///etc/passwd"));
+    server.route("/non-http", out -> StubServer.redirect(out, "file:///etc/passwd"));
 
     final IOException thrown = Assertions.assertThrows(IOException.class,
-        () -> ResourceInstaller.install(server.uri("/hostile"), target,
+        () -> ResourceInstaller.install(server.uri("/non-http"), target,
             UNREACHED_CHECKSUM));
     Assertions.assertEquals(
         "redirect target is not an http or https location: file:///etc/passwd",
@@ -312,15 +305,11 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves the downgrade rule on the redirect seam: an https source must not follow a
-   * redirect to plain http, while https to https and http to https are permitted.
-   */
   @Test
   void testHttpsToHttpDowngradeIsRejected() {
     final URI https = URI.create("https://example.invalid/archive.tar.gz");
 
-    // assertAll so a wrongly rejected upgrade is not hidden by the rejection case.
+    // Cover the rejected downgrade and both accepted upgrade and same-scheme cases.
     Assertions.assertAll(
         () -> {
           final IOException thrown = Assertions.assertThrows(IOException.class,
@@ -350,10 +339,6 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves the read timeout against a server that accepts the request and then never
-   * answers: the installer gives up within the configured timeout instead of hanging.
-   */
   @Test
   void testStalledResponseHitsReadTimeout(@TempDir Path target) {
     server.route("/stall", out -> StubServer.sleep(STALL));
@@ -364,10 +349,6 @@ public class ResourceInstallerHttpTest {
     Assertions.assertInstanceOf(SocketTimeoutException.class, thrown);
   }
 
-  /**
-   * Proves the read timeout against a slow-loris body: headers and a few bytes arrive,
-   * then the connection stalls, and the installer gives up instead of hanging.
-   */
   @Test
   void testStalledBodyHitsReadTimeout(@TempDir Path target) throws Exception {
     server.route("/drip", out -> {
@@ -384,31 +365,23 @@ public class ResourceInstallerHttpTest {
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a declared content length beyond the download ceiling fails before
-   * the body is read, so a lying server cannot make the installer fetch it at all.
-   */
   @Test
-  void testDeclaredContentLengthBeyondCeilingFailsFast(@TempDir Path target)
+  void testDeclaredContentLengthBeyondLimitFailsFast(@TempDir Path target)
       throws Exception {
     server.route("/liar.tar.gz", out -> StubServer.head(out, "200 OK",
         "Content-Length: 10000000", ""));
 
     final IOException thrown = Assertions.assertThrows(IOException.class,
         () -> ResourceInstaller.install(server.uri("/liar.tar.gz"), target,
-            UNREACHED_CHECKSUM, withDownloadCeiling(KIBIBYTE)));
+            UNREACHED_CHECKSUM, withDownloadLimit(KIBIBYTE)));
     Assertions.assertEquals(
-        "declared content length 10000000 exceeds the download ceiling of 1024 bytes",
+        "declared content length 10000000 exceeds the download limit of 1024 bytes",
         thrown.getMessage());
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves the download ceiling against a close-delimited body with no declared
-   * length: the transfer aborts once the ceiling is crossed and nothing is installed.
-   */
   @Test
-  void testStreamedBodyBeyondCeilingAborts(@TempDir Path target) throws Exception {
+  void testStreamedBodyBeyondLimitAborts(@TempDir Path target) throws Exception {
     server.route("/endless", out -> {
       StubServer.head(out, "200 OK", "");
       out.write(new byte[64 * 1024]);
@@ -417,18 +390,12 @@ public class ResourceInstallerHttpTest {
 
     final IOException thrown = Assertions.assertThrows(IOException.class,
         () -> ResourceInstaller.install(server.uri("/endless"), target,
-            UNREACHED_CHECKSUM, withDownloadCeiling(KIBIBYTE)));
-    Assertions.assertEquals("download exceeds the ceiling of 1024 bytes",
+            UNREACHED_CHECKSUM, withDownloadLimit(KIBIBYTE)));
+    Assertions.assertEquals("download exceeds the limit of 1024 bytes",
         thrown.getMessage());
     Assertions.assertEquals(List.of(), installedFiles(target));
   }
 
-  /**
-   * Proves that a positive timeout shorter than a millisecond is applied as a real
-   * timeout. Rounded down to zero it would mean no timeout at all to
-   * {@code HttpURLConnection}, so the tightest configuration a caller can express would
-   * become the loosest, and this install would never return.
-   */
   @Test
   @Timeout(value = 15, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
   void testSubMillisecondReadTimeoutStillTimesOut(@TempDir Path target) {
@@ -445,33 +412,27 @@ public class ResourceInstallerHttpTest {
   }
 
 
-  /**
-   * Proves that a timeout too large to express in milliseconds is capped rather than
-   * overflowing. {@link Duration#toMillis()} raises an {@code ArithmeticException} on
-   * such a value, which would abort the install before a single byte was fetched.
-   */
   @Test
   void testTimeoutBeyondTheMillisecondRangeIsCapped(@TempDir Path target)
       throws Exception {
-    final byte[] archive = tarGz(new String[][] {{"corpus/data.txt", "patient"}});
-    server.route("/corpus.tar.gz", out -> StubServer.ok(out, archive));
+    final byte[] archive = tarGz(new String[][] {{"payload/data.txt", "content"}});
+    server.route("/payload.tar.gz", out -> StubServer.ok(out, archive));
     final Duration beyondMillis = Duration.ofSeconds(Long.MAX_VALUE / 1000 + 1);
     final ResourceInstaller.Limits limits = ResourceInstaller.Limits.builder()
         .connectTimeout(beyondMillis)
         .readTimeout(beyondMillis)
         .build();
 
-    ResourceInstaller.install(server.uri("/corpus.tar.gz"), target, sha256(archive),
+    ResourceInstaller.install(server.uri("/payload.tar.gz"), target, sha256(archive),
         limits);
 
-    Assertions.assertEquals("patient",
-        Files.readString(target.resolve("corpus/data.txt")));
+    Assertions.assertEquals("content",
+        Files.readString(target.resolve("payload/data.txt")));
   }
 
   /**
-   * A minimal scripted HTTP server on a loopback socket. Each registered route is a
-   * function from the response output stream to the raw bytes it wants on the wire,
-   * which lets tests script redirects, lies, stalls, and floods precisely.
+   * A scripted HTTP server on a loopback socket. Each registered route writes a raw
+   * response for redirect, timeout, malformed-response, and size-limit tests.
    */
   private static final class StubServer implements AutoCloseable {
 

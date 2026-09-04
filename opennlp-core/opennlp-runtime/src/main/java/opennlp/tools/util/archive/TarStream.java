@@ -20,41 +20,24 @@ package opennlp.tools.util.archive;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 import opennlp.tools.commons.Internal;
 
 /**
- * A forward-only reader over a tar stream: {@link #next()} advances to the following
- * entry, skipping whatever remains of the current one, and {@link #entryStream()}
- * exposes exactly the current entry's bytes.
+ * A forward-only reader for classic v7, POSIX ustar, GNU, and pax tar streams.
+ * {@link #next()} advances to the following entry and {@link #entryStream()} exposes
+ * only the current entry's bytes.
  *
- * <p>Reads the classic v7, POSIX ustar, GNU, and pax formats: entry name, octal size, and
- * type flag, with a valid header checksum required in every case. On a POSIX ustar header
- * the 155-byte name prefix field is honored, so a name may span the prefix and the
- * 100-byte name field, joined by {@code /}. A GNU header is not read that way, because GNU
- * stores {@code atime} at the offset ustar gives to the prefix; the two are told apart by
- * the magic field, {@code "ustar\0"} plus version {@code "00"} for ustar against
- * {@code "ustar  \0"} for GNU.</p>
+ * <p>The reader validates header checksums, supports ustar name prefixes, GNU long
+ * names, pax {@code path} and {@code size} records, and GNU base-256 sizes. Sparse
+ * entries and global pax records that change paths or sizes are rejected because this
+ * reader cannot reproduce their content or global semantics.</p>
  *
- * <p>A name longer than the header fields is read from the extension header that carries
- * it, because the entry header following one holds only a truncated name. A pax extended
- * header ({@code x}) supplies {@code path} and {@code size} for the next entry; a GNU
- * long-name header ({@code L}) supplies its name. Both are in everyday use:
- * {@code bsdtar} and {@code tar --format=posix} write an {@code x} header ahead of every
- * entry, including entries that need no override.</p>
- *
- * <p>A size field too large for eleven octal digits is read in the base-256 encoding GNU
- * writes for it, so an entry of 8 GiB or more states its length correctly.</p>
- *
- * <p>Keywords other than {@code path} and {@code size} are ignored, because this reader
- * exposes only an entry's name, size, type, and content, and no other pax keyword changes
- * those. The exception is the {@code GNU.sparse.*} family, along with the GNU sparse type
- * flag {@code S}: there the archived bytes are a sparse-file encoding rather than the
- * content, so those entries are refused instead of being unpacked as though they were
- * literal. A pax global header ({@code g}) is refused if it carries {@code path} or
- * {@code size}, which would change every entry after it.</p>
+ * @since 3.0.0
  */
 @Internal
 public final class TarStream {
@@ -87,12 +70,15 @@ public final class TarStream {
   private static final int BASE_256_FIRST_BYTE_BITS = 0x7F;
 
   private final InputStream in;
+  private final long maxEntries;
   private final byte[] header = new byte[BLOCK];
 
   private String name;
   private long size;
   private char type;
   private long remaining;
+  private long entries;
+  private boolean ended;
 
   /** The name an extension header supplied for the entry that follows it, else null. */
   private String pendingPath;
@@ -103,21 +89,38 @@ public final class TarStream {
   /**
    * Initializes the reader.
    *
-   * @param in The tar content. Must not be {@code null}. Not closed by this class.
+   * @param in The tar content. Not {@code null}. Not closed by this class.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    */
   public TarStream(InputStream in) {
+    this(in, Long.MAX_VALUE);
+  }
+
+  /**
+   * Initializes a reader with an archive-entry limit. Extension headers count toward the
+   * limit.
+   *
+   * @param in The tar content. Not {@code null}. Not closed by this class.
+   * @param maxEntries The maximum number of archive headers to read. Must be positive.
+   * @throws IllegalArgumentException Thrown if {@code in} is {@code null} or
+   *         {@code maxEntries} is not positive.
+   */
+  public TarStream(InputStream in, long maxEntries) {
     if (in == null) {
       throw new IllegalArgumentException("in must not be null");
     }
+    if (maxEntries <= 0) {
+      throw new IllegalArgumentException("maxEntries must be positive");
+    }
     this.in = in;
+    this.maxEntries = maxEntries;
   }
 
   /**
    * Checks whether the given stream is positioned at a tar entry header, leaving its
    * position unchanged.
    *
-   * @param in The stream to inspect. Must not be {@code null} and must support
+   * @param in The stream to inspect. Not {@code null} and must support
    *           {@link InputStream#mark(int) mark} and {@link InputStream#reset() reset}.
    * @return {@code true} if the next 512 bytes read as a tar header, {@code false} if
    *         they do not or if fewer than 512 bytes are available.
@@ -149,11 +152,20 @@ public final class TarStream {
    * @throws IOException Thrown if the archive is truncated or a header is malformed.
    */
   public boolean next() throws IOException {
+    if (ended) {
+      return false;
+    }
     skip(remaining);
     skip(padding(size));
     while (true) {
       if (!readBlock() || isEndBlock()) {
+        ended = true;
         return false;
+      }
+      entries++;
+      if (entries > maxEntries) {
+        throw new IOException("archive entry count exceeds the limit of "
+            + maxEntries + " entries");
       }
       if (!hasValidChecksum(header)) {
         throw new IOException("malformed tar header checksum");
@@ -163,14 +175,15 @@ public final class TarStream {
       remaining = size;
       if (type == TYPE_GNU_SPARSE) {
         throw new IOException("sparse tar entries are not supported: "
-            + "the archived bytes encode holes rather than the file content");
+            + "the archived bytes describe file holes, not contiguous content");
       }
       if (type == TYPE_PAX_EXTENDED || type == TYPE_PAX_GLOBAL) {
         readRecords(readExtensionPayload(), type == TYPE_PAX_GLOBAL);
         continue;
       }
       if (type == TYPE_GNU_LONG_NAME) {
-        pendingPath = trimNul(new String(readExtensionPayload(), StandardCharsets.UTF_8));
+        final byte[] payload = readExtensionPayload();
+        pendingPath = trimNul(decodeUtf8(payload, 0, payload.length, "GNU long name"));
         continue;
       }
       if (type == TYPE_GNU_LONG_LINK) {
@@ -186,7 +199,7 @@ public final class TarStream {
         pendingSize = -1;
       }
       if (name.isEmpty()) {
-        throw new IOException("tar entry header carries an empty name");
+        throw new IOException("tar entry header contains an empty name");
       }
       return true;
     }
@@ -196,7 +209,7 @@ public final class TarStream {
    * Reads the payload of the extension header just read, leaving the stream positioned on
    * the header that follows it.
    *
-   * @return The payload bytes. Never {@code null}.
+   * @return The payload bytes. Not {@code null}.
    * @throws IOException Thrown if the payload is larger than
    *         {@link #MAX_EXTENSION_BYTES} or the archive ends inside it.
    */
@@ -217,15 +230,13 @@ public final class TarStream {
 
   /**
    * Reads a pax extended header payload, which is a sequence of
-   * {@code "<length> <keyword>=<value>\n"} records whose length counts the whole record
-   * including its own digits, the blank, and the newline. Records are parsed on the raw
-   * bytes rather than on decoded text, because the length is a byte count and a multibyte
-   * value would otherwise shift every record after it.
+   * {@code "<length> <keyword>=<value>\n"} records. Each length counts the complete
+   * record, including the length digits, blank, and newline. Records are parsed from raw
+   * bytes because the length is a byte count and a multibyte value would shift later records.
    *
    * @param payload The raw extended header payload.
-   * @param global Whether this is a global header, which applies to every entry that
-   *               follows rather than to just the next one.
-   * @throws IOException Thrown if a record is malformed, if a global header carries a
+   * @param global Whether this is a global header, which applies to all following entries.
+   * @throws IOException Thrown if a record is malformed, if a global header contains a
    *         keyword that would change the entries after it, or if the entry is sparse.
    */
   private void readRecords(byte[] payload, boolean global) throws IOException {
@@ -260,35 +271,55 @@ public final class TarStream {
       if (equals >= end - 1 || equals == blank + 1) {
         throw new IOException(MALFORMED_RECORD);
       }
-      apply(new String(payload, blank + 1, equals - blank - 1, StandardCharsets.UTF_8),
-          new String(payload, equals + 1, end - equals - 2, StandardCharsets.UTF_8),
-          global);
+      apply(decodeUtf8(payload, blank + 1, equals - blank - 1, "pax record"),
+          decodeUtf8(payload, equals + 1, end - equals - 2, "pax record"), global);
       offset = end;
     }
   }
 
   /**
+   * Decodes archive text without replacing malformed input, which would silently
+   * change an archive path.
+   *
+   * @param bytes The bytes containing the text.
+   * @param offset The first byte to decode.
+   * @param length The number of bytes to decode.
+   * @param subject The field name to use in an error message.
+   * @return The decoded text. Not {@code null}.
+   * @throws IOException Thrown if the bytes are not valid UTF-8.
+   */
+  private static String decodeUtf8(byte[] bytes, int offset, int length, String subject)
+      throws IOException {
+    try {
+      return StandardCharsets.UTF_8.newDecoder()
+          .decode(ByteBuffer.wrap(bytes, offset, length)).toString();
+    } catch (CharacterCodingException e) {
+      throw new IOException(subject + " is not valid UTF-8", e);
+    }
+  }
+
+  /**
    * Applies one pax record. Only {@code path} and {@code size} change what this reader
-   * reports, so every other keyword is ignored, except the sparse family, whose entries
-   * cannot be unpacked at all.
+   * reports, so other keywords are ignored, except sparse entries, which cannot be
+   * unpacked.
    *
    * @param keyword The record's keyword.
    * @param value The record's value.
    * @param global Whether the record came from a global header.
-   * @throws IOException Thrown if the entry is sparse, if a global header carries a
+   * @throws IOException Thrown if the entry is sparse, if a global header contains a
    *         keyword that would change the entries after it, or if {@code size} is not a
    *         number.
    */
   private void apply(String keyword, String value, boolean global) throws IOException {
     if (keyword.startsWith(SPARSE_PREFIX)) {
       throw new IOException("sparse tar entries are not supported: "
-          + "the archived bytes encode holes rather than the file content");
+          + "the archived bytes describe file holes, not contiguous content");
     }
     if (!KEYWORD_PATH.equals(keyword) && !KEYWORD_SIZE.equals(keyword)) {
       return;
     }
     if (global) {
-      throw new IOException("pax global header carries " + keyword
+      throw new IOException("pax global header contains " + keyword
           + ", which would change every entry after it");
     }
     if (KEYWORD_PATH.equals(keyword)) {
@@ -307,10 +338,10 @@ public final class TarStream {
 
   /**
    * Drops everything from the first NUL onward, which is how a GNU long-name header
-   * terminates the name it carries.
+   * terminates the name it contains.
    *
    * @param value The decoded payload.
-   * @return The name without its terminator. Never {@code null}.
+   * @return The name without its terminator. Not {@code null}.
    */
   private static String trimNul(String value) {
     final int nul = value.indexOf('\0');
@@ -320,16 +351,17 @@ public final class TarStream {
   /**
    * Reads the current header's entry name. On a POSIX ustar header a non-empty name
    * prefix is joined to the name field with {@code /}, which is how a name longer than
-   * the 100-byte name field is stored when no extension header carries it.
+   * the 100-byte name field is stored when no extension header contains it.
    *
-   * @return The entry name. Never {@code null}.
+   * @return The entry name. Not {@code null}.
+   * @throws IOException Thrown if the stored name or prefix is not valid UTF-8.
    */
-  private String readName() {
-    final String stored = field(0, NAME_LENGTH);
+  private String readName() throws IOException {
+    final String stored = field(0, NAME_LENGTH, "tar entry name");
     if (!hasPosixUstarMagic(header)) {
       return stored;
     }
-    final String prefix = field(PREFIX_OFFSET, PREFIX_LENGTH);
+    final String prefix = field(PREFIX_OFFSET, PREFIX_LENGTH, "tar entry name prefix");
     return prefix.isEmpty() ? stored : prefix + "/" + stored;
   }
 
@@ -338,18 +370,20 @@ public final class TarStream {
    *
    * @param offset The field's offset in the header block.
    * @param length The field's length in bytes.
-   * @return The field content up to its first NUL, decoded as UTF-8. Never {@code null}.
+   * @param subject The field name to use in an error message.
+   * @return The field content up to its first NUL, decoded as UTF-8. Not {@code null}.
+   * @throws IOException Thrown if the field is not valid UTF-8.
    */
-  private String field(int offset, int length) {
+  private String field(int offset, int length, String subject) throws IOException {
     int end = 0;
     while (end < length && header[offset + end] != 0) {
       end++;
     }
-    return new String(header, offset, end, StandardCharsets.UTF_8);
+    return decodeUtf8(header, offset, end, subject);
   }
 
   /**
-   * @return The current entry's name as stored in the archive. Never {@code null}
+   * @return The current entry's name as stored in the archive. Not {@code null}
    *         after a successful {@link #next()}.
    */
   public String name() {
@@ -375,7 +409,7 @@ public final class TarStream {
    *
    * @return A stream over exactly this entry's bytes; reading past the end returns end
    *         of stream, and a zero-length read returns {@code 0} as
-   *         {@link InputStream#read(byte[], int, int)} requires. Never {@code null}.
+   *         {@link InputStream#read(byte[], int, int)} requires. Not {@code null}.
    *         Closing it is not required.
    */
   public InputStream entryStream() {
@@ -396,10 +430,9 @@ public final class TarStream {
       /**
        * {@inheritDoc}
        *
-       * <p>The range is checked before anything else, so an invalid one is reported even
-       * when the entry is exhausted or the length is zero. This override raises the
-       * exceptions {@link InputStream} specifies rather than the
-       * {@code IllegalArgumentException} used elsewhere in this package.</p>
+       * <p>The range is checked before the entry state, so invalid arguments are reported
+       * when the entry is exhausted or the requested length is zero. This override uses
+       * the exceptions specified by {@link InputStream}.</p>
        *
        * @throws NullPointerException Thrown if {@code buffer} is {@code null}.
        * @throws IndexOutOfBoundsException Thrown if {@code offset} or {@code length} is
@@ -428,8 +461,8 @@ public final class TarStream {
   /**
    * Checks whether a full 512-byte block reads as a tar entry header, which it does when
    * it starts with a name and its stored checksum matches the block. Both classic and
-   * ustar headers carry that checksum, so it identifies either without relying on the
-   * ustar magic, which arbitrary content can also carry.
+   * ustar headers contain that checksum, so it identifies both without relying on the
+   * ustar magic, which arbitrary content can also contain.
    *
    * @param block The block to inspect. Must be 512 bytes long.
    * @return {@code true} if the block reads as a tar header.
@@ -441,7 +474,7 @@ public final class TarStream {
   /**
    * Verifies a header block against the checksum stored in it. The checksum is the sum
    * of every header byte with the checksum field itself read as eight blanks. Historical
-   * writers summed the bytes as signed rather than unsigned, so either total is accepted.
+   * writers used signed-byte sums, so both totals are accepted.
    *
    * @param block The header block to verify. Must be 512 bytes long.
    * @return {@code true} if the stored checksum is well formed and matches the block.
@@ -449,12 +482,16 @@ public final class TarStream {
   private static boolean hasValidChecksum(byte[] block) {
     long stored = 0;
     boolean digits = false;
+    boolean trailingPadding = false;
     for (int i = CHECKSUM_OFFSET; i < CHECKSUM_OFFSET + CHECKSUM_LENGTH; i++) {
       final byte b = block[i];
       if (b == 0 || b == ' ') {
+        if (digits) {
+          trailingPadding = true;
+        }
         continue;
       }
-      if (!isOctalDigit(b)) {
+      if (!isOctalDigit(b) || trailingPadding) {
         return false;
       }
       stored = stored * 8 + (b - '0');
@@ -482,7 +519,7 @@ public final class TarStream {
    * every entry under a directory named after an octal timestamp.
    *
    * @param block The block to inspect. Must be 512 bytes long.
-   * @return {@code true} if the block carries the POSIX ustar magic.
+   * @return {@code true} if the block contains the POSIX ustar magic.
    */
   private static boolean hasPosixUstarMagic(byte[] block) {
     for (int i = 0; i < USTAR_MAGIC.length(); i++) {
@@ -534,7 +571,7 @@ public final class TarStream {
 
   /**
    * Parses the size field of the current header, tolerating NUL and blank padding around
-   * the octal digits. A field whose leading bit is set is in the base-256 encoding
+   * the octal digits. A field with its leading bit set is in the base-256 encoding
    * instead, and is read by {@link #parseBase256Size()}.
    *
    * @return The entry size in bytes.
@@ -547,14 +584,20 @@ public final class TarStream {
       return parseBase256Size();
     }
     long value = 0;
+    boolean digitSeen = false;
+    boolean trailingPadding = false;
     for (int i = SIZE_OFFSET; i < SIZE_OFFSET + SIZE_LENGTH; i++) {
       final byte b = header[i];
       if (b == 0 || b == ' ') {
+        if (digitSeen) {
+          trailingPadding = true;
+        }
         continue;
       }
-      if (!isOctalDigit(b)) {
+      if (!isOctalDigit(b) || trailingPadding) {
         throw new IOException("malformed tar size field in entry header");
       }
+      digitSeen = true;
       value = value * 8 + (b - '0');
     }
     return value;
@@ -562,13 +605,12 @@ public final class TarStream {
 
   /**
    * Reads a size field in the base-256 encoding, which GNU writes when a value does not
-   * fit the eleven octal digits the field otherwise holds, so entries of 8 GiB and above
+   * fit the 11 octal digits the field otherwise contains, so entries of 8 GiB and above
    * can state their length.
    *
    * <p>The leading bit marks the encoding, the next bit is the sign, and the remaining
-   * bits of that byte followed by every later byte form a big-endian two's complement
-   * number. A size is never negative, so the negative form is refused rather than wrapped
-   * into a huge positive length.</p>
+   * bits of that byte followed by all later bytes form a big-endian two's complement
+   * number. Negative sizes are rejected.</p>
    *
    * @return The entry size in bytes.
    * @throws IOException Thrown if the encoded value is negative or does not fit a

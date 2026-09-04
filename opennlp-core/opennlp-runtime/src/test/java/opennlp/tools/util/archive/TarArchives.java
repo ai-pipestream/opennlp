@@ -20,10 +20,11 @@ package opennlp.tools.util.archive;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Builds tar archives byte by byte, so tests can assemble well-formed, boundary, and
- * deliberately corrupt archives without a third-party library. Headers carry the ustar
+ * malformed archives without an extra library. Each header has the ustar
  * magic and a valid checksum, as a real archive does; {@link #reseal(byte[])} restores
  * the checksum after a test has corrupted some other field on purpose.
  */
@@ -159,8 +160,7 @@ public final class TarArchives {
 
   /**
    * Encodes one pax extended header record, {@code "<length> <keyword>=<value>\n"}. The
-   * length counts the whole record including its own digits, the blank, and the newline,
-   * so it is solved for rather than guessed.
+   * length includes all record bytes: digits, the blank, and the newline.
    *
    * @param keyword The pax keyword.
    * @param value The keyword's value.
@@ -307,5 +307,39 @@ public final class TarArchives {
   public static void entry(ByteArrayOutputStream tar, String name, byte[] content)
       throws IOException {
     entry(tar, name, content, TYPE_REGULAR_FILE);
+  }
+
+  /**
+   * Builds a gzip-compressed tar archive from name and content pairs, terminated by
+   * the two all-zero blocks that end a tar archive.
+   *
+   * @param entries The entries as {@code {name, content}} pairs of UTF-8 text. Must not
+   *                be {@code null}.
+   * @return The compressed archive bytes. Never {@code null}.
+   * @throws IOException Thrown if writing to the in-memory streams fails.
+   */
+  public static byte[] gzippedTar(String[][] entries) throws IOException {
+    final ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    for (final String[] entry : entries) {
+      entry(tar, entry[0], entry[1].getBytes(StandardCharsets.UTF_8));
+    }
+    tar.write(new byte[TERMINATOR_SIZE]);
+    return gzip(tar.toByteArray());
+  }
+
+  /**
+   * Compresses raw tar bytes the way a {@code .tar.gz} distribution is shipped, so
+   * tests can wrap hand-built or deliberately truncated tar content.
+   *
+   * @param content The raw tar bytes. Must not be {@code null}.
+   * @return The gzip-compressed bytes. Never {@code null}.
+   * @throws IOException Thrown if writing to the in-memory stream fails.
+   */
+  public static byte[] gzip(byte[] content) throws IOException {
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (GZIPOutputStream compressed = new GZIPOutputStream(out)) {
+      compressed.write(content);
+    }
+    return out.toByteArray();
   }
 }

@@ -22,12 +22,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.DictionaryCatalog;
 import opennlp.tools.util.DigestTestUtil;
@@ -69,7 +77,7 @@ public class MecabDictionaryInstallerTest {
   /**
    * Verifies that only files at the archive root count as dictionary payload.
    * mecab-ko-dic ships template user dictionaries under {@code user-dic/} whose
-   * numeric fields are empty, input for {@code mecab-dict-index} rather than loadable
+   * numeric fields are empty. They are input for {@code mecab-dict-index}, not loadable
    * lexicon data. Flattening them next to the real lexicon fails the subsequent load,
    * and on a case-insensitive file system a template can silently overwrite a real
    * lexicon file of the same base name.
@@ -91,11 +99,11 @@ public class MecabDictionaryInstallerTest {
   }
 
   /**
-   * Verifies that two payload entries that flatten to the same base name are refused,
+   * Verifies that two payload entries that flatten to the same base name are rejected,
    * because keeping either one silently would install an ambiguous dictionary.
    */
   @Test
-  void testEntriesFlatteningToTheSameNameAreRefused(@TempDir Path source,
+  void testEntriesFlatteningToTheSameNameAreRejected(@TempDir Path source,
       @TempDir Path target) throws IOException {
     final Path archiveFile = archive(source, new String[][] {
         {"words.csv", "cat,0,0,100,noun\n"},
@@ -124,10 +132,36 @@ public class MecabDictionaryInstallerTest {
   }
 
   /**
+   * Checks installation when the target uses a different filesystem provider.
+   *
+   * @param source The directory containing the fixture archive.
+   * @param scratch The directory containing the ZIP filesystem.
+   * @throws IOException Thrown if creating or installing the fixture fails.
+   */
+  @Test
+  void testInstallIntoANonDefaultFileSystem(@TempDir Path source, @TempDir Path scratch)
+      throws IOException {
+    final Path archiveFile = archive(source, new String[][] {
+        {"d/words.csv", "cat,0,0,100,noun\n"},
+        {"d/matrix.def", "1 1\n0 0 0\n"}});
+    final URI zip = URI.create("jar:" + scratch.resolve("target.zip").toUri());
+
+    try (FileSystem targetFileSystem =
+             FileSystems.newFileSystem(zip, Map.of("create", "true"))) {
+      final Path target = targetFileSystem.getPath("/dictionary");
+
+      Assertions.assertEquals(2,
+          MecabDictionaryInstaller.install(archiveFile.toUri(), target));
+      Assertions.assertEquals("cat,0,0,100,noun\n",
+          Files.readString(target.resolve("words.csv")));
+    }
+  }
+
+  /**
    * Verifies that a pax long-name entry installs under its real name. The common
    * distributions ship plain ustar today, but {@code bsdtar} and
    * {@code tar --format=posix} write pax archives, whose over-100-byte names live in an
-   * extension header rather than the header name field.
+   * extension header instead of the header name field.
    */
   @Test
   void testPaxLongNamedEntryInstallsUnderItsRealName(@TempDir Path source,
@@ -140,7 +174,7 @@ public class MecabDictionaryInstallerTest {
         "cat,0,0,100,noun\n".getBytes(StandardCharsets.UTF_8));
     tar.write(new byte[TarArchives.TERMINATOR_SIZE]);
     final Path archiveFile = source.resolve("dict.tar.gz");
-    Files.write(archiveFile, TarGzArchives.gzip(tar.toByteArray()));
+    Files.write(archiveFile, TarArchives.gzip(tar.toByteArray()));
 
     final int installed =
         MecabDictionaryInstaller.install(archiveFile.toUri(), target);
@@ -152,11 +186,11 @@ public class MecabDictionaryInstallerTest {
 
   /**
    * Verifies that installing into a target that already holds a dictionary file of the
-   * same name is refused, leaving the first installation in place. Refreshing a
+   * same name is rejected, leaving the first installation in place. Refreshing a
    * dictionary means removing its old files first.
    */
   @Test
-  void testReinstallOverAnExistingDictionaryIsRefused(@TempDir Path source,
+  void testReinstallOverAnExistingDictionaryIsRejected(@TempDir Path source,
       @TempDir Path target) throws IOException {
     final Path archiveFile = archive(source, new String[][] {
         {"d/words.csv", "cat,0,0,100,noun\n"}});
@@ -171,7 +205,7 @@ public class MecabDictionaryInstallerTest {
   }
 
   @Test
-  void testRemoteInstallWithoutDigestFailsLoud(@TempDir Path target) {
+  void testRemoteInstallWithoutDigestIsRejected(@TempDir Path target) {
     final IllegalArgumentException e =
         Assertions.assertThrows(IllegalArgumentException.class,
             () -> MecabDictionaryInstaller.install(
@@ -221,7 +255,7 @@ public class MecabDictionaryInstallerTest {
   }
 
   @Test
-  void testArchivesWithoutDictionaryFilesFailLoud(@TempDir Path source,
+  void testArchivesWithoutDictionaryFilesAreRejected(@TempDir Path source,
       @TempDir Path target) throws IOException {
     final Path archiveFile =
         archive(source, new String[][] {{"readme.txt", "nothing here"}});
@@ -230,19 +264,36 @@ public class MecabDictionaryInstallerTest {
     Assertions.assertEquals("the archive contains no dictionary file", e.getMessage());
   }
 
-  @Test
-  void testInvalidArguments(@TempDir Path target) throws IOException {
+  /**
+   * Checks each public installer parameter independently.
+   *
+   * @param argument The invalid parameter.
+   * @param target A scratch directory managed by the test framework.
+   * @throws IOException Thrown if the empty catalog cannot be loaded.
+   */
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"archive", "targetDirectory", "catalog", "dictionaryId",
+      "catalog targetDirectory"})
+  void testInvalidArguments(String argument, @TempDir Path target) throws IOException {
     final DictionaryCatalog catalog = emptyCatalog();
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> MecabDictionaryInstaller.install(null, target));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> MecabDictionaryInstaller.install(target.toUri(), null));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> MecabDictionaryInstaller.installFromCatalog(null, "mecab.ipadic", target));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> MecabDictionaryInstaller.installFromCatalog(catalog, null, target));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> MecabDictionaryInstaller.installFromCatalog(catalog, "mecab.ipadic", null));
+    final Executable install = switch (argument) {
+      case "archive" -> () -> MecabDictionaryInstaller.install(null, target);
+      case "targetDirectory" -> () ->
+          MecabDictionaryInstaller.install(target.toUri(), null);
+      case "catalog" -> () ->
+          MecabDictionaryInstaller.installFromCatalog(null, "mecab.ipadic", target);
+      case "dictionaryId" -> () ->
+          MecabDictionaryInstaller.installFromCatalog(catalog, null, target);
+      case "catalog targetDirectory" -> () ->
+          MecabDictionaryInstaller.installFromCatalog(catalog, "mecab.ipadic", null);
+      default -> throw new IllegalArgumentException("unknown argument: " + argument);
+    };
+
+    final IllegalArgumentException thrown =
+        Assertions.assertThrows(IllegalArgumentException.class, install);
+    final String parameter = argument.startsWith("catalog ")
+        ? argument.substring("catalog ".length()) : argument;
+    Assertions.assertEquals(parameter + " must not be null", thrown.getMessage());
   }
 
   private static DictionaryCatalog emptyCatalog() throws IOException {
@@ -259,7 +310,24 @@ public class MecabDictionaryInstallerTest {
    */
   private static Path archive(Path directory, String[][] entries) throws IOException {
     final Path archiveFile = directory.resolve("dict.tar.gz");
-    Files.write(archiveFile, TarGzArchives.gzippedTar(entries));
+    Files.write(archiveFile, TarArchives.gzippedTar(entries));
     return archiveFile;
+  }
+
+  @Test
+  void testStaleScratchOfAKilledInstallIsRemoved(@TempDir Path source,
+      @TempDir Path target) throws IOException {
+    final Path stale = Files.createDirectories(target.resolve(".mecab-dict-OLD"));
+    Files.writeString(stale.resolve("words.csv"), "half");
+    final Path archiveFile = archive(source, new String[][] {
+        {"d/words.csv", "cat,0,0,100,noun\n"}});
+
+    Assertions.assertEquals(1,
+        MecabDictionaryInstaller.install(archiveFile.toUri(), target));
+
+    try (Stream<Path> entries = Files.list(target)) {
+      Assertions.assertEquals(List.of("words.csv"),
+          entries.map(path -> path.getFileName().toString()).sorted().toList());
+    }
   }
 }
