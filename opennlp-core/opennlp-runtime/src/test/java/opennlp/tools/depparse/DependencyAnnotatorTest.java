@@ -29,28 +29,12 @@ import opennlp.tools.util.Span;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Tests {@link DependencyAnnotator} as the container's first graph-shaped layer: arcs
- * reference tokens by layer index, and resolving an arc through the token layer lands on
- * the right span of the original text.
- */
+/** Tests dependency arcs, token references, and original-text spans. */
 public class DependencyAnnotatorTest {
 
-  /**
-   * A parser stub that always returns the gold graph of {@code "the dog barks"}, so the
-   * assertions in this class depend only on the annotator's own layer handling and not on
-   * any trained model.
-   */
   private static final DependencyParser FIXED = (tokens, tags) ->
       DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
 
-  /**
-   * Builds a document over the text {@code "the dog barks"} carrying a one-sentence layer plus
-   * aligned token and tag layers, mirroring what the upstream sentence, tokenizer, and
-   * tagger annotators would produce.
-   *
-   * @return A document ready for dependency annotation. Never {@code null}.
-   */
   private static Document tokenized() {
     return Document.of("the dog barks")
         .with(Layers.SENTENCES, List.of(
@@ -72,13 +56,10 @@ public class DependencyAnnotatorTest {
         document.get(DependencyAnnotator.DEPENDENCIES);
     assertEquals(3, arcs.size());
 
-    // the arc of "dog" is anchored on the dependent token's span in the original text
     final Annotation<DependencyArc> dog = arcs.get(1);
     assertEquals(new Span(4, 7), dog.span());
     assertEquals("nsubj", dog.value().relation());
 
-    // cross-layer reference: the arc stores its head as an index, and looking that index
-    // up in the token layer lands on the head token and its span in the original text
     final List<Annotation<String>> tokens = document.get(Layers.TOKENS);
     final Annotation<String> head = tokens.get(dog.value().head());
     assertEquals("barks", head.value());
