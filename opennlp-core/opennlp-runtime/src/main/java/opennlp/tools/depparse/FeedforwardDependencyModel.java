@@ -28,11 +28,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
+import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -42,25 +45,38 @@ import opennlp.tools.util.StringUtil;
  * architecture follows
  * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>.
  *
- * <p>This is the pure-Java neural tier: the network is executed with ordinary array
- * arithmetic, so parsing needs no native runtime, and the same class scores
- * configurations for training and decoding. Unknown words fall back to a learned
- * unknown symbol; words are matched case-insensitively after
+ * <p>The network runs with Java arrays and requires no native runtime. The same class
+ * scores configurations during training and decoding. Unknown words use a learned
+ * fallback row; words are matched case-insensitively after
  * {@link #normalize(String) normalization}.</p>
  *
- * <p>An instance is immutable and safe to share between threads once it has been handed
- * to a caller. {@link FeedforwardDependencyTrainer} fills the weights while building a
- * model and before that model escapes, and
- * {@link FeedforwardDependencyTrainer#refine refine} trains a copy rather than the model
- * it is given, so no model a caller holds ever changes underneath it.</p>
+ * <p>Instances returned by {@link FeedforwardDependencyTrainer} are immutable and safe
+ * to share between threads. {@link FeedforwardDependencyTrainer#refine refine} updates
+ * an independent copy.</p>
  *
  * @see FeedforwardDependencyParser
  * @see FeedforwardDependencyTrainer
  * @since 3.0.0
  */
+@ThreadSafe
 public class FeedforwardDependencyModel {
 
   private static final String MAGIC = "ONLP-FFDP-1";
+
+  /** Maximum combined entries across the word, tag, and label maps. */
+  private static final int MAX_VOCABULARY_ENTRIES = 2_000_000;
+
+  /** Maximum transitions accepted from a serialized model. */
+  private static final int MAX_TRANSITIONS = 100_000;
+
+  /** Maximum embedding width accepted from a serialized model. */
+  static final int MAX_EMBEDDING_SIZE = 4_096;
+
+  /** Maximum hidden-layer width accepted from a serialized model. */
+  static final int MAX_HIDDEN_SIZE = 65_536;
+
+  /** Maximum float values allocated while loading a serialized model. */
+  static final long MAX_MODEL_FLOAT_VALUES = 100_000_000L;
 
   /** U+03A3, GREEK CAPITAL LETTER SIGMA, the one code point with a contextual lowering. */
   private static final int GREEK_CAPITAL_SIGMA = 0x03A3;
@@ -77,9 +93,6 @@ public class FeedforwardDependencyModel {
   /** The vocabulary key of the artificial root node. */
   static final String ROOT_SYMBOL = "*ROOT*";
 
-  /** The prefix marking a vocabulary key as one of the special symbols above. */
-  static final String SPECIAL_SYMBOL_PREFIX = "*";
-
   /** The lazy scoring cache; {@code null} until {@link #enableScoringCache()}. */
   private volatile ContributionCache cache;
 
@@ -95,6 +108,21 @@ public class FeedforwardDependencyModel {
   private final float[][] outputWeights;
   private final float[] outputBias;
 
+  /**
+   * Assembles a model from its vocabularies and weights, copying the maps so later
+   * changes by the caller do not reach the model.
+   *
+   * @param wordIds The word vocabulary, mapping each normalized word to its row.
+   * @param tagIds The tag vocabulary.
+   * @param labelIds The dependency label vocabulary.
+   * @param transitions The transition inventory, indexed by output row.
+   * @param embeddingSize The embedding dimensionality.
+   * @param embeddings The embedding rows for words, tags, and labels.
+   * @param hiddenWeights The hidden layer weights.
+   * @param hiddenBias The hidden layer bias.
+   * @param outputWeights The output layer weights.
+   * @param outputBias The output layer bias.
+   */
   FeedforwardDependencyModel(Map<String, Integer> wordIds, Map<String, Integer> tagIds,
       Map<String, Integer> labelIds, String[] transitions, int embeddingSize,
       float[][] embeddings, float[][] hiddenWeights, float[] hiddenBias,
@@ -118,11 +146,19 @@ public class FeedforwardDependencyModel {
    *                 {@link #featureIds(String[])}. Must not be {@code null}.
    * @return One unnormalized score per transition, indexed like
    *         {@link #transitions()}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code features} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code features} does not have the
+   *         required length or contains an invalid embedding index.
    */
   public double[] score(int[] features) {
-    if (features == null) {
-      throw new IllegalArgumentException("features must not be null");
+    if (features == null || features.length != FeedforwardContext.FEATURE_COUNT) {
+      throw new IllegalArgumentException("features must contain "
+          + FeedforwardContext.FEATURE_COUNT + " embedding indices");
+    }
+    for (int i = 0; i < features.length; i++) {
+      if (features[i] < 0 || features[i] >= embeddings.length) {
+        throw new IllegalArgumentException(
+            "feature embedding out of range at index " + i + ": " + features[i]);
+      }
     }
     final int hidden = hiddenBias.length;
     final double[] h = new double[hidden];
@@ -188,7 +224,7 @@ public class FeedforwardDependencyModel {
    * slot per (template position, embedding row) pair, filled on first use. Filling is
    * idempotent, so concurrent readers may compute a contribution twice but never see
    * a partial one, and a shared budget bounds the total memory; pairs beyond the
-   * budget simply keep the direct path.
+   * budget use direct scoring.
    */
   private static final class ContributionCache {
 
@@ -200,6 +236,12 @@ public class FeedforwardDependencyModel {
     private final AtomicReferenceArray<float[]>[] byPosition;
     private final AtomicInteger remaining = new AtomicInteger(MAX_PAIRS);
 
+    /**
+     * Creates an empty cache.
+     *
+     * @param positions The number of feature positions.
+     * @param rows The number of embedding rows a position can hold.
+     */
     @SuppressWarnings("unchecked")
     private ContributionCache(int positions, int rows) {
       byPosition = new AtomicReferenceArray[positions];
@@ -212,7 +254,7 @@ public class FeedforwardDependencyModel {
      * Returns the cached hidden-layer contribution of one pair, computing and
      * publishing it on first sight while the budget lasts.
      *
-     * @param model The frozen model the contributions derive from.
+     * @param model The immutable model the contributions derive from.
      * @param position The template position.
      * @param row The embedding row at that position.
      * @return The contribution vector, or {@code null} when the budget is spent and
@@ -253,11 +295,13 @@ public class FeedforwardDependencyModel {
    *
    * @param symbols The symbolic features. Must not be {@code null}.
    * @return The embedding row per feature. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code symbols} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code symbols} does not have the
+   *         required length.
    */
   public int[] featureIds(String[] symbols) {
-    if (symbols == null) {
-      throw new IllegalArgumentException("symbols must not be null");
+    if (symbols == null || symbols.length != FeedforwardContext.FEATURE_COUNT) {
+      throw new IllegalArgumentException("symbols must contain "
+          + FeedforwardContext.FEATURE_COUNT + " features");
     }
     final int[] ids = new int[symbols.length];
     for (int i = 0; i < FeedforwardContext.POSITIONS; i++) {
@@ -282,16 +326,11 @@ public class FeedforwardDependencyModel {
   /**
    * Lowercases a word symbol; special symbols and absences pass through.
    *
-   * <p>Case is mapped per code point through UnicodeData, the same mapping as
-   * {@link StringUtil#toLowerCase(CharSequence)}, with one contextual rule on top: a
-   * Greek capital sigma preceded by a letter and not followed by one lowercases to
-   * the final form U+03C2, the Final_Sigma condition of the Unicode
+   * <p>Case is mapped per code point like
+   * {@link StringUtil#toLowerCase(CharSequence)}. Greek capital sigma also applies the
+   * cased-letter and case-ignorable context defined by the Unicode
    * <a href="https://www.unicode.org/Public/UCD/latest/ucd/SpecialCasing.txt">SpecialCasing</a>
-   * file restricted to a single token. Natural lowercase Greek text, and with it
-   * every vocabulary key derived from a treebank, spells a word-final sigma that
-   * way, so without the rule an uppercase Greek word would normalize to a spelling
-   * the vocabulary never contains. A word that is already lowercase, the common
-   * case at parse time, is returned unchanged without allocating.</p>
+   * data within one token.</p>
    *
    * @param word The word to normalize. May be {@code null}.
    * @return The vocabulary key of {@code word}, or {@code null} if {@code word} is
@@ -301,36 +340,90 @@ public class FeedforwardDependencyModel {
     if (word == null) {
       return null;
     }
-    if (word.startsWith(SPECIAL_SYMBOL_PREFIX)) {
+    if (isSpecialSymbol(word)) {
       return word;
     }
-    int i = 0;
-    while (i < word.length()) {
-      final int cp = word.codePointAt(i);
-      if (Character.toLowerCase(cp) != cp) {
-        break;
-      }
-      i += Character.charCount(cp);
-    }
-    if (i == word.length()) {
+    final String simple = StringUtil.toLowerCase(word);
+    if (simple.equals(word)) {
       return word;
     }
-    final StringBuilder lowered = new StringBuilder(word.length());
-    lowered.append(word, 0, i);
-    while (i < word.length()) {
-      final int cp = word.codePointAt(i);
+    StringBuilder contextual = null;
+    int sourceIndex = 0;
+    int loweredIndex = 0;
+    while (sourceIndex < word.length()) {
+      final int cp = word.codePointAt(sourceIndex);
       final int width = Character.charCount(cp);
-      if (cp == GREEK_CAPITAL_SIGMA && i > 0
-          && Character.isLetter(word.codePointBefore(i))
-          && (i + width >= word.length()
-              || !Character.isLetter(word.codePointAt(i + width)))) {
-        lowered.append(GREEK_SMALL_FINAL_SIGMA);
-      } else {
-        lowered.appendCodePoint(Character.toLowerCase(cp));
+      final int loweredCp = simple.codePointAt(loweredIndex);
+      final int loweredWidth = Character.charCount(loweredCp);
+      if (cp == GREEK_CAPITAL_SIGMA && hasCasedLetterBefore(word, sourceIndex)
+          && !hasCasedLetterAfter(word, sourceIndex + width)) {
+        if (contextual == null) {
+          contextual = new StringBuilder(simple.length());
+          contextual.append(simple, 0, loweredIndex);
+        }
+        contextual.append(GREEK_SMALL_FINAL_SIGMA);
+      } else if (contextual != null) {
+        contextual.appendCodePoint(loweredCp);
       }
-      i += width;
+      sourceIndex += width;
+      loweredIndex += loweredWidth;
     }
-    return lowered.toString();
+    return contextual == null ? simple : contextual.toString();
+  }
+
+  /** Checks the final-sigma prefix context, skipping case-ignorable code points. */
+  private static boolean hasCasedLetterBefore(String word, int index) {
+    int current = index;
+    while (current > 0) {
+      final int cp = word.codePointBefore(current);
+      current -= Character.charCount(cp);
+      if (!isCaseIgnorable(cp)) {
+        return isCased(cp);
+      }
+    }
+    return false;
+  }
+
+  /** Checks the final-sigma suffix context, skipping case-ignorable code points. */
+  private static boolean hasCasedLetterAfter(String word, int index) {
+    int current = index;
+    while (current < word.length()) {
+      final int cp = word.codePointAt(current);
+      if (!isCaseIgnorable(cp)) {
+        return isCased(cp);
+      }
+      current += Character.charCount(cp);
+    }
+    return false;
+  }
+
+  /** Returns whether a code point has uppercase, lowercase, or titlecase. */
+  private static boolean isCased(int cp) {
+    return Character.isUpperCase(cp) || Character.isLowerCase(cp)
+        || Character.isTitleCase(cp);
+  }
+
+  /** Returns whether a code point may be ignored when finding cased neighbors. */
+  private static boolean isCaseIgnorable(int cp) {
+    final boolean categoryMatches = switch (Character.getType(cp)) {
+      case Character.NON_SPACING_MARK, Character.ENCLOSING_MARK,
+          Character.FORMAT, Character.MODIFIER_LETTER, Character.MODIFIER_SYMBOL -> true;
+      default -> false;
+    };
+    if (categoryMatches) {
+      return true;
+    }
+    return switch (cp) {
+      case '\'', '.', ':', '\u00B7', '\u0387', '\u055F', '\u05F4',
+          '\u2018', '\u2019', '\u2024', '\u2027', '\uFE13', '\uFE52',
+          '\uFE55', '\uFF07', '\uFF0E', '\uFF1A' -> true;
+      default -> false;
+    };
+  }
+
+  /** Returns whether a symbol is reserved for the model's internal feature values. */
+  static boolean isSpecialSymbol(String symbol) {
+    return UNKNOWN.equals(symbol) || ABSENT.equals(symbol) || ROOT_SYMBOL.equals(symbol);
   }
 
   /**
@@ -385,7 +478,7 @@ public class FeedforwardDependencyModel {
    *
    * @param in The stream to read from. Must not be {@code null}. Not closed.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is not this format.
+   * @throws IOException Thrown if reading fails or the content is malformed.
    */
   public static FeedforwardDependencyModel load(InputStream in) throws IOException {
     if (in == null) {
@@ -396,17 +489,52 @@ public class FeedforwardDependencyModel {
     if (!MAGIC.equals(magic)) {
       throw new IOException("not a feedforward dependency model: " + magic);
     }
-    final Map<String, Integer> wordIds = readVocabulary(data);
-    final Map<String, Integer> tagIds = readVocabulary(data);
-    final Map<String, Integer> labelIds = readVocabulary(data);
-    final String[] transitions = new String[data.readInt()];
+    final Map<String, Integer> wordIds = readVocabulary(data, "word vocabulary");
+    final Map<String, Integer> tagIds = readVocabulary(data, "tag vocabulary");
+    final Map<String, Integer> labelIds = readVocabulary(data, "label vocabulary");
+    final int embeddingRows = validateVocabularies(wordIds, tagIds, labelIds);
+    final String[] transitions = new String[
+        readCount(data, "transition count", MAX_TRANSITIONS, false)];
+    final Set<String> transitionSet = new HashSet<>();
+    boolean hasShift = false;
+    boolean hasRightArc = false;
     for (int i = 0; i < transitions.length; i++) {
       transitions[i] = data.readUTF();
+      if (!transitionSet.add(transitions[i])) {
+        throw new IOException("duplicate transition: " + transitions[i]);
+      }
+      try {
+        final Transition transition = Transition.decode(transitions[i]);
+        hasShift |= transition.type() == Transition.Type.SHIFT;
+        hasRightArc |= transition.type() == Transition.Type.RIGHT_ARC;
+      } catch (IllegalArgumentException e) {
+        throw new IOException("invalid transition: " + transitions[i], e);
+      }
     }
-    final int embeddingSize = data.readInt();
+    if (!hasShift) {
+      throw new IOException("transition inventory has no SHIFT action");
+    }
+    if (!hasRightArc) {
+      throw new IOException("transition inventory has no RIGHT_ARC action");
+    }
+    final int embeddingSize = readCount(data, "embedding size", MAX_EMBEDDING_SIZE, false);
+    final long[] remainingFloats = {MAX_MODEL_FLOAT_VALUES};
+    final float[][] embeddings = readMatrix(data, embeddingRows, embeddingSize,
+        MAX_VOCABULARY_ENTRIES, remainingFloats, "embedding matrix");
+    final int inputSize = FeedforwardContext.FEATURE_COUNT * embeddingSize;
+    final float[][] hiddenWeights = readMatrix(data, -1, inputSize,
+        MAX_HIDDEN_SIZE, remainingFloats, "hidden matrix");
+    final float[] hiddenBias = readVector(data, hiddenWeights.length,
+        remainingFloats, "hidden bias");
+    final float[][] outputWeights = readMatrix(data, transitions.length,
+        hiddenWeights.length, MAX_TRANSITIONS, remainingFloats, "output matrix");
+    final float[] outputBias = readVector(data, transitions.length,
+        remainingFloats, "output bias");
+    if (data.read() != -1) {
+      throw new IOException("trailing data after feedforward dependency model");
+    }
     return new FeedforwardDependencyModel(wordIds, tagIds, labelIds, transitions,
-        embeddingSize, readMatrix(data), readMatrix(data), readVector(data),
-        readMatrix(data), readVector(data));
+        embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias);
   }
 
   /**
@@ -445,15 +573,60 @@ public class FeedforwardDependencyModel {
   /**
    * Reads one vocabulary written by {@link #writeVocabulary}.
    */
-  private static Map<String, Integer> readVocabulary(DataInputStream data)
+  private static Map<String, Integer> readVocabulary(DataInputStream data, String label)
       throws IOException {
-    final int size = data.readInt();
+    final int size = readCount(data, label + " size", MAX_VOCABULARY_ENTRIES, true);
     final Map<String, Integer> ids = new HashMap<>(size * 2);
     for (int i = 0; i < size; i++) {
       final String symbol = data.readUTF();
-      ids.put(symbol, data.readInt());
+      final int id = data.readInt();
+      if (ids.put(symbol, id) != null) {
+        throw new IOException("duplicate symbol in " + label + ": " + symbol);
+      }
     }
     return ids;
+  }
+
+  /**
+   * Checks that all vocabulary ids form one consecutive embedding index range and that
+   * each map has its required special symbols.
+   */
+  private static int validateVocabularies(Map<String, Integer> wordIds,
+      Map<String, Integer> tagIds, Map<String, Integer> labelIds) throws IOException {
+    final long total = (long) wordIds.size() + tagIds.size() + labelIds.size();
+    if (total > MAX_VOCABULARY_ENTRIES) {
+      throw new IOException("combined vocabulary size exceeds " + MAX_VOCABULARY_ENTRIES);
+    }
+    final boolean[] present = new boolean[(int) total];
+    validateVocabulary(wordIds, present, "word vocabulary", UNKNOWN, ABSENT, ROOT_SYMBOL);
+    validateVocabulary(tagIds, present, "tag vocabulary", UNKNOWN, ABSENT, ROOT_SYMBOL);
+    validateVocabulary(labelIds, present, "label vocabulary", UNKNOWN, ABSENT);
+    for (int i = 0; i < present.length; i++) {
+      if (!present[i]) {
+        throw new IOException("missing embedding id: " + i);
+      }
+    }
+    return present.length;
+  }
+
+  /** Checks one vocabulary's required symbols and embedding ids. */
+  private static void validateVocabulary(Map<String, Integer> ids, boolean[] present,
+      String label, String... requiredSymbols) throws IOException {
+    for (final String required : requiredSymbols) {
+      if (!ids.containsKey(required)) {
+        throw new IOException(label + " has no " + required + " symbol");
+      }
+    }
+    for (final Map.Entry<String, Integer> entry : ids.entrySet()) {
+      final int id = entry.getValue();
+      if (id < 0 || id >= present.length) {
+        throw new IOException(label + " id out of range for " + entry.getKey() + ": " + id);
+      }
+      if (present[id]) {
+        throw new IOException("duplicate embedding id: " + id);
+      }
+      present[id] = true;
+    }
   }
 
   /**
@@ -473,13 +646,23 @@ public class FeedforwardDependencyModel {
   /**
    * Reads a matrix written by {@link #writeMatrix}.
    */
-  private static float[][] readMatrix(DataInputStream data) throws IOException {
-    final int rows = data.readInt();
-    final int columns = data.readInt();
+  private static float[][] readMatrix(DataInputStream data, int expectedRows,
+      int expectedColumns, int maxRows, long[] remainingFloats, String label)
+      throws IOException {
+    final int rows = readCount(data, label + " rows", maxRows, false);
+    final int columns = readCount(data, label + " columns", Integer.MAX_VALUE, false);
+    if (expectedRows >= 0 && rows != expectedRows) {
+      throw new IOException(label + " row count is " + rows + ", expected " + expectedRows);
+    }
+    if (columns != expectedColumns) {
+      throw new IOException(label + " column count is " + columns
+          + ", expected " + expectedColumns);
+    }
+    reserveFloats(remainingFloats, (long) rows * columns, label);
     final float[][] matrix = new float[rows][columns];
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < columns; c++) {
-        matrix[r][c] = data.readFloat();
+        matrix[r][c] = readFiniteFloat(data, label);
       }
     }
     return matrix;
@@ -498,12 +681,47 @@ public class FeedforwardDependencyModel {
   /**
    * Reads a vector written by {@link #writeVector}.
    */
-  private static float[] readVector(DataInputStream data) throws IOException {
-    final float[] vector = new float[data.readInt()];
+  private static float[] readVector(DataInputStream data, int expectedLength,
+      long[] remainingFloats, String label) throws IOException {
+    final int length = readCount(data, label + " length", Integer.MAX_VALUE, false);
+    if (length != expectedLength) {
+      throw new IOException(label + " length is " + length + ", expected " + expectedLength);
+    }
+    reserveFloats(remainingFloats, length, label);
+    final float[] vector = new float[length];
     for (int i = 0; i < vector.length; i++) {
-      vector[i] = data.readFloat();
+      vector[i] = readFiniteFloat(data, label);
     }
     return vector;
+  }
+
+  /** Reads a nonnegative bounded count from the model. */
+  private static int readCount(DataInputStream data, String label, int maximum,
+      boolean allowZero) throws IOException {
+    final int value = data.readInt();
+    if (value < 0 || !allowZero && value == 0 || value > maximum) {
+      throw new IOException(label + " out of range: " + value);
+    }
+    return value;
+  }
+
+  /** Reserves float entries before allocating a matrix or vector. */
+  private static void reserveFloats(long[] remaining, long count, String label)
+      throws IOException {
+    if (count > remaining[0]) {
+      throw new IOException(label + " exceeds the model allocation limit");
+    }
+    remaining[0] -= count;
+  }
+
+  /** Reads one finite model weight. */
+  private static float readFiniteFloat(DataInputStream data, String label)
+      throws IOException {
+    final float value = data.readFloat();
+    if (!Float.isFinite(value)) {
+      throw new IOException(label + " contains a non-finite value");
+    }
+    return value;
   }
 
   /**

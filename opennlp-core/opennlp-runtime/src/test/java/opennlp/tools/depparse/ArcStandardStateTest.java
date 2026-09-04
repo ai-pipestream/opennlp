@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests the configuration mechanics of {@link ArcStandardState}: the start
  * configuration, transition applicability at the boundaries, the bookkeeping of attached
- * dependents, copy independence, and the fail-loud behavior of every accessor.
+ * dependents, copy independence, and accessor validation.
  */
 public class ArcStandardStateTest {
 
@@ -44,6 +44,9 @@ public class ArcStandardStateTest {
     assertEquals(1, state.stackSize());
     assertEquals(3, state.bufferSize());
     assertFalse(state.isTerminal());
+
+    state.apply(Transition.SHIFT);
+    assertEquals(ArcStandardState.NONE, state.buffer(Integer.MAX_VALUE));
   }
 
   @Test
@@ -94,7 +97,7 @@ public class ArcStandardStateTest {
   }
 
   @Test
-  void testInapplicableTransitionFailsLoud() {
+  void testInapplicableTransitionIsRejected() {
     final ArcStandardState state = new ArcStandardState(2);
     assertThrows(IllegalArgumentException.class,
         () -> state.apply(Transition.leftArc("det")));
@@ -105,7 +108,7 @@ public class ArcStandardStateTest {
   }
 
   @Test
-  void testToGraphBeforeTerminalFailsLoud() {
+  void testToGraphBeforeTerminalIsRejected() {
     final ArcStandardState state = new ArcStandardState(2);
     assertThrows(IllegalStateException.class, state::toGraph);
     state.apply(Transition.SHIFT);

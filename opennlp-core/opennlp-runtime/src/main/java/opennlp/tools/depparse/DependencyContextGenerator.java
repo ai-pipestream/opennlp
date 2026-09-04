@@ -20,6 +20,8 @@ package opennlp.tools.depparse;
 import java.util.ArrayList;
 import java.util.List;
 
+import opennlp.tools.commons.ThreadSafe;
+
 /**
  * Generates the classification features for one arc-standard configuration: words and
  * tags of the topmost stack and frontmost buffer positions, their pairings, the partial
@@ -30,6 +32,7 @@ import java.util.List;
  *
  * @since 3.0.0
  */
+@ThreadSafe
 public class DependencyContextGenerator {
 
   private static final String ROOT_VALUE = "*ROOT*";
@@ -57,15 +60,22 @@ public class DependencyContextGenerator {
    * Generates the features of the current configuration.
    *
    * @param state The configuration to describe. Must not be {@code null}.
-   * @param tokens The sentence tokens. Must not be {@code null}.
+   * @param tokens The input tokens. Must satisfy the token contract of
+   *               {@link DependencyParser#parse(String[], String[])} and match the state.
    * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
-   *             {@code null}.
+   *             {@code null} and must match the state.
    * @return The feature strings. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if any parameter is {@code null}.
+   * @throws IllegalArgumentException Thrown if a parameter is invalid or the arrays do
+   *         not match the state.
    */
   public String[] getContext(ArcStandardState state, String[] tokens, String[] tags) {
-    if (state == null || tokens == null || tags == null) {
-      throw new IllegalArgumentException("state, tokens and tags must not be null");
+    if (state == null) {
+      throw new IllegalArgumentException("state must not be null");
+    }
+    DependencySample.checkTokensAndTags(tokens, tags);
+    if (tokens.length != state.tokenCount()) {
+      throw new IllegalArgumentException("tokens and tags must match state token count: "
+          + tokens.length + " != " + state.tokenCount());
     }
     final int s0 = state.stack(0);
     final int s1 = state.stack(1);

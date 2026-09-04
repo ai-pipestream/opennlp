@@ -94,8 +94,7 @@ public final class ArcStandardState {
   }
 
   /**
-   * Creates an independent copy of this configuration, so alternatives can be advanced
-   * side by side during search.
+   * Creates an independent copy for advancing a search alternative.
    *
    * @return A copy that can be advanced without affecting this state. Never {@code null}.
    */
@@ -213,8 +212,15 @@ public final class ArcStandardState {
     if (fromFront < 0) {
       throw new IllegalArgumentException("fromFront must not be negative: " + fromFront);
     }
-    final int position = bufferFront + fromFront;
-    return position >= tokenCount ? NONE : position;
+    if (fromFront >= tokenCount - bufferFront) {
+      return NONE;
+    }
+    return bufferFront + fromFront;
+  }
+
+  /** {@return the number of tokens in this parse} */
+  int tokenCount() {
+    return tokenCount;
   }
 
   /**

@@ -20,6 +20,7 @@ package opennlp.tools.formats.conllu;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,13 +39,10 @@ import opennlp.tools.util.StringUtil;
  * <a href="https://universaldependencies.org/format.html">CoNLL-U</a> content, mapping
  * the {@code HEAD} and {@code DEPREL} columns of the basic dependency annotation.
  *
- * <p>The file is parsed raw, deliberately not through {@link ConlluStream}: that stream
- * merges multiword token ranges with their syntactic words, which suits the token and
- * lemma views but destroys the dependency annotation of every sentence containing a
- * contraction. Here range lines and empty nodes are dropped while their syntactic words
- * are kept, so contraction-bearing sentences train and evaluate normally. Sentences
- * whose annotation is incomplete or invalid, for example an underscore head, are
- * skipped and counted; the count is logged once the stream is exhausted.</p>
+ * <p>This reader does not use {@link ConlluStream}, which merges multiword token ranges
+ * with their syntactic words for token and lemma samples. Dependency samples instead
+ * omit range lines and empty nodes while retaining the syntactic word rows. Sentences
+ * with incomplete or invalid basic dependencies are skipped and counted.</p>
  *
  * @since 3.0.0
  */
@@ -64,6 +62,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   private final int tagColumn;
 
   private BufferedReader reader;
+  private boolean firstLine = true;
   private int skipped;
 
   /**
@@ -116,12 +115,18 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    *
    * @return The word lines of the next sentence, or an empty list at the end of the
    *         content. Never {@code null}.
-   * @throws IOException Thrown if reading fails or a word line has too few columns.
+   * @throws IOException Thrown if reading fails or a word line does not have ten columns.
    */
   private List<String[]> nextSentence() throws IOException {
     final List<String[]> words = new ArrayList<>();
     String line;
     while ((line = reader.readLine()) != null) {
+      if (firstLine) {
+        firstLine = false;
+        if (!line.isEmpty() && line.charAt(0) == '\ufeff') {
+          line = line.substring(1);
+        }
+      }
       if (StringUtil.isBlank(line)) {
         if (!words.isEmpty()) {
           return words;
@@ -132,8 +137,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
         continue;
       }
       final String[] fields = splitFields(line);
-      if (fields.length < COLUMNS) {
-        throw new IOException("not a CoNLL-U word line: " + line);
+      if (fields.length != COLUMNS) {
+        throw new IOException("CoNLL-U word line has " + fields.length
+            + " columns, expected " + COLUMNS + ": " + line);
       }
       final String id = fields[0];
       if (id.indexOf('-') < 0 && id.indexOf('.') < 0) {
@@ -177,6 +183,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
     final String[] relations = new String[n];
     for (int i = 0; i < n; i++) {
       final String[] word = words.get(i);
+      if (!Integer.toString(i + 1).equals(word[0])) {
+        return null;
+      }
       tokens[i] = word[FORM];
       tags[i] = word[tagColumn];
       relations[i] = word[DEPREL];
@@ -197,6 +206,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   public void reset() throws IOException, UnsupportedOperationException {
     reader.close();
     reader = open();
+    firstLine = true;
     skipped = 0;
   }
 
@@ -213,6 +223,8 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    */
   private BufferedReader open() throws IOException {
     return new BufferedReader(
-        new InputStreamReader(in.createInputStream(), StandardCharsets.UTF_8));
+        new InputStreamReader(in.createInputStream(), StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)));
   }
 }

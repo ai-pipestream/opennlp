@@ -19,8 +19,11 @@ package opennlp.tools.depparse;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
+import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.ml.EventTrainer;
 import opennlp.tools.ml.TrainerFactory;
 import opennlp.tools.ml.TrainerFactory.TrainerType;
@@ -40,6 +43,7 @@ import opennlp.tools.util.TrainingParameters;
  * @see DependencyParser
  * @since 3.0.0
  */
+@ThreadSafe
 public class DependencyParserME implements DependencyParser {
 
   private final MaxentModel model;
@@ -51,7 +55,7 @@ public class DependencyParserME implements DependencyParser {
    *
    * @param model The model to parse with. Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if {@code model} is {@code null} or an
-   *         outcome of the model does not decode to a transition.
+   *         outcome inventory is invalid or cannot parse a sentence.
    */
   public DependencyParserME(DependencyModel model) {
     if (model == null) {
@@ -67,7 +71,7 @@ public class DependencyParserME implements DependencyParser {
    *
    * @param model The transition classification model. Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if {@code model} is {@code null} or an
-   *         outcome of the model does not decode to a transition.
+   *         outcome inventory is invalid or cannot parse a sentence.
    */
   public DependencyParserME(MaxentModel model) {
     if (model == null) {
@@ -89,6 +93,9 @@ public class DependencyParserME implements DependencyParser {
    */
   private static Transition[] decodeOutcomes(MaxentModel model) {
     final Transition[] decoded = new Transition[model.getNumOutcomes()];
+    final Set<Transition> seen = new HashSet<>();
+    boolean hasShift = false;
+    boolean hasRightArc = false;
     for (int i = 0; i < decoded.length; i++) {
       final String outcome = model.getOutcome(i);
       try {
@@ -96,22 +103,24 @@ public class DependencyParserME implements DependencyParser {
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException("model outcome is not a transition: " + outcome, e);
       }
+      if (!seen.add(decoded[i])) {
+        throw new IllegalArgumentException("duplicate model transition: " + outcome);
+      }
+      hasShift |= decoded[i].type() == Transition.Type.SHIFT;
+      hasRightArc |= decoded[i].type() == Transition.Type.RIGHT_ARC;
+    }
+    if (!hasShift) {
+      throw new IllegalArgumentException("model has no SHIFT action");
+    }
+    if (!hasRightArc) {
+      throw new IllegalArgumentException("model has no RIGHT_ARC action");
     }
     return decoded;
   }
 
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    if (tokens == null || tags == null) {
-      throw new IllegalArgumentException("tokens and tags must not be null");
-    }
-    if (tokens.length == 0) {
-      throw new IllegalArgumentException("tokens must not be empty");
-    }
-    if (tokens.length != tags.length) {
-      throw new IllegalArgumentException("tokens and tags must have the same length: "
-          + tokens.length + " != " + tags.length);
-    }
+    DependencySample.checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));
@@ -125,9 +134,17 @@ public class DependencyParserME implements DependencyParser {
    */
   private Transition bestApplicable(ArcStandardState state, String[] tokens, String[] tags) {
     final double[] probabilities = model.eval(contextGenerator.getContext(state, tokens, tags));
+    if (probabilities == null || probabilities.length != transitions.length) {
+      final int count = probabilities == null ? 0 : probabilities.length;
+      throw new IllegalStateException("model returned " + count + " scores for "
+          + transitions.length + " outcomes");
+    }
     Transition best = null;
     double bestProbability = Double.NEGATIVE_INFINITY;
     for (int i = 0; i < probabilities.length; i++) {
+      if (!Double.isFinite(probabilities[i])) {
+        throw new IllegalStateException("model returned a non-finite score at index " + i);
+      }
       if (probabilities[i] <= bestProbability) {
         continue;
       }

@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests {@link DependencyParserME} end to end: training on a tiny corpus must let the
+ * Tests {@link DependencyParserME} end to end: training on a small corpus must let the
  * greedy parser reproduce the training sentences, which proves the oracle, event stream,
  * feature generation, and decode loop agree with each other.
  */
@@ -45,7 +45,7 @@ public class DependencyParserMETest {
 
   /**
    * Trains the shared model once for all tests; the zero cutoff keeps every feature of
-   * the tiny corpus.
+   * the test corpus.
    *
    * @throws IOException Thrown if reading the in-memory samples fails.
    */
@@ -143,11 +143,56 @@ public class DependencyParserMETest {
         () -> new DependencyParserME(new OutcomeOnlyModel("NN", "VB")));
   }
 
+  @Test
+  void testIncompleteActionInventoriesAreRejectedAtConstruction() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new DependencyParserME(new OutcomeOnlyModel("SHIFT")));
+    assertThrows(IllegalArgumentException.class,
+        () -> new DependencyParserME(new OutcomeOnlyModel("RIGHT_ARC:root")));
+  }
+
+  @Test
+  void testDuplicateActionsAreRejectedAtConstruction() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new DependencyParserME(
+            new OutcomeOnlyModel("SHIFT", "SHIFT", "RIGHT_ARC:root")));
+  }
+
+  @Test
+  void testModelScoreCountIsValidated() {
+    final DependencyParserME invalid = new DependencyParserME(
+        new OutcomeOnlyModel(new double[] {1.0}, "SHIFT", "RIGHT_ARC:root"));
+    final IllegalStateException exception = assertThrows(IllegalStateException.class,
+        () -> invalid.parse(new String[] {"word"}, new String[] {"NN"}));
+    assertEquals("model returned 1 scores for 2 outcomes", exception.getMessage());
+  }
+
+  @Test
+  void testNonFiniteModelScoreIsRejected() {
+    final DependencyParserME invalid = new DependencyParserME(
+        new OutcomeOnlyModel(new double[] {Double.NaN, 1.0},
+            "SHIFT", "RIGHT_ARC:root"));
+    assertThrows(IllegalStateException.class,
+        () -> invalid.parse(new String[] {"word"}, new String[] {"NN"}));
+  }
+
   /**
    * A {@link MaxentModel} that only knows its outcome inventory, enough to build a
    * parser from; any other use fails.
    */
-  private record OutcomeOnlyModel(String... outcomes) implements MaxentModel {
+  private static final class OutcomeOnlyModel implements MaxentModel {
+
+    private final String[] outcomes;
+    private final double[] scores;
+
+    private OutcomeOnlyModel(String... outcomes) {
+      this(null, outcomes);
+    }
+
+    private OutcomeOnlyModel(double[] scores, String... outcomes) {
+      this.scores = scores;
+      this.outcomes = outcomes;
+    }
 
     @Override
     public String getOutcome(int i) {
@@ -161,7 +206,10 @@ public class DependencyParserMETest {
 
     @Override
     public double[] eval(String[] context) {
-      throw new UnsupportedOperationException();
+      if (scores == null) {
+        throw new UnsupportedOperationException();
+      }
+      return scores.clone();
     }
 
     @Override

@@ -21,10 +21,13 @@ The dependency parser's unit tests are fully self-contained, but its accuracy ev
 
 ## Getting a treebank
 
-Every UD treebank lives in its own repository under `github.com/UniversalDependencies`, with its splits named `<lang_code>-ud-train.conllu`, `-dev`, and `-test`. The helper next to this file clones one shallowly and lays the splits out under the names the evaluation expects:
+Every UD treebank lives in its own repository under `github.com/UniversalDependencies`, with its splits named `<lang_code>-ud-train.conllu`, `-dev`, and `-test`. Pass the helper a full commit SHA so later runs use the same data. This example selects the official `r2.18` commit of `UD_English-EWT`:
 
 ```
-./download-ud-treebank.sh UD_English-EWT /tmp/ud-ewt
+./download-ud-treebank.sh \
+    UD_English-EWT \
+    b7711cce01cdd4f5fcc0a8199b8a50d951b16c0c \
+    /tmp/ud-ewt
 ```
 
 produces `/tmp/ud-ewt/train.conllu` and `/tmp/ud-ewt/test.conllu`. Any treebank that publishes both splits works the same way.
@@ -34,14 +37,15 @@ produces `/tmp/ud-ewt/train.conllu` and `/tmp/ud-ewt/test.conllu`. Any treebank 
 `ConlluDependencyParserEvalTest` is disabled unless the `opennlp.depparse.ud.dir` system property points at a directory containing `train.conllu` and `test.conllu`:
 
 ```
-./mvnw -pl opennlp-core/opennlp-formats test \
+./mvnw -pl opennlp-core/opennlp-formats -am test \
     -Dtest=ConlluDependencyParserEvalTest \
+    -Dopennlp.forkCount=1 \
     -Dopennlp.depparse.ud.dir=/tmp/ud-ewt
 ```
 
 Without the property the test reports as skipped, which is why a plain build never needs network access or external data.
 
-Two properties of the parser worth knowing when reading the numbers: multiword-token sentences are kept because the CoNLL-U reader recovers their dependency rows, and non-projective training sentences are skipped, since the arc-standard transition system cannot derive them; the skip count is inherent to the algorithm, not data loss in the reader.
+The score uses the treebank's sentence boundaries, tokens, and part-of-speech tags. It measures dependency parsing rather than the errors of an upstream text pipeline. The reader retains the syntactic rows of multiword tokens. The arc-standard trainer skips non-projective trees because that transition system cannot derive them.
 
 ## Licensing
 

@@ -35,9 +35,8 @@ import opennlp.tools.util.ObjectStream;
  * Trains the {@link FeedforwardDependencyModel} entirely in Java: oracle-derived
  * transition examples, minibatch AdaGrad over a softmax cross-entropy loss, cube
  * activation, and inverted dropout on the hidden layer, the training recipe of
- * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>. No external
- * training framework is involved, so the whole neural tier, training and inference, is
- * plain array arithmetic inside the JVM.
+ * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>. Training and
+ * inference use Java arrays and require no external training framework.
  *
  * <p>Words below the frequency cutoff share a learned unknown embedding; absent
  * template positions share a learned padding embedding. Non-projective samples have no
@@ -53,8 +52,14 @@ public final class FeedforwardDependencyTrainer {
 
   private static final double ADAGRAD_EPSILON = 1e-6;
 
+  /** Special-symbol rows present before any training vocabulary is added. */
+  private static final int MIN_VOCABULARY_ROWS = 8;
+
+  /** SHIFT and at least one RIGHT_ARC are required to parse a sentence. */
+  private static final int MIN_TRANSITIONS = 2;
+
+  /** Prevents construction of this utility class. */
   private FeedforwardDependencyTrainer() {
-    // This class only exposes static training methods and is never instantiated.
   }
 
   /**
@@ -84,8 +89,24 @@ public final class FeedforwardDependencyTrainer {
       if (embeddingSize <= 0 || hiddenSize <= 0 || epochs <= 0 || batchSize <= 0) {
         throw new IllegalArgumentException("sizes, epochs and batch must be positive");
       }
-      if (learningRate <= 0.0 || l2 < 0.0) {
-        throw new IllegalArgumentException("learningRate must be positive, l2 not negative");
+      if (embeddingSize > FeedforwardDependencyModel.MAX_EMBEDDING_SIZE) {
+        throw new IllegalArgumentException("embeddingSize exceeds the model format limit: "
+            + embeddingSize);
+      }
+      if (hiddenSize > FeedforwardDependencyModel.MAX_HIDDEN_SIZE) {
+        throw new IllegalArgumentException("hiddenSize exceeds the model format limit: "
+            + hiddenSize);
+      }
+      final long minimumModelValues = modelFloatValues(MIN_VOCABULARY_ROWS,
+          MIN_TRANSITIONS, embeddingSize, hiddenSize);
+      if (minimumModelValues > FeedforwardDependencyModel.MAX_MODEL_FLOAT_VALUES) {
+        throw new IllegalArgumentException("embeddingSize and hiddenSize exceed the model "
+            + "format allocation limit");
+      }
+      if (!Double.isFinite(learningRate) || learningRate <= 0.0
+          || !Double.isFinite(l2) || l2 < 0.0) {
+        throw new IllegalArgumentException(
+            "learningRate must be finite and positive, l2 finite and not negative");
       }
       if (!(dropout >= 0.0 && dropout < 1.0)) {
         throw new IllegalArgumentException("dropout must be in [0, 1): " + dropout);
@@ -161,20 +182,13 @@ public final class FeedforwardDependencyTrainer {
   }
 
   /**
-   * Fine-tunes a locally trained model globally: sentences are decoded with a beam, the
-   * gold derivation is tracked through it, and the moment the gold prefix falls out of
-   * the beam an early update, in the sense of
-   * <a href="https://aclanthology.org/P04-1015/">Collins and Roark (2004)</a>, pushes
-   * the model toward keeping it. The loss is a conditional likelihood over the beam's
-   * candidate paths, scored exactly like the beamed parser scores them, summed
-   * log-probabilities, so training optimizes the quantity decoding uses.
+   * Refines a locally trained model with beam search and the early-update method of
+   * <a href="https://aclanthology.org/P04-1015/">Collins and Roark (2004)</a>. The loss
+   * is conditional likelihood over candidate paths scored by summed log-probabilities.
    *
-   * <p>The refined weights are a copy: {@code model} itself is never written to, so a
-   * model already being parsed with, possibly by several threads, keeps behaving exactly
-   * as before while a refined successor is trained from it. The copy is updated with
-   * per-sentence AdaGrad steps and no dropout; {@link Settings#epochs()} counts the
-   * refinement passes. Refinement is deterministic for a fixed {@link Settings#seed()}.
-   * Parse afterwards with the same beam size.</p>
+   * <p>Refinement updates a copy with per-sentence AdaGrad steps and no dropout.
+   * {@link Settings#epochs()} sets the number of refinement passes. Use the same beam
+   * size for parsing the result.</p>
    *
    * <p>The transition inventory comes from {@code model} and is not extended, because
    * its size is the width of the trained output layer. A refinement corpus using a
@@ -259,6 +273,7 @@ public final class FeedforwardDependencyTrainer {
           updates++;
         }
       }
+      checkFinite(refined);
       logger.info("refine epoch {}: loss {} over {} updates in {} ms", epoch,
           loss / Math.max(updates, 1), updates, System.currentTimeMillis() - epochStart);
     }
@@ -382,14 +397,14 @@ public final class FeedforwardDependencyTrainer {
         expansions.sort((a, b) -> Double.compare(b.score, a.score));
         final List<BeamNode> survivors =
             new ArrayList<>(expansions.subList(0, Math.min(beamSize, expansions.size())));
-        boolean goldSurvives = false;
+        boolean goldRetained = false;
         for (final BeamNode survivor : survivors) {
           if (survivor.gold) {
-            goldSurvives = true;
+            goldRetained = true;
             break;
           }
         }
-        if (!goldSurvives) {
+        if (!goldRetained) {
           if (goldChild == null) {
             // The gold transition was not applicable in the gold configuration, so
             // this sentence yields no update.
@@ -584,12 +599,21 @@ public final class FeedforwardDependencyTrainer {
     return corpus;
   }
 
-  /** Overwrites the random word rows with pretrained vectors where available. */
+  /**
+   * Overwrites the random word rows with pretrained vectors where available.
+   *
+   * @param model The freshly initialized model whose word rows are seeded.
+   * @param pretrained The pretrained vector source, returning {@code null} for a word it
+   *                   does not cover.
+   * @param settings The hyperparameters, which fix the expected vector width.
+   * @throws IllegalArgumentException Thrown if a pretrained vector has a different width
+   *         than the embedding size or contains a non-finite value.
+   */
   private static void seed(FeedforwardDependencyModel model,
       Function<String, float[]> pretrained, Settings settings) {
     int seeded = 0;
     for (final Map.Entry<String, Integer> entry : model.wordIds().entrySet()) {
-      if (entry.getKey().startsWith(FeedforwardDependencyModel.SPECIAL_SYMBOL_PREFIX)) {
+      if (FeedforwardDependencyModel.isSpecialSymbol(entry.getKey())) {
         // The special unknown, padding, and root symbols have no pretrained
         // counterpart, so they keep their random initialization.
         continue;
@@ -603,6 +627,12 @@ public final class FeedforwardDependencyTrainer {
             + "' has " + vector.length + " dimensions, expected "
             + settings.embeddingSize());
       }
+      for (final float value : vector) {
+        if (!Float.isFinite(value)) {
+          throw new IllegalArgumentException(
+              "pretrained vector for '" + entry.getKey() + "' contains a non-finite value");
+        }
+      }
       System.arraycopy(vector, 0, model.embeddings()[entry.getValue()], 0, vector.length);
       seeded++;
     }
@@ -610,7 +640,15 @@ public final class FeedforwardDependencyTrainer {
         model.wordIds().size());
   }
 
-  /** Builds the vocabularies and randomly initialized weights. */
+  /**
+   * Builds the vocabularies and randomly initialized weights.
+   *
+   * @param corpus The training samples.
+   * @param settings The hyperparameters.
+   * @return The untrained model. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if the vocabularies and settings would
+   *         produce more model values than the model format can store.
+   */
   private static FeedforwardDependencyModel initialize(List<DependencySample> corpus,
       Settings settings) {
     final Map<String, Integer> wordCounts = new HashMap<>();
@@ -618,6 +656,12 @@ public final class FeedforwardDependencyTrainer {
     final Map<String, Integer> labelIds = new HashMap<>();
     final Map<String, Integer> transitionIds = new HashMap<>();
     for (final DependencySample s : corpus) {
+      final List<Transition> oracle;
+      try {
+        oracle = ArcStandardOracle.transitions(s.getGraph());
+      } catch (IllegalArgumentException e) {
+        continue;
+      }
       for (final String token : s.getTokens()) {
         wordCounts.merge(FeedforwardDependencyModel.normalize(token), 1, Integer::sum);
       }
@@ -628,13 +672,9 @@ public final class FeedforwardDependencyTrainer {
       for (int i = 0; i < graph.size(); i++) {
         labelIds.putIfAbsent(graph.relationOf(i), 0);
       }
-    }
-    // The outcome space is the shift transition plus both arc directions for every
-    // relation label observed in the training data.
-    transitionIds.putIfAbsent(Transition.SHIFT.encode(), 0);
-    for (final String label : labelIds.keySet()) {
-      transitionIds.putIfAbsent(Transition.leftArc(label).encode(), 0);
-      transitionIds.putIfAbsent(Transition.rightArc(label).encode(), 0);
+      for (final Transition transition : oracle) {
+        transitionIds.putIfAbsent(transition.encode(), 0);
+      }
     }
 
     int row = 0;
@@ -659,11 +699,15 @@ public final class FeedforwardDependencyTrainer {
       labels.put(label, row++);
     }
 
-    int transitionIndex = 0;
-    final String[] transitions = new String[transitionIds.size()];
-    for (final String encoded : transitionIds.keySet()) {
-      transitions[transitionIndex] = encoded;
-      transitionIds.put(encoded, transitionIndex++);
+    final String[] transitions = transitionIds.keySet().toArray(String[]::new);
+    Arrays.sort(transitions);
+
+    final long modelValues = modelFloatValues(row, transitions.length,
+        settings.embeddingSize(), settings.hiddenSize());
+    if (modelValues > FeedforwardDependencyModel.MAX_MODEL_FLOAT_VALUES) {
+      throw new IllegalArgumentException("training vocabulary and settings require "
+          + modelValues + " model values, limit is "
+          + FeedforwardDependencyModel.MAX_MODEL_FLOAT_VALUES);
     }
 
     final Random random = new Random(settings.seed());
@@ -696,6 +740,17 @@ public final class FeedforwardDependencyTrainer {
       next++;
     }
     return next;
+  }
+
+  /** Returns the number of float values stored by a model of the given shape. */
+  private static long modelFloatValues(int vocabularyRows, int transitionCount,
+      int embeddingSize, int hiddenSize) {
+    final long inputSize = (long) FeedforwardContext.FEATURE_COUNT * embeddingSize;
+    return (long) vocabularyRows * embeddingSize
+        + (long) hiddenSize * inputSize
+        + hiddenSize
+        + (long) transitionCount * hiddenSize
+        + transitionCount;
   }
 
   /** Replays the oracle over every projective sample, emitting one example per step. */
@@ -888,6 +943,7 @@ public final class FeedforwardDependencyTrainer {
           }
         }
       }
+      checkFinite(model);
       logger.info("epoch {}: loss {} in {} ms", epoch, loss / exampleCount,
           System.currentTimeMillis() - epochStart);
     }
@@ -917,6 +973,31 @@ public final class FeedforwardDependencyTrainer {
       accumulators[i] += gradient * gradient;
       weights[i] -= settings.learningRate() * gradient
           / (Math.sqrt(accumulators[i]) + ADAGRAD_EPSILON);
+    }
+  }
+
+  /** Rejects numerical overflow before returning or continuing to train a model. */
+  private static void checkFinite(FeedforwardDependencyModel model) {
+    checkFinite(model.embeddings());
+    checkFinite(model.hiddenWeights());
+    checkFinite(model.hiddenBias());
+    checkFinite(model.outputWeights());
+    checkFinite(model.outputBias());
+  }
+
+  /** Rejects a non-finite value in a matrix. */
+  private static void checkFinite(float[][] matrix) {
+    for (final float[] row : matrix) {
+      checkFinite(row);
+    }
+  }
+
+  /** Rejects a non-finite value in a vector. */
+  private static void checkFinite(float[] vector) {
+    for (final float value : vector) {
+      if (!Float.isFinite(value)) {
+        throw new IllegalStateException("training produced a non-finite model parameter");
+      }
     }
   }
 
