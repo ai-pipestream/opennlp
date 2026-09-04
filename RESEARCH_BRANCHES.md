@@ -1,18 +1,21 @@
 # Research branch map
 
-State verified on 2026-09-03 against Apache GitHub, every live worktree in
+State verified on 2026-09-04 against Apache GitHub, every live worktree in
 `repos.all.txt`, the org remote, `regen-uber.sh`, and the current provenance
 manifest.
 
-Apache main is `73f9a25f7`. It includes the typed Document container from
-merged PR #1182, the paragraph normalizer from merged PR #1249, and term
-vectors from merged PR #1212. The public `OPENNLP-1833-grpc-helper` is
-`2b5ebbc9d` locally and on Apache. It contains Apache main plus all 15 open
-pull requests in the 3.x review graph, drafts included. No open 2.x pull
-request belongs in this helper.
+Apache main is `144be05ae`. It includes the typed Document container from
+merged PR #1182, the paragraph normalizer from merged PR #1249, term vectors
+from merged PR #1212, Hunspell stemming from merged PRs #1190, CJK lattice
+tokenization from merged PRs #1191 and #1265, and the verified resource
+installer from merged PR #1211. The public `OPENNLP-1833-grpc-helper` was
+regenerated locally on 2026-09-04 as `16e3568c2`: current Apache main plus all
+13 open pull requests in the 3.x review graph, drafts included. The helper
+push to Apache is pending and needs the user's one-time authorization. No open
+2.x pull request belongs in this helper.
 
-`regen-uber.sh` now starts from current main, drops merged #1182, #1249, and
-#1212 branches,
+`regen-uber.sh` now starts from current main, drops merged #1182, #1249,
+#1212, #1190, #1191/#1265, and #1211 branches,
 and selects the cascaded heads shown below. The exact refs in the last
 completed preview remain recorded in `PIPESTREAM-PROVENANCE.txt`; during a
 cascade that generated manifest can temporarily trail this membership plan.
@@ -39,7 +42,7 @@ research branch is selected for uber.
 
 ```mermaid
 flowchart LR
-  main["apache main<br/>OPENNLP-1888, OPENNLP-1921, and OPENNLP-1897 included"]
+  main["apache main<br/>OPENNLP-1888, -1921, -1897, -1893, -1894, and -1909 included"]
   uber["kristian-3.x-features<br/>generated uber"]
   apacheTips{{"APACHE_TIPS"}}
   researchTips{{"RESEARCH_TIPS"}}
@@ -49,17 +52,19 @@ flowchart LR
     wordnet["#1155 WordNet API"]
     expansion["#1167 WordNet expansion"]
     light["#1166 Light stemmers"]
-    sentencepiece["#1165 SentencePiece"]
+    sentencepiece["#1165 Subword API and WordPiece"]
     static["#1152 Static embeddings<br/>add-ons reconciliation"]
     turbo["#1213 TurboQuant"]
     vector["#1214 Vector index"]
     evaluation["#1215 Vector evaluation"]
-    hunspell["#1190 Hunspell"]
-    lattice["#1191 CJK lattice"]
-    installer["#1211 Resource installer"]
+    hunspellFix["#1266 Hunspell corrections"]
     parser["#1236 Dependency parser"]
     dependency["#1237 Dependency annotations"]
     relation["#1238 Relation extraction"]
+  end
+
+  subgraph addons["apache/opennlp-addons"]
+    subwordAddon["addons PR #178 SentencePiece impl<br/>(subword-addon, draft)"]
   end
 
   subgraph research["Research branches"]
@@ -92,10 +97,8 @@ flowchart LR
   main --> wordnet --> expansion
   main --> light
   main --> sentencepiece --> static --> turbo --> vector --> evaluation
-  main --> hunspell
-  main --> lattice
-  hunspell --> installer
-  lattice --> installer
+  main --> hunspellFix
+  sentencepiece -. impl moved .-> subwordAddon
   main --> parser --> dependency --> relation
 
   main --> artifacts
@@ -120,9 +123,6 @@ flowchart LR
   wordnet --> apacheTips
   expansion --> apacheTips
   light --> apacheTips
-  hunspell --> apacheTips
-  lattice --> apacheTips
-  installer --> apacheTips
   evaluation --> apacheTips
   relation --> apacheTips
 
@@ -159,26 +159,26 @@ flowchart LR
 | [#1152](https://github.com/apache/opennlp/pull/1152) | Static embeddings | `OPENNLP-1885-sentencepiece` | `f6f1bef48e` | `18b3426767` | Draft, no decision | Via #1215 |
 | [#1154](https://github.com/apache/opennlp/pull/1154) | Gazetteer and geocoder API | `main` | `b81d0eb978` | `2b72aa1a66` | Draft, review required | Direct |
 | [#1155](https://github.com/apache/opennlp/pull/1155) | WordNet API and readers | `main` | `9c0e9a0533` | `19117b0315` | Draft, review required, conflicting | Direct |
-| [#1165](https://github.com/apache/opennlp/pull/1165) | Subword API and WordPiece | `main` | `96d2781cb2` | `d2c216e749` | Ready, review required | Via #1215 |
-| [#1166](https://github.com/apache/opennlp/pull/1166) | UniNE light and minimal stemmers | `main` | `ff681b3934` | `e0a46ee89d` | Draft, review required | Direct |
-| [#1167](https://github.com/apache/opennlp/pull/1167) | WordNet expansion | `main` | `a68762fe35` | `e6fad91bf2` | Draft, review required, conflicting | Direct |
-| [#1190](https://github.com/apache/opennlp/pull/1190) | Hunspell stemming | `main` | `c833264c1c` | `b2b5bd9da1` | Ready, changes requested | Direct |
-| [#1191](https://github.com/apache/opennlp/pull/1191) | CJK lattice tokenization | `main` | `dba1353580` | `01c1875d23` | Ready, changes requested | Direct |
-| [#1211](https://github.com/apache/opennlp/pull/1211) | Verified resource installer | `main` | `b1b38039f7` | `79dd6ec5f4` | Ready, review required | Direct |
+| [#1165](https://github.com/apache/opennlp/pull/1165) | Subword API and WordPiece | `main` | `141160e439` | `141160e439` | Ready, rzo1 review answered 2026-09-04, eval build pending | Via #1215 |
+| [#1166](https://github.com/apache/opennlp/pull/1166) | UniNE light and minimal stemmers | `main` | `233514d523` | `403302109e` | Draft, review required | Direct |
+| [#1167](https://github.com/apache/opennlp/pull/1167) | WordNet expansion | `main` | `1d13232d89` | `db8c221440` | Draft, review required, conflicting | Direct |
 | [#1213](https://github.com/apache/opennlp/pull/1213) | TurboQuant embedding tables | `main` | `05398bb677` | `16e4ab4d17` | Draft, review required | Via #1215 |
-| [#1214](https://github.com/apache/opennlp/pull/1214) | Bounded in-memory vector indexes | `main` | `ac501e2259` | `bc844412e4` | Draft, review required | Via #1215 |
+| [#1214](https://github.com/apache/opennlp/pull/1214) | Bounded in-memory vector indexes | `main` | `ac501e2259` | `bc844412e4` | Draft, review required | Via #1214 stack |
 | [#1215](https://github.com/apache/opennlp/pull/1215) | Vector-search evaluation | `main` | `5b79627bb8` | `89d8fba4c5` | Draft, review required | Direct stack tip |
-| [#1236](https://github.com/apache/opennlp/pull/1236) | Dependency parser | `main` | `83bc298189` | `437d01ff56` | Ready, review required | Via #1238 |
-| [#1237](https://github.com/apache/opennlp/pull/1237) | Dependency Document layer | `OPENNLP-547-dependency-parser` | `75bf330a26` | `a974a8d8c1` | Draft, no decision, conflicting | Via #1238 |
-| [#1238](https://github.com/apache/opennlp/pull/1238) | Dependency-path relation extraction | `OPENNLP-1919-dependency-annotations` | `9c860c3afc` | `20e99af717` | Draft, no decision | Direct stack tip |
+| [#1236](https://github.com/apache/opennlp/pull/1236) | Dependency parser | `main` | `5cc405820d` | `aa90290996` | Ready, rebased per mawiesne 2026-09-04 | Via #1238 |
+| [#1237](https://github.com/apache/opennlp/pull/1237) | Dependency Document layer | `OPENNLP-547-dependency-parser` | `75bf330a26` | `f8498b1e66` | Draft, no decision, conflicting | Via #1238 |
+| [#1238](https://github.com/apache/opennlp/pull/1238) | Dependency-path relation extraction | `OPENNLP-1919-dependency-annotations` | `9c860c3afc` | `92df0620ce` | Draft, no decision | Direct stack tip |
+| [#1266](https://github.com/apache/opennlp/pull/1266) | Hunspell parsing and analysis corrections | `main` | `6e18532129` | `6e18532129` | Ready, changes requested (javadoc churn; process items pending) | Not a feature source; fixes land on main |
 
-PRs #1182, #1212, #1247, #1249, and #1250 merged and are now supplied by
-main. The earlier local competing OPENNLP-1921 branch is review-only and is not
-an uber feature source. The local static-embedding line contains the API-only
-#1165 head but still carries its earlier in-repository SentencePiece
-implementation so the preview remains buildable. Replace that copy with the
-add-ons module during embeddings reconciliation. The local cascaded heads have
-not been pushed to their Apache branches.
+PRs #1182, #1190, #1191, #1211, #1212, #1247, #1249, #1250, and #1265 merged
+and are now supplied by main. The earlier local competing OPENNLP-1921 branch
+is review-only and is not an uber feature source. The local static-embedding
+line contains the API-only #1165 head but still carries its earlier
+in-repository SentencePiece implementation so the preview remains buildable.
+Replace that copy with the add-ons module during embeddings reconciliation.
+The stale local branches `OPENNLP-1893-hunspell`, `OPENNLP-1894-lattice-cjk`,
+and `OPENNLP-1909-resource-installer` are superseded by merged main and can be
+retired.
 
 ## Research worktrees
 
@@ -217,11 +217,10 @@ directory, not in this branch-status map.
 
 ## Add-ons candidates
 
-This is a routing list, not an Apache consensus decision. Document Shape and
-term vectors are already in core. The remaining narrow core candidates are the
-subword API and WordPiece (#1165), Hunspell stemming (#1190), CJK lattice
-tokenization (#1191), the resource installer (#1211), and the dependency parser
-(#1236).
+This is a routing list, not an Apache consensus decision. Document Shape, term
+vectors, Hunspell stemming, CJK lattice tokenization, and the resource
+installer are already in core. The remaining narrow core candidates are the
+subword API and WordPiece (#1165) and the dependency parser (#1236).
 
 | Family | Candidate add-ons |
 | --- | --- |
