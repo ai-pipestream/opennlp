@@ -33,20 +33,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class DependencyAnnotatorTest {
 
   private static final DependencyParser FIXED = (tokens, tags) ->
-      DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
+      DependencyGraph.of(new int[] {1, -1, 1, 4, 1},
+          new String[] {"nsubj", "root", "iobj", "det", "obj"});
 
   private static Document tokenized() {
-    return Document.of("the dog barks")
+    return Document.of("Alice sent Bob a message.")
         .with(Layers.SENTENCES, List.of(
-            new Annotation<>(new Span(0, 13), "the dog barks")))
+            new Annotation<>(new Span(0, 25), "Alice sent Bob a message.")))
         .with(Layers.TOKENS, List.of(
-            new Annotation<>(new Span(0, 3), "the"),
-            new Annotation<>(new Span(4, 7), "dog"),
-            new Annotation<>(new Span(8, 13), "barks")))
+            new Annotation<>(new Span(0, 5), "Alice"),
+            new Annotation<>(new Span(6, 10), "sent"),
+            new Annotation<>(new Span(11, 14), "Bob"),
+            new Annotation<>(new Span(15, 16), "a"),
+            new Annotation<>(new Span(17, 24), "message")))
         .with(Layers.POS_TAGS, List.of(
-            new Annotation<>(new Span(0, 3), "DT"),
-            new Annotation<>(new Span(4, 7), "NN"),
-            new Annotation<>(new Span(8, 13), "VBZ")));
+            new Annotation<>(new Span(0, 5), "NNP"),
+            new Annotation<>(new Span(6, 10), "VBD"),
+            new Annotation<>(new Span(11, 14), "NNP"),
+            new Annotation<>(new Span(15, 16), "DT"),
+            new Annotation<>(new Span(17, 24), "NN")));
   }
 
   @Test
@@ -54,23 +59,24 @@ public class DependencyAnnotatorTest {
     final Document document = new DependencyAnnotator(FIXED).annotate(tokenized());
     final List<Annotation<DependencyArc>> arcs =
         document.get(DependencyAnnotator.DEPENDENCIES);
-    assertEquals(3, arcs.size());
+    assertEquals(5, arcs.size());
 
-    final Annotation<DependencyArc> dog = arcs.get(1);
-    assertEquals(new Span(4, 7), dog.span());
-    assertEquals("nsubj", dog.value().relation());
+    final Annotation<DependencyArc> bob = arcs.get(2);
+    assertEquals(new Span(11, 14), bob.span());
+    assertEquals("iobj", bob.value().relation());
 
     final List<Annotation<String>> tokens = document.get(Layers.TOKENS);
-    final Annotation<String> head = tokens.get(dog.value().head());
-    assertEquals("barks", head.value());
-    assertEquals("barks", head.span().getCoveredText(document.text()).toString());
+    final Annotation<String> head = tokens.get(bob.value().head());
+    assertEquals("sent", head.value());
+    assertEquals("sent", head.span().getCoveredText(document.text()).toString());
+    assertEquals("Bob", bob.span().getCoveredText(document.text()).toString());
   }
 
   @Test
   void testRootArcCarriesRootHead() {
     final Document document = new DependencyAnnotator(FIXED).annotate(tokenized());
     final DependencyArc root =
-        document.get(DependencyAnnotator.DEPENDENCIES).get(2).value();
+        document.get(DependencyAnnotator.DEPENDENCIES).get(1).value();
     assertEquals(DependencyArc.ROOT_HEAD, root.head());
     assertEquals("root", root.relation());
   }
