@@ -145,6 +145,20 @@ public class RelationPatternTest {
     Assertions.assertEquals("not a valid path step: >", later.getMessage());
   }
 
+  @Test
+  void testDirectionMarkerInsideLabelIsRejected() {
+    final IllegalArgumentException missingSeparator = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new RelationPattern("t", "<nsubj>obj", null));
+    Assertions.assertEquals("not a valid path step: <nsubj>obj",
+        missingSeparator.getMessage());
+
+    final IllegalArgumentException repeatedMarker = Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> new RelationPattern("t", "<<nsubj", null));
+    Assertions.assertEquals("not a valid path step: <<nsubj", repeatedMarker.getMessage());
+  }
+
   /**
    * Verifies the exact message of the step order check: a path with an up step after a
    * down step is rejected and the message quotes the whole path.
