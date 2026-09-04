@@ -355,4 +355,12 @@ public class DependencyAnnotatorEdgeCaseTest {
     assertEquals("parser returned a graph over 2 tokens for a sentence of 3",
         e.getMessage());
   }
+
+  @Test
+  void testNullGraphIsRejected() {
+    final DependencyParser noGraph = (tokens, tags) -> null;
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new DependencyAnnotator(noGraph).annotate(twoTokens()));
+    assertEquals("parser returned no dependency graph", e.getMessage());
+  }
 }
