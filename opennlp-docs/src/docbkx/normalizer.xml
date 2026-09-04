@@ -130,6 +130,13 @@
 							to ASCII <code>0</code>-<code>9</code> by their numeric value.</entry>
 					</row>
 					<row>
+						<entry><code>SymbolJoinerCharSequenceNormalizer</code></entry>
+						<entry>Spells out a whole-token symbol as its English word
+							(<code>&amp;</code> to <code>and</code>, <code>§</code> to
+							<code>section</code>, <code>™</code> to <code>trademark</code>); a symbol
+							embedded in a larger token is left alone.</entry>
+					</row>
+					<row>
 						<entry><code>EllipsisCharSequenceNormalizer</code></entry>
 						<entry>Expands the horizontal ellipsis to <code>...</code> and the two-dot
 							leader to <code>..</code></entry>
