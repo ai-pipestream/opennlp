@@ -20,6 +20,7 @@ package opennlp.tools.relation;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Assertions;
@@ -48,6 +49,20 @@ public class RelationAnnotatorTest {
       dependencies.add(new Annotation<>(tokens.get(arc.dependent()).span(), arc));
     }
     return dependencies;
+  }
+
+  private static Document twoEntityDocument(List<DependencyArc> arcs) {
+    final List<Annotation<String>> tokens = List.of(
+        new Annotation<>(new Span(0, 1), "A"),
+        new Annotation<>(new Span(2, 3), "B"));
+    final List<Annotation<DependencyArc>> dependencies = new ArrayList<>();
+    for (int i = 0; i < arcs.size(); i++) {
+      dependencies.add(new Annotation<>(tokens.get(i).span(), arcs.get(i)));
+    }
+    return Document.of("A B")
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.ENTITIES, tokens)
+        .with(DependencyAnnotator.DEPENDENCIES, dependencies);
   }
 
   private static Document acquisitionDocument() {
@@ -194,6 +209,45 @@ public class RelationAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(Document.of("no layers")));
+    Assertions.assertEquals(Set.of(Layers.TOKENS, Layers.ENTITIES,
+        DependencyAnnotator.DEPENDENCIES), annotator.requires());
+    Assertions.assertEquals(Set.of(RelationAnnotator.RELATIONS), annotator.provides());
+    Assertions.assertEquals("RelationAnnotator", annotator.toString());
+  }
+
+  @Test
+  void testInvalidDependencyLayersAreRejected() {
+    final RelationAnnotator annotator = new RelationAnnotator(List.of(
+        new RelationPattern("t", "<dep", null)));
+
+    final Document missingArc = twoEntityDocument(List.of(
+        new DependencyArc(DependencyArc.ROOT_HEAD, 0, "root")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(missingArc));
+
+    final Document duplicateDependent = twoEntityDocument(List.of(
+        new DependencyArc(1, 0, "dep"),
+        new DependencyArc(DependencyArc.ROOT_HEAD, 0, "root")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(duplicateDependent));
+
+    final Document headOutOfRange = twoEntityDocument(List.of(
+        new DependencyArc(2, 0, "dep"),
+        new DependencyArc(DependencyArc.ROOT_HEAD, 1, "root")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(headOutOfRange));
+  }
+
+  @Test
+  void testCyclicDependencyLayerDoesNotLoop() {
+    final Document cycle = twoEntityDocument(List.of(
+        new DependencyArc(1, 0, "dep"),
+        new DependencyArc(0, 1, "dep")));
+    final RelationAnnotator annotator = new RelationAnnotator(List.of(
+        new RelationPattern("t", "<dep >dep", null)));
+
+    Assertions.assertTrue(annotator.annotate(cycle)
+        .get(RelationAnnotator.RELATIONS).isEmpty());
   }
 
   @Test
@@ -332,6 +386,18 @@ public class RelationAnnotatorTest {
         relations.get(0).value());
     Assertions.assertEquals(DOTTED_CAPITAL_ISTANBUL + ", home of Bolt", document.text().subSequence(
         relations.get(0).span().getStart(), relations.get(0).span().getEnd()).toString());
+  }
+
+  @Test
+  void testPathCanEndAtAnAncestorEntity() {
+    final RelationAnnotator annotator = new RelationAnnotator(List.of(
+        new RelationPattern("located_in", "<nmod <appos", "istanbul")));
+
+    final List<Annotation<RelationMention>> relations =
+        annotator.annotate(dottedCapitalPivotDocument()).get(RelationAnnotator.RELATIONS);
+
+    Assertions.assertEquals(List.of(new Annotation<>(new Span(0, 22),
+        new RelationMention("located_in", 1, 0))), relations);
   }
 
   @Test
