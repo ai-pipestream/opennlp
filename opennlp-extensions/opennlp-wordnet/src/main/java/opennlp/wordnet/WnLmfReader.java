@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.namespace.QName;
@@ -43,6 +44,17 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
 import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
+import opennlp.wordnet.WnLmfRawModel.Kind;
+import opennlp.wordnet.WnLmfRawModel.RawEntry;
+import opennlp.wordnet.WnLmfRawModel.RawExternalEntry;
+import opennlp.wordnet.WnLmfRawModel.RawExternalSense;
+import opennlp.wordnet.WnLmfRawModel.RawExternalSynset;
+import opennlp.wordnet.WnLmfRawModel.RawLexicon;
+import opennlp.wordnet.WnLmfRawModel.RawRelation;
+import opennlp.wordnet.WnLmfRawModel.RawResource;
+import opennlp.wordnet.WnLmfRawModel.RawSense;
+import opennlp.wordnet.WnLmfRawModel.RawSenseRelation;
+import opennlp.wordnet.WnLmfRawModel.RawSynset;
 
 /**
  * Reads a WN-LMF XML document (the Global WordNet Association
@@ -71,9 +83,29 @@ import opennlp.tools.wordnet.WordNetRelation;
  * metadata but are not resolved or loaded. Returned resources and lexicons are immutable and safe
  * for concurrent lookups.</p>
  *
+ * <p>A WN-LMF {@code LexiconExtension} is an additive overlay on a base lexicon supplied in a
+ * separate document. The overloads that take a {@link WnLmfResolver} compose extensions against
+ * the bases the resolver supplies: new entries, senses, and synsets are added, declarations such
+ * as {@code ExternalLexicalEntry}, {@code ExternalSense}, and {@code ExternalSynset} attach
+ * additive content to base entities, and the composed result is an ordinary {@link WnLmfLexicon}
+ * whose {@link WnLmfLexicon#extensionOf() extensionOf} carries the {@code Extends} reference.
+ * Extension chains compose up to 16 levels, with cycles detected by exact id and version. The
+ * overloads without a resolver perform no I/O of their own and reject
+ * a {@code LexiconExtension} clearly. {@code ExternalLemma}, {@code Form}, and
+ * {@code ExternalForm} stay outside the knowledge-base projection, exactly like the forms,
+ * examples, counts, and secondary definitions the ordinary reader already skips; they never
+ * affect lookup.</p>
  * @since 3.0.0
  */
 public final class WnLmfReader {
+
+  /**
+   * The maximum number of {@code LexiconExtension} levels one composition may stack: a document
+   * whose base is itself an extension counts one level per extension. The bound exists so a
+   * malicious or broken extension chain cannot recurse without limit; deeper chains fail loud
+   * with an {@link InvalidFormatException} naming this bound.
+   */
+  private static final int MAX_EXTENSION_DEPTH = 16;
 
   /** The WN-LMF relation names this reader accepts, mapped to the contract relations. */
   private static final Map<String, WordNetRelation> RELATION_NAMES = relationNames();
@@ -116,11 +148,23 @@ public final class WnLmfReader {
   /** The element declaring one independently queryable lexicon. */
   private static final String LEXICON_ELEMENT = "Lexicon";
 
-  /** The resource extension form, not represented by the current knowledge-base contract. */
+  /** The element declaring an extension composed against a separately supplied base. */
   private static final String LEXICON_EXTENSION_ELEMENT = "LexiconExtension";
 
   /** The element declaring a lexicon dependency. */
   private static final String REQUIRES_ELEMENT = "Requires";
+
+  /** The element declaring an extension's base lexicon. */
+  private static final String EXTENDS_ELEMENT = "Extends";
+
+  /** The element referencing a base lexical entry to attach additive content to. */
+  private static final String EXTERNAL_LEXICAL_ENTRY_ELEMENT = "ExternalLexicalEntry";
+
+  /** The element referencing a base sense to attach added relations to. */
+  private static final String EXTERNAL_SENSE_ELEMENT = "ExternalSense";
+
+  /** The element referencing a base synset to attach added content to. */
+  private static final String EXTERNAL_SYNSET_ELEMENT = "ExternalSynset";
 
   /** The identifier attribute shared by entries, senses, and synsets. */
   private static final String ID_ATTRIBUTE = "id";
@@ -136,6 +180,9 @@ public final class WnLmfReader {
 
   /** The required lexicon reference attribute. */
   private static final String REF_ATTRIBUTE = "ref";
+
+  /** The optional retrieval-hint attribute on Requires and Extends. */
+  private static final String URL_ATTRIBUTE = "url";
 
   /** The part-of-speech attribute shared by lemmas and synsets. */
   private static final String PART_OF_SPEECH_ATTRIBUTE = "partOfSpeech";
@@ -170,6 +217,24 @@ public final class WnLmfReader {
   }
 
   /**
+   * Reads a WN-LMF XML file, composing a {@code LexiconExtension} against the base lexicons the
+   * resolver supplies.
+   *
+   * @param file     The XML file. Must not be {@code null} and must exist.
+   * @param resolver The resolver for {@code Extends} references. Must not be {@code null}.
+   * @return The loaded lexicon; for an extension, the composed base-plus-extension graph.
+   * @throws IllegalArgumentException Thrown if {@code file} is {@code null} or missing or
+   *     {@code resolver} is {@code null}.
+   * @throws InvalidFormatException Thrown if a document is malformed, composition is invalid,
+   *     or the file contains more than one lexicon.
+   * @throws IOException Thrown if reading the file fails or the resolver cannot supply a base.
+   */
+  public static LexicalKnowledgeBase read(Path file, WnLmfResolver resolver) throws IOException {
+    final WnLmfResource resource = readResource(file, resolver);
+    return onlyLexicon(resource, file.toString());
+  }
+
+  /**
    * Reads every lexicon in a WN-LMF XML file without merging their lookup indexes.
    *
    * @param file The XML file. Must not be {@code null} and must exist.
@@ -180,15 +245,27 @@ public final class WnLmfReader {
    * @throws IOException Thrown if reading the file fails.
    */
   public static WnLmfResource readResource(Path file) throws IOException {
-    if (file == null) {
-      throw new IllegalArgumentException("file must not be null");
+    return readResourceFromFile(file, null);
+  }
+
+  /**
+   * Reads every lexicon in a WN-LMF XML file, composing each {@code LexiconExtension} against
+   * the base lexicons the resolver supplies. Sibling extensions compose independently and are
+   * never merged with each other.
+   *
+   * @param file     The XML file. Must not be {@code null} and must exist.
+   * @param resolver The resolver for {@code Extends} references. Must not be {@code null}.
+   * @return The lexical resource in document order, extensions composed.
+   * @throws IllegalArgumentException Thrown if {@code file} is {@code null} or missing or
+   *     {@code resolver} is {@code null}.
+   * @throws InvalidFormatException Thrown if a document is malformed or composition is invalid.
+   * @throws IOException Thrown if reading the file fails or the resolver cannot supply a base.
+   */
+  public static WnLmfResource readResource(Path file, WnLmfResolver resolver) throws IOException {
+    if (resolver == null) {
+      throw new IllegalArgumentException("resolver must not be null");
     }
-    if (!Files.isRegularFile(file)) {
-      throw new IllegalArgumentException("file does not exist or is not a regular file: " + file);
-    }
-    try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
-      return readResource(in, file.toString());
-    }
+    return readResourceFromFile(file, resolver);
   }
 
   /**
@@ -209,6 +286,26 @@ public final class WnLmfReader {
   }
 
   /**
+   * Reads a WN-LMF XML document from a stream, composing a {@code LexiconExtension} against the
+   * base lexicons the resolver supplies. The stream is not closed; resolver-supplied sources
+   * are closed by this reader.
+   *
+   * @param in           The document stream. Must not be {@code null}.
+   * @param resourceName The name used in error messages. Must not be {@code null}.
+   * @param resolver     The resolver for {@code Extends} references. Must not be {@code null}.
+   * @return The loaded lexicon; for an extension, the composed base-plus-extension graph.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}.
+   * @throws InvalidFormatException Thrown if a document is malformed, composition is invalid,
+   *     or the document contains more than one lexicon.
+   * @throws IOException Thrown if reading a stream fails or the resolver cannot supply a base.
+   */
+  public static LexicalKnowledgeBase read(InputStream in, String resourceName,
+      WnLmfResolver resolver) throws IOException {
+    final WnLmfResource resource = readResource(in, resourceName, resolver);
+    return onlyLexicon(resource, resourceName);
+  }
+
+  /**
    * Reads every lexicon in a WN-LMF document without merging their lookup indexes. The stream is
    * not closed.
    *
@@ -220,14 +317,148 @@ public final class WnLmfReader {
    *     {@code LexiconExtension}.
    * @throws IOException Thrown if reading the stream fails.
    */
-  public static WnLmfResource readResource(InputStream in, String resourceName) throws IOException {
+  public static WnLmfResource readResource(InputStream in, String resourceName)
+      throws IOException {
+    return readResourceInternal(in, resourceName, null);
+  }
+
+  /**
+   * Reads every lexicon in a WN-LMF document, composing each {@code LexiconExtension} against
+   * the base lexicons the resolver supplies. The stream is not closed; resolver-supplied
+   * sources are closed by this reader. Sibling extensions compose independently and are never
+   * merged with each other; resolver calls are cached per exact id and version for the duration
+   * of this read.
+   *
+   * @param in           The document stream. Must not be {@code null}.
+   * @param resourceName The name used in error messages. Must not be {@code null}.
+   * @param resolver     The resolver for {@code Extends} references. Must not be {@code null}.
+   * @return The lexical resource in document order, extensions composed.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}.
+   * @throws InvalidFormatException Thrown if a document is malformed or composition is invalid.
+   * @throws IOException Thrown if reading a stream fails or the resolver cannot supply a base.
+   */
+  public static WnLmfResource readResource(InputStream in, String resourceName,
+      WnLmfResolver resolver) throws IOException {
+    if (resolver == null) {
+      throw new IllegalArgumentException("resolver must not be null");
+    }
+    return readResourceInternal(in, resourceName, resolver);
+  }
+
+  /**
+   * Opens a file and reads its resource with an optional resolver.
+   *
+   * @param file     The XML file.
+   * @param resolver The resolver, or {@code null} for the no-resolver contract; the public
+   *                 resolver-aware overloads validated their argument already.
+   * @return The lexical resource.
+   * @throws IOException Thrown if reading fails.
+   */
+  private static WnLmfResource readResourceFromFile(Path file, WnLmfResolver resolver)
+      throws IOException {
+    if (file == null) {
+      throw new IllegalArgumentException("file must not be null");
+    }
+    if (!Files.isRegularFile(file)) {
+      throw new IllegalArgumentException("file does not exist or is not a regular file: " + file);
+    }
+    try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
+      return readResourceInternal(in, file.toString(), resolver);
+    }
+  }
+
+  /**
+   * Parses one document into the raw model, then materializes every lexicon, composing
+   * extensions when a resolver is present.
+   *
+   * @param in           The document stream; not closed.
+   * @param resourceName The name used in error messages.
+   * @param resolver     The resolver, or {@code null} to reject extensions.
+   * @return The lexical resource in document order.
+   * @throws InvalidFormatException Thrown if a document is malformed or composition is invalid.
+   * @throws IOException Thrown if reading a stream fails or the resolver cannot supply a base.
+   */
+  private static WnLmfResource readResourceInternal(InputStream in, String resourceName,
+      WnLmfResolver resolver) throws IOException {
     if (in == null) {
       throw new IllegalArgumentException("in must not be null");
     }
     if (resourceName == null) {
       throw new IllegalArgumentException("resourceName must not be null");
     }
-    final Parser parser = new Parser(resourceName);
+    final RawResource raw = parseRaw(in, resourceName, resolver != null);
+    rejectSameDocumentBase(raw, resourceName);
+    final Composition composition =
+        resolver == null ? null : new Composition(resolver, resourceName);
+    final List<WnLmfLexicon> lexicons = new ArrayList<>(raw.lexicons().size());
+    for (final RawLexicon lexicon : raw.lexicons()) {
+      if (lexicon.kind() == Kind.LEXICON) {
+        lexicons.add(descriptor(lexicon, resourceName));
+      } else {
+        // A null composition cannot reach here: without a resolver the parser rejects a
+        // LexiconExtension, so no raw lexicon of that kind exists.
+        lexicons.add(descriptor(composition.compose(lexicon), resourceName));
+      }
+    }
+    return new WnLmfResource(lexicons);
+  }
+
+  /**
+   * Materializes a raw lexicon into its public descriptor.
+   *
+   * @param lexicon      The raw lexicon; for an extension, already composed.
+   * @param resourceName The name used in error messages.
+   * @return The public lexicon descriptor.
+   * @throws InvalidFormatException Thrown if the lexicon content is invalid.
+   */
+  private static WnLmfLexicon descriptor(RawLexicon lexicon, String resourceName)
+      throws InvalidFormatException {
+    return new WnLmfLexicon(lexicon.id(), lexicon.label(), lexicon.language(),
+        lexicon.version(), lexicon.metadata(), lexicon.requires(),
+        Optional.ofNullable(lexicon.extendsRef()),
+        new Materializer(lexicon, resourceName).materialize());
+  }
+
+  /**
+   * Rejects a document that contains both an extension and the base it extends: the format
+   * forbids that shape, because external ids would be ambiguous.
+   *
+   * @param resource     The parsed document.
+   * @param resourceName The name used in error messages.
+   * @throws InvalidFormatException Thrown if an extension's base shares the document.
+   */
+  private static void rejectSameDocumentBase(RawResource resource, String resourceName)
+      throws InvalidFormatException {
+    for (final RawLexicon extension : resource.lexicons()) {
+      if (extension.kind() != Kind.EXTENSION) {
+        continue;
+      }
+      for (final RawLexicon other : resource.lexicons()) {
+        if (other != extension
+            && other.id().equals(extension.extendsRef().ref())
+            && other.version().equals(extension.extendsRef().version())) {
+          throw malformed(resourceName, -1, "LexiconExtension " + extension.id() + " extends "
+              + other.id() + " version " + other.version() + ", which occurs in the same"
+              + " document; a base lexicon may not share a file with its extension", null);
+        }
+      }
+    }
+  }
+
+  /**
+   * Streams one document into the raw model.
+   *
+   * @param in              The document stream; not closed.
+   * @param resourceName    The name used in error messages.
+   * @param allowExtensions Whether a {@code LexiconExtension} may be parsed; without a resolver
+   *                        it is rejected instead.
+   * @return The raw resource in document order.
+   * @throws InvalidFormatException Thrown if the document is malformed.
+   * @throws IOException Thrown if reading the stream fails.
+   */
+  private static RawResource parseRaw(InputStream in, String resourceName,
+      boolean allowExtensions) throws IOException {
+    final Parser parser = new Parser(resourceName, allowExtensions);
     try {
       final XMLStreamReader reader =
           hardenedFactory().createXMLStreamReader(new NonClosingInputStream(in));
@@ -243,7 +474,7 @@ public final class WnLmfReader {
       if (nested instanceof IOException io) {
         throw io;
       }
-      throw parser.malformed(e.getLocation(), "XML error: " + e.getMessage(), e);
+      throw parser.malformedAt(e.getLocation(), "XML error: " + e.getMessage(), e);
     }
     return parser.resource();
   }
@@ -299,48 +530,85 @@ public final class WnLmfReader {
   }
 
   /** Holds the streaming parse state and performs post-parse resolution. */
+  /**
+   * Builds a malformed-document exception naming the resource and, when known, the line.
+   *
+   * @param resourceName The resource name.
+   * @param line         The line number, or {@code -1} when unknown.
+   * @param message      The failure detail.
+   * @param cause        The underlying cause, or {@code null}.
+   * @return The exception to throw.
+   */
+  private static InvalidFormatException malformed(String resourceName, int line, String message,
+      Throwable cause) {
+    final String prefix = line < 0 ? MALFORMED_PREFIX + resourceName + ": "
+        : MALFORMED_PREFIX + resourceName + " at line " + line + ": ";
+    return cause == null ? new InvalidFormatException(prefix + message)
+        : new InvalidFormatException(prefix + message, cause);
+  }
+
+  /**
+   * Extracts a line number from a parser location.
+   *
+   * @param location The location, or {@code null}.
+   * @return The line number, or {@code -1} when unknown.
+   */
+  private static int line(Location location) {
+    return location == null ? -1 : location.getLineNumber();
+  }
+
+  /** Streams one document into raw lexicons; performs no cross-lexicon resolution. */
   private static final class Parser {
 
     private final String resourceName;
-    private final List<WnLmfLexicon> lexicons = new ArrayList<>();
+    private final boolean allowExtensions;
+    private final List<RawLexicon> lexicons = new ArrayList<>();
     private final Set<String> lexiconIds = new HashSet<>();
     private final Set<String> documentIds = new HashSet<>();
 
-    // Current Lexicon metadata.
+    // Current Lexicon or LexiconExtension identity.
+    private Kind currentKind;
     private String currentLexiconId;
     private String currentLexiconLabel;
     private String currentLexiconLanguage;
     private String currentLexiconVersion;
     private Map<QName, String> currentLexiconMetadata;
-    private final List<WnLmfDependency> currentDependencies = new ArrayList<>();
+    private int currentLexiconLine;
+    private final List<WnLmfDependency> currentRequires = new ArrayList<>();
+    private WnLmfDependency currentExtends;
 
-    // Entry state.
-    private final Set<String> entryIds = new HashSet<>();
-    private final Map<String, String> lemmaByEntryId = new HashMap<>();
-    private final Map<String, WordNetPOS> posByEntryId = new HashMap<>();
-    private final Map<String, String> synsetBySenseId = new HashMap<>();
-    private final Map<String, String> entryIdBySenseId = new HashMap<>();
-    private final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
-        new LinkedHashMap<>();
-    private final List<RawSenseRelation> senseRelations = new ArrayList<>();
-    private final Map<String, RawSynset> rawSynsets = new LinkedHashMap<>();
-    // Fallback membership (entry ids per synset in document order) when members is absent.
-    private final Map<String, List<String>> entryIdsBySynset = new HashMap<>();
+    // Current lexicon content, in document order. Duplicate ids of every kind are caught by
+    // the document-wide id claim, whose messages name the element kind.
+    private final Map<String, RawEntry> entries = new LinkedHashMap<>();
+    private final Map<String, RawSense> senses = new LinkedHashMap<>();
+    private final Map<String, RawSynset> synsets = new LinkedHashMap<>();
+    private final List<RawExternalEntry> externalEntries = new ArrayList<>();
+    private final List<RawExternalSynset> externalSynsets = new ArrayList<>();
 
     // Cursor state.
     private String currentEntryId;
     private String currentEntryLemma;
     private WordNetPOS currentEntryPos;
+    private int currentEntryLine;
     private String currentSenseId;
-    private RawSynset currentSynset;
+    private String currentSenseEntryId;
+    private String currentSenseSynset;
+    private int currentSenseLine;
+    private final List<RawSenseRelation> currentSenseRelations = new ArrayList<>();
+    private SynsetBuilder currentSynset;
+    private ExternalEntryBuilder currentExternalEntry;
+    private ExternalSenseBuilder currentExternalSense;
+    private ExternalSynsetBuilder currentExternalSynset;
 
     /**
      * Creates a parser.
      *
-     * @param resourceName The name used in error messages.
+     * @param resourceName    The name used in error messages.
+     * @param allowExtensions Whether a {@code LexiconExtension} may be parsed.
      */
-    Parser(String resourceName) {
+    Parser(String resourceName, boolean allowExtensions) {
       this.resourceName = resourceName;
+      this.allowExtensions = allowExtensions;
     }
 
     /**
@@ -361,16 +629,15 @@ public final class WnLmfReader {
         }
       }
       if (currentLexiconId != null) {
-        throw malformed(reader.getLocation(), "Unclosed Lexicon " + currentLexiconId, null);
+        throw malformedAt(reader.getLocation(), "Unclosed Lexicon " + currentLexiconId, null);
       }
       if (lexicons.isEmpty()) {
-        throw malformed(reader.getLocation(), "Document contains no Lexicon", null);
+        throw malformedAt(reader.getLocation(), "Document contains no Lexicon", null);
       }
     }
 
     /**
-     * Handles one start element, updating cursor state and collecting raw entries, senses, and
-     * synsets.
+     * Handles one start element, updating cursor state and collecting raw content.
      *
      * @param reader The StAX reader positioned on the start element.
      * @throws XMLStreamException Thrown if reading element text fails.
@@ -380,133 +647,210 @@ public final class WnLmfReader {
         throws XMLStreamException, InvalidFormatException {
       final String name = reader.getLocalName();
       switch (name) {
-        case LEXICON_ELEMENT -> openLexicon(reader);
-        case LEXICON_EXTENSION_ELEMENT -> throw malformed(reader.getLocation(),
-            "LexiconExtension is not supported by WnLmfReader", null);
+        case LEXICON_ELEMENT -> openLexicon(reader, Kind.LEXICON);
+        case LEXICON_EXTENSION_ELEMENT -> {
+          if (!allowExtensions) {
+            throw malformedAt(reader.getLocation(), "LexiconExtension is not supported without"
+                + " a resolver; use a read or readResource overload that takes a WnLmfResolver",
+                null);
+          }
+          openLexicon(reader, Kind.EXTENSION);
+        }
+        case EXTENDS_ELEMENT -> {
+          if (currentKind != Kind.EXTENSION) {
+            throw malformedAt(reader.getLocation(), "Extends outside a LexiconExtension", null);
+          }
+          if (currentExtends != null) {
+            throw malformedAt(reader.getLocation(),
+                "Repeated Extends in LexiconExtension " + currentLexiconId, null);
+          }
+          currentExtends = dependency(reader);
+        }
         case REQUIRES_ELEMENT -> {
           requireLexicon(reader, REQUIRES_ELEMENT);
-          currentDependencies.add(new WnLmfDependency(
-              requireAttribute(reader, REF_ATTRIBUTE),
-              requireAttribute(reader, VERSION_ATTRIBUTE)));
+          currentRequires.add(dependency(reader));
         }
         case LEXICAL_ENTRY_ELEMENT -> {
           requireLexicon(reader, LEXICAL_ENTRY_ELEMENT);
           if (currentEntryId != null) {
-            throw malformed(reader.getLocation(),
+            throw malformedAt(reader.getLocation(),
                 "Nested LexicalEntry inside " + currentEntryId, null);
           }
           currentEntryId = requireAttribute(reader, ID_ATTRIBUTE);
-          if (!entryIds.add(currentEntryId)) {
-            throw malformed(reader.getLocation(),
-                "Duplicate lexical entry id " + currentEntryId, null);
-          }
           claimDocumentId(currentEntryId, "lexical entry", reader.getLocation());
           currentEntryLemma = null;
           currentEntryPos = null;
+          currentEntryLine = line(reader.getLocation());
+        }
+        case EXTERNAL_LEXICAL_ENTRY_ELEMENT -> {
+          requireExtension(reader, EXTERNAL_LEXICAL_ENTRY_ELEMENT);
+          final String id = requireAttribute(reader, ID_ATTRIBUTE);
+          claimDocumentId(id, "external lexical entry", reader.getLocation());
+          currentExternalEntry = new ExternalEntryBuilder(id, line(reader.getLocation()));
         }
         case "Lemma" -> {
           if (currentEntryId == null) {
-            throw malformed(reader.getLocation(), "Lemma outside a LexicalEntry", null);
+            throw malformedAt(reader.getLocation(), "Lemma outside a LexicalEntry", null);
           }
           if (currentEntryLemma != null) {
-            throw malformed(reader.getLocation(),
+            throw malformedAt(reader.getLocation(),
                 "Duplicate Lemma in LexicalEntry " + currentEntryId, null);
           }
           currentEntryLemma = requireAttribute(reader, "writtenForm");
           currentEntryPos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
-          lemmaByEntryId.put(currentEntryId, currentEntryLemma);
-          posByEntryId.put(currentEntryId, currentEntryPos);
         }
         case SENSE_ELEMENT -> {
-          if (currentSenseId != null) {
-            throw malformed(reader.getLocation(), "Nested Sense inside " + currentSenseId, null);
+          final String owner;
+          if (currentExternalEntry != null) {
+            owner = currentExternalEntry.id;
+          } else {
+            if (currentEntryLemma == null) {
+              throw malformedAt(reader.getLocation(),
+                  "Sense before its entry's Lemma in LexicalEntry " + currentEntryId, null);
+            }
+            owner = currentEntryId;
           }
-          if (currentEntryLemma == null) {
-            throw malformed(reader.getLocation(),
-                "Sense before its entry's Lemma in LexicalEntry " + currentEntryId, null);
-          }
-          currentSenseId = requireAttribute(reader, ID_ATTRIBUTE);
+          final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final String synsetId = requireAttribute(reader, "synset");
-          if (synsetBySenseId.putIfAbsent(currentSenseId, synsetId) != null) {
-            throw malformed(reader.getLocation(), "Duplicate sense id " + currentSenseId, null);
+          claimDocumentId(id, "sense", reader.getLocation());
+          currentSenseId = id;
+          currentSenseEntryId = owner;
+          currentSenseSynset = synsetId;
+          currentSenseLine = line(reader.getLocation());
+          currentSenseRelations.clear();
+        }
+        case EXTERNAL_SENSE_ELEMENT -> {
+          if (currentExternalEntry == null) {
+            throw malformedAt(reader.getLocation(),
+                "ExternalSense outside an ExternalLexicalEntry", null);
           }
-          claimDocumentId(currentSenseId, "sense", reader.getLocation());
-          entryIdBySenseId.put(currentSenseId, currentEntryId);
-          entryIdsBySynset.computeIfAbsent(synsetId, unused -> new ArrayList<>(2))
-              .add(currentEntryId);
-          final List<String> order = senseOrder.computeIfAbsent(
-              InMemoryWordNetLexicon.LemmaKey.of(currentEntryLemma, currentEntryPos),
-              unused -> new ArrayList<>(2));
-          if (!order.contains(synsetId)) {
-            order.add(synsetId);
-          }
+          final String id = requireAttribute(reader, ID_ATTRIBUTE);
+          claimDocumentId(id, "external sense", reader.getLocation());
+          currentExternalSense = new ExternalSenseBuilder(id, line(reader.getLocation()));
         }
         case "SenseRelation" -> {
-          if (currentSenseId == null) {
-            throw malformed(reader.getLocation(), "SenseRelation outside a Sense", null);
+          if (currentExternalSense == null && currentSenseId == null) {
+            throw malformedAt(reader.getLocation(), "SenseRelation outside a Sense", null);
           }
-          senseRelations.add(new RawSenseRelation(currentSenseId,
+          final RawSenseRelation relation = new RawSenseRelation(
               requireAttribute(reader, REL_TYPE_ATTRIBUTE),
-              requireAttribute(reader, TARGET_ATTRIBUTE), line(reader.getLocation())));
+              requireAttribute(reader, TARGET_ATTRIBUTE), line(reader.getLocation()));
+          if (currentExternalSense != null) {
+            currentExternalSense.relations.add(relation);
+          } else {
+            currentSenseRelations.add(relation);
+          }
         }
         case SYNSET_ELEMENT -> {
           requireLexicon(reader, SYNSET_ELEMENT);
           if (currentSynset != null) {
-            throw malformed(reader.getLocation(), "Nested Synset inside " + currentSynset.id,
+            throw malformedAt(reader.getLocation(), "Nested Synset inside " + currentSynset.id,
                 null);
           }
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final WordNetPOS pos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
-          currentSynset = new RawSynset(id, pos, reader.getAttributeValue(null, "members"),
-              line(reader.getLocation()));
-          if (rawSynsets.putIfAbsent(id, currentSynset) != null) {
-            throw malformed(reader.getLocation(), "Duplicate synset id " + id, null);
-          }
           claimDocumentId(id, "synset", reader.getLocation());
+          currentSynset = new SynsetBuilder(id, pos,
+              reader.getAttributeValue(null, "members"), line(reader.getLocation()));
+        }
+        case EXTERNAL_SYNSET_ELEMENT -> {
+          requireExtension(reader, EXTERNAL_SYNSET_ELEMENT);
+          final String id = requireAttribute(reader, ID_ATTRIBUTE);
+          claimDocumentId(id, "external synset", reader.getLocation());
+          currentExternalSynset = new ExternalSynsetBuilder(id, line(reader.getLocation()));
         }
         case "Definition" -> {
-          if (currentSynset == null) {
-            throw malformed(reader.getLocation(), "Definition outside a Synset", null);
+          if (currentSynset != null && currentSynset.gloss == null) {
+            currentSynset.gloss = reader.getElementText();
+          } else if (currentExternalSynset != null && currentExternalSynset.definition == null) {
+            currentExternalSynset.definition = reader.getElementText();
           }
-          currentSynset.definitions.add(reader.getElementText());
         }
         case "SynsetRelation" -> {
-          if (currentSynset == null) {
-            throw malformed(reader.getLocation(), "SynsetRelation outside a Synset", null);
+          if (currentSynset == null && currentExternalSynset == null) {
+            throw malformedAt(reader.getLocation(), "SynsetRelation outside a Synset", null);
           }
           final String relType = requireAttribute(reader, REL_TYPE_ATTRIBUTE);
           final String target = requireAttribute(reader, TARGET_ATTRIBUTE);
           // The escape-hatch type is a documented skip, not a rejection.
           if (!OTHER_RELATION.equals(relType)) {
-            currentSynset.relations.add(
-                new RawRelation(relType, target, line(reader.getLocation()), false));
+            final RawRelation relation =
+                new RawRelation(relType, target, line(reader.getLocation()));
+            if (currentSynset != null) {
+              currentSynset.relations.add(relation);
+            } else {
+              currentExternalSynset.relations.add(relation);
+            }
           }
         }
         default -> {
-          // Pronunciation, Form, Example, SyntacticBehaviour, ILIDefinition, and other
-          // elements outside the contract subset are skipped.
+          // Pronunciation, Form, ExternalForm, ExternalLemma, Example, SyntacticBehaviour,
+          // ILIDefinition, and other elements outside the contract subset are skipped.
         }
       }
     }
 
     /**
-     * Clears cursor state when a tracked element closes.
+     * Builds raw records and clears cursor state when a tracked element closes.
      *
      * @param name The local name of the closing element.
-     * @throws InvalidFormatException Thrown if closing a Lexicon exposes invalid content.
+     * @throws InvalidFormatException Thrown if closing a lexicon exposes invalid content.
      */
     private void endElement(String name) throws InvalidFormatException {
       switch (name) {
-        case LEXICON_ELEMENT -> closeLexicon();
+        case LEXICON_ELEMENT, LEXICON_EXTENSION_ELEMENT -> closeLexicon();
         case LEXICAL_ENTRY_ELEMENT -> {
+          if (currentEntryLemma != null) {
+            entries.put(currentEntryId, new RawEntry(currentEntryId, currentEntryLemma,
+                currentEntryPos, currentEntryLine));
+          }
           currentEntryId = null;
           currentEntryLemma = null;
           currentEntryPos = null;
         }
-        case SENSE_ELEMENT -> currentSenseId = null;
-        case SYNSET_ELEMENT -> currentSynset = null;
+        case SENSE_ELEMENT -> {
+          if (currentSenseId != null) {
+            senses.put(currentSenseId, new RawSense(currentSenseId, currentSenseEntryId,
+                currentSenseSynset, currentSenseRelations, currentSenseLine));
+          }
+          currentSenseId = null;
+          currentSenseEntryId = null;
+          currentSenseSynset = null;
+          currentSenseRelations.clear();
+        }
+        case EXTERNAL_SENSE_ELEMENT -> {
+          if (currentExternalSense != null) {
+            currentExternalEntry.externalSenses.add(new RawExternalSense(
+                currentExternalSense.id, currentExternalSense.relations,
+                currentExternalSense.line));
+          }
+          currentExternalSense = null;
+        }
+        case EXTERNAL_LEXICAL_ENTRY_ELEMENT -> {
+          if (currentExternalEntry != null) {
+            externalEntries.add(new RawExternalEntry(currentExternalEntry.id,
+                currentExternalEntry.externalSenses, currentExternalEntry.line));
+          }
+          currentExternalEntry = null;
+        }
+        case SYNSET_ELEMENT -> {
+          if (currentSynset != null) {
+            synsets.put(currentSynset.id, new RawSynset(currentSynset.id, currentSynset.pos,
+                currentSynset.members, List.of(), currentSynset.gloss,
+                currentSynset.relations, currentSynset.line));
+          }
+          currentSynset = null;
+        }
+        case EXTERNAL_SYNSET_ELEMENT -> {
+          if (currentExternalSynset != null) {
+            externalSynsets.add(new RawExternalSynset(currentExternalSynset.id,
+                currentExternalSynset.definition, currentExternalSynset.relations,
+                currentExternalSynset.line));
+          }
+          currentExternalSynset = null;
+        }
         default -> {
           // Nothing to close for skipped elements.
         }
@@ -514,25 +858,29 @@ public final class WnLmfReader {
     }
 
     /**
-     * Opens one Lexicon and captures its identity and metadata.
+     * Opens one Lexicon or LexiconExtension and captures its identity and metadata.
      *
-     * @param reader The reader positioned on the Lexicon start element.
-     * @throws InvalidFormatException Thrown if the Lexicon is nested, repeats an id, or omits a
+     * @param reader The reader positioned on the start element.
+     * @param kind   The lexicon form being opened.
+     * @throws InvalidFormatException Thrown if the element is nested, repeats an id, or omits a
      *     required attribute.
      */
-    private void openLexicon(XMLStreamReader reader) throws InvalidFormatException {
+    private void openLexicon(XMLStreamReader reader, Kind kind) throws InvalidFormatException {
       if (currentLexiconId != null) {
-        throw malformed(reader.getLocation(), "Nested Lexicon inside " + currentLexiconId, null);
+        throw malformedAt(reader.getLocation(),
+            "Nested " + reader.getLocalName() + " inside " + currentLexiconId, null);
       }
       final String id = requireAttribute(reader, ID_ATTRIBUTE);
       if (!lexiconIds.add(id)) {
-        throw malformed(reader.getLocation(), "Duplicate lexicon id " + id, null);
+        throw malformedAt(reader.getLocation(), "Duplicate lexicon id " + id, null);
       }
       claimDocumentId(id, "lexicon", reader.getLocation());
+      currentKind = kind;
       currentLexiconId = id;
       currentLexiconLabel = requireAttribute(reader, LABEL_ATTRIBUTE);
       currentLexiconLanguage = requireAttribute(reader, LANGUAGE_ATTRIBUTE);
       currentLexiconVersion = requireAttribute(reader, VERSION_ATTRIBUTE);
+      currentLexiconLine = line(reader.getLocation());
       final Map<QName, String> metadata = new LinkedHashMap<>();
       for (int i = 0; i < reader.getAttributeCount(); i++) {
         final QName attribute = reader.getAttributeName(i);
@@ -544,35 +892,70 @@ public final class WnLmfReader {
     }
 
     /**
-     * Builds the current Lexicon and clears its parse state.
+     * Builds the current lexicon's raw record and clears its parse state.
      *
-     * @throws InvalidFormatException Thrown if the Lexicon content is invalid.
+     * @throws InvalidFormatException Thrown if the lexicon content is invalid.
      */
     private void closeLexicon() throws InvalidFormatException {
       if (currentLexiconId == null) {
         return;
       }
+      if (currentKind == Kind.EXTENSION && currentExtends == null) {
+        throw malformedAt(null,
+            "LexiconExtension " + currentLexiconId + " is missing its Extends element", null);
+      }
       try {
-        lexicons.add(new WnLmfLexicon(currentLexiconId, currentLexiconLabel,
+        lexicons.add(new RawLexicon(currentKind, currentLexiconId, currentLexiconLabel,
             currentLexiconLanguage, currentLexiconVersion, currentLexiconMetadata,
-            currentDependencies, buildKnowledgeBase()));
+            currentRequires, currentExtends, entries, senses, synsets, externalEntries,
+            externalSynsets, currentLexiconLine));
       } finally {
         clearLexiconState();
       }
     }
 
     /**
-     * Requires lexical content to be enclosed by a Lexicon element.
+     * Requires lexical content to be enclosed by a Lexicon or LexiconExtension element.
      *
      * @param reader  The reader positioned on the content element.
      * @param element The element name used in the rejection message.
-     * @throws InvalidFormatException Thrown if no Lexicon is open.
+     * @throws InvalidFormatException Thrown if no lexicon is open.
      */
     private void requireLexicon(XMLStreamReader reader, String element)
         throws InvalidFormatException {
       if (currentLexiconId == null) {
-        throw malformed(reader.getLocation(), element + " outside a Lexicon", null);
+        throw malformedAt(reader.getLocation(), element + " outside a Lexicon", null);
       }
+    }
+
+    /**
+     * Requires an external declaration to be enclosed by a LexiconExtension.
+     *
+     * @param reader  The reader positioned on the declaration element.
+     * @param element The element name used in the rejection message.
+     * @throws InvalidFormatException Thrown if no extension is open.
+     */
+    private void requireExtension(XMLStreamReader reader, String element)
+        throws InvalidFormatException {
+      if (currentKind != Kind.EXTENSION) {
+        throw malformedAt(reader.getLocation(),
+            element + " outside a LexiconExtension", null);
+      }
+    }
+
+    /**
+     * Reads a Requires or Extends element into a dependency descriptor.
+     *
+     * @param reader The reader positioned on the element.
+     * @return The dependency, with its url when the source declared a non-empty one.
+     * @throws InvalidFormatException Thrown if ref or version is absent or empty.
+     */
+    private WnLmfDependency dependency(XMLStreamReader reader) throws InvalidFormatException {
+      final String url = reader.getAttributeValue(null, URL_ATTRIBUTE);
+      return new WnLmfDependency(
+          requireAttribute(reader, REF_ATTRIBUTE),
+          requireAttribute(reader, VERSION_ATTRIBUTE),
+          Optional.ofNullable(url).filter(value -> !value.isEmpty()));
     }
 
     /**
@@ -586,7 +969,7 @@ public final class WnLmfReader {
     private void claimDocumentId(String id, String kind, Location location)
         throws InvalidFormatException {
       if (!documentIds.add(id)) {
-        throw malformed(location, "Duplicate " + kind + " id " + id, null);
+        throw malformedAt(location, "Duplicate " + kind + " id " + id, null);
       }
     }
 
@@ -606,158 +989,41 @@ public final class WnLmfReader {
       };
     }
 
-    /** Clears every field whose scope is one Lexicon element. */
+    /** Clears every field whose scope is one Lexicon or LexiconExtension element. */
     private void clearLexiconState() {
+      currentKind = null;
       currentLexiconId = null;
       currentLexiconLabel = null;
       currentLexiconLanguage = null;
       currentLexiconVersion = null;
       currentLexiconMetadata = null;
-      currentDependencies.clear();
-      entryIds.clear();
-      lemmaByEntryId.clear();
-      posByEntryId.clear();
-      synsetBySenseId.clear();
-      entryIdBySenseId.clear();
-      senseOrder.clear();
-      senseRelations.clear();
-      rawSynsets.clear();
-      entryIdsBySynset.clear();
+      currentRequires.clear();
+      currentExtends = null;
+      entries.clear();
+      senses.clear();
+      synsets.clear();
+      externalEntries.clear();
+      externalSynsets.clear();
       currentEntryId = null;
       currentEntryLemma = null;
       currentEntryPos = null;
       currentSenseId = null;
+      currentSenseEntryId = null;
+      currentSenseSynset = null;
+      currentSenseRelations.clear();
       currentSynset = null;
+      currentExternalEntry = null;
+      currentExternalSense = null;
+      currentExternalSynset = null;
     }
 
     /**
-     * Resolves the parsed state into an immutable lexicon, validates sense targets, represents
-     * sense relations at the synset level, and builds the public synset values.
+     * Returns the parsed raw resource.
      *
-     * @return The loaded lexicon.
-     * @throws InvalidFormatException Thrown if a sense or relation references an undeclared
-     *     target or a declared member is invalid.
+     * @return The immutable raw resource in document order.
      */
-    LexicalKnowledgeBase buildKnowledgeBase() throws InvalidFormatException {
-      // Every sense must point to a declared synset; part-of-speech consistency between a
-      // synset and its member entries is checked in memberLemmas.
-      for (final Map.Entry<String, String> sense : synsetBySenseId.entrySet()) {
-        final RawSynset target = rawSynsets.get(sense.getValue());
-        if (target == null) {
-          throw malformed(null,
-              "Sense " + sense.getKey() + " references undeclared synset " + sense.getValue(),
-              null);
-        }
-      }
-      // Lift sense relations to the synset level.
-      for (final RawSenseRelation relation : senseRelations) {
-        if (OTHER_RELATION.equals(relation.relType)) {
-          continue;
-        }
-        final String sourceSynsetId = synsetBySenseId.get(relation.sourceSenseId);
-        final String targetSynsetId = synsetBySenseId.get(relation.targetSenseId);
-        if (targetSynsetId == null) {
-          throw malformed(null, "SenseRelation at line " + relation.line + " from sense "
-              + relation.sourceSenseId + " references undeclared sense " + relation.targetSenseId,
-              null);
-        }
-        final RawSynset source = rawSynsets.get(sourceSynsetId);
-        source.relations.add(
-            new RawRelation(relation.relType, targetSynsetId, relation.line, true));
-      }
-      // Resolve raw synsets into contract synsets.
-      final Map<String, Synset> synsetsById =
-          LinkedHashMap.newLinkedHashMap(rawSynsets.size());
-      for (final RawSynset raw : rawSynsets.values()) {
-        final Map<WordNetRelation, List<String>> relations = resolveRelations(raw);
-        synsetsById.put(raw.id,
-            new Synset(raw.id, raw.pos, memberLemmas(raw), String.join("; ", raw.definitions),
-                relations));
-      }
-      return new InMemoryWordNetLexicon(synsetsById, senseOrder);
-    }
-
-    /**
-     * Returns the parsed resource.
-     *
-     * @return The immutable resource in document order.
-     */
-    WnLmfResource resource() {
-      return new WnLmfResource(lexicons);
-    }
-
-    /**
-     * Resolves a raw synset's relations into typed target-id lists, deduplicated in source order.
-     *
-     * @param raw The raw synset.
-     * @return The typed relations for the contract synset.
-     * @throws InvalidFormatException Thrown if a relation type is unknown or its target is
-     *     undeclared.
-     */
-    private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw)
-        throws InvalidFormatException {
-      final Map<WordNetRelation, LinkedHashSet<String>> typed = new LinkedHashMap<>();
-      for (final RawRelation relation : raw.relations) {
-        final WordNetRelation type = parseRelation(
-            relation.relType, raw.pos, relation.line, relation.senseRelation);
-        final RawSynset target = rawSynsets.get(relation.target);
-        if (target == null) {
-          throw malformed(null, "Relation " + relation.relType + " at line " + relation.line
-              + " on synset " + raw.id + " references undeclared synset " + relation.target, null);
-        }
-        // Share the synset table's id instance so only one copy of each id is retained.
-        typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(target.id);
-      }
-      final Map<WordNetRelation, List<String>> relations =
-          LinkedHashMap.newLinkedHashMap(typed.size());
-      for (final Map.Entry<WordNetRelation, LinkedHashSet<String>> entry : typed.entrySet()) {
-        relations.put(entry.getKey(), List.copyOf(entry.getValue()));
-      }
-      return relations;
-    }
-
-    /**
-     * Resolves a synset's member sense ids to their entry lemmas, from the {@code members}
-     * attribute when present and otherwise from the senses that pointed at the synset. Legacy
-     * documents that put lexical-entry ids in {@code members} remain accepted.
-     *
-     * @param raw The raw synset.
-     * @return The member lemmas in source order, deduplicated.
-     * @throws InvalidFormatException Thrown if the synset names an undeclared member or a
-     *     member's part of speech disagrees with the synset's.
-     */
-    private List<String> memberLemmas(RawSynset raw) throws InvalidFormatException {
-      final List<String> entryIds;
-      if (raw.members != null && !raw.members.isEmpty()) {
-        entryIds = LemmaFolding.splitOnSpaces(raw.members);
-      } else {
-        final List<String> fromSenses = entryIdsBySynset.get(raw.id);
-        entryIds = fromSenses == null ? List.of() : fromSenses;
-      }
-      final List<String> lemmas = new ArrayList<>(entryIds.size());
-      for (final String memberId : entryIds) {
-        final String fromSense = entryIdBySenseId.get(memberId);
-        final String memberSynsetId = synsetBySenseId.get(memberId);
-        if (memberSynsetId != null && !raw.id.equals(memberSynsetId)) {
-          throw malformed(null, "Synset " + raw.id + " at line " + raw.line
-              + " lists sense " + memberId + " assigned to synset " + memberSynsetId, null);
-        }
-        final String entryId = fromSense == null ? memberId : fromSense;
-        final String lemma = lemmaByEntryId.get(entryId);
-        if (lemma == null) {
-          throw malformed(null, "Synset " + raw.id + " at line " + raw.line
-              + " lists undeclared member sense or entry " + memberId, null);
-        }
-        if (raw.pos != posByEntryId.get(entryId)) {
-          throw malformed(null, "Synset " + raw.id + " at line " + raw.line
-              + " has part of speech " + raw.pos + " but member entry " + entryId
-              + " has " + posByEntryId.get(entryId), null);
-        }
-        if (!lemmas.contains(lemma)) {
-          lemmas.add(lemma);
-        }
-      }
-      return lemmas;
+    RawResource resource() {
+      return new RawResource(lexicons);
     }
 
     /**
@@ -775,8 +1041,271 @@ public final class WnLmfReader {
         case "v" -> WordNetPOS.VERB;
         case "a", "s" -> WordNetPOS.ADJECTIVE;
         case "r" -> WordNetPOS.ADVERB;
-        default -> throw malformed(location, "Unknown part-of-speech code: " + code, null);
+        default -> throw malformedAt(location, "Unknown part-of-speech code: " + code, null);
       };
+    }
+
+    /**
+     * Reads a required attribute from the current element.
+     *
+     * @param reader    The StAX reader.
+     * @param attribute The attribute name.
+     * @return The non-empty attribute value.
+     * @throws InvalidFormatException Thrown if the attribute is absent or empty.
+     */
+    private String requireAttribute(XMLStreamReader reader, String attribute)
+        throws InvalidFormatException {
+      final String value = reader.getAttributeValue(null, attribute);
+      if (value == null || value.isEmpty()) {
+        throw malformedAt(reader.getLocation(), "Element " + reader.getLocalName()
+            + " is missing required attribute " + attribute, null);
+      }
+      return value;
+    }
+
+    /**
+     * Builds a malformed-document exception naming this parser's resource.
+     *
+     * @param location The parser location, or {@code null} when unavailable.
+     * @param message  The failure detail.
+     * @param cause    The underlying cause, or {@code null}.
+     * @return The exception to throw.
+     */
+    InvalidFormatException malformedAt(Location location, String message, Throwable cause) {
+      return malformed(resourceName, line(location), message, cause);
+    }
+
+    /** Mutable Synset parse state, converted to a {@link RawSynset} when the element closes. */
+    private static final class SynsetBuilder {
+      private final String id;
+      private final WordNetPOS pos;
+      private final String members;
+      private final int line;
+      private final List<RawRelation> relations = new ArrayList<>(4);
+      private String gloss;
+
+      SynsetBuilder(String id, WordNetPOS pos, String members, int line) {
+        this.id = id;
+        this.pos = pos;
+        this.members = members;
+        this.line = line;
+      }
+    }
+
+    /** Mutable ExternalLexicalEntry parse state. */
+    private static final class ExternalEntryBuilder {
+      private final String id;
+      private final int line;
+      private final List<RawExternalSense> externalSenses = new ArrayList<>(2);
+
+      ExternalEntryBuilder(String id, int line) {
+        this.id = id;
+        this.line = line;
+      }
+    }
+
+    /** Mutable ExternalSense parse state. */
+    private static final class ExternalSenseBuilder {
+      private final String id;
+      private final int line;
+      private final List<RawSenseRelation> relations = new ArrayList<>(2);
+
+      ExternalSenseBuilder(String id, int line) {
+        this.id = id;
+        this.line = line;
+      }
+    }
+
+    /** Mutable ExternalSynset parse state. */
+    private static final class ExternalSynsetBuilder {
+      private final String id;
+      private final int line;
+      private final List<RawRelation> relations = new ArrayList<>(2);
+      private String definition;
+
+      ExternalSynsetBuilder(String id, int line) {
+        this.id = id;
+        this.line = line;
+      }
+    }
+  }
+
+  /**
+   * Materializes one raw lexicon (parsed or composed) into the immutable knowledge base:
+   * validates sense targets, lifts sense relations to the synset level, and builds the contract
+   * synsets with their member lemmas and typed relations.
+   */
+  private static final class Materializer {
+
+    private final RawLexicon lexicon;
+    private final String resourceName;
+
+    /**
+     * Creates a materializer.
+     *
+     * @param lexicon      The raw lexicon; for an extension, already composed.
+     * @param resourceName The name used in error messages.
+     */
+    Materializer(RawLexicon lexicon, String resourceName) {
+      this.lexicon = lexicon;
+      this.resourceName = resourceName;
+    }
+
+    /**
+     * Resolves the raw lexicon into an immutable knowledge base.
+     *
+     * @return The loaded lexicon.
+     * @throws InvalidFormatException Thrown if a sense or relation references an undeclared
+     *     target or a declared member is invalid.
+     */
+    LexicalKnowledgeBase materialize() throws InvalidFormatException {
+      // Every sense must point to a declared synset; part-of-speech consistency between a
+      // synset and its member entries is checked in memberLemmas.
+      for (final RawSense sense : lexicon.senses().values()) {
+        if (!lexicon.synsets().containsKey(sense.synsetId())) {
+          throw fail("Sense " + sense.id() + " references undeclared synset "
+              + sense.synsetId());
+        }
+      }
+      // Lift sense relations to the synset level and index membership and sense order, all in
+      // one pass over the senses in their materialization order.
+      final Map<String, List<LiftableRelation>> liftedBySynset = new HashMap<>();
+      final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
+          new LinkedHashMap<>();
+      final Map<String, List<String>> entryIdsBySynset = new HashMap<>();
+      for (final RawSense sense : lexicon.senses().values()) {
+        for (final RawSenseRelation relation : sense.relations()) {
+          if (OTHER_RELATION.equals(relation.relType())) {
+            continue;
+          }
+          final RawSense target = lexicon.senses().get(relation.target());
+          if (target == null) {
+            throw fail("SenseRelation at line " + relation.line() + " from sense "
+                + sense.id() + " references undeclared sense " + relation.target());
+          }
+          liftedBySynset.computeIfAbsent(sense.synsetId(), unused -> new ArrayList<>(2))
+              .add(new LiftableRelation(relation.relType(), target.synsetId(),
+                  relation.line(), true));
+        }
+        final RawEntry entry = entry(sense);
+        entryIdsBySynset.computeIfAbsent(sense.synsetId(), unused -> new ArrayList<>(2))
+            .add(entry.id());
+        final List<String> order = senseOrder.computeIfAbsent(
+            InMemoryWordNetLexicon.LemmaKey.of(entry.lemma(), entry.pos()),
+            unused -> new ArrayList<>(2));
+        if (!order.contains(sense.synsetId())) {
+          order.add(sense.synsetId());
+        }
+      }
+      // Resolve raw synsets into contract synsets.
+      final Map<String, Synset> synsetsById = new LinkedHashMap<>(lexicon.synsets().size() * 2);
+      for (final RawSynset raw : lexicon.synsets().values()) {
+        final Map<WordNetRelation, List<String>> relations = resolveRelations(raw,
+            liftedBySynset.getOrDefault(raw.id(), List.of()));
+        synsetsById.put(raw.id(),
+            new Synset(raw.id(), raw.pos(), memberLemmas(raw, entryIdsBySynset),
+                raw.gloss() == null ? "" : raw.gloss(), relations));
+      }
+      return new InMemoryWordNetLexicon(synsetsById, senseOrder);
+    }
+
+    /**
+     * Resolves a sense's owning entry.
+     *
+     * @param sense The sense.
+     * @return The owning entry.
+     */
+    private RawEntry entry(RawSense sense) {
+      final RawEntry entry = lexicon.entries().get(sense.entryId());
+      if (entry == null) {
+        // Reachable only through a reader bug: composition validates external entries and the
+        // parser binds every ordinary sense to its enclosing entry.
+        throw new IllegalStateException("Sense " + sense.id()
+            + " belongs to unresolved lexical entry " + sense.entryId());
+      }
+      return entry;
+    }
+
+    /**
+     * Resolves a raw synset's own and lifted relations into typed target-id lists, deduplicated
+     * in source order.
+     *
+     * @param raw    The raw synset.
+     * @param lifted The sense relations lifted onto this synset, in sense order.
+     * @return The typed relations for the contract synset.
+     * @throws InvalidFormatException Thrown if a relation type is unknown or its target is
+     *     undeclared.
+     */
+    private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw,
+        List<LiftableRelation> lifted) throws InvalidFormatException {
+      final List<LiftableRelation> combined =
+          new ArrayList<>(raw.relations().size() + lifted.size());
+      for (final RawRelation relation : raw.relations()) {
+        combined.add(new LiftableRelation(relation.relType(), relation.target(),
+            relation.line(), false));
+      }
+      combined.addAll(lifted);
+      final Map<WordNetRelation, LinkedHashSet<String>> typed = new LinkedHashMap<>();
+      for (final LiftableRelation relation : combined) {
+        final WordNetRelation type = parseRelation(
+            relation.relType(), raw.pos(), relation.line(), relation.senseRelation());
+        final RawSynset target = lexicon.synsets().get(relation.target());
+        if (target == null) {
+          throw fail("Relation " + relation.relType() + " at line " + relation.line()
+              + " on synset " + raw.id() + " references undeclared synset "
+              + relation.target());
+        }
+        // Share the synset table's id instance so only one copy of each id is retained.
+        typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(target.id());
+      }
+      final Map<WordNetRelation, List<String>> relations =
+          LinkedHashMap.newLinkedHashMap(typed.size());
+      for (final Map.Entry<WordNetRelation, LinkedHashSet<String>> entry : typed.entrySet()) {
+        relations.put(entry.getKey(), List.copyOf(entry.getValue()));
+      }
+      return relations;
+    }
+
+    /**
+     * Resolves a synset's member sense ids to their entry lemmas, from the {@code members}
+     * attribute when present and otherwise from the senses that pointed at the synset, then
+     * appends the entry ids composition added. Legacy documents that put lexical-entry ids in
+     * {@code members} remain accepted.
+     *
+     * @param raw               The raw synset.
+     * @param entryIdsBySynset  The fallback membership index built from the senses.
+     * @return The member lemmas in source order, deduplicated.
+     * @throws InvalidFormatException Thrown if the synset names an undeclared member or a
+     *     member's part of speech disagrees with the synset's.
+     */
+    private List<String> memberLemmas(RawSynset raw, Map<String, List<String>> entryIdsBySynset)
+        throws InvalidFormatException {
+      final List<String> memberIds = new ArrayList<>();
+      if (raw.members() != null && !raw.members().isEmpty()) {
+        memberIds.addAll(LemmaFolding.splitOnSpaces(raw.members()));
+      } else {
+        memberIds.addAll(entryIdsBySynset.getOrDefault(raw.id(), List.of()));
+      }
+      memberIds.addAll(raw.extraMembers());
+      final List<String> lemmas = new ArrayList<>(memberIds.size());
+      for (final String memberId : memberIds) {
+        final RawSense sense = lexicon.senses().get(memberId);
+        final String entryId = sense == null ? memberId : sense.entryId();
+        final RawEntry entry = lexicon.entries().get(entryId);
+        if (entry == null) {
+          throw fail("Synset " + raw.id() + " at line " + raw.line()
+              + " lists undeclared member sense or entry " + memberId);
+        }
+        if (raw.pos() != entry.pos()) {
+          throw fail("Synset " + raw.id() + " at line " + raw.line()
+              + " has part of speech " + raw.pos() + " but member entry " + entry.id()
+              + " has " + entry.pos());
+        }
+        if (!lemmas.contains(entry.lemma())) {
+          lemmas.add(entry.lemma());
+        }
+      }
+      return lemmas;
     }
 
     /**
@@ -795,12 +1324,12 @@ public final class WnLmfReader {
                                           boolean senseRelation)
         throws InvalidFormatException {
       if (senseRelation && SYNSET_ONLY_RELATIONS.contains(relType)) {
-        throw malformed(null, "Relation type " + relType
-            + " is not legal on SenseRelation at line " + line, null);
+        throw fail("Relation type " + relType
+            + " is not legal on SenseRelation at line " + line);
       }
       if (!senseRelation && SENSE_ONLY_RELATIONS.contains(relType)) {
-        throw malformed(null, "Relation type " + relType
-            + " is not legal on SynsetRelation at line " + line, null);
+        throw fail("Relation type " + relType
+            + " is not legal on SynsetRelation at line " + line);
       }
       if ("similar".equals(relType)) {
         return !senseRelation && sourcePos == WordNetPOS.VERB ? WordNetRelation.VERB_GROUP
@@ -808,88 +1337,378 @@ public final class WnLmfReader {
       }
       final WordNetRelation relation = RELATION_NAMES.get(relType);
       if (relation == null) {
-        throw malformed(null, "Unknown relation type " + relType + " at line " + line, null);
+        throw fail("Unknown relation type " + relType + " at line " + line);
       }
       return relation;
     }
 
     /**
-     * Reads a required attribute from the current element.
+     * Builds a materialization failure naming the resource.
      *
-     * @param reader    The StAX reader.
-     * @param attribute The attribute name.
-     * @return The non-empty attribute value.
-     * @throws InvalidFormatException Thrown if the attribute is absent or empty.
-     */
-    private String requireAttribute(XMLStreamReader reader, String attribute)
-        throws InvalidFormatException {
-      final String value = reader.getAttributeValue(null, attribute);
-      if (value == null || value.isEmpty()) {
-        throw malformed(reader.getLocation(), "Element " + reader.getLocalName()
-            + " is missing required attribute " + attribute, null);
-      }
-      return value;
-    }
-
-    /**
-     * Builds a malformed-document exception naming the resource and, when known, the line.
-     *
-     * @param location The parser location, or {@code null} when unavailable.
-     * @param message  The failure detail.
-     * @param cause    The underlying cause, or {@code null}.
+     * @param message The failure detail.
      * @return The exception to throw.
      */
-    private InvalidFormatException malformed(Location location, String message, Throwable cause) {
-      final int line = line(location);
-      final String prefix = line < 0 ? MALFORMED_PREFIX + resourceName + ": "
-          : MALFORMED_PREFIX + resourceName + " at line " + line + ": ";
-      return cause == null ? new InvalidFormatException(prefix + message)
-          : new InvalidFormatException(prefix + message, cause);
+    private InvalidFormatException fail(String message) {
+      return malformed(resourceName, -1, message, null);
+    }
+
+    /** One relation ready for typing: a synset relation or a lifted sense relation. */
+    private record LiftableRelation(String relType, String target, int line,
+                                    boolean senseRelation) {
+    }
+  }
+
+  /**
+   * One top-level read's composition state: the resolver, its per-(id, version) cache, and the
+   * resolution stack that bounds chains and detects cycles.
+   */
+  private static final class Composition {
+
+    private final WnLmfResolver resolver;
+    private final String resourceName;
+    private final Map<ResolutionKey, RawLexicon> cache = new HashMap<>();
+    private final LinkedHashSet<ResolutionKey> stack = new LinkedHashSet<>();
+
+    /**
+     * Creates the composition state for one top-level read.
+     *
+     * @param resolver     The caller-supplied resolver.
+     * @param resourceName The top-level resource name used in error messages.
+     */
+    Composition(WnLmfResolver resolver, String resourceName) {
+      this.resolver = resolver;
+      this.resourceName = resourceName;
     }
 
     /**
-     * Extracts a line number from a parser location.
+     * Composes one extension against its resolved base, recursively composing base chains.
      *
-     * @param location The location, or {@code null}.
-     * @return The line number, or {@code -1} when unknown.
+     * @param extension The parsed extension.
+     * @return The composed raw lexicon, carrying no external declarations.
+     * @throws InvalidFormatException Thrown if composition is invalid, cyclic, or too deep.
+     * @throws IOException Thrown if the resolver cannot supply a base.
      */
-    private int line(Location location) {
-      return location == null ? -1 : location.getLineNumber();
+    RawLexicon compose(RawLexicon extension) throws IOException {
+      final ResolutionKey key = new ResolutionKey(extension.id(), extension.version());
+      if (stack.contains(key)) {
+        throw malformed(resourceName, -1, "Extension dependency cycle: " + path(key), null);
+      }
+      if (stack.size() >= MAX_EXTENSION_DEPTH) {
+        throw malformed(resourceName, -1, "Extension chain at " + key
+            + " exceeds the maximum composition depth of " + MAX_EXTENSION_DEPTH, null);
+      }
+      stack.add(key);
+      try {
+        return merge(base(extension.extendsRef()), extension);
+      } finally {
+        stack.remove(key);
+      }
     }
-  }
-
-  /** A parsed synset, kept until its members and relation targets can be resolved. */
-  private static final class RawSynset {
-    private final String id;
-    private final WordNetPOS pos;
-    private final String members;
-    private final int line;
-    private final List<RawRelation> relations = new ArrayList<>(4);
-    private final List<String> definitions = new ArrayList<>(1);
 
     /**
-     * Creates a raw synset gathered during parsing.
+     * Resolves one base reference to a composed raw lexicon, caching per exact id and version.
      *
-     * @param id      The synset id.
-     * @param pos     The part of speech.
-     * @param members The {@code members} attribute value, or {@code null} when absent.
-     * @param line    The document line.
+     * @param reference The {@code Extends} reference.
+     * @return The base lexicon; if the resolved lexicon is itself an extension, its composed
+     *         form.
+     * @throws InvalidFormatException Thrown if the resolved document is malformed or lacks an
+     *     exact id and version match.
+     * @throws IOException Thrown if the resolver cannot supply the document.
+     * @throws IllegalStateException Thrown if the resolver violates its contract by returning
+     *     {@code null} or a consumed source.
      */
-    RawSynset(String id, WordNetPOS pos, String members, int line) {
-      this.id = id;
-      this.pos = pos;
-      this.members = members;
-      this.line = line;
+    private RawLexicon base(WnLmfDependency reference) throws IOException {
+      final ResolutionKey key = new ResolutionKey(reference.ref(), reference.version());
+      final RawLexicon cached = cache.get(key);
+      if (cached != null) {
+        return cached;
+      }
+      final WnLmfSource source = resolver.resolve(reference);
+      if (source == null) {
+        throw new IllegalStateException("Resolver returned null for lexicon " + reference.ref()
+            + " version " + reference.version() + " instead of a source or an IOException");
+      }
+      final String sourceName = source.name();
+      final RawResource resolved;
+      try (source) {
+        resolved = parseRaw(source.consume(), sourceName, true);
+      }
+      rejectSameDocumentBase(resolved, sourceName);
+      RawLexicon match = null;
+      for (final RawLexicon lexicon : resolved.lexicons()) {
+        if (lexicon.id().equals(reference.ref())
+            && lexicon.version().equals(reference.version())) {
+          match = lexicon;
+          break;
+        }
+      }
+      if (match == null) {
+        throw malformed(resourceName, -1, "Resolved resource " + sourceName
+            + " does not contain lexicon " + reference.ref() + " version "
+            + reference.version(), null);
+      }
+      final RawLexicon result = match.kind() == Kind.EXTENSION ? compose(match) : match;
+      cache.put(key, result);
+      return result;
     }
-  }
 
-  /** A parsed synset relation, kept until the target synset is known. */
-  private record RawRelation(String relType, String target, int line, boolean senseRelation) {
-  }
+    /**
+     * Additively merges one extension into its composed base. The base inputs stay untouched;
+     * every changed entity is a fresh record.
+     *
+     * @param base      The composed base lexicon.
+     * @param extension The parsed extension.
+     * @return The composed raw lexicon carrying the extension's identity.
+     * @throws InvalidFormatException Thrown if a validation rule fails.
+     */
+    private RawLexicon merge(RawLexicon base, RawLexicon extension)
+        throws InvalidFormatException {
+      for (final String id : extension.entries().keySet()) {
+        requireNewId(base, extension, id, "lexical entry");
+      }
+      for (final String id : extension.senses().keySet()) {
+        requireNewId(base, extension, id, "sense");
+      }
+      for (final String id : extension.synsets().keySet()) {
+        requireNewId(base, extension, id, "synset");
+      }
 
-  /** A parsed sense relation, kept until both sense ids are known. */
-  private record RawSenseRelation(String sourceSenseId, String relType, String targetSenseId,
-                                  int line) {
+      // Resolve the declared external synsets against the base.
+      final Map<String, RawExternalSynset> externalSynsets = new LinkedHashMap<>();
+      for (final RawExternalSynset external : extension.externalSynsets()) {
+        if (!base.synsets().containsKey(external.id())) {
+          throw fail("ExternalSynset " + external.id() + " at line " + external.line()
+              + " does not resolve to a synset in base " + base.id() + " version "
+              + base.version() + kindHint(base, external.id()));
+        }
+        externalSynsets.put(external.id(), external);
+      }
+
+      // Resolve the declared external entries and senses against the base.
+      final Set<String> declaredExternalSenses = new HashSet<>();
+      final Map<String, List<RawSenseRelation>> addedSenseRelations = new LinkedHashMap<>();
+      for (final RawExternalEntry external : extension.externalEntries()) {
+        if (!base.entries().containsKey(external.id())) {
+          throw fail("ExternalLexicalEntry " + external.id() + " at line " + external.line()
+              + " does not resolve to a lexical entry in base " + base.id() + " version "
+              + base.version() + kindHint(base, external.id()));
+        }
+        for (final RawExternalSense externalSense : external.externalSenses()) {
+          final RawSense baseSense = base.senses().get(externalSense.id());
+          if (baseSense == null) {
+            throw fail("ExternalSense " + externalSense.id() + " at line "
+                + externalSense.line() + " does not resolve to a sense in base " + base.id()
+                + " version " + base.version() + kindHint(base, externalSense.id()));
+          }
+          if (!baseSense.entryId().equals(external.id())) {
+            throw fail("ExternalSense " + externalSense.id() + " at line "
+                + externalSense.line() + " is not a sense of lexical entry " + external.id()
+                + "; it belongs to " + baseSense.entryId());
+          }
+          declaredExternalSenses.add(externalSense.id());
+          addedSenseRelations
+              .computeIfAbsent(externalSense.id(), unused -> new ArrayList<>(2))
+              .addAll(externalSense.relations());
+        }
+      }
+
+      // Every target of new content must be new content or explicitly declared external
+      // content; silently reaching into the base would hide missing declarations.
+      for (final RawSense sense : extension.senses().values()) {
+        requireSynsetTarget(extension, externalSynsets, sense.synsetId(),
+            "Sense " + sense.id(), sense.line());
+        requireSenseTargets(extension, declaredExternalSenses, sense.id(), sense.relations());
+      }
+      for (final RawSynset synset : extension.synsets().values()) {
+        for (final RawRelation relation : synset.relations()) {
+          requireSynsetTarget(extension, externalSynsets, relation.target(),
+              "Relation " + relation.relType() + " on synset " + synset.id(),
+              relation.line());
+        }
+      }
+      for (final RawExternalSynset external : extension.externalSynsets()) {
+        for (final RawRelation relation : external.relations()) {
+          requireSynsetTarget(extension, externalSynsets, relation.target(),
+              "Relation " + relation.relType() + " on ExternalSynset " + external.id(),
+              relation.line());
+        }
+      }
+      for (final Map.Entry<String, List<RawSenseRelation>> added
+          : addedSenseRelations.entrySet()) {
+        requireSenseTargets(extension, declaredExternalSenses, added.getKey(),
+            added.getValue());
+      }
+
+      // Merge entries: base first, new entries after, in extension source order.
+      final Map<String, RawEntry> entries = new LinkedHashMap<>(base.entries());
+      entries.putAll(extension.entries());
+
+      // Merge senses: augmented base senses keep their position, new senses follow all base
+      // senses so lookup returns base senses first.
+      final Map<String, RawSense> senses = new LinkedHashMap<>(base.senses());
+      for (final Map.Entry<String, List<RawSenseRelation>> added
+          : addedSenseRelations.entrySet()) {
+        final RawSense baseSense = base.senses().get(added.getKey());
+        final List<RawSenseRelation> relations =
+            new ArrayList<>(baseSense.relations().size() + added.getValue().size());
+        relations.addAll(baseSense.relations());
+        relations.addAll(added.getValue());
+        senses.put(baseSense.id(), new RawSense(baseSense.id(), baseSense.entryId(),
+            baseSense.synsetId(), relations, baseSense.line()));
+      }
+      senses.putAll(extension.senses());
+
+      // New senses on declared external base synsets contribute their entry's lemma after the
+      // base members.
+      final Map<String, List<String>> extraMembers = new LinkedHashMap<>();
+      for (final RawSense sense : extension.senses().values()) {
+        if (externalSynsets.containsKey(sense.synsetId())) {
+          extraMembers.computeIfAbsent(sense.synsetId(), unused -> new ArrayList<>(2))
+              .add(sense.entryId());
+        }
+      }
+
+      // Merge synsets: augmented base synsets keep their position with base-first relation
+      // order; a base gloss wins and only an empty one is filled.
+      final Map<String, RawSynset> synsets = new LinkedHashMap<>(base.synsets());
+      for (final RawExternalSynset external : externalSynsets.values()) {
+        final RawSynset baseSynset = base.synsets().get(external.id());
+        final List<RawRelation> relations =
+            new ArrayList<>(baseSynset.relations().size() + external.relations().size());
+        relations.addAll(baseSynset.relations());
+        relations.addAll(external.relations());
+        final String gloss = baseSynset.gloss() == null || baseSynset.gloss().isEmpty()
+            ? external.definition() == null ? baseSynset.gloss() : external.definition()
+            : baseSynset.gloss();
+        final List<String> extras = new ArrayList<>(baseSynset.extraMembers());
+        extras.addAll(extraMembers.getOrDefault(external.id(), List.of()));
+        synsets.put(baseSynset.id(), new RawSynset(baseSynset.id(), baseSynset.pos(),
+            baseSynset.members(), extras, gloss, relations, baseSynset.line()));
+      }
+      synsets.putAll(extension.synsets());
+
+      return new RawLexicon(Kind.EXTENSION, extension.id(), extension.label(),
+          extension.language(), extension.version(), extension.metadata(),
+          extension.requires(), extension.extendsRef(), entries, senses, synsets,
+          List.of(), List.of(), extension.line());
+    }
+
+    /**
+     * Rejects a new id that collides with any base entry, sense, or synset id.
+     *
+     * @param base      The composed base.
+     * @param extension The extension introducing the id.
+     * @param id        The new id.
+     * @param kind      The element kind used in the rejection message.
+     * @throws InvalidFormatException Thrown on a collision.
+     */
+    private void requireNewId(RawLexicon base, RawLexicon extension, String id, String kind)
+        throws InvalidFormatException {
+      if (base.entries().containsKey(id) || base.senses().containsKey(id)
+          || base.synsets().containsKey(id)) {
+        throw fail("New " + kind + " id " + id + " in extension " + extension.id()
+            + " collides with content of base " + base.id() + " version " + base.version());
+      }
+    }
+
+    /**
+     * Requires a synset target to be new extension content or a declared external synset.
+     *
+     * @param extension       The extension under composition.
+     * @param externalSynsets The declared external synsets by id.
+     * @param target          The referenced synset id.
+     * @param what            The referencing construct, for the rejection message.
+     * @param line            The referencing line.
+     * @throws InvalidFormatException Thrown if the target is neither.
+     */
+    private void requireSynsetTarget(RawLexicon extension,
+        Map<String, RawExternalSynset> externalSynsets, String target, String what, int line)
+        throws InvalidFormatException {
+      if (!extension.synsets().containsKey(target) && !externalSynsets.containsKey(target)) {
+        throw fail(what + " at line " + line + " references synset " + target
+            + ", which is neither declared in the extension nor as an ExternalSynset");
+      }
+    }
+
+    /**
+     * Requires every sense-relation target to be a new extension sense or a declared external
+     * sense. The format's {@code other} escape hatch is exempt, exactly as it is for ordinary
+     * lexicons.
+     *
+     * @param extension              The extension under composition.
+     * @param declaredExternalSenses The declared external sense ids.
+     * @param sourceId               The relation source, for the rejection message.
+     * @param relations              The relations to check.
+     * @throws InvalidFormatException Thrown if a target is neither.
+     */
+    private void requireSenseTargets(RawLexicon extension, Set<String> declaredExternalSenses,
+        String sourceId, List<RawSenseRelation> relations) throws InvalidFormatException {
+      for (final RawSenseRelation relation : relations) {
+        if (OTHER_RELATION.equals(relation.relType())) {
+          continue;
+        }
+        if (!extension.senses().containsKey(relation.target())
+            && !declaredExternalSenses.contains(relation.target())) {
+          throw fail("SenseRelation " + relation.relType() + " at line " + relation.line()
+              + " from sense " + sourceId + " references sense " + relation.target()
+              + ", which is neither declared in the extension nor as an ExternalSense");
+        }
+      }
+    }
+
+    /**
+     * Names the entity kind a misdeclared external id actually resolves to, when it resolves
+     * at all.
+     *
+     * @param base The composed base.
+     * @param id   The external id.
+     * @return A clause naming the actual kind, or an empty string.
+     */
+    private String kindHint(RawLexicon base, String id) {
+      if (base.entries().containsKey(id)) {
+        return "; it names a lexical entry";
+      }
+      if (base.senses().containsKey(id)) {
+        return "; it names a sense";
+      }
+      if (base.synsets().containsKey(id)) {
+        return "; it names a synset";
+      }
+      return "";
+    }
+
+    /**
+     * Renders the resolution path for a cycle message.
+     *
+     * @param repeated The key that closed the cycle.
+     * @return The path from the outermost extension to the repeated key.
+     */
+    private String path(ResolutionKey repeated) {
+      final StringBuilder path = new StringBuilder();
+      for (final ResolutionKey key : stack) {
+        path.append(key).append(" -> ");
+      }
+      return path.append(repeated).toString();
+    }
+
+    /**
+     * Builds a composition failure naming the top-level resource.
+     *
+     * @param message The failure detail.
+     * @return The exception to throw.
+     */
+    private InvalidFormatException fail(String message) {
+      return malformed(resourceName, -1, message, null);
+    }
+
+    /** One exact base identity: the caching and cycle-detection unit. */
+    private record ResolutionKey(String ref, String version) {
+
+      @Override
+      public String toString() {
+        return ref + " " + version;
+      }
+    }
   }
 
   /**

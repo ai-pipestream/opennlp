@@ -81,9 +81,84 @@ dog.id();  // "omw-es-02084071-n"]]>
 			attributes are available through the namespace-aware
 			<code>Map&lt;QName, String&gt; metadata</code>. This preserves attributes such
 			as <code>license</code> and <code>dc:publisher</code> without allowing
-			namespace collisions. <code>LexiconExtension</code> is not yet represented
-			by the knowledge-base contract and is rejected clearly rather than partly
-			loaded.
+			namespace collisions. A <code>LexiconExtension</code> requires its base
+			lexicon from a separate document; the resolver-aware overloads described in
+			the next section compose it, while the overloads shown here reject it
+			clearly rather than partly load it.
+		</para>
+	</section>
+
+	<section xml:id="tools.wordnet.extension">
+		<title>Composing lexicon extensions</title>
+		<para>
+			A WN-LMF <code>LexiconExtension</code> is an additive overlay on a base
+			lexicon that ships in a separate document; the format forbids a base and
+			its extension sharing one file. An extension can add lexical entries,
+			senses, and synsets, attach a new sense to an existing base entry, and add
+			relations to base senses and synsets it declares through
+			<code>ExternalLexicalEntry</code>, <code>ExternalSense</code>, and
+			<code>ExternalSynset</code>. Composition is additive: base content is
+			never deleted or replaced, and new ids must not collide with base ids.
+		</para>
+		<para>
+			The application supplies the base through a <code>WnLmfResolver</code>,
+			typically a small catalog keyed by id and version. The reader never opens
+			a file or fetches a URL itself: without a resolver an extension is
+			rejected with a clear error and no I/O happens at all. A resolver returns
+			a freshly opened <code>WnLmfSource</code> per call, or throws
+			<code>IOException</code> when it cannot supply the document, and the
+			reader closes every source it receives, whether composition succeeds or
+			fails. <code>WordNetUsageExampleTest</code> mirrors this example:
+			<programlisting language="java"><![CDATA[
+WnLmfResolver resolver = reference -> {
+  if ("ewn".equals(reference.ref()) && "2020".equals(reference.version())) {
+    return new WnLmfSource("extension-base.xml",
+        Files.newInputStream(Path.of("extension-base.xml")));
+  }
+  throw new IOException(
+      "No lexicon " + reference.ref() + " " + reference.version());
+};
+
+WnLmfResource resource = WnLmfReader.readResource(
+    inputStream, "extension-computer-science.xml", resolver);
+WnLmfLexicon composed = resource.lexicons().get(0);
+
+WnLmfDependency base = composed.extensionOf().orElseThrow();
+base.ref();      // "ewn"
+base.version();  // "2020"
+composed.dependencies().get(0).ref();  // "omw-fr", metadata only
+
+LexicalKnowledgeBase lexicon = composed.knowledgeBase();
+List<Synset> senses = lexicon.lookup("process", WordNetPOS.NOUN);
+// senses.size() = 3, the base senses first, the added sense last
+Synset added = senses.get(2);
+added.id();     // "ewn-20000123-n"
+added.gloss();  // "a running instance of a computer program"
+
+String hypernymId = added.related(WordNetRelation.HYPERNYM).get(0);
+lexicon.synset(hypernymId).orElseThrow().lemmas();  // ["software"], a base synset]]>
+			</programlisting>
+		</para>
+		<para>
+			The composed result is an ordinary <code>WnLmfLexicon</code>: its
+			identity and metadata come from the extension,
+			<code>extensionOf()</code> carries the exact <code>Extends</code>
+			reference, and <code>dependencies()</code> still means only the source's
+			ordered <code>Requires</code> declarations, which stay descriptive
+			metadata and are never loaded automatically. Sibling extensions in one
+			document compose independently against their own bases and are never
+			merged with each other. When a resolved base is itself an extension, the
+			chain composes up to 16 levels,
+			with cycles detected by exact id and version. Resolutions are cached per
+			id and version for one read, so a shared base is fetched once.
+		</para>
+		<para>
+			The projection limits of the ordinary reader apply unchanged: forms,
+			pronunciations, examples, counts, and secondary definitions stay outside
+			the <code>LexicalKnowledgeBase</code> contract, in extensions exactly as
+			in ordinary lexicons. Because a <code>Synset</code> carries one gloss, a
+			base gloss always wins; an extension definition only fills a base gloss
+			that is empty.
 		</para>
 	</section>
 
