@@ -7,10 +7,9 @@ manifest.
 Apache main is `73f9a25f7`. It includes the typed Document container from
 merged PR #1182, the paragraph normalizer from merged PR #1249, and term
 vectors from merged PR #1212. The public `OPENNLP-1833-grpc-helper` is
-`2b5ebbc9d` locally and `a4084cabe0` on Apache until pushed. The local helper
-contains Apache main plus all 15 open pull
-requests in the 3.x review graph, drafts
-included. No open 2.x pull request belongs in this helper.
+`2b5ebbc9d` locally and on Apache. It contains Apache main plus all 15 open
+pull requests in the 3.x review graph, drafts included. No open 2.x pull
+request belongs in this helper.
 
 `regen-uber.sh` now starts from current main, drops merged #1182, #1249, and
 #1212 branches,
@@ -35,8 +34,8 @@ cascade that generated manifest can temporarily trail this membership plan.
 Solid arrows show true Git parentage. The dotted gazetteer arrow is a copied,
 patch-equivalent API dependency carried by the region stack. Arrows into
 `APACHE_TIPS` and `RESEARCH_TIPS` show the direct membership recorded in
-`regen-uber.sh`; a selected child also brings its parent stack. The two gray
-research branches remain available but are not selected for uber.
+`regen-uber.sh`; a selected child also brings its parent stack. Every active
+research branch is selected for uber.
 
 ```mermaid
 flowchart LR
@@ -82,8 +81,8 @@ flowchart LR
     symbols["Symbol joiner"]
     morfologik["Morfologik FSA"]
     dehyphenation["Dehyphenation"]
-    recase["Spellcheck recase<br/>not selected"]
-    wordnetExtension["WordNet extension<br/>not selected"]
+    recase["Spellcheck recase"]
+    wordnetExtension["WordNet extension"]
     major0["Preview major-0 model patch"]
   end
 
@@ -140,8 +139,10 @@ flowchart LR
   profiles --> researchTips
   embedding --> researchTips
   symbols --> researchTips
+  recase --> researchTips
   morfologik --> researchTips
   dehyphenation --> researchTips
+  wordnetExtension --> researchTips
   major0 --> researchTips
 
   main -->|base| uber
@@ -149,8 +150,6 @@ flowchart LR
   researchTips --> uber
   previewDocs --> uber
 
-  classDef parked fill:#eee,stroke:#888,color:#555;
-  class recase,wordnetExtension parked;
 ```
 
 ## Open Apache 3.x pull requests
@@ -207,10 +206,10 @@ authorization.
 | `OPENNLP-XXXX-place-profiles` | `ec3c6728d0` | Direct | #1154 gazetteer API | Differs |
 | `OPENNLP-XXXX-predicate-annotators` | `3bc4e048ed` | Direct | Apache main | Differs |
 | `OPENNLP-XXXX-region-vote` | `ef53423ee9` | Via hierarchy tip | Numeric annotations; copied #1154 API | Differs |
-| `OPENNLP-XXXX-spellcheck-recase` | `3d7c58f774` | Not selected | Apache main | Differs |
+| `OPENNLP-XXXX-spellcheck-recase` | `3d7c58f774` | Direct | Apache main | Differs |
 | `OPENNLP-XXXX-symbol-joiner` | `10579093cf` | Direct | Apache main | Differs |
 | `OPENNLP-XXXX-text-artifacts` | `f52601c02e` | Direct | Apache main | Differs |
-| `OPENNLP-XXXX-wordnet-extension` | `63a22b4b2d` | Not selected | #1155 WordNet API | Differs |
+| `OPENNLP-XXXX-wordnet-extension` | `63a22b4b2d` | Direct | #1155 WordNet API | Differs |
 
 The BiLSTM accuracy gate remains open at 96.294 against a 97.0 target. Active
 maturity requirements for every feature live in the workspace `TODO/`
