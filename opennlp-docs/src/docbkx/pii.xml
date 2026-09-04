@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.pii" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>PII Detection</title>
+
+	<section xml:id="tools.pii.introduction">
+		<title>Introduction</title>
+		<para>
+			The package <code>opennlp.tools.pii</code> finds personally identifiable
+			mentions as exact spans over the original text. A
+			<code>PiiAnnotator</code> writes the <code>opennlp:pii</code> layer from a
+			<code>PiiExtractor</code>; the built-in <code>CursorPiiExtractor</code>
+			recognizes email addresses, phone numbers, IBANs, and payment card
+			numbers, each with a type constant and a normalized form. Numeric types
+			are checksum validated, and an IBAN candidate must additionally match the
+			ISO 13616 registry: a registered country code and exactly the length that
+			country assigns, so a checksum-passing run with an unknown country or a
+			wrong length is not reported. Email domains must end in an
+			IANA-registered top-level domain (including punycode forms) and stay
+			within the RFC 1035 presentation-length limit, so private-use suffixes
+			such as <code>.internal</code> or <code>.local</code> are not reported.
+			The ASCII local part is capped at 64 characters and the complete
+			mailbox at 254 characters. Local-part case is preserved in the normalized
+			form, while the case-insensitive domain is lowercased. The baked IANA
+			snapshot is refreshed with
+			<code>dev/fetch-iana-tlds.sh</code>; pass <code>--check</code> in an
+			automated drift check without changing the source tree. The calling-code
+			and IBAN length tables are regenerated from libphonenumber and the SWIFT
+			registry with <code>dev/fetch-phone-number-lengths.sh</code> and
+			<code>dev/fetch-iban-lengths.sh</code>, respectively.
+			An extractor limited to a subset of the types, for a caller that wants
+			only payment data found, is built with
+			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
+		</para>
+		<para>
+			Further detectors, for network addresses, credentials, cryptocurrency
+			addresses, bank routing numbers, national identifiers, and device
+			identifiers, are opt-in and
+			described under
+			<link linkend="tools.pii.packs">Opt-in detectors and packs</link>. None of
+			them is part of <code>CursorPiiExtractor</code>, so what a caller already
+			redacts never changes when a detector is added.
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.pipeline">
+		<title>Annotating and masking</title>
+		<para>
+			Annotate a document, read the layer, then produce a redacted copy in which
+			only detected spans are replaced. Length is preserved: every character
+			inside a mention becomes the mask character, and everything outside stays
+			unchanged. <code>PiiUsageExampleTest</code> asserts the behavior shown
+			here.
+			<programlisting language="java"><![CDATA[
+String text =
+    "Contact jane@example.com, call (555) 123-4567, or charge card 4111 1111 1111 1111.";
+
+Document document = new PiiAnnotator(new CursorPiiExtractor())
+    .annotate(Document.of(text));
+
+List<Annotation<PiiMention>> mentions = document.get(PiiAnnotator.PII);
+// email, phone, card: exact spans, types, and normalized forms
+
+String masked = Masker.mask(document, PiiAnnotator.PII, '*');
+// "Contact ****************, call **************, or charge card *******************."]]>
+			</programlisting>
+		</para>
+		<para>
+			A <code>MaskPolicy</code> controls how the covered characters are
+			replaced while staying length preserving. <code>keepingFormat()</code>
+			leaves separators visible so the kind of value stays recognizable, and
+			<code>keepingTrailing(4)</code> leaves the last four letters or digits of
+			each span readable, the customary receipt style.
+			<code>PiiUsageExampleTest</code> asserts the exact output shown here.
+			<programlisting language="java"><![CDATA[
+String receipt = Masker.mask(document, PiiAnnotator.PII,
+    MaskPolicy.of('*').keepingFormat().keepingTrailing(4));
+// "Contact ****@******e.com, call (***) ***-4567, or charge card **** **** **** 1111."]]>
+			</programlisting>
+		</para>
+		<para>
+			What is customary differs by type, and <code>MaskPolicies</code> collects
+			those defaults: a card keeps its last four digits, an address or an IP
+			address keeps only its separators, and a credential is masked whole,
+			formatting included, since even its shape says which system it opens.
+			Passing the defaults to <code>Masker</code> chooses a policy per mention,
+			so one pass redacts a mixed document correctly.
+			<programlisting language="java"><![CDATA[
+String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
+// "Contact ****@*******.***, call (***) ***-****, or charge card **** **** **** 1111."]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.packs">
+		<title>Opt-in detectors and packs</title>
+		<para>
+			<code>CursorPiiExtractor</code> reports email addresses, phone numbers,
+			IBANs, and payment card numbers, and it always will: adding a type to it
+			would silently change what every existing caller redacts. Everything else
+			is opt-in, in extractors that each validate against the standard they
+			implement rather than against a shape.
+		</para>
+		<itemizedlist>
+			<listitem>
+				<para>
+					<code>NetworkPiiExtractor</code>: IPv4, IPv6, and MAC addresses.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>SecretsPiiExtractor</code>: AWS access key identifiers,
+					GitHub tokens from their current minimum lengths through the
+					255-character scanner limit, JSON Web Tokens whose header decodes to a
+					JWS header, and credentials embedded in a URL.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>CryptoPiiExtractor</code>: Bitcoin addresses, legacy
+					Base58Check and segwit bech32 or bech32m, and Ethereum addresses
+					with the EIP-55 checksum where the case carries one.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>BankingPiiExtractor</code>: ABA routing numbers.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>UsIdentityPiiExtractor</code>,
+					<code>EuIdentityPiiExtractor</code>, and
+					<code>CaIdentityPiiExtractor</code>: United States Social Security
+					and taxpayer numbers, United Kingdom NHS numbers, the German tax
+					identifier, and context-labeled Canadian Social Insurance Numbers.
+					National identifiers are the most context
+					dependent of the lot, which is why they are never on by default.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>DevicePiiExtractor</code>: 15-digit, Luhn-valid IMEIs that
+					directly follow an <code>IMEI</code> label. The label prevents a
+					generic long number from becoming a device identifier by checksum
+					alone.
+				</para>
+			</listitem>
+		</itemizedlist>
+		<para>
+			<code>CompositePiiExtractor</code> runs several extractors over one text
+			and merges the result, and <code>PiiPacks</code> names the combinations
+			worth having: <code>payment()</code>, <code>contact()</code>,
+			<code>network()</code>, <code>secrets()</code>, <code>crypto()</code>,
+			<code>usIdentity()</code>, <code>euIdentity()</code>,
+			<code>caIdentity()</code>, <code>device()</code>, and
+			<code>allStructured()</code> for everything. Overlaps are resolved the way
+			a single extractor resolves them: the leftmost candidate wins, then the
+			longest, then the more specific type, so a value two types both claim
+			resolves the same way whichever pack was listed first.
+			<programlisting language="java"><![CDATA[
+String text = "Deploy from 10.0.0.7 using AKIAIOSFODNN7EXAMPLE, ask jane@example.com.";
+
+List<PiiMention> mentions = PiiPacks.allStructured().extract(text);
+// ipv4, aws-access-key, email
+
+PiiExtractor keysOnly = PiiPacks.secrets();
+PiiExtractor custom = new CompositePiiExtractor(
+    new CursorPiiExtractor(), new NetworkPiiExtractor());]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.pii.transforms">
+		<title>Pseudonymizing, tokenizing, and auditing</title>
+		<para>
+			Masking hides a value but also destroys the fact that two mentions were
+			the same value, which is what makes a redacted support ticket unreadable.
+			<code>Pseudonymizer</code> replaces each mention with a numbered label
+			instead, giving the same value the same label throughout the text. Labels
+			are rarely as long as what they replace, so the returned
+			<code>PiiRewrite</code> carries the new text together with a mapping for
+			moving other annotations onto it.
+			<programlisting language="java"><![CDATA[
+String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+
+PiiRewrite rewrite = new Pseudonymizer()
+    .rewrite(text, new CursorPiiExtractor().extract(text));
+// "Contact EMAIL-1; EMAIL-1 replied to EMAIL-2."
+
+int moved = rewrite.mapOffset(text.indexOf("bob@example.com"));
+List<Annotation<String>> tokens = rewrite.remap(originalTokens);]]>
+			</programlisting>
+		</para>
+		<para>
+			Labels number from one in every text, so they say nothing across
+			documents. Where that is the question, <code>HmacTokenizer</code> derives
+			the label from the value under a secret key, and the same address
+			tokenizes identically in every document. A plain digest of a value drawn
+			from a small space, a Social Security number for instance, is recovered by
+			digesting the space. The secret key prevents that attack, and it must contain
+			at least 32 random bytes. Tokens made under one key are deliberately
+			linkable, so they remain pseudonymous data and logs containing them still
+			require access control.
+			<programlisting language="java"><![CDATA[
+HmacTokenizer tokenizer = new HmacTokenizer(key); // at least 32 random bytes
+
+String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
+// "EMAIL-3f2a1c9d7e4b6a20", the same in every document scanned under this key
+
+String tokenized = tokenizer.rewrite(document).text();]]>
+			</programlisting>
+		</para>
+		<para>
+			<code>PiiAuditReport</code> is what a review can be given instead of the
+			mentions: how many of each type, how many were distinct, and a keyed token
+			per distinct value rather than the value. Nothing in a report carries a
+			value or an offset, but its tokens remain linkable pseudonymous data.
+			<programlisting language="java"><![CDATA[
+PiiAuditReport report = PiiAuditReport.of(document, tokenizer);
+
+report.total();                              // 3
+report.counts().get(PiiMention.TYPE_CARD);   // 1
+report.distinctCounts();                     // repeats counted once
+report.samples(PiiMention.TYPE_EMAIL);       // tokens, never addresses]]>
+			</programlisting>
+		</para>
+	</section>
+</chapter>
