@@ -554,4 +554,52 @@ List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
 // chain 1: Orion Labs, its]]>
 		</programlisting>
 	</section>
+
+	<section xml:id="tools.document.region-currency">
+		<title>Region ballot and currency signs</title>
+		<para>
+			<code>GeocodeAnnotator</code> resolves location entities into a locations
+			layer, <code>DocumentRegionAnnotator</code> turns those resolutions into a
+			document-scoped region ballot: countries ranked by confidence-weighted share.
+			<code>RegionAwareMoneyAnnotator</code> then reads that ballot and resolves
+			ambiguous currency signs such as <code>$</code> from the winning country, so a
+			document that speaks from Mexico reads <code>$</code> as the Mexican peso:
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+Document withEntities = Document.of(
+    "Guadalajara outsells Boston this quarter, and lunch there costs $8.")
+    .with(Layers.ENTITIES, locationEntities);
+
+Document document = new RegionAwareMoneyAnnotator().annotate(
+    new DocumentRegionAnnotator().annotate(
+        new GeocodeAnnotator(geocoder).annotate(withEntities)));
+
+List<Annotation<RegionVote>> ballot =
+    document.get(DocumentRegionAnnotator.REGIONS);
+// ballot: MX 0.6, US 0.4; rows are span-less
+
+List<Annotation<MoneyAmount>> money = document.get(MoneyAnnotator.MONEY);
+// "$8" -> 8 MXN because Mexico wins the ballot]]>
+		</programlisting>
+		<para>
+			The ranked rows are plain values: each carries the country code and its
+			confidence share, in rank order.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+for (Annotation<RegionVote> row : ballot) {
+    String country = row.value().countryCode(); // "MX", then "US"
+    double share = row.value().share();         // 0.6, then 0.4
+}]]>
+		</programlisting>
+		<para>
+			<code>DocumentRegionAnnotator.winner</code> elects the ballot's top row only
+			when its share leads the runner-up's by at least a caller-given margin, and
+			<code>RegionAwareMoneyAnnotator</code> accepts that margin as a constructor
+			argument, keeping the default symbol table on an indecisive ballot.
+			<code>RegionCurrencyResolutionExampleTest</code> asserts the behavior shown
+			here.
+		</para>
+	</section>
 </chapter>
