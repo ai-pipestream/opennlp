@@ -29,12 +29,14 @@ import opennlp.tools.util.WhitespaceMode;
 public class WhitespaceTokenizerTest {
 
   /**
-   * Restores {@link WhitespaceMode} property resolution after each test, so no mode
-   * state leaks.
+   * Restores {@link WhitespaceMode} property resolution and the shared
+   * {@link WhitespaceTokenizer#INSTANCE} {@code keepNewLines} flag after each test, so no
+   * state leaks into later tests using the shared instance.
    */
   @AfterEach
-  void resetWhitespaceMode() {
+  void resetSharedState() {
     WhitespaceMode.reset();
+    WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
   }
 
   @Test
