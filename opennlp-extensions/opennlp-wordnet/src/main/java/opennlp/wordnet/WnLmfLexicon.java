@@ -18,6 +18,7 @@ package opennlp.wordnet;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import javax.xml.namespace.QName;
 
 import opennlp.tools.commons.ThreadSafe;
@@ -31,8 +32,14 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * except {@code id}, {@code label}, {@code language}, and {@code version}. Keys are namespace-aware
  * {@link QName} values, so Dublin Core attributes do not collide with unqualified attributes.
  * The dependency list preserves the source order of WN-LMF {@code Requires} declarations. It is
- * descriptive metadata only; parsing does not resolve or load the referenced lexicons. The list,
- * map, and knowledge base are immutable and safe to share between threads.</p>
+ * descriptive metadata only; parsing does not resolve or load the referenced lexicons.</p>
+ *
+ * <p>For an ordinary {@code Lexicon}, {@link #extensionOf()} is empty. For a lexicon composed
+ * from a WN-LMF {@code LexiconExtension}, it carries the exact {@code Extends} reference, the
+ * identity components describe the extension itself, and {@link #knowledgeBase()} contains the
+ * resolved base plus the extension's additive content. {@code Extends} is never mixed into
+ * {@link #dependencies()}. The list, maps, and knowledge base are immutable and safe to share
+ * between threads.</p>
  *
  * @param id            The WN-LMF lexicon id. Must not be {@code null} or empty.
  * @param label         The human-readable label. Must not be {@code null} or empty.
@@ -43,6 +50,8 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  *                      contain null keys or values.
  * @param dependencies  The required lexicons in source order. Must not be {@code null} and must
  *                      not contain null elements.
+ * @param extensionOf   The {@code Extends} reference of a composed {@code LexiconExtension}, or
+ *                      empty for an ordinary lexicon. Must not be {@code null}.
  * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
  */
 @ThreadSafe
@@ -53,6 +62,7 @@ public record WnLmfLexicon(
     String version,
     Map<QName, String> metadata,
     List<WnLmfDependency> dependencies,
+    Optional<WnLmfDependency> extensionOf,
     LexicalKnowledgeBase knowledgeBase) {
 
   /**
@@ -89,10 +99,31 @@ public record WnLmfLexicon(
         throw new IllegalArgumentException("Dependencies must not contain null");
       }
     }
+    if (extensionOf == null) {
+      throw new IllegalArgumentException("ExtensionOf must not be null; use Optional.empty()");
+    }
     if (knowledgeBase == null) {
       throw new IllegalArgumentException("KnowledgeBase must not be null");
     }
     metadata = Map.copyOf(metadata);
     dependencies = List.copyOf(dependencies);
+  }
+
+  /**
+   * Creates a descriptor for an ordinary lexicon, which extends nothing.
+   *
+   * @param id            The WN-LMF lexicon id. Must not be {@code null} or empty.
+   * @param label         The human-readable label. Must not be {@code null} or empty.
+   * @param language      The BCP 47 language tag. Must not be {@code null} or empty.
+   * @param version       The source's version string. Must not be {@code null} or empty.
+   * @param metadata      The remaining Lexicon attributes. Must not be {@code null}.
+   * @param dependencies  The required lexicons in source order. Must not be {@code null}.
+   * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if a component violates its documented constraint.
+   */
+  public WnLmfLexicon(String id, String label, String language, String version,
+      Map<QName, String> metadata, List<WnLmfDependency> dependencies,
+      LexicalKnowledgeBase knowledgeBase) {
+    this(id, label, language, version, metadata, dependencies, Optional.empty(), knowledgeBase);
   }
 }
