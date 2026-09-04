@@ -93,13 +93,14 @@ public class RelationPatternTest {
   @ParameterizedTest
   @ValueSource(chars = {NEL, FILE_SEPARATOR, UNIT_SEPARATOR})
   void testSplittingFollowsTheProjectWhitespacePredicate(char divergent) {
-    final List<String> expected = StringUtil.isWhitespace(divergent)
-        ? List.of("<nsubj", ">obj")
-        : List.of("<nsubj" + divergent + ">obj");
-    Assertions.assertEquals(expected,
-        new RelationPattern("t", "<nsubj" + divergent + ">obj", null).steps(),
-        "split behavior for U+" + String.format("%04X", (int) divergent)
-            + " must follow StringUtil.isWhitespace");
+    final String path = "<nsubj" + divergent + ">obj";
+    if (StringUtil.isWhitespace(divergent)) {
+      Assertions.assertEquals(List.of("<nsubj", ">obj"),
+          new RelationPattern("t", path, null).steps());
+    } else {
+      Assertions.assertThrows(IllegalArgumentException.class,
+          () -> new RelationPattern("t", path, null));
+    }
   }
 
   /**

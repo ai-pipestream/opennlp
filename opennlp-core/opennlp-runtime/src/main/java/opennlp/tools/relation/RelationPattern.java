@@ -44,8 +44,9 @@ import opennlp.tools.util.StringUtil;
  * trigger the mapping would change could never equal a pivot form.</p>
  *
  * @param type The relation type to emit. Must not be {@code null} or blank.
- * @param path The path shape as described above. Must not be {@code null} or blank, and
- *             every up step must come before the first down step.
+ * @param path The path shape as described above. Must not be {@code null} or blank,
+ *             direction markers may appear only at the start of a step, and all up
+ *             steps must precede the first down step.
  * @param trigger The required pivot form, or {@code null} for any pivot. Must not be
  *                blank or contain whitespace, since it is matched against a single
  *                token, and must be unchanged by
@@ -95,7 +96,7 @@ public record RelationPattern(String type, String path, String trigger) {
     }
     boolean down = false;
     for (final String step : splitSteps(path)) {
-      if (step.length() < 2 || (step.charAt(0) != UP_STEP && step.charAt(0) != DOWN_STEP)) {
+      if (!isValidStep(step)) {
         throw new IllegalArgumentException("not a valid path step: " + step);
       }
       if (step.charAt(0) == DOWN_STEP) {
@@ -114,6 +115,19 @@ public record RelationPattern(String type, String path, String trigger) {
    */
   public List<String> steps() {
     return splitSteps(path);
+  }
+
+  /** Returns whether a step has one direction marker followed by a relation label. */
+  private static boolean isValidStep(String step) {
+    if (step.length() < 2 || (step.charAt(0) != UP_STEP && step.charAt(0) != DOWN_STEP)) {
+      return false;
+    }
+    for (int i = 1; i < step.length(); i++) {
+      if (step.charAt(i) == UP_STEP || step.charAt(i) == DOWN_STEP) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
