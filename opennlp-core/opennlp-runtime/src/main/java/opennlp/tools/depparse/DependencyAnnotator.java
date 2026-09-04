@@ -29,21 +29,13 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
 /**
- * Adapts a {@link DependencyParser} to the document pipeline: reads
- * {@link Layers#SENTENCES}, {@link Layers#TOKENS}, and {@link Layers#POS_TAGS} and
- * provides {@link #DEPENDENCIES}, one {@link DependencyArc} per token on the token's
- * span.
+ * Adds dependency arcs to a document through a {@link DependencyParser}. The annotator
+ * reads {@link Layers#SENTENCES}, {@link Layers#TOKENS}, and {@link Layers#POS_TAGS} and
+ * provides {@link #DEPENDENCIES}.
  *
- * <p>An arc's {@link DependencyArc#head()} and {@link DependencyArc#dependent()} are
- * indices into the token layer, following the container's rule that annotations
- * reference each other by layer and index, never by object identity.</p>
- *
- * <p>Each sentence is parsed separately, the way the parser contract expects its input,
- * so every sentence gets its own tree and its own root arc. The sentence-local indices
- * the parser returns are shifted by the sentence's first token position, which keeps
- * every arc's head and dependent a position in the document-wide token layer. Token
- * spans already refer to the original document text, so anchoring an arc on its
- * dependent token's span puts the arc in document coordinates.</p>
+ * <p>Parsing runs once per sentence. Sentence-local head and dependent indices are
+ * offset to positions in the document token layer. Each output annotation uses the
+ * dependent token's original-text span.</p>
  *
  * <p>The adapter holds no per-call state; it is as thread-safe as the parser it
  * wraps.</p>
@@ -77,14 +69,9 @@ public final class DependencyAnnotator implements DocumentAnnotator {
   /**
    * Parses the document sentence by sentence and adds the {@link #DEPENDENCIES} layer.
    *
-   * <p>For every sentence, the tokens whose spans lie inside the sentence span are
-   * passed to the parser with their tags as one sequence, and the resulting
-   * sentence-local arcs are shifted by the sentence's first token position. Arcs are
-   * emitted in token order, so the new layer is aligned with {@link Layers#TOKENS} by
-   * position, and each arc annotation reuses the span of its dependent token. The
-   * required layers must be present, but they may be empty: a document without
-   * sentences or tokens yields a present-but-empty dependency layer, and a sentence
-   * containing no tokens contributes no arcs.</p>
+   * <p>Arcs are emitted in token order and reuse their dependent tokens' spans. The
+   * required layers may be empty. An empty document receives an empty dependency
+   * layer, and sentences without tokens are skipped.</p>
    *
    * @param document The document to annotate. Must not be {@code null} and must carry
    *                 the {@link Layers#SENTENCES} and {@link Layers#TOKENS} layers, in
