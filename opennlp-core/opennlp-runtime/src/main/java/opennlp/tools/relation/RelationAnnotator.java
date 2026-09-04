@@ -50,6 +50,10 @@ import opennlp.tools.util.StringUtil;
 @ThreadSafe
 public final class RelationAnnotator implements DocumentAnnotator {
 
+  private static final byte UNVISITED = 0;
+  private static final byte VISITING = 1;
+  private static final byte VISITED = 2;
+
   /**
    * Extracted relations; each annotation covers both entity spans and carries its
    * {@link RelationMention}.
@@ -105,7 +109,8 @@ public final class RelationAnnotator implements DocumentAnnotator {
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, a
    *         required layer is absent, the dependency layer does not hold exactly one
    *         arc per token, two arcs share a dependent, an arc refers to a token
-   *         outside the token layer, or the document already carries the
+   *         outside the token layer, the dependency layer contains a cycle, or the
+   *         document already carries the
    *         {@link #RELATIONS} layer.
    */
   @Override
@@ -133,6 +138,7 @@ public final class RelationAnnotator implements DocumentAnnotator {
       heads[dependent] = arc.value().head();
       relations[dependent] = arc.value().relation();
     }
+    checkAcyclic(heads);
 
     final int[] entityHeads = new int[entities.size()];
     final int[][] chains = new int[entities.size()][];
@@ -269,21 +275,38 @@ public final class RelationAnnotator implements DocumentAnnotator {
     return first;
   }
 
+  /** Rejects a cycle in the document dependency forest. */
+  private static void checkAcyclic(int[] heads) {
+    final byte[] states = new byte[heads.length];
+    for (int start = 0; start < heads.length; start++) {
+      int current = start;
+      while (current != DependencyArc.ROOT_HEAD && states[current] == UNVISITED) {
+        states[current] = VISITING;
+        current = heads[current];
+      }
+      if (current != DependencyArc.ROOT_HEAD && states[current] == VISITING) {
+        throw new IllegalArgumentException(
+            "dependency layer contains a cycle at token " + current);
+      }
+      current = start;
+      while (current != DependencyArc.ROOT_HEAD && states[current] == VISITING) {
+        states[current] = VISITED;
+        current = heads[current];
+      }
+    }
+  }
+
   /**
    * Walks from a token to the root, collecting the visited tokens in order.
    *
    * @param start The token to start from.
    * @param heads The dependency head of each token, indexed by dependent token.
-   * @return The chain including {@code start} and ending at the root token, or
-   *         {@code null} when the walk takes more steps than there are tokens, which
-   *         only happens when the arcs contain a cycle.
+   * @return The chain including {@code start} and ending at the root token.
    */
-  private int[] chainToRoot(int start, int[] heads) {
+  private static int[] chainToRoot(int start, int[] heads) {
     int length = 0;
     for (int current = start; current != DependencyArc.ROOT_HEAD; current = heads[current]) {
-      if (++length > heads.length) {
-        return null;
-      }
+      length++;
     }
     final int[] chain = new int[length];
     int current = start;
