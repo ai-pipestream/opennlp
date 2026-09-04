@@ -353,6 +353,7 @@ List<GeoResolution> resolutions = geocoder.resolve(text, mentions);
 			</programlisting>
 		</para>
 	</section>
+
 	<section xml:id="tools.geo.pipeline">
 		<title>Wiring the location pipeline</title>
 		<para>
@@ -431,6 +432,7 @@ List<Annotation<ContainmentChain>> chains =
 			</programlisting>
 		</para>
 	</section>
+
 	<section xml:id="tools.geo.place-profiles">
 		<title>Place profiles</title>
 		<para>
