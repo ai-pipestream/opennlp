@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.lemmatizer.Lemmatizer;
 import opennlp.tools.util.StringUtil;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
@@ -38,27 +37,31 @@ import opennlp.tools.wordnet.WordNetRelation;
  * sharing its synsets, the lemmas of its hypernym ancestors up to a configured depth, and
  * optionally the lemmas of its direct hyponyms.
  *
- * <p>Each {@link Expansion} carries a deterministic heuristic weight, not a probability: the
+ * <p>Each {@link Expansion} has a deterministic heuristic weight, not a probability: the
  * first sense of a term starts at {@code 1.0}, each later sense is multiplied by the configurable
  * sense decay, and every hypernym or hyponym step multiplies by the configurable depth decay.
- * A decay product that underflows to zero in double arithmetic carries no ranking signal, so
- * such expansions are dropped rather than emitted outside the {@code (0, 1]} weight range.
+ * A candidate is omitted when the multiplication underflows to zero.
  * When the term itself is not in the lexicon and a {@link Lemmatizer} is configured, the term is
  * lemmatized and the lemma expanded instead; the lemmatizer is invoked with the
  * {@link WordNetPOS} name as the tag.</p>
  *
  * <p>Hypernym walks follow both the direct and the instance relation, track visited synsets so
- * malformed cyclic data cannot loop, and never report the term itself. Results are deduplicated
+ * malformed cyclic data cannot loop, and exclude the term itself. Results are deduplicated
  * case-insensitively, keeping the highest weight, and ordered by weight descending, then kind,
  * then term, so output is stable across runs.</p>
  *
  * <p>Instances are immutable and safe for concurrent use when the configured lexicon and
  * lemmatizer are.</p>
+ *
+ * @since 3.0.0
  */
-@ThreadSafe
 public final class LexicalExpander {
 
-  /** How an expansion relates to the input term. */
+  /**
+   * How an expansion relates to the input term.
+   *
+   * @since 3.0.0
+   */
   public enum Kind {
 
     /** A member of one of the term's own synsets. */
@@ -81,6 +84,7 @@ public final class LexicalExpander {
    *                  for {@link Kind#HYPERNYM}, {@code 1} for hyponyms.
    * @param senseRank The zero-based rank of the input sense this expansion came from.
    * @param weight    The heuristic weight in {@code (0, 1]}; higher is closer to the input term.
+   * @since 3.0.0
    */
   public record Expansion(String term, Kind kind, int depth, int senseRank, double weight) {
 
@@ -88,8 +92,8 @@ public final class LexicalExpander {
      * Validates every component against the documented ranges.
      *
      * @throws IllegalArgumentException Thrown if {@code term} is {@code null} or blank,
-     *         {@code kind} is {@code null}, {@code depth} or {@code senseRank} is negative, or
-     *         {@code weight} is not in {@code (0, 1]}.
+     *         {@code kind} is {@code null}, {@code depth} does not match {@code kind},
+     *         {@code senseRank} is negative, or {@code weight} is not in {@code (0, 1]}.
      */
     public Expansion {
       if (term == null || StringUtil.isBlank(term)) {
@@ -100,6 +104,15 @@ public final class LexicalExpander {
       }
       if (depth < 0) {
         throw new IllegalArgumentException("depth must not be negative: " + depth);
+      }
+      if (kind == Kind.SYNONYM && depth != 0) {
+        throw new IllegalArgumentException("depth must be 0 for a synonym: " + depth);
+      }
+      if (kind == Kind.HYPERNYM && depth == 0) {
+        throw new IllegalArgumentException("depth must be positive for a hypernym: " + depth);
+      }
+      if (kind == Kind.HYPONYM && depth != 1) {
+        throw new IllegalArgumentException("depth must be 1 for a hyponym: " + depth);
       }
       if (senseRank < 0) {
         throw new IllegalArgumentException("senseRank must not be negative: " + senseRank);
@@ -243,14 +256,13 @@ public final class LexicalExpander {
   }
 
   /**
-   * Offers the synonyms, hypernym ancestors, and optional hyponyms of one sense into the running
-   * best-expansion map.
+   * Adds the synonyms, hypernym ancestors, and optional hyponyms of one sense to the result map.
    *
    * @param sense       The sense to expand. Must not be {@code null}.
    * @param rank        The zero-based salience rank of the sense.
    * @param senseWeight The weight of the sense itself; each relation step decays from it.
    * @param best        The best expansion seen so far per folded term; updated in place.
-   * @param excluded    The folded terms that are never reported, such as the input term.
+   * @param excluded    The folded terms excluded from the result, such as the input term.
    */
   private void expandSense(Synset sense, int rank, double senseWeight,
                            Map<String, Expansion> best, Set<String> excluded) {
@@ -327,12 +339,12 @@ public final class LexicalExpander {
   }
 
   /**
-   * Records the candidate under its folded term when it is not excluded and it beats the current
-   * best weight for that term. Folding through {@link LemmaFolding#fold(String)} keeps the
+   * Records the candidate under its folded term when it is not excluded and has a higher weight
+   * than the current value. Folding through {@link LemmaFolding#fold(String)} keeps the
    * exclusion and deduplication keys aligned with the lexicon's own lemma keys.
    *
    * @param best      The best expansion seen so far per folded term; updated in place.
-   * @param excluded  The folded terms that are never reported.
+   * @param excluded  The folded terms excluded from the result.
    * @param candidate The expansion to offer. Must not be {@code null}.
    */
   private void offer(Map<String, Expansion> best, Set<String> excluded,
@@ -347,7 +359,11 @@ public final class LexicalExpander {
     }
   }
 
-  /** Configures and creates a {@link LexicalExpander}. */
+  /**
+   * Configures and creates a {@link LexicalExpander}.
+   *
+   * @since 3.0.0
+   */
   public static final class Builder {
 
     private final LexicalKnowledgeBase lexicon;
@@ -389,7 +405,7 @@ public final class LexicalExpander {
     }
 
     /**
-     * Configures how many senses of the term are expanded, most salient first.
+     * Configures how many senses are expanded per part of speech, most salient first.
      *
      * @param maxSenses The sense count; must be positive. The default is {@code 3}.
      * @return This builder.

@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.util.StringUtil;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.Synset;
@@ -33,20 +32,19 @@ import opennlp.tools.wordnet.WordNetPOS;
 import opennlp.tools.wordnet.WordNetRelation;
 
 /**
- * Types a noun by walking its hypernym chain to the nearest registered anchor: the
- * caller names anchor concepts by lemma, {@code person}, {@code organization},
- * {@code location}, and any word whose senses lead up to an anchor's synsets receives
- * that anchor's label. The nearest anchor wins, so a more specific registered concept
- * beats a general one.
+ * Types a noun using the nearest caller-defined anchor in its hypernym graph. The caller maps
+ * anchor lemmas, such as {@code person}, {@code organization}, or {@code location}, to labels.
+ * The nearest anchor wins, so a specific registered concept takes precedence over a general one.
  *
  * <p>Anchors are resolved against the knowledge base at construction and follow its
- * sense inventory; nothing beyond the caller's anchor choice is built in. Words with no
+ * sense inventory. Words with no
  * sense reaching an anchor get no type.</p>
  *
- * <p>The typer reads only immutable state and is safe to share between threads.</p>
+ * <p>Concurrent use depends on the supplied knowledge base implementation.</p>
+ *
+ * @since 3.0.0
  */
-@ThreadSafe
-public class HypernymTyper {
+public final class HypernymTyper {
 
   /** The relations that lead from a synset to its generalizations. */
   private static final List<WordNetRelation> UPWARD_RELATIONS =
@@ -65,7 +63,8 @@ public class HypernymTyper {
    *                lemma or label may be blank.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null},
    *         {@code anchors} is empty or holds a blank entry, or an anchor lemma is
-   *         unknown to the knowledge base.
+   *         unknown to the knowledge base, or two anchors assign different labels to the same
+   *         synset.
    */
   public HypernymTyper(LexicalKnowledgeBase knowledgeBase, Map<String, String> anchors) {
     if (knowledgeBase == null) {
@@ -87,14 +86,18 @@ public class HypernymTyper {
             "anchor lemma is unknown to the knowledge base: " + anchor.getKey());
       }
       for (final Synset sense : senses) {
-        labels.putIfAbsent(sense.id(), anchor.getValue());
+        final String previous = labels.putIfAbsent(sense.id(), anchor.getValue());
+        if (previous != null && !previous.equals(anchor.getValue())) {
+          throw new IllegalArgumentException("anchor lemmas assign conflicting labels to synset "
+              + sense.id() + ": " + previous + " and " + anchor.getValue());
+        }
       }
     }
     this.labelBySynsetId = Map.copyOf(labels);
   }
 
   /**
-   * Types a noun by its nearest anchored hypernym.
+   * Types a noun using the nearest anchor in its hypernym graph.
    *
    * @param lemma The noun lemma to type. Must not be {@code null} or blank.
    * @return The label of the nearest anchor over all senses, or empty when no sense
@@ -119,10 +122,11 @@ public class HypernymTyper {
   }
 
   /**
-   * Types a specific synset by its nearest anchored hypernym.
+   * Types a synset using the nearest anchor in its hypernym graph.
    *
    * @param synsetId The synset identifier. Must not be {@code null}.
-   * @return The nearest anchor's label, or empty when no ancestor is anchored.
+   * @return The nearest anchor's label, or empty when neither the synset nor an ancestor is
+   *     anchored.
    * @throws IllegalArgumentException Thrown if {@code synsetId} is {@code null}.
    */
   public Optional<String> typeSynset(String synsetId) {

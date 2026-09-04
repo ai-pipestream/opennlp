@@ -99,6 +99,19 @@ public class WnLmfReaderTest {
   }
 
   @Test
+  void testPreservesMultipleDefinitions() throws IOException {
+    final LexicalKnowledgeBase lexicon = parse(
+        wrap("<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
+            + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/></LexicalEntry>"
+            + "<Synset id=\"t-1\" partOfSpeech=\"n\">"
+            + "<Definition>a feline</Definition>"
+            + "<Definition>a domesticated cat</Definition></Synset>"));
+
+    assertEquals("a feline; a domesticated cat",
+        lexicon.lookup("cat", WordNetPOS.NOUN).get(0).gloss());
+  }
+
+  @Test
   void testLookupIsPosScoped() {
     final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(1, lexicon.lookup("run", WordNetPOS.VERB).size());
@@ -121,13 +134,12 @@ public class WnLmfReaderTest {
     final LexicalKnowledgeBase lexicon = fixture();
     final String target = lexicon.synset("mini-n1").orElseThrow()
         .related(WordNetRelation.HYPERNYM).get(0);
-    // Not just equal: the identical instance from the synset table, so a loaded lexicon keeps
-    // one copy of each id no matter how many relations point at it.
+    // Relation targets reuse the id instance from the synset table.
     assertSame(lexicon.synset("mini-n2").orElseThrow().id(), target);
   }
 
   @Test
-  void testSenseRelationsAreLiftedToSynsetLevel() {
+  void testSenseRelationsAreRepresentedAtSynsetLevel() {
     final LexicalKnowledgeBase lexicon = fixture();
     assertEquals(List.of("mini-a2"), lexicon.related("mini-a1", WordNetRelation.ANTONYM));
     assertEquals(List.of("mini-a1"), lexicon.related("mini-a2", WordNetRelation.ANTONYM));
@@ -197,6 +209,24 @@ public class WnLmfReaderTest {
   }
 
   @Test
+  void testReadDoesNotCloseInputStream() throws IOException {
+    final boolean[] closed = {false};
+    final InputStream in = new ByteArrayInputStream(wrap("").getBytes(StandardCharsets.UTF_8)) {
+      @Override
+      public void close() throws IOException {
+        closed[0] = true;
+        super.close();
+      }
+    };
+
+    WnLmfReader.read(in, "inline.xml");
+
+    assertFalse(closed[0]);
+    in.close();
+    assertTrue(closed[0]);
+  }
+
+  @Test
   void testStreamReadFailurePropagatesAsIOException() {
     final InputStream failing = new InputStream() {
       @Override
@@ -206,15 +236,13 @@ public class WnLmfReaderTest {
     };
     final IOException e =
         assertThrows(IOException.class, () -> WnLmfReader.read(failing, "failing.xml"));
-    // The I/O failure must surface as itself, not be misreported as a malformed document.
+    // Preserve an I/O failure instead of reporting malformed XML.
     assertFalse(e instanceof InvalidFormatException);
   }
 
   @Test
   void testSkipsDoctypeDeclaration() throws IOException {
-    // Real Open English WordNet releases ship exactly this shape: a DOCTYPE naming the schema
-    // DTD by an unreachable SYSTEM identifier (example.invalid is the RFC 2606 reserved domain
-    // that must never resolve). The reader must parse past it without attempting to fetch it.
+    // The reserved domain makes an attempted external DTD fetch fail the test.
     final String document = "<?xml version=\"1.0\"?>\n"
         + "<!DOCTYPE LexicalResource SYSTEM \"http://example.invalid/WN-LMF-1.3.dtd\">\n"
         + "<LexicalResource><Lexicon id=\"t\" label=\"t\" language=\"en\" version=\"1\">"
@@ -228,10 +256,7 @@ public class WnLmfReaderTest {
 
   @Test
   void testInternalSubsetEntityIsNeverExpanded(@TempDir Path tempDir) throws IOException {
-    // A DOCTYPE-declared internal-subset entity is the classic XXE payload: if the parser ever
-    // honored it, the entity reference below would be replaced by the target file's content.
-    // With SUPPORT_DTD disabled the declaration itself is never registered, so the reference is
-    // undefined and parsing must fail loud rather than silently expand it.
+    // Expanding this entity would expose the temporary file's contents.
     final Path secret = tempDir.resolve("secret.txt");
     Files.writeString(secret, "xxe-marker-should-never-appear");
     final String document = "<?xml version=\"1.0\"?>\n"
@@ -318,6 +343,14 @@ public class WnLmfReaderTest {
                 + "<Synset id=\"t-1\" partOfSpeech=\"v\"><Definition>a feline</Definition>"
                 + "</Synset>"),
             List.of("t-cat-n", "VERB", "NOUN")),
+        Arguments.of(Named.of("synset member assigned to another synset",
+            "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
+                + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/></LexicalEntry>"
+                + "<LexicalEntry id=\"t-dog-n\"><Lemma writtenForm=\"dog\" partOfSpeech=\"n\"/>"
+                + "<Sense id=\"t-dog-n-1\" synset=\"t-2\"/></LexicalEntry>"
+                + "<Synset id=\"t-1\" partOfSpeech=\"n\" members=\"t-dog-n-1\"/>"
+                + "<Synset id=\"t-2\" partOfSpeech=\"n\" members=\"t-dog-n-1\"/>"),
+            List.of("t-dog-n-1", "t-1", "t-2")),
         Arguments.of(Named.of("sense relation to undeclared sense",
             "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
                 + "<Sense id=\"t-cat-n-1\" synset=\"t-1\">"
@@ -329,12 +362,34 @@ public class WnLmfReaderTest {
         Arguments.of(Named.of("lemma outside lexical entry",
             "<Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"),
             List.of("Lemma outside a LexicalEntry")),
+        Arguments.of(Named.of("duplicate lemma",
+            "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
+                + "<Lemma writtenForm=\"dog\" partOfSpeech=\"n\"/></LexicalEntry>"),
+            List.of("Duplicate Lemma in LexicalEntry t-cat-n")),
+        Arguments.of(Named.of("nested lexical entry",
+            "<LexicalEntry id=\"t-outer-n\"><Lemma writtenForm=\"outer\" partOfSpeech=\"n\"/>"
+                + "<LexicalEntry id=\"t-inner-n\"><Lemma writtenForm=\"inner\" "
+                + "partOfSpeech=\"n\"/></LexicalEntry></LexicalEntry>"),
+            List.of("Nested LexicalEntry inside t-outer-n")),
         Arguments.of(Named.of("sense before lemma",
             "<LexicalEntry id=\"t-cat-n\"><Sense id=\"t-cat-n-1\" synset=\"t-1\"/>"
                 + "<Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/></LexicalEntry>"
                 + "<Synset id=\"t-1\" partOfSpeech=\"n\"><Definition>a feline</Definition>"
                 + "</Synset>"),
             List.of("Sense before its entry's Lemma")),
+        Arguments.of(Named.of("nested sense",
+            "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
+                + "<Sense id=\"t-cat-n-1\" synset=\"t-1\">"
+                + "<Sense id=\"t-cat-n-2\" synset=\"t-1\"/></Sense></LexicalEntry>"
+                + "<Synset id=\"t-1\" partOfSpeech=\"n\"/>"),
+            List.of("Nested Sense inside t-cat-n-1")),
+        Arguments.of(Named.of("nested synset",
+            "<Synset id=\"t-1\" partOfSpeech=\"n\">"
+                + "<Synset id=\"t-2\" partOfSpeech=\"n\"/></Synset>"),
+            List.of("Nested Synset inside t-1")),
+        Arguments.of(Named.of("definition outside synset",
+            "<Definition>orphaned definition</Definition>"),
+            List.of("Definition outside a Synset")),
         Arguments.of(Named.of("sense relation outside sense",
             "<LexicalEntry id=\"t-cat-n\"><Lemma writtenForm=\"cat\" partOfSpeech=\"n\"/>"
                 + "<Sense id=\"t-cat-n-1\" synset=\"t-1\"/>"

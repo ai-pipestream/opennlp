@@ -21,10 +21,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 import opennlp.tools.wordnet.WordNetRelation;
 
@@ -36,16 +37,17 @@ import opennlp.tools.wordnet.WordNetRelation;
  * {@code d} through a common ancestor. Wu-Palmer similarity relates the depth of the
  * deepest common ancestor to the depths of both synsets. Leacock-Chodorow scales the
  * shortest path against a caller-supplied taxonomy depth, since the knowledge base
- * interface does not enumerate the taxonomy. Unrelated synsets, those sharing no
- * ancestor, score zero everywhere. Information-content measures need corpus counts and
+ * interface does not enumerate the taxonomy. Synsets with no shared known ancestor score zero
+ * for all measures. Information-content measures need corpus counts and
  * are not provided here.</p>
  *
  * <p>Both plain and instance hypernyms count as taxonomy edges. The measures read only
  * the knowledge base and hold no mutable state, so instances are as thread-safe as
  * their knowledge base.</p>
+ *
+ * @since 3.0.0
  */
-@ThreadSafe
-public class SynsetSimilarity {
+public final class SynsetSimilarity {
 
   private final LexicalKnowledgeBase knowledgeBase;
 
@@ -96,17 +98,17 @@ public class SynsetSimilarity {
     validateIds(synsetId, otherSynsetId);
     final Map<String, Integer> up = depthsAbove(synsetId);
     final Map<String, Integer> otherUp = depthsAbove(otherSynsetId);
+    final int depthA = depthFromRoot(synsetId) + 1;
+    final int depthB = depthFromRoot(otherSynsetId) + 1;
     double best = 0.0;
     for (final Map.Entry<String, Integer> common : up.entrySet()) {
       final Integer otherDistance = otherUp.get(common.getKey());
       if (otherDistance == null) {
         continue;
       }
-      // Node counting: the root sits at depth one, so a shared ancestor always
-      // contributes a positive numerator and the denominator is never zero.
+      // Node counting gives the root depth one, so a shared ancestor has a positive
+      // numerator and the denominator is nonzero.
       final int lcsDepth = depthFromRoot(common.getKey()) + 1;
-      final int depthA = lcsDepth + common.getValue();
-      final int depthB = lcsDepth + otherDistance;
       final double score = 2.0 * lcsDepth / (depthA + depthB);
       best = Math.max(best, score);
     }
@@ -123,7 +125,8 @@ public class SynsetSimilarity {
    * @param taxonomyDepth The maximum depth of the taxonomy the synsets live in. Must
    *                      be positive.
    * @return The similarity, higher for closer synsets, or {@code 0} when the synsets
-   *         share no ancestor.
+   *         share no ancestor. The value can be negative if {@code taxonomyDepth} is smaller
+   *         than required by the shortest path.
    * @throws IllegalArgumentException Thrown if {@code synsetId} or
    *         {@code otherSynsetId} is {@code null}, or {@code taxonomyDepth} is not
    *         positive.
@@ -195,6 +198,9 @@ public class SynsetSimilarity {
    */
   private Map<String, Integer> depthsAbove(String synsetId) {
     final Map<String, Integer> depths = new HashMap<>();
+    if (knowledgeBase.synset(synsetId).isEmpty()) {
+      return depths;
+    }
     final Deque<String> queue = new ArrayDeque<>();
     depths.put(synsetId, 0);
     queue.add(synsetId);
@@ -202,6 +208,9 @@ public class SynsetSimilarity {
       final String current = queue.remove();
       final int depth = depths.get(current);
       for (final String parent : hypernyms(current)) {
+        if (knowledgeBase.synset(parent).isEmpty()) {
+          continue;
+        }
         if (!depths.containsKey(parent) || depths.get(parent) > depth + 1) {
           depths.put(parent, depth + 1);
           queue.add(parent);
@@ -212,18 +221,34 @@ public class SynsetSimilarity {
   }
 
   /**
-   * Measures a synset's depth as the distance to its farthest ancestor, which is the taxonomy
-   * root reached the long way round when several paths lead up.
+   * Measures a synset's depth as the maximum edge count on an acyclic route to a taxonomy root.
    *
    * @param synsetId The synset to measure.
    * @return The edge count to the farthest ancestor, {@code 0} for a root.
    */
   private int depthFromRoot(String synsetId) {
-    final Map<String, Integer> above = depthsAbove(synsetId);
-    int deepest = 0;
-    for (final int distance : above.values()) {
-      deepest = Math.max(deepest, distance);
+    return depthFromRoot(synsetId, new HashSet<>());
+  }
+
+  /**
+   * Finds the longest acyclic route from a synset to a taxonomy root.
+   *
+   * @param synsetId The synset to measure.
+   * @param path The synsets on the current route, used to stop cycles.
+   * @return The edge count to the farthest root, or {@code -1} for an unknown synset or a cycle.
+   */
+  private int depthFromRoot(String synsetId, Set<String> path) {
+    if (knowledgeBase.synset(synsetId).isEmpty() || !path.add(synsetId)) {
+      return -1;
     }
+    int deepest = 0;
+    for (final String parent : hypernyms(synsetId)) {
+      final int parentDepth = depthFromRoot(parent, path);
+      if (parentDepth >= 0) {
+        deepest = Math.max(deepest, parentDepth + 1);
+      }
+    }
+    path.remove(synsetId);
     return deepest;
   }
 
