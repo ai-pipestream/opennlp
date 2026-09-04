@@ -37,7 +37,7 @@ import opennlp.dl.AbstractDL;
 import opennlp.dl.Tokens;
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.embeddings.TextEmbedder;
-import opennlp.tools.tokenize.Tokenizer;
+import opennlp.tools.tokenize.SubwordTokenizer;
 
 
 /**
@@ -123,7 +123,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    */
   public float[] getVectors(final String sentence) throws OrtException {
 
-    final Tokens tokens = tokenize(sentence, tokenizer, vocab);
+    final Tokens tokens = encode(sentence, tokenizer);
 
     final Map<String, OnnxTensor> inputs = new HashMap<>();
 
@@ -201,7 +201,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       if (text == null) {
         throw new IllegalArgumentException("Texts must not contain null");
       }
-      encoded[i] = tokenize(text instanceof String s ? s : text.toString(), tokenizer, vocab);
+      encoded[i] = encode(text instanceof String s ? s : text.toString(), tokenizer);
       byLength.computeIfAbsent(encoded[i].ids().length, length -> new ArrayList<>()).add(i);
     }
     try {
@@ -299,41 +299,9 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
     return last > 0 && last <= Integer.MAX_VALUE ? (int) last : -1;
   }
 
-  /**
-   * Encodes text as model inputs: wordpiece token ids, an attention mask of ones,
-   * and single-segment (all zero) token type ids.
-   *
-   * @param text The text to encode.
-   * @param tokenizer The wordpiece tokenizer matching the {@code vocab}.
-   * @param vocab The vocabulary map.
-   * @return The encoded {@link Tokens}.
-   *
-   * @throws IllegalArgumentException Thrown if the tokenizer emits a token that is
-   *     not present in the vocabulary.
-   */
-  static Tokens tokenize(final String text, final Tokenizer tokenizer,
-      final Map<String, Integer> vocab) {
-
-    final String[] tokens = tokenizer.tokenize(text);
-
-    final long[] ids = new long[tokens.length];
-
-    for (int x = 0; x < tokens.length; x++) {
-      final Integer id = vocab.get(tokens[x]);
-      if (id == null) {
-        throw new IllegalArgumentException("Token '" + tokens[x]
-            + "' is not present in the vocabulary; the vocabulary file does not match the model.");
-      }
-      ids[x] = id;
-    }
-
-    final long[] mask = new long[ids.length];
-    Arrays.fill(mask, 1);
-
-    final long[] types = new long[ids.length];
-
-    return new Tokens(tokens, ids, mask, types);
-
+  /** Encodes one sentence with model vocabulary ids. */
+  static Tokens encode(String text, SubwordTokenizer tokenizer) {
+    return encodeTokens(tokenizer, text);
   }
 
 }
