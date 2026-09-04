@@ -45,7 +45,7 @@
 		<para>
 			The trigger is optional and constrains the pivot token: the pattern matches
 			only when the pivot's lowercased form equals it. A <code>null</code> trigger
-			accepts any pivot. A trigger is never rewritten, so it must already be
+			accepts any pivot. The constructor does not rewrite triggers, so a trigger must be
 			lowercase and must not contain whitespace; anything else is rejected when the
 			pattern is constructed.
 		</para>
@@ -55,8 +55,8 @@
 		<title>Pattern-based extraction</title>
 		<para>
 			Given a document that already carries tokens, entities, and dependency
-			arcs for <code>Acme Corp acquired Bolt in 2024.</code>, two patterns fire
-			once each: an acquisition between the two organizations, and an
+			arcs for <code>Acme Corp acquired Bolt in 2024.</code>, two patterns produce
+			an acquisition between the two organizations and an
 			acquisition date linking the object organization to the date.
 			<code>RelationExtractionExampleTest</code> asserts the behavior shown
 			here.

@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
+import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.depparse.DependencyAnnotator;
 import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.document.Annotation;
@@ -34,22 +35,20 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Extracts typed relations between entity pairs by matching {@link RelationPattern}
- * rules against the dependency path connecting the two entity heads, and provides
- * {@link #RELATIONS}, one annotation per relation carrying its {@link RelationMention}.
+ * Extracts typed relations by matching {@link RelationPattern} rules against dependency
+ * paths between entity heads. Each result covers both entity spans and carries a
+ * {@link RelationMention} with indices into {@link Layers#ENTITIES}.
  *
- * <p>Each entity's head is the first token overlapping the entity span whose dependency
- * head lies outside the range of overlapping tokens. For every ordered entity pair the
- * annotator computes the path from the subject's head up to the lowest common ancestor
- * and down to the object's head, then emits one relation per pattern whose path shape
- * and trigger match. The annotation covers both entity spans; the mention references the
- * entities by their index in {@link Layers#ENTITIES}.</p>
+ * <p>An entity head is the first overlapping token with a dependency head outside the
+ * entity. For each ordered entity pair, matching follows the path through the lowest
+ * common ancestor.</p>
  *
  * <p>The annotator holds no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
-public class RelationAnnotator implements DocumentAnnotator {
+@ThreadSafe
+public final class RelationAnnotator implements DocumentAnnotator {
 
   /**
    * Extracted relations; each annotation covers both entity spans and carries its
@@ -79,10 +78,11 @@ public class RelationAnnotator implements DocumentAnnotator {
       }
     }
     this.patterns = List.copyOf(patterns);
-    this.patternSteps = new ArrayList<>(this.patterns.size());
+    final List<List<String>> steps = new ArrayList<>(this.patterns.size());
     for (final RelationPattern pattern : this.patterns) {
-      patternSteps.add(pattern.steps());
+      steps.add(pattern.steps());
     }
+    this.patternSteps = List.copyOf(steps);
   }
 
   /**
@@ -134,8 +134,6 @@ public class RelationAnnotator implements DocumentAnnotator {
       relations[dependent] = arc.value().relation();
     }
 
-    // Each entity's chain to the root depends only on that entity, so walking it once
-    // per entity keeps the pair loop below from repeating the walk for every partner.
     final int[] entityHeads = new int[entities.size()];
     final int[][] chains = new int[entities.size()][];
     for (int e = 0; e < entities.size(); e++) {
@@ -165,6 +163,15 @@ public class RelationAnnotator implements DocumentAnnotator {
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(RELATIONS);
+  }
+
+  /**
+   * {@return the annotator's simple class name, which names it in pipeline validation
+   * messages}
+   */
+  @Override
+  public String toString() {
+    return getClass().getSimpleName();
   }
 
   /**
