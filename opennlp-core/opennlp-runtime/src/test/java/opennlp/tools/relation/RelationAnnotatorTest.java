@@ -239,15 +239,17 @@ public class RelationAnnotatorTest {
   }
 
   @Test
-  void testCyclicDependencyLayerDoesNotLoop() {
+  void testCyclicDependencyLayerIsRejected() {
     final Document cycle = twoEntityDocument(List.of(
         new DependencyArc(1, 0, "dep"),
         new DependencyArc(0, 1, "dep")));
     final RelationAnnotator annotator = new RelationAnnotator(List.of(
         new RelationPattern("t", "<dep >dep", null)));
 
-    Assertions.assertTrue(annotator.annotate(cycle)
-        .get(RelationAnnotator.RELATIONS).isEmpty());
+    final IllegalArgumentException e = Assertions.assertThrows(
+        IllegalArgumentException.class, () -> annotator.annotate(cycle));
+    Assertions.assertEquals("dependency layer contains a cycle at token 0",
+        e.getMessage());
   }
 
   @Test
