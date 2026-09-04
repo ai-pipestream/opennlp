@@ -1,0 +1,33 @@
+# ai.pipestream:opennlp-experiment provenance
+# Built from unmerged development branches of Apache OpenNLP.
+# Not an Apache Software Foundation release. Apache OpenNLP is a trademark of the ASF.
+version: 0.1.0-alpha4-SNAPSHOT
+generated: 2026-09-04T00:52:29Z
+main: 73f9a25f7
+ref: 2b72aa1a6  OPENNLP-1879-gazetteer-api  apache
+ref: 19117b031  OPENNLP-1880-wordnet-api  apache
+ref: e0a46ee89  OPENNLP-1886-light-stemmers  apache
+ref: e6fad91bf  OPENNLP-1887-wordnet-expansion  apache
+ref: b2b5bd9da  OPENNLP-1893-hunspell  apache
+ref: 01c1875d2  OPENNLP-1894-lattice-cjk  apache
+ref: 79dd6ec5f  OPENNLP-1909-resource-installer  apache
+ref: 89d8fba4c  OPENNLP-1911-vector-search-evaluation  apache
+ref: 20e99af71  OPENNLP-1920-relation-extraction  apache
+ref: f52601c02  OPENNLP-XXXX-text-artifacts  research
+ref: d9f196569  OPENNLP-XXXX-embedded-assets  research
+ref: f5a33578d  OPENNLP-XXXX-noise  research
+ref: 3bc4e048e  OPENNLP-XXXX-predicate-annotators  research
+ref: 02744d5e8  OPENNLP-XXXX-ff-postagger  research
+ref: 3d0171c3f  OPENNLP-XXXX-bilstm-tagger  research
+ref: d708f7d9f  OPENNLP-XXXX-glossary  research
+ref: cb6ad708a  OPENNLP-XXXX-pii  research
+ref: 70548d292  OPENNLP-XXXX-coref  research
+ref: 1088aa811  OPENNLP-XXXX-hierarchy-annotator  research
+ref: ec3c6728d  OPENNLP-XXXX-place-profiles  research
+ref: 63a22b4b2  OPENNLP-XXXX-wordnet-extension  research
+ref: 3ba4e0a63  OPENNLP-XXXX-embedding-annotator  research
+ref: 10579093c  OPENNLP-XXXX-symbol-joiner  research
+ref: 3d7c58f77  OPENNLP-XXXX-spellcheck-recase  research
+ref: a0d1e6ba6  OPENNLP-XXXX-morfologik-fsa  research
+ref: 730f69cf4  OPENNLP-XXXX-dehyphenation  research
+ref: 2fe682c54  preview-accept-major0-models  research
