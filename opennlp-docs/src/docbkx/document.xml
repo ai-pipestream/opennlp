@@ -440,4 +440,118 @@ filter.annotate(Document.of("The dog barks. It naps."));
 			shown above.
 		</para>
 	</section>
+
+	<section xml:id="tools.document.coref">
+		<title>Document-layer coreference</title>
+		<para>
+			<code>CorefAnnotator</code> clusters the mentions of a document into
+			coreference chains without a model, following the entity-centric,
+			precision-ranked sieves of Lee et al. (Computational Linguistics 2013). It
+			requires the sentence, token, POS-tag, and entity layers and provides
+			<code>CorefAnnotator.CHAINS</code>: each annotation covers one mention and
+			carries a <code>CorefMention</code> with a chain id, a kind (entity, nominal,
+			or pronoun), and the index of the entity it came from. Singletons are
+			reported too, so no mention is lost; consumers interested only in links
+			filter by chain size.
+		</para>
+		<para>
+			Mentions are the entities, the noun phrases of an optional
+			<code>ParserAnnotator.PHRASES</code> or <code>ChunkerAnnotator.CHUNKS</code>
+			layer, the personal pronouns, and the demonstratives that stand alone
+			(<emphasis>That was costly</emphasis>). A noun phrase headed by an entity widens
+			that entity's mention to the whole phrase, a possessor inside a phrase is a
+			mention of its own, two chunks joined by <emphasis>of</emphasis> or
+			<emphasis>and</emphasis> are a candidate beside their parts (<emphasis>the law
+			of negligence</emphasis>, <emphasis>Kim and Lee</emphasis>), and a pleonastic
+			<emphasis>it</emphasis> is none. The rule sieves do not resolve demonstratives,
+			which mostly point at clauses; a ranker decides them. Each
+			mention carries the number, gender, animacy, and person the text supports,
+			read from pronoun forms, plural tags, name titles, a bundled first-name list
+			built from the public-domain Social Security Administration name tables, and
+			lists of gendered and animate nouns. Nine sieves then run in order of
+			decreasing precision, and each links an anaphor to the first candidate
+			antecedent whose whole cluster passes: exact and relaxed string match, acronym
+			and person-name containment, strict head match with two relaxations, proper
+			and relaxed head match, and pronoun resolution within three sentences under
+			number, gender, animacy, person, and entity type agreement. A name never
+			absorbs a compound such as <emphasis>Kansas City</emphasis>, indefinite and
+			bare common noun phrases are antecedents only, and clusters whose known
+			entity types differ never merge.
+		</para>
+		<para>
+			First and second person pronouns refer to the speaker and the addressee rather
+			than to an antecedent, so they chain per speaker: the value of an optional
+			<code>CorefAnnotator.SPEAKERS</code> layer covering each mention, or, without
+			one, the narrator outside quotation marks and one speaker per quotation, joined
+			to the person a verb of speech attributes the quotation to.
+		</para>
+		<para>
+			Given a <code>CorefModel</code>, the annotator ranks instead of applying the
+			head-match and pronoun sieves: after the speaker and string sieves, each
+			remaining mention takes the candidate antecedent the model scores highest. A
+			model from <code>CorefTrainer.trainRanking</code> is a mention ranker after
+			Durrett and Klein (EMNLP 2013), trained by softmax over each mention's
+			candidates and the option of starting a new chain, and links when the best
+			candidate outscores that option; a model from <code>CorefTrainer.train</code>
+			is a pair classifier and links when the best link probability reaches the
+			floor <code>CorefAnnotator.DEFAULT_THRESHOLD</code>. The features are the
+			sieve tests as predicates, head words, mention shapes, distance, attribute
+			pairs, cluster size, speaker equality, their conjunctions, and, when the
+			annotator is given <code>WordVectors</code>, the bucketed cosine similarity
+			of the two heads. Given <code>TokenVectors</code>, an encoder that returns one
+			contextual vector per token of a sentence, each mention also has a span vector
+			and the model adds the bucketed cosine of two span vectors and real-valued
+			features, their elementwise product and absolute difference, and the anaphor's
+			vector for the new-chain option; <code>TokenVectorsDL</code> in
+			<code>opennlp-dl</code> wraps a BERT-style ONNX encoder for that purpose. A
+			model trained with an encoder must be decoded with the same one. Training reads
+			documents that carry the annotator's input layers and a
+			<code>CorefAnnotator.GOLD_CHAINS</code> layer, the <code>gold:</code>
+			counterpart of the chains layer; <code>ConlluCorefDocumentStream</code> in
+			<code>opennlp-formats</code> reads such documents from CoNLL-U with
+			<code>Entity</code> brackets, the encoding of OntoGUM, the Universal Anaphora
+			releases, and the CorefUD collection, including its rich entity ids and
+			discontinuous mention parts. A document whose gold layer holds singleton
+			entities is taken to annotate every mention of its scheme, so detected mentions
+			it leaves unannotated are not taught, which lets corpora that mark only some
+			mention types, such as LitBank, train beside OntoNotes-style data.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+ObjectStream<Document> gold = new ConlluCorefDocumentStream(inputStreamFactory, ConlluTagset.X);
+ObjectStream<Document> training = /* add entity and chunk layers to each document */;
+CorefModel model = CorefTrainer.trainRanking("eng", training, new CorefAnnotator());
+Document resolved = new CorefAnnotator(model).annotate(document);]]>
+		</programlisting>
+		<para>
+			<code>CorefScorer</code> computes the MUC, B-cubed, and CEAF metrics and the
+			CoNLL average over predicted mentions exactly as the reference scorer of
+			Pradhan et al. (ACL 2014) does. Measured with it on the OntoGUM corpus with
+			gold sentences, tokens, and tags, predicted entities and chunks, and the corpus
+			speaker lines, the rule-based annotator reaches a CoNLL average of 46.5 on the
+			test split and the mention ranker trained on the train split 49.8, against the
+			39.7 that Zhu, Pradhan, and Zeldes (ACL 2021) report for the Stanford
+			deterministic system; without the two reddit documents per split, whose text
+			GUM withholds, the ranker reaches 51.9. The harness is
+			<code>OntoGumCorefEvalTest</code>, which also reads any CorefUD file;
+			<code>GapCorefEvalTest</code> checks pronoun resolution alone on GAP with every
+			layer predicted, where the ranker reaches an F1 of 43.1 with a gender bias ratio
+			of 0.94.
+			<code>CorefPipelineExampleTest</code> asserts the behavior shown here.
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+Document document = DocumentAnalyzer.builder()
+    .add(sentenceAnnotator)
+    .add(tokenAndPosAnnotator)
+    .add(entityAnnotator)
+    .add(new CorefAnnotator())
+    .build()
+    .analyze("Ada Lovelace advised Orion Labs. Lovelace saw its potential. She was right.");
+
+List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+// chain 0: Ada Lovelace, Lovelace, She
+// chain 1: Orion Labs, its]]>
+		</programlisting>
+	</section>
 </chapter>
