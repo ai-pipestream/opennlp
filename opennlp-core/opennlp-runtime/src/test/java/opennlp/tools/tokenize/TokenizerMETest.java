@@ -20,6 +20,7 @@ package opennlp.tools.tokenize;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +42,17 @@ import opennlp.tools.util.TrainingParameters;
  * @see TokenizerME
  */
 public class TokenizerMETest {
+
+  /**
+   * Restores the shared {@link WhitespaceTokenizer#INSTANCE} after each test:
+   * {@link TokenizerME#tokenizePos(String)} writes its {@code keepNewLines} flag through to
+   * that shared instance, so the newline-aware tests here would otherwise leak
+   * {@code keepNewLines=true} into every later test using the instance.
+   */
+  @AfterEach
+  void resetSharedWhitespaceTokenizer() {
+    WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
+  }
 
   @Test
   void testTokenizerSimpleModel() throws IOException {
