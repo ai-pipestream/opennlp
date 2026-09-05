@@ -17,9 +17,7 @@
 
 package opennlp.geo;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -28,6 +26,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import static opennlp.geo.PlaceProfilesTestSupport.load;
 
 /**
  * Tests place-profile similarity against a project-authored miniature table; no
@@ -45,23 +45,17 @@ public class PlaceProfilesTest {
 
   private static PlaceProfiles profiles;
 
+  /**
+   * Loads the shared table fixture.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
+   */
   @BeforeAll
   static void loadProfiles() throws IOException {
     profiles = load(TABLE);
   }
 
-  /**
-   * Loads a table held as a string through the stream entry point.
-   *
-   * @param table The tab-separated table content.
-   * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if the table is malformed.
-   */
-  private static PlaceProfiles load(String table) throws IOException {
-    return PlaceProfiles.load(
-        new ByteArrayInputStream(table.getBytes(StandardCharsets.UTF_8)));
-  }
-
+  /** Similar urban profiles score higher than profiles with different measurements. */
   @Test
   void testSimilarProfilesScoreHigherThanDissimilarOnes() {
     final double urbanPair = profiles.similarity("park-slope", "brooklyn-heights");
@@ -71,6 +65,7 @@ public class PlaceProfilesTest {
     Assertions.assertEquals(1.0, profiles.similarity("suburbia", "suburbia"), 1e-9);
   }
 
+  /** Orders neighbors by decreasing similarity. */
   @Test
   void testMostSimilarRanksByProfile() {
     final List<PlaceProfiles.Neighbor> neighbors =
@@ -81,6 +76,7 @@ public class PlaceProfilesTest {
         neighbors.get(0).similarity() > neighbors.get(1).similarity());
   }
 
+  /** Lists metric names in column order and checks place membership. */
   @Test
   void testMetricsAndMembership() {
     Assertions.assertEquals(List.of("density", "income", "transit"),
@@ -89,16 +85,22 @@ public class PlaceProfilesTest {
     Assertions.assertFalse(profiles.contains("atlantis"));
   }
 
+  /**
+   * Rejects invalid headers, numeric cells, field counts, and empty data sections.
+   *
+   * @param table The malformed table.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "density\tincome\n",
       "id\tdensity\na\tnot-a-number\n",
       "id\tdensity\na\t1\t2\n",
       "id\tdensity\n"})
-  void testMalformedTablesFailLoud(String table) {
+  void testMalformedTablesAreRejected(String table) {
     Assertions.assertThrows(IOException.class, () -> load(table));
   }
 
+  /** Rejects null sources, unknown places, and invalid result counts. */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

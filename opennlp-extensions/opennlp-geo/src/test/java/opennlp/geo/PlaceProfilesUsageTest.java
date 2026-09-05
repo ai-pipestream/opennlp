@@ -21,34 +21,25 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * Demonstrates the full place-profile workflow end to end: a caller assembles a small
- * tab-separated metric table, writes it to a file, loads it, and then queries pairwise
- * similarities and nearest-neighbor rankings. The five places and their metric values
- * are project-authored; no external metadata source is involved.
- *
- * <p>Every expected score in this class was produced by running exactly this table
- * through {@link PlaceProfiles}. The scores are floating-point results of standardizing
- * the columns and taking cosines, so they are asserted with a delta of {@code 1e-12},
- * which is tight enough to pin the value while tolerating only last-ulp variation in
- * summation order.</p>
- */
+/** Demonstrates loading and querying a project-authored place-profile table. */
 public class PlaceProfilesUsageTest {
 
-  /**
-   * A miniature profile table with three metrics per place: residential density in
-   * people per square kilometer, median household income in dollars, and a transit
-   * access score from 1 to 10. The two dense urban places resemble each other, the
-   * suburb and the rural town sit progressively farther away, and the mid-sized mill
-   * city lands in between.
-   */
+  /** Density, income, and transit measurements for five fictional places. */
   private static final String TABLE = String.join("\n",
       "id\tdensity\tincome\ttransit",
       "metroville\t12000\t72000\t8",
@@ -58,16 +49,14 @@ public class PlaceProfilesUsageTest {
       "mill-city\t9500\t52000\t7",
       "");
 
-  /** The profiles under test, loaded once from a real file for the whole class. */
+  /** Profiles loaded from the test file. */
   private static PlaceProfiles profiles;
 
   /**
-   * Writes the table to a file inside the supplied temporary directory and loads it
-   * through the {@link Path} entry point, mirroring how a caller supplies a table on
-   * disk.
+   * Writes and loads the table through the Path entry point.
    *
-   * @param tempDir A directory managed by the test framework. Never {@code null}.
-   * @throws IOException Thrown if the fixture cannot be written or loaded.
+   * @param tempDir The test directory.
+   * @throws IOException Thrown if the file cannot be written or loaded.
    */
   @BeforeAll
   static void loadProfilesFromFile(@TempDir Path tempDir) throws IOException {
@@ -77,8 +66,7 @@ public class PlaceProfilesUsageTest {
   }
 
   /**
-   * Asserts that the loaded table exposes its metric names in column order and answers
-   * membership questions for listed and unlisted places.
+   * Checks the metric names and place membership.
    */
   @Test
   void testLoadedTableExposesMetricsAndMembership() {
@@ -89,11 +77,7 @@ public class PlaceProfilesUsageTest {
   }
 
   /**
-   * Asserts the exact pairwise scores against the query place: the sibling urban place
-   * scores highest, the mill city is mildly positive, the suburb is mildly negative,
-   * and the rural town is strongly negative. Also asserts that self-similarity lands
-   * one ulp below {@code 1.0}, because the square root of the squared norm is rounded
-   * before the division.
+   * Checks pairwise scores with floating-point tolerance.
    */
   @Test
   void testPairwiseSimilaritiesMatchComputedScores() {
@@ -110,9 +94,7 @@ public class PlaceProfilesUsageTest {
   }
 
   /**
-   * Asserts that a full-width neighbor query returns every other place, never the
-   * query place itself, in strictly descending score order, and that each score equals
-   * the corresponding pairwise similarity.
+   * Checks the complete neighbor ranking and excludes the query place.
    */
   @Test
   void testMostSimilarReturnsFullDescendingRanking() {
@@ -132,9 +114,7 @@ public class PlaceProfilesUsageTest {
   }
 
   /**
-   * Asserts a truncated ranking from a different query place: the rural town's least
-   * dissimilar neighbor is the suburb, followed by the mill city, and the requested
-   * count caps the result at two entries.
+   * Limits the ranking to the requested number of results.
    */
   @Test
   void testTruncatedRankingFromAnotherQueryPlace() {
@@ -144,5 +124,71 @@ public class PlaceProfilesUsageTest {
     Assertions.assertEquals("mill-city", neighbors.get(1).id());
     Assertions.assertEquals(0.15895265022433747, neighbors.get(0).similarity(), 1e-12);
     Assertions.assertEquals(-0.08091385909242901, neighbors.get(1).similarity(), 1e-12);
+  }
+
+  /** Returned metric names and rankings cannot modify the loaded profiles. */
+  @Test
+  void testImmutableResults() {
+    Assertions.assertThrows(UnsupportedOperationException.class,
+        () -> profiles.metrics().add("extra"));
+    Assertions.assertThrows(UnsupportedOperationException.class,
+        () -> profiles.mostSimilar("metroville", 2).clear());
+    Assertions.assertEquals(3, profiles.metrics().size());
+    Assertions.assertEquals(4, profiles.mostSimilar("metroville", Integer.MAX_VALUE).size());
+  }
+
+  /**
+   * A single-place table has no comparative variation or neighbors.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
+   */
+  @Test
+  void testSinglePlace() throws IOException {
+    final PlaceProfiles single = PlaceProfilesTestSupport.load("id\tv\na\t42\n");
+    Assertions.assertEquals(0.0, single.similarity("a", "a"));
+    Assertions.assertTrue(single.mostSimilar("a", 1).isEmpty());
+  }
+
+  /**
+   * Shared profiles return consistent rankings during concurrent queries.
+   *
+   * @throws InterruptedException Thrown if the test is interrupted.
+   * @throws ExecutionException Thrown if a query task fails.
+   */
+  @Test
+  void testConcurrentQueries() throws InterruptedException, ExecutionException {
+    final List<PlaceProfiles.Neighbor> urban = profiles.mostSimilar("metroville", 4);
+    final List<PlaceProfiles.Neighbor> rural = profiles.mostSimilar("farmdale", 4);
+    final List<Callable<List<PlaceProfiles.Neighbor>>> tasks = new ArrayList<>();
+    for (int i = 0; i < 64; i++) {
+      final String id = i % 2 == 0 ? "metroville" : "farmdale";
+      tasks.add(() -> profiles.mostSimilar(id, 4));
+    }
+    try (var executor = Executors.newFixedThreadPool(4)) {
+      final var results = executor.invokeAll(tasks);
+      for (int i = 0; i < results.size(); i++) {
+        Assertions.assertEquals(i % 2 == 0 ? urban : rural, results.get(i).get());
+      }
+    }
+  }
+
+  /**
+   * Table line order does not change scores or rankings.
+   *
+   * @param seed The shuffle seed.
+   * @throws IOException Thrown if the reordered table cannot be loaded.
+   */
+  @ParameterizedTest
+  @ValueSource(longs = {1, 7, 43, 91})
+  void testRowOrder(long seed) throws IOException {
+    final List<String> lines = TABLE.lines().toList();
+    final List<String> data = new ArrayList<>(lines.subList(1, lines.size()));
+    Collections.shuffle(data, new Random(seed));
+    final PlaceProfiles reordered = PlaceProfilesTestSupport.load(
+        lines.getFirst() + "\n" + String.join("\n", data));
+    Assertions.assertEquals(profiles.mostSimilar("metroville", 4),
+        reordered.mostSimilar("metroville", 4));
+    Assertions.assertEquals(profiles.mostSimilar("farmdale", 4),
+        reordered.mostSimilar("farmdale", 4));
   }
 }
