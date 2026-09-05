@@ -32,6 +32,7 @@ import java.util.Set;
 import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * A deterministic {@link MoneyExtractor}: a single forward scan over the text, no
@@ -54,22 +55,20 @@ import opennlp.tools.util.Span;
  * default: {@code $1,234.56} is a little over a thousand dollars. A document written in
  * the European convention is read by an extractor built for it, either with the notation
  * given directly or with {@link #forRegion(Locale)}, and then {@code 1.234,56 EUR} is a
- * little over a thousand euros. Text in the other notation is rejected rather than
- * misread.</p>
+ * little over a thousand euros. Inputs valid in both notations are interpreted using
+ * the selected one; invalid grouping is rejected.</p>
  *
  * <p>Currency symbols are inherently ambiguous; the default table maps each symbol to
  * the ISO code it most commonly denotes, for example {@code $} to {@code USD}. Callers
  * working in another convention supply their own mapping through
  * {@link #CursorMoneyExtractor(Map)}. ISO codes are taken from
- * {@link Currency#getAvailableCurrencies()}, so no currency data is bundled.</p>
+ * {@link Currency#getAvailableCurrencies()}.</p>
  *
- * <p>Spelled-out currency words are matched against a deliberately short table of English
- * words with a conventional default currency, singular and plural, so
- * {@code 50 euros} and {@code 3 billion pounds} are money while {@code 5 apples} and
- * {@code 10 cents} are not. Less predictable families such as {@code peso}, {@code franc},
- * and {@code krone} are left out, as is {@code won}, which is an everyday English verb.
- * The defaults resolve {@code dollar} to USD and {@code rupee} to INR. {@code Pound} also
- * names a weight, so {@code 3 pounds of flour} is knowingly read as money.</p>
+ * <p>English currency words use fixed defaults, including {@code dollar} for USD,
+ * {@code rupee} for INR, and {@code pound} for GBP. Singular and plural forms are
+ * supported. The words {@code peso}, {@code franc}, {@code krone}, and {@code won}
+ * are excluded, as are subunits such as {@code cents}. Weight phrases such as
+ * {@code 3 pounds of flour} are interpreted as GBP amounts.</p>
  *
  * <p>Not recognized: accounting negatives in parentheses and multi-character symbols such
  * as {@code kr} or {@code HK$}. A known symbol directly preceded by an ASCII letter is
@@ -436,20 +435,12 @@ public class CursorMoneyExtractor implements MoneyExtractor {
    *         or are part of a longer token.
    */
   private CurrencyWord currencyWordAt(CharSequence text, int start) {
-    int i = start;
-    final StringBuilder word = new StringBuilder();
-    while (Character.isLetter(NumberScan.charAt(text, i))
-        && word.length() <= MAX_CURRENCY_WORD_LENGTH) {
-      word.append(Character.toLowerCase(text.charAt(i)));
-      i++;
-    }
-    final char after = NumberScan.charAt(text, i);
-    if (word.isEmpty() || word.length() > MAX_CURRENCY_WORD_LENGTH
-        || Character.isLetterOrDigit(after) || after == '-') {
+    final int end = NumberScan.wordEnd(text, start, MAX_CURRENCY_WORD_LENGTH);
+    if (end < 0 || NumberScan.charAt(text, end) == '-') {
       return null;
     }
-    final String currency = CURRENCY_WORDS.get(word.toString());
-    return currency == null ? null : new CurrencyWord(currency, i);
+    final String currency = CURRENCY_WORDS.get(StringUtil.toLowerCase(text.subSequence(start, end)));
+    return currency == null ? null : new CurrencyWord(currency, end);
   }
 
   /**
@@ -489,7 +480,7 @@ public class CursorMoneyExtractor implements MoneyExtractor {
         return null;
       }
     }
-    if (Character.isLetterOrDigit(NumberScan.charAt(text, start + 3))) {
+    if (!NumberScan.boundaryAfter(text, start + 3)) {
       return null;
     }
     final String code = text.subSequence(start, start + 3).toString();
@@ -518,19 +509,16 @@ public class CursorMoneyExtractor implements MoneyExtractor {
   }
 
   /**
-   * Checks whether the code point directly before a position is an ASCII letter. A
+   * Checks whether the preceding base character is an ASCII letter, skipping its marks. A
    * known currency symbol in that context is the tail of a multi-character symbol the
    * table does not know, such as {@code HK$}, and must not match as the bare symbol.
    *
    * @param text The text being scanned. Must not be {@code null}.
    * @param index The offset of the candidate symbol.
-   * @return {@code true} if an ASCII letter directly precedes {@code index}.
+   * @return {@code true} if an ASCII letter, with optional combining marks, precedes the symbol.
    */
   private boolean asciiLetterBefore(CharSequence text, int index) {
-    if (index == 0) {
-      return false;
-    }
-    final int cp = Character.codePointBefore(text, index);
+    final int cp = NumberScan.baseCodePointBefore(text, index);
     return isUpperAscii(cp) || (cp >= 'a' && cp <= 'z');
   }
 

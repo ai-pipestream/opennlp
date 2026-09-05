@@ -24,17 +24,11 @@ import java.util.Locale;
  * The written conventions for grouping digits and marking a decimal fraction that the
  * numeric extractors read.
  *
- * <p>The two conventions are mirror images of each other, which is why a number written
- * in one and read in the other silently means something else: {@code 1.234,56} is a
- * little over a thousand where a dot groups digits and just over one where a dot marks
- * the fraction. A caller therefore states which convention a document follows, either
- * directly or through {@link #forLocale(Locale)}, instead of the extractors guessing per
- * number.</p>
- *
- * <p>Text that cannot be read in the stated convention is rejected rather than
- * approximated: the scan of an ambiguous grouping such as {@code 1,23} in
- * {@link #LATIN_US} fails, so a document in the wrong convention yields no mentions
- * instead of wrong ones.</p>
+ * <p>A caller selects one convention, directly or through {@link #forLocale(Locale)}.
+ * Some inputs are valid in both but have different values: {@code 1.234} means 1.234 in
+ * {@link #LATIN_US} and 1234 in {@link #LATIN_EU}. The extractor does not infer which
+ * value the author intended. Invalid grouping, such as {@code 1,23} in LATIN_US, is
+ * rejected.</p>
  *
  * @see NumberScan
  * @since 3.0.0
@@ -42,20 +36,24 @@ import java.util.Locale;
 public enum NumberNotation {
 
   /**
-   * Commas group digits and a dot marks the fraction, as in {@code 1,234.56}. The
-   * convention of English-speaking regions and of most of Asia.
+   * Commas group digits and a dot marks the fraction, as in {@code 1,234.56}.
    */
   LATIN_US(',', '.'),
 
   /**
-   * Dots group digits and a comma marks the fraction, as in {@code 1.234,56}. The
-   * convention of most of continental Europe and of South America.
+   * Dots group digits and a comma marks the fraction, as in {@code 1.234,56}.
    */
   LATIN_EU('.', ',');
 
   private final char groupSeparator;
   private final char decimalSeparator;
 
+  /**
+   * Stores the notation's separators.
+   *
+   * @param groupSeparator The character separating digit groups.
+   * @param decimalSeparator The character separating the fractional part.
+   */
   NumberNotation(char groupSeparator, char decimalSeparator) {
     this.groupSeparator = groupSeparator;
     this.decimalSeparator = decimalSeparator;
@@ -79,12 +77,9 @@ public enum NumberNotation {
    * Resolves the notation a locale writes numbers in.
    *
    * <p>The decision is taken from the locale's own {@link DecimalFormatSymbols}, so it
-   * follows the JDK's locale data rather than a hard-coded list of countries: a locale
-   * whose decimal separator is a comma is read as {@link #LATIN_EU}, every other locale
-   * as {@link #LATIN_US}. Locales that group digits with neither a comma nor a dot, with
-   * a narrow no-break space for instance, are read in the notation their decimal
-   * separator names, and their grouped numbers are then rejected rather than
-   * misread.</p>
+   * follows the JDK's locale data: a comma decimal separator selects {@link #LATIN_EU};
+   * every other decimal separator selects {@link #LATIN_US}. This selection does not
+   * add support for the locale's other grouping characters or non-ASCII digits.</p>
    *
    * @param locale The locale to resolve. Must not be {@code null}.
    * @return The notation of {@code locale}. Never {@code null}.

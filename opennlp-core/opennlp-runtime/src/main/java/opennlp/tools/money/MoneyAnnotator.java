@@ -26,14 +26,14 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
 
 /**
- * Adapts a {@link MoneyExtractor} to the document pipeline: scans the document text and
- * provides {@link #MONEY}, one annotation per monetary mention carrying its
- * {@link MoneyAmount}.
+ * Extracts monetary mentions from the original document text into {@link #MONEY}.
  *
- * <p>The extractor works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline.</p>
+ * <p>No input layers are required. Results must be non-null, in text order,
+ * non-overlapping, and within the text bounds. Values and spans are retained without
+ * normalization or reordering.</p>
  *
  * @since 3.0.0
  */
@@ -61,24 +61,42 @@ public class MoneyAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Scans the document text and adds the {@link #MONEY} layer.
+   * {@inheritDoc}
    *
-   * <p>No other layer is read, so a document without any layer yields the money layer
-   * present and, if the text holds no monetary mention, empty.</p>
+   * <p>Adds the validated extraction results under {@link #MONEY}.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #MONEY} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   * @throws IllegalArgumentException Thrown if the output layer is present or the
+   *         extractor returns a null result, null mention, or invalid span sequence.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    if (document.layers().contains(MONEY)) {
+      throw new IllegalArgumentException("layer is already present: " + MONEY);
+    }
+    final CharSequence text = document.text();
+    final int textLength = text.length();
+    final List<MoneyAmount> extracted = extractor.extract(text);
+    if (extracted == null) {
+      throw new IllegalArgumentException("extractor returned a null result");
+    }
     final List<Annotation<MoneyAmount>> mentions = new ArrayList<>();
-    for (final MoneyAmount amount : extractor.extract(document.text())) {
-      mentions.add(new Annotation<>(amount.span(), amount));
+    int previousEnd = 0;
+    for (final MoneyAmount amount : extracted) {
+      if (amount == null) {
+        throw new IllegalArgumentException("extractor returned a null mention");
+      }
+      final Span span = amount.span();
+      if (span.getEnd() > textLength) {
+        throw new IllegalArgumentException("extractor returned a span beyond the text: " + span);
+      }
+      if (span.getStart() < previousEnd) {
+        throw new IllegalArgumentException("extractor returned an unordered or overlapping span: " + span);
+      }
+      previousEnd = span.getEnd();
+      mentions.add(new Annotation<>(span, amount));
     }
     return document.with(MONEY, mentions);
   }

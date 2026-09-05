@@ -35,32 +35,26 @@ import opennlp.tools.temporal.DocumentDateAnnotator;
 import opennlp.tools.temporal.TemporalAnnotator;
 
 /**
- * Ready-made numeric pipelines, one per kind of number a caller usually looks for: money
- * amounts, measured quantities, calendar mentions, and all of them at once.
+ * Builds pipelines for currency amounts, quantities, calendar mentions, or their combination.
  *
- * <p>A pack saves the caller from naming individual annotators and, more importantly, from
- * ordering them wrongly. The order matters in one place that is easy to miss: the temporal
- * annotator must run before {@link DocumentDateAnnotator}, and it is the temporal annotator
- * that elects the dateline resolving relative expressions such as {@code yesterday}. A pack
- * wires that once and correctly.</p>
+ * <p>Temporal pipelines run {@link TemporalAnnotator} before {@link DocumentDateAnnotator}.
+ * Relative expressions use a reference date from the text or a configured date.</p>
  *
- * <p>The regional variants read a document the way its region writes numbers: an amount in
- * a German document groups digits with dots, and a dollar sign in an Australian one denotes
- * Australian dollars. Both decisions come from JDK locale data through
+ * <p>Regional variants select number notation and currency-symbol defaults from JDK locale
+ * data through
  * {@link CursorMoneyExtractor#forRegion(Locale)} and
  * {@link NumberNotation#forLocale(Locale)}.</p>
  *
- * <p>Every pack returns a new analyzer built from stateless extractors, so a caller may keep
- * one in a static field and share it between threads. A pipeline that needs more than a pack
- * offers, currency conversion through {@link MoneyConversionAnnotator} for instance, starts
- * from {@link #annotators(Locale)} and adds to it.</p>
+ * <p>The analyzers use stateless extractors and can be shared between threads. To add steps
+ * such as {@link MoneyConversionAnnotator}, start with the modifiable list from
+ * {@link #annotators()} or {@link #annotators(Locale)}.</p>
  *
  * @since 3.0.0
  */
 public final class NumericPacks {
 
+  /** Prevents instances of this factory class. */
   private NumericPacks() {
-    // This class holds static factories only and is never instantiated.
   }
 
   /**
@@ -75,7 +69,7 @@ public final class NumericPacks {
   }
 
   /**
-   * Money amounts, read the way a region writes and denominates them.
+   * Currency amounts using the notation and symbol defaults selected for a region.
    *
    * @param region A locale with a country component. Must not be {@code null} and must
    *               name a region with a currency.
@@ -119,8 +113,8 @@ public final class NumericPacks {
   }
 
   /**
-   * Calendar mentions and the document date they elect: a dateline in the text supplies
-   * the reference date, so relative expressions behind it are resolved.
+   * Calendar mentions and a document date, using an absolute day in the text to resolve
+   * relative expressions.
    *
    * @return A new analyzer providing {@link TemporalAnnotator#TEMPORALS} and
    *         {@link DocumentDateAnnotator#DOCUMENT_DATE}. Never {@code null}.
@@ -133,9 +127,8 @@ public final class NumericPacks {
   }
 
   /**
-   * Calendar mentions and an absolute document date, with the reference for relative
-   * expressions fixed by the caller. A fixed reference is not synthesized as a text span,
-   * so the document-date layer stays empty unless the text contains an absolute day.
+   * Calendar mentions with a configured reference date for relative expressions. The
+   * document-date layer requires an absolute day mention in the text.
    *
    * @param reference The date relative expressions resolve against. Must not be
    *                  {@code null}.
@@ -151,8 +144,7 @@ public final class NumericPacks {
   }
 
   /**
-   * Every numeric layer at once: calendar mentions, the elected document date, money
-   * amounts, and measured quantities.
+   * Calendar mentions, the document date, currency amounts, and quantities.
    *
    * @return A new analyzer providing all four numeric layers. Never {@code null}.
    */
@@ -161,7 +153,7 @@ public final class NumericPacks {
   }
 
   /**
-   * Every numeric layer at once, read the way a region writes and denominates numbers.
+   * All numeric layers using a region's selected notation and currency-symbol defaults.
    *
    * @param region A locale with a country component. Must not be {@code null} and must
    *               name a region with a currency.
@@ -174,10 +166,8 @@ public final class NumericPacks {
   }
 
   /**
-   * The annotators of {@link #fullPipeline()} in execution order, for callers that add
-   * further annotators of their own: appending a {@link MoneyConversionAnnotator} to this
-   * list yields a pipeline that also restates every amount in one currency as of the
-   * document date.
+   * The annotators of {@link #fullPipeline()} in execution order. Additional steps such
+   * as {@link MoneyConversionAnnotator} can be appended to the returned list.
    *
    * @return A new, modifiable list of annotators in execution order. Never {@code null}.
    */
@@ -186,8 +176,7 @@ public final class NumericPacks {
   }
 
   /**
-   * The annotators of {@link #fullPipeline(Locale)} in execution order, for callers that
-   * add further annotators of their own.
+   * The annotators of {@link #fullPipeline(Locale)} in execution order.
    *
    * @param region A locale with a country component. Must not be {@code null} and must
    *               name a region with a currency.
@@ -204,7 +193,7 @@ public final class NumericPacks {
   }
 
   /**
-   * Assembles the full pipeline around the extractors the caller's region decided on.
+   * Assembles the full pipeline using the selected extractors.
    *
    * @param money The money extractor to use. Must not be {@code null}.
    * @param quantity The quantity extractor to use. Must not be {@code null}.
