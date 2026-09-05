@@ -521,3 +521,13 @@ https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT
 
 The Unicode License V3 reproduced above also applies to this mapping.
 Copyright © 1991-2026 Unicode, Inc.
+
+The generated opennlp.tools.pii.IanaTlds table contains only factual
+top-level-domain labels derived from the IANA Root Zone Database:
+
+    https://data.iana.org/TLD/tlds-alpha-by-domain.txt
+
+The IANA download does not include separate license text. IANA's CC0 statement
+at https://www.iana.org/help/licensing-terms is expressly limited to Protocol
+Registries and is not asserted here to cover the Root Zone Database. No IANA
+website text, delegation metadata, or branding is included in the table.
