@@ -5,3 +5,16 @@ https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT
 
 Copyright © 1991-2026 Unicode, Inc.
 Distributed under the Unicode License V3 reproduced in LICENSE.
+
+The file signature table in opennlp.tools.assets.KnownMagics is adapted from
+Apache Tika's tika-mimetypes.xml.
+Apache Tika: Copyright 2021 The Apache Software Foundation.
+
+Tika's catalog includes MIME type information from file-4.26:
+Copyright (c) Ian F. Darwin 1986, 1987, 1989, 1990, 1991, 1992, 1994, 1995.
+Software written by Ian F. Darwin and others; maintained 1994- Christos Zoulas.
+
+The catalog also includes definitions adapted from the PRONOM Technical
+Registry by The National Archives (https://www.nationalarchives.gov.uk/PRONOM/).
+Contains public sector information licensed under the Open Government Licence v3.0.
+https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/

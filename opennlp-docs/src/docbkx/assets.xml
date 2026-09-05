@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML 5.0//EN"
+"http://docbook.org/xml/5.0/dtd/docbook.dtd"[
+]>
+<!-- Licensed to the Apache Software Foundation (ASF) under one or more contributor
+	license agreements. See the NOTICE file distributed with this work for additional
+	information regarding copyright ownership. The ASF licenses this file to
+	you under the Apache License, Version 2.0 (the "License"); you may not use
+	this file except in compliance with the License. You may obtain a copy of
+	the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+	by applicable law or agreed to in writing, software distributed under the
+	License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+	OF ANY KIND, either express or implied. See the License for the specific
+	language governing permissions and limitations under the License. -->
+
+<chapter xml:id="tools.assets" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+	<title>Embedded Asset Detection</title>
+
+	<section xml:id="tools.assets.introduction">
+		<title>Introduction</title>
+		<para>
+			Text can include encoded files: web pages inline images as <code>data:</code> URIs,
+			documents paste base64 payloads, mail wraps MIME bodies, and logs contain PEM
+			envelopes and JSON Web Tokens.
+			The package <code>opennlp.tools.assets</code> finds such assets as exact spans
+			over the original text, identifies their format, and can replace them with text
+			while keeping every offset mapped to the source.
+		</para>
+		<para>
+			<code>CursorAssetDetector</code> checks encoded prefixes, validates the payload
+			alphabet and padding, and decodes up to 24 leading bytes for format detection.
+			Bare runs need at least 32 encoded characters and a recognized file signature.
+			The signature table is derived from Apache Tika's media-type catalog. Recognized
+			PNG and GIF headers also provide image dimensions. A declared media type alone
+			does not provide dimensions. Both dimensions are -1 when either
+			is missing or invalid. PNG dimensions require a leading 13-byte
+			<ulink url="https://www.w3.org/TR/png-3/#11IHDR">IHDR chunk</ulink> and positive
+			values no greater than 2,147,483,647. GIF dimensions describe the logical screen.
+			A signature match does not establish that a file is complete, valid, or safe to open.
+		</para>
+		<para>
+			XAR archives are reported as <code>xar</code> with media type
+			<code>application/x-xar</code>, not Xara graphics. Encoded XPM images are
+			reported as <code>xpm</code> with media type <code>image/x-xpixmap</code>.
+		</para>
+		<para>
+			Explicitly typed, base64 <code>data:</code> URIs accept non-empty payloads,
+			including one- and two-byte values. The media type retains parameters such as
+			<code>charset=UTF-8</code>; the format name excludes them. Non-base64 data URIs
+			and percent-encoded payload characters are not supported.
+		</para>
+		<para>
+			Malformed padding, mixed standard and URL-safe alphabets, and line-wrapped
+			URL-safe payloads are rejected. For an unpadded run with length 1 modulo 4,
+			the scanner omits the final character to recover a decodable prefix. This
+			recovery does not repair or validate the underlying file.
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.detection">
+		<title>Detecting and decoding</title>
+		<para>
+			This example uses a 45-byte PNG header fixture with dimensions 5 by 7:
+			<programlisting language="java"><![CDATA[
+String text = "An image data:image/png;base64,"
+    + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
+    + " follows.";
+
+AssetDetector detector = new CursorAssetDetector();
+EmbeddedAsset asset = detector.detect(text).get(0);
+// asset.format()        = "png"
+// asset.mediaType()     = "image/png"
+// asset.width()         = 5
+// asset.height()        = 7
+// asset.decodedLength() = 45
+byte[] bytes = asset.decode(text);  // the original 45 bytes]]>
+			</programlisting>
+			The asset span covers the URI and the payload span covers the base64 text.
+			<code>decode</code> returns the payload bytes from the original text.
+		</para>
+		<para>
+			Detection needs no <code>data:</code> URI: the same payload pasted bare into
+			prose is found by its magic prefix and verified against its decoded header:
+			<programlisting language="java"><![CDATA[
+String bare = "A report pastes "
+    + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
+    + " into the body.";
+
+EmbeddedAsset found = new CursorAssetDetector().detect(bare).get(0);
+// found.format()        = "png", sniffed from the decoded header
+// found.mediaType()     = "image/png", derived from the format
+// found.width()         = 5
+// found.height()        = 7
+// found.decodedLength() = 45]]>
+			</programlisting>
+			For a bare run, the asset span and payload span cover the same characters.
+		</para>
+		<para>
+			A short text payload does not require a file signature:
+			<programlisting language="java"><![CDATA[
+String note = "data:text/plain;charset=UTF-8;base64,SGk=";
+EmbeddedAsset asset = new CursorAssetDetector().detect(note).get(0);
+String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
+// decoded = "Hi"
+// asset.format() = "plain"
+// asset.mediaType() = "text/plain;charset=UTF-8"]]>
+			</programlisting>
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.transport-forms">
+		<title>Wrapped base64, PEM, and JWT</title>
+		<para>
+			Bare standard-base64 payloads can cross LF or CRLF line separators when their
+			continued lines use the conventional 76-column MIME or 64-column PEM width.
+			The final line may be shorter. Unwrapped payloads may instead use the URL-safe
+			alphabet from
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc4648.html#section-5">RFC
+			4648 section 5</link>. The detector still requires a known and decoded file
+			magic before it reports either form as a bare asset.
+		</para>
+		<para>
+			A textual envelope following
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc7468.html">RFC 7468</link>
+			is different: its verified, matching <code>BEGIN</code> and <code>END</code>
+			labels identify the content. The asset span covers the full envelope while the
+			payload span covers only its line-wrapped body, so <code>decode</code> returns
+			the DER bytes directly. Empty bodies, mismatched labels, lines longer than 64
+			characters, invalid padding, and non-base64 body characters fail closed.
+		</para>
+		<para>
+			Compact JSON Web Tokens from
+			<link xlink:href="https://www.rfc-editor.org/rfc/rfc7519.html">RFC 7519</link>
+			are recognized as three base64url segments. The header and claims must decode
+			as UTF-8 JSON objects, the header must carry a non-empty string-valued
+			<code>alg</code>, and each segment is bounded to 16 KiB. For an unsecured token,
+			<code>alg</code> must be <code>none</code> and the signature segment must be empty;
+			all other algorithms require a non-empty signature segment with valid unpadded
+			base64url encoding. The full token is
+			the asset span and the claims segment is the payload:
+			<programlisting language="java"><![CDATA[
+String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    + ".eyJzdWIiOiIxMjMifQ.AAAA";
+
+EmbeddedAsset token = new CursorAssetDetector().detect(jwt).get(0);
+// token.format()    = "jwt"
+// token.mediaType() = "application/jwt"
+// new String(token.decode(jwt), StandardCharsets.UTF_8) = "{\"sub\":\"123\"}"]]>
+			</programlisting>
+			Detection validates structure only. It does not verify a JWT signature, trust a
+			key, or make an authorization decision.
+		</para>
+	</section>
+
+	<section xml:id="tools.assets.fold">
+		<title>Folding assets into text</title>
+		<para>
+			<code>AssetAnnotator</code> provides the <code>opennlp:assets</code> layer, and
+			<code>AssetFolder</code> replaces every asset with text. The result is an
+			<code>AlignedText</code>: spans over the folded text map back to exact original
+			offsets, so downstream findings over the cleaned text still locate in the raw
+			input. The default replacement renders a caption from the asset's own
+			metadata:
+			<programlisting language="java"><![CDATA[
+Document document = new AssetAnnotator().annotate(Document.of(text));
+AlignedText folded = AssetFolder.fold(document, AssetFolder.caption());
+// folded.normalizedString() = "An image [png 5x7, 45 bytes] follows."]]>
+			</programlisting>
+			Mapping the caption back recovers the asset's exact span in the original:
+			<code>folded.toOriginalSpan(9, 28)</code>, the caption's offsets in the folded
+			text, returns the span of the whole data URI.
+		</para>
+		<para>
+			What replaces an asset is the caller's choice through the replacement
+			function. A <code>BinaryContentDescriber</code> can extract document text or
+			generate an image description:
+			<programlisting language="java"><![CDATA[
+BinaryContentDescriber describer = ...;  // supplied by the caller
+
+AlignedText described = AssetFolder.fold(document, annotation ->
+    describer.describe(annotation.value().decode(text),
+        annotation.value().mediaType()));]]>
+			</programlisting>
+			The interface takes bytes and a media type and returns text. OpenNLP ships no
+			implementation. Applications provide the extraction or captioning service.
+		</para>
+	</section>
+</chapter>
