@@ -685,6 +685,13 @@ STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
+The English first-name table bundled inside the opennlp-runtime jar at
+opennlp/tools/coref/first-names-en.txt is an Apache-licensed project derivative of
+the United States Social Security Administration national baby-name data for 1920
+through 2008. The source data are United States government material published at
+https://www.ssa.gov/oact/babynames/. SSA describes its government documents as
+public domain at https://www.ssa.gov/websitepolicies.htm.
+
 The following license applies to the Unicode data files bundled inside the
 opennlp-runtime jar (opennlp/tools/util/normalizer/confusables.txt,
 opennlp/tools/util/normalizer/CaseFolding.txt,

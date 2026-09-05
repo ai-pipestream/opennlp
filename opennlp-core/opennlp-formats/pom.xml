@@ -35,6 +35,13 @@
       <groupId>${project.groupId}</groupId>
       <scope>test</scope>
     </dependency>
+    <!-- The coreference evaluation harness encodes tokens with an ONNX model when asked. -->
+    <dependency>
+      <artifactId>opennlp-dl</artifactId>
+      <groupId>${project.groupId}</groupId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>

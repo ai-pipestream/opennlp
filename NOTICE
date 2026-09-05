@@ -107,6 +107,10 @@ SOFTWARE.
 
 ============================================================================
 
+This product includes an English first-name gender table derived from the national
+baby-name data published by the United States Social Security Administration:
+https://www.ssa.gov/oact/babynames/
+
 This product bundles data files from the Unicode Character Database (UCD)
 and the Unicode Security Mechanisms, version 17.0.0, published by Unicode,
 Inc. (https://www.unicode.org/Public/).
