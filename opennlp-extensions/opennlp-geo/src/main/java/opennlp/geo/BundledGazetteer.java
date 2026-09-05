@@ -19,9 +19,7 @@ package opennlp.geo;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -43,15 +41,15 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
 /**
  * The bundled {@link Gazetteer}: a public-domain populated-places table derived from Natural
  * Earth, shipped in this jar so location lookup works with no download or configuration. The
- * table is parsed once, lazily, on first {@link #getInstance()}, with fail-loud errors that name
- * the resource and line for any malformed row; after loading an instance is immutable and
+ * table is parsed once, lazily, on first {@link #getInstance()}. Format errors identify the
+ * resource and line of a malformed row. After loading an instance is immutable and
  * thread-safe.
  *
  * <p>Indexed names and queries are folded through the same normalization chain (NFC, case fold,
  * accent fold with {@link TermAnalyzer} over
- * <a href="https://unicode.org/reports/tr29/">UAX&#160;#29</a> word tokens), so matching is
- * robust to case, accents, and hyphenation. The bundled table is pure ASCII; native-script names
- * are not matchable against it.</p>
+ * <a href="https://unicode.org/reports/tr29/">UAX&#160;#29</a> word tokens), so queries match
+ * across case, accents, and hyphenation. The bundled table is pure ASCII;
+ * native-script names are not matchable against it.</p>
  *
  * <p>{@link #lookup(CharSequence)} returns candidates ordered by population descending, then a
  * feature-class prior ({@link GazetteerEntry#FEATURE_CLASS_CITY} before
@@ -219,8 +217,7 @@ public final class BundledGazetteer implements Gazetteer {
    */
   static List<GazetteerEntry> parse(InputStream in, String resourceName) throws IOException {
     final List<GazetteerEntry> entries = new ArrayList<>();
-    try (BufferedReader reader =
-             new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+    try (BufferedReader reader = GazetteerIndex.utf8Reader(in)) {
       String line;
       int lineNumber = 0;
       while ((line = reader.readLine()) != null) {

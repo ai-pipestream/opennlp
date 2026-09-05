@@ -20,8 +20,6 @@ package opennlp.geo;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -70,7 +68,7 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>A row needs either both coordinates or a bounding box; with only a bounding box the point
  * location becomes the box's {@link GeoBoundingBox#center() center}. Free-text metadata such as
- * a postal address belongs in an attribute column; it is carried verbatim and never parsed or
+ * a postal address belongs in an attribute column; it is stored as provided and is not parsed or
  * matched. Lines whose first character is {@code #} and blank lines are skipped. The file is
  * read as UTF-8. Names containing a tab or {@code |} are not representable in this format.</p>
  *
@@ -83,13 +81,13 @@ import opennlp.tools.util.StringUtil;
 public final class UserGazetteer implements Gazetteer {
 
   /** The separator between the fields of one row. */
-  private static final String FIELD_SEPARATOR = "\t";
+  private static final char FIELD_SEPARATOR = '\t';
 
   /** The separator between the elements of the alternate-names and containment fields. */
   private static final char LIST_SEPARATOR = '|';
 
   /** The separator between the edges of the bounding-box field. */
-  private static final String BOX_SEPARATOR = ",";
+  private static final char BOX_SEPARATOR = ',';
 
   /** The separator between an attribute key and its value. */
   private static final char ATTRIBUTE_SEPARATOR = '=';
@@ -121,6 +119,7 @@ public final class UserGazetteer implements Gazetteer {
     if (table == null) {
       throw new IllegalArgumentException("table must not be null");
     }
+    validateSource(source);
     try (InputStream in = Files.newInputStream(table)) {
       return load(in, source);
     }
@@ -143,9 +142,7 @@ public final class UserGazetteer implements Gazetteer {
     if (in == null) {
       throw new IllegalArgumentException("in must not be null");
     }
-    if (StringUtil.isUnicodeBlank(source)) {
-      throw new IllegalArgumentException("source must not be null or blank");
-    }
+    validateSource(source);
     final Set<String> seenIds = new HashSet<>();
     final GazetteerIndex index = GazetteerIndex.load(in, true, (line, lineNumber) -> {
       final GazetteerEntry entry = parseRow(line, lineNumber, source);
@@ -195,8 +192,7 @@ public final class UserGazetteer implements Gazetteer {
       throw new IllegalArgumentException("in must not be null");
     }
     final List<Suppression> rules = new ArrayList<>();
-    final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+    final BufferedReader reader = GazetteerIndex.utf8Reader(in);
     String line;
     int lineNumber = 0;
     while ((line = reader.readLine()) != null) {
@@ -204,7 +200,7 @@ public final class UserGazetteer implements Gazetteer {
       if (StringUtil.isUnicodeBlank(line) || line.charAt(0) == '#') {
         continue;
       }
-      final String[] fields = line.split(FIELD_SEPARATOR, -1);
+      final String[] fields = GazetteerIndex.split(line, FIELD_SEPARATOR);
       if (fields.length > 3) {
         throw new InvalidFormatException("line " + lineNumber + " has " + fields.length
             + " columns, expected at most 3");
@@ -254,10 +250,10 @@ public final class UserGazetteer implements Gazetteer {
     return Set.of(source);
   }
 
-  /** Parses one row into an entry, failing loud with the line number. */
+  /** Parses one row into an entry and includes the line number in format errors. */
   private static GazetteerEntry parseRow(String line, int lineNumber, String source)
       throws InvalidFormatException {
-    final String[] fields = line.split(FIELD_SEPARATOR, -1);
+    final String[] fields = GazetteerIndex.split(line, FIELD_SEPARATOR);
     if (fields.length < 2) {
       throw new InvalidFormatException("line " + lineNumber + " has " + fields.length
           + " columns, expected at least record id and name");
@@ -322,7 +318,7 @@ public final class UserGazetteer implements Gazetteer {
    * @throws IllegalArgumentException Thrown if the field does not hold four valid edges.
    */
   private static GeoBoundingBox parseBox(String field) {
-    final String[] edges = field.split(BOX_SEPARATOR, -1);
+    final String[] edges = GazetteerIndex.split(field, BOX_SEPARATOR);
     if (edges.length != BOX_EDGES) {
       throw new IllegalArgumentException(
           "a bounding box must read west,south,east,north, got: " + field);
@@ -351,5 +347,17 @@ public final class UserGazetteer implements Gazetteer {
   /** {@return {@code true} if the column at {@code i} is missing or empty after trimming} */
   private static boolean absent(String[] fields, int i) {
     return fields.length <= i || fields[i].trim().isEmpty();
+  }
+
+  /**
+   * Validates the source identifier shared by both load entry points.
+   *
+   * @param source The source identifier. Must not be {@code null} or blank.
+   * @throws IllegalArgumentException Thrown if {@code source} is {@code null} or blank.
+   */
+  private static void validateSource(String source) {
+    if (StringUtil.isUnicodeBlank(source)) {
+      throw new IllegalArgumentException("source must not be null or blank");
+    }
   }
 }
