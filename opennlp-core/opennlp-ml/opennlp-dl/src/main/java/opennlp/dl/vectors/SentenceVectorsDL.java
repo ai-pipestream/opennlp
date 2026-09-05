@@ -38,7 +38,6 @@ import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.embeddings.TextEmbedder;
 import opennlp.tools.tokenize.SubwordTokenizer;
 
-
 /**
  * Facilitates the generation of sentence vectors using
  * a sentence-transformers model converted to ONNX.
@@ -118,9 +117,14 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * @param sentence The input sentence.
    * @return The sentence vector.
    *
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
    * @throws OrtException Thrown if an error occurs during inference.
    */
   public float[] getVectors(final String sentence) throws OrtException {
+
+    if (sentence == null) {
+      throw new IllegalArgumentException("sentence must not be null");
+    }
 
     final Tokens tokens = encode(sentence, tokenizer);
 
@@ -161,7 +165,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   @Override
   public float[] embed(final CharSequence text) {
     if (text == null) {
-      throw new IllegalArgumentException("Text must not be null");
+      throw new IllegalArgumentException("text must not be null");
     }
     try {
       return getVectors(text instanceof String s ? s : text.toString());
@@ -187,7 +191,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   @Override
   public float[][] embedAll(final List<? extends CharSequence> texts) {
     if (texts == null) {
-      throw new IllegalArgumentException("Texts must not be null");
+      throw new IllegalArgumentException("texts must not be null");
     }
     final float[][] vectors = new float[texts.size()][];
     if (texts.isEmpty()) {
@@ -198,9 +202,9 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
     for (int i = 0; i < texts.size(); i++) {
       final CharSequence text = texts.get(i);
       if (text == null) {
-        throw new IllegalArgumentException("Texts must not contain null");
+        throw new IllegalArgumentException("texts[" + i + "] must not be null");
       }
-      encoded[i] = encode(text instanceof String s ? s : text.toString(), tokenizer);
+      encoded[i] = encodeTokens(text);
       byLength.computeIfAbsent(encoded[i].ids().length, length -> new ArrayList<>()).add(i);
     }
     try {
