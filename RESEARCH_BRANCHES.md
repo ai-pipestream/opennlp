@@ -9,12 +9,12 @@ Apache main is `535c6d43a`. It includes Document #1182, paragraph normalization
 #1249, term vectors #1212, Hunspell #1190, CJK #1191 and #1265, and the resource
 installer #1211. Features use those implementations from main.
 
-The map covers 14 open 3.x PR branches and 20 research branches. Only Hunspell
-follow-up, regex hardening, and glossary contain current main: 31 of 34 branches
-need a main sync. Of these 34, 28 need local/fork history reconciliation; 6 local
-heads equal their fork heads. These are Git ancestry checks, not test results.
-Several branches lack only main's latest CI change; others also lack merged
-features.
+All 34 feature branches contain current main and their required updated parents.
+Thirty-two branches were reconciled and pushed to their existing fork names.
+Hunspell follow-up and regex hardening were already synchronized. The old local
+and published heads remain ancestors of every result. Feature tests and affected
+manual builds passed; the CI-only WordNet API and light-stemmer updates used
+reactor compilation checks.
 
 ## Integration intent and current state
 
@@ -26,24 +26,22 @@ features.
 - The helper consumes published open 3.x PR heads, including drafts. Local
   research is excluded. The preview combines the selected feature branches
   and admitted research.
-- The current script selects 6 Apache tips and 18 research/preview tips.
-  Hunspell #1266 and regex #1268 are missing direct inputs for the intended
-  complete preview. Their additions are planned, not yet applied to the script.
-- The last local preview is `a0f8efa05`, generated on 2026-09-04 from main
-  `144be05ae`. Its manifest is a build snapshot, not a current branch inventory.
-- Local helper `16e3568c2` also lacks current main and the current published
-  heads of #1155, #1266, and #1268. Helper publication to Apache needs separate
-  authorization.
+- The script selects 8 Apache tips and 18 research/preview tips, including
+  Hunspell #1266 and regex #1268. All selected feature tips contain their current
+  parents. `--update` preserves integration history; `--scratch` checks a fresh
+  detached build. Neither mode resets a branch or silently reuses conflict files.
+- The last completed local preview is still `a0f8efa05`, generated from main
+  `144be05ae`. The new integration build and provenance update are in progress.
+- The helper update is in progress locally using published PR heads, not local
+  research. Apache publication remains a separate authorization.
 - Feature fixes remain on feature branches. Integration branches are not
   sources for feature updates.
 
 ## Intended dependency tree
 
-Solid feature arrows show the intended source dependencies, not a claim that
-the current parent tip is already an ancestor. Solid arrows into the input
-groups reflect the current script. Dotted arrows identify copied APIs,
-cross-repository dependencies, planned inputs, or shared server changes.
-The tables below describe current state.
+Solid feature arrows are verified parent relationships. Arrows into the input
+groups reflect the script. Dotted arrows identify cross-repository dependencies,
+planned add-on integration, or shared server changes.
 
 ```mermaid
 flowchart LR
@@ -123,7 +121,7 @@ flowchart LR
   main --> pii
   main --> coref
   main --> numeric --> region --> geocode --> hierarchy
-  gaz -. copied API needs reconciliation .-> region
+  gaz --> region
   gaz --> profiles
   static --> embedding
   main --> dehyphenation
@@ -140,8 +138,8 @@ flowchart LR
   light --> apacheTips
   evaluation --> apacheTips
   relation --> apacheTips
-  hunspellFix -. planned input .-> apacheTips
-  regexFix -. planned input .-> apacheTips
+  hunspellFix --> apacheTips
+  regexFix --> apacheTips
 
   artifacts --> researchTips
   assets --> researchTips
@@ -181,30 +179,30 @@ head. A PR marked Ready is not necessarily approved or validated for merge.
 
 | PR / feature | Published base | PR source | Published head | Local head | Main missing | Review state | Preview input |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| [#1152](https://github.com/apache/opennlp/pull/1152) Static embeddings | `OPENNLP-1885-sentencepiece` | ai-pipestream | `f6f1bef48e` | `ff83d94ad6` | 5 | Draft | Via #1215, needs cascade |
-| [#1154](https://github.com/apache/opennlp/pull/1154) Gazetteer API | `main` | ai-pipestream | `b81d0eb978` | `27ba5f95c9` | 3 | Draft | Direct |
-| [#1155](https://github.com/apache/opennlp/pull/1155) WordNet API | `main` | ai-pipestream | `19791cfdf5` | `19791cfdf5` | 1 | Draft | Direct |
-| [#1165](https://github.com/apache/opennlp/pull/1165) Subword API and WordPiece | `main` | ai-pipestream | `141160e439` | `141160e439` | 3 | Ready | Via #1215, needs API reconciliation |
-| [#1166](https://github.com/apache/opennlp/pull/1166) Light stemmers | `main` | ai-pipestream | `233514d523` | `233514d523` | 1 | Draft | Direct |
-| [#1167](https://github.com/apache/opennlp/pull/1167) WordNet expansion | `main` | ai-pipestream | `1d13232d89` | `1d13232d89` | 1 | Draft | Direct |
-| [#1213](https://github.com/apache/opennlp/pull/1213) TurboQuant | `main` | ai-pipestream | `05398bb677` | `fd1f4f354d` | 5 | Draft | Via #1215, needs cascade |
-| [#1214](https://github.com/apache/opennlp/pull/1214) Vector indexes | `main` | ai-pipestream | `ac501e2259` | `2917c32dd9` | 5 | Draft | Via #1215, needs cascade |
-| [#1215](https://github.com/apache/opennlp/pull/1215) Vector evaluation | `main` | ai-pipestream | `5b79627bb8` | `3d27843220` | 5 | Draft | Direct stack tip |
-| [#1236](https://github.com/apache/opennlp/pull/1236) Dependency parser | `main` | apache | `5cc405820d` | `5cc405820d` | 1 | Ready | Via #1238, needs cascade |
-| [#1237](https://github.com/apache/opennlp/pull/1237) Dependency annotations | `OPENNLP-547-dependency-parser` | apache | `75bf330a26` | `f8498b1e60` | 3 | Draft | Via #1238 |
-| [#1238](https://github.com/apache/opennlp/pull/1238) Relation extraction | `OPENNLP-1919-dependency-annotations` | apache | `9c860c3afc` | `92df0620cc` | 3 | Draft | Direct stack tip |
-| [#1266](https://github.com/apache/opennlp/pull/1266) Hunspell corrections | `main` | ai-pipestream | `8baa234d05` | `8baa234d05` | 0 | Ready, changes requested | Planned direct input, not selected |
-| [#1268](https://github.com/apache/opennlp/pull/1268) Regex test hardening | `main` | ai-pipestream | `c27a029674` | `c27a029674` | 0 | Ready, approved | Planned direct input, not selected |
+| [#1152](https://github.com/apache/opennlp/pull/1152) Static embeddings | `OPENNLP-1885-sentencepiece` | ai-pipestream | `f8228d9d52` | `f8228d9d52` | 0 | Draft | Via #1215 |
+| [#1154](https://github.com/apache/opennlp/pull/1154) Gazetteer API | `main` | ai-pipestream | `0e9e307522` | `0e9e307522` | 0 | Draft | Direct |
+| [#1155](https://github.com/apache/opennlp/pull/1155) WordNet API | `main` | ai-pipestream | `ff2ce79c51` | `ff2ce79c51` | 0 | Draft | Direct |
+| [#1165](https://github.com/apache/opennlp/pull/1165) Subword API and WordPiece | `main` | ai-pipestream | `d130e1cd6e` | `d130e1cd6e` | 0 | Ready | Via #1215 |
+| [#1166](https://github.com/apache/opennlp/pull/1166) Light stemmers | `main` | ai-pipestream | `d7588618cc` | `d7588618cc` | 0 | Draft | Direct |
+| [#1167](https://github.com/apache/opennlp/pull/1167) WordNet expansion | `main` | ai-pipestream | `acb88dfc84` | `acb88dfc84` | 0 | Draft | Direct |
+| [#1213](https://github.com/apache/opennlp/pull/1213) TurboQuant | `main` | ai-pipestream | `7e55830883` | `7e55830883` | 0 | Draft | Via #1215 |
+| [#1214](https://github.com/apache/opennlp/pull/1214) Vector indexes | `main` | ai-pipestream | `c32538da52` | `c32538da52` | 0 | Draft | Via #1215 |
+| [#1215](https://github.com/apache/opennlp/pull/1215) Vector evaluation | `main` | ai-pipestream | `fdcff8429a` | `fdcff8429a` | 0 | Draft | Direct stack tip |
+| [#1236](https://github.com/apache/opennlp/pull/1236) Dependency parser | `main` | apache | `5cc405820d` | `d6e74c4f0b` | 0 | Ready | Via #1238 |
+| [#1237](https://github.com/apache/opennlp/pull/1237) Dependency annotations | `OPENNLP-547-dependency-parser` | apache | `75bf330a26` | `dfdbf197aa` | 0 | Draft | Via #1238 |
+| [#1238](https://github.com/apache/opennlp/pull/1238) Relation extraction | `OPENNLP-1919-dependency-annotations` | apache | `9c860c3afc` | `2dfde824f9` | 0 | Draft | Direct stack tip |
+| [#1266](https://github.com/apache/opennlp/pull/1266) Hunspell corrections | `main` | ai-pipestream | `8baa234d05` | `8baa234d05` | 0 | Ready, changes requested | Direct |
+| [#1268](https://github.com/apache/opennlp/pull/1268) Regex test hardening | `main` | ai-pipestream | `c27a029674` | `c27a029674` | 0 | Ready, approved | Direct |
 
 Fork publication alone does not update #1236, #1237, or #1238: their PR source
 branches are on apache/opennlp. Keep fork synchronization and Apache PR
 publication separate.
 
-Static embeddings still includes an older subword API, `BertTokenizer`, and
-the in-repository SentencePiece implementation. It does not contain the current
-#1165 tip. Reconcile the API with #1165 and preserve working SentencePiece
-support while arranging the add-on module dependency. Do not remove the
-implementation before its replacement builds and passes the existing tests.
+Static embeddings and its descendants contain the current subword API and
+WordPiece implementation. `BertTokenizer` is removed. The in-repository
+SentencePiece implementation remains tested and available until migration to
+the add-on dependency is complete. That migration is separate from branch
+synchronization.
 
 Add-ons #178 is a draft at `b9a57b3dc7`, based on
 `OPENNLP-1924-canary-addon`, not add-ons main. It is a separate repository
@@ -213,7 +211,7 @@ dependency, not an OpenNLP Git parent.
 Hunspell #1266 uses the ResourceInstaller merged through #1211. Its downloader,
 catalog, installer, and installer tests match current main. Review process
 items remain: new JIRA key, title, unsupported-directive policy, and posting
-dictionary results. This documentation update does not change that behavior.
+dictionary results. Synchronization does not change that policy.
 
 The original Hunspell and CJK worktrees contain uncommitted edits requiring
 comparison with the merged implementations. Exclude them from bulk publication
@@ -224,57 +222,49 @@ are outside this feature inventory; do not include them in a bulk push.
 
 ## Research worktrees
 
-All 20 research branches have an existing fork destination with history on
-both the local and remote sides. Their tracked working files are clean;
-temporary untracked feature READMEs are not part of the commit hashes below.
-“Via hierarchy tip” describes the intended stack; it does not confirm that
-the latest numeric changes are included.
+All 20 research branches match their existing fork destinations. Tracked working
+files are clean; temporary untracked feature READMEs remain local and unchanged.
+The hierarchy tip contains current numeric, gazetteer, region, and geocode heads.
 
 | Branch | Local head | Main missing | Preview input | Intended dependency | Fork status |
 | --- | --- | --- | --- | --- | --- |
-| `OPENNLP-XXXX-bilstm-tagger` | `3d0171c3ff` | 5 | Direct | Feedforward tagger | Reconcile histories |
-| `OPENNLP-XXXX-coref` | `6392b92f0b` | 1 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-dehyphenation` | `730f69cf4d` | 5 | Direct | main (term vectors included) | Reconcile histories |
-| `OPENNLP-XXXX-embedded-assets` | `a6b4e21a37` | 1 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-embedding-annotator` | `b424c9fcc2` | 5 | Direct | #1152 static embeddings | Reconcile histories |
-| `OPENNLP-XXXX-ff-postagger` | `02744d5e84` | 5 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-geocode-annotator` | `f1ce6f0a38` | 5 | Via hierarchy tip | Region vote | Reconcile histories |
-| `OPENNLP-XXXX-glossary` | `fa7a2f6f1f` | 0 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-hierarchy-annotator` | `1088aa8115` | 5 | Direct | Geocode annotator | Reconcile histories |
-| `OPENNLP-XXXX-morfologik-fsa` | `a0d1e6ba61` | 5 | Direct | main; reconcile existing extension | Reconcile histories |
-| `OPENNLP-XXXX-noise` | `747c77d563` | 1 | Direct | Embedded assets | Reconcile histories |
-| `OPENNLP-XXXX-numeric` | `7995de237e` | 5 | Via hierarchy tip | main | Reconcile histories |
-| `OPENNLP-XXXX-pii` | `cb6ad708a1` | 5 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-place-profiles` | `d9e8487c3f` | 3 | Direct | #1154 gazetteer | Reconcile histories |
-| `OPENNLP-XXXX-predicate-annotators` | `74eccb576e` | 1 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-region-vote` | `ef53423ee9` | 5 | Via hierarchy tip | Numeric + #1154 copied API | Reconcile histories |
-| `OPENNLP-XXXX-spellcheck-recase` | `3d7c58f774` | 5 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-symbol-joiner` | `d537fb06e5` | 5 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-text-artifacts` | `0badf4ab62` | 1 | Direct | main | Reconcile histories |
-| `OPENNLP-XXXX-wordnet-extension` | `63a22b4b2d` | 5 | Direct | #1155 WordNet | Reconcile histories |
+| `OPENNLP-XXXX-bilstm-tagger` | `cb290868e6` | 0 | Direct | Feedforward tagger | Matches fork |
+| `OPENNLP-XXXX-coref` | `47256a8786` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-dehyphenation` | `028077eebc` | 0 | Direct | main (term vectors included) | Matches fork |
+| `OPENNLP-XXXX-embedded-assets` | `5595f6e1b3` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-embedding-annotator` | `3e238895c0` | 0 | Direct | #1152 static embeddings | Matches fork |
+| `OPENNLP-XXXX-ff-postagger` | `f42e28a8aa` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-geocode-annotator` | `43e5b28533` | 0 | Via hierarchy tip | Region vote | Matches fork |
+| `OPENNLP-XXXX-glossary` | `b203456a79` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-hierarchy-annotator` | `9eb7aef3d9` | 0 | Direct | Geocode annotator | Matches fork |
+| `OPENNLP-XXXX-morfologik-fsa` | `ca75cb2d18` | 0 | Direct | main; reconcile existing extension | Matches fork |
+| `OPENNLP-XXXX-noise` | `a447c49181` | 0 | Direct | Embedded assets | Matches fork |
+| `OPENNLP-XXXX-numeric` | `8a52b9ea6e` | 0 | Via hierarchy tip | main | Matches fork |
+| `OPENNLP-XXXX-pii` | `81bf8be340` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-place-profiles` | `b38a19aeee` | 0 | Direct | #1154 gazetteer | Matches fork |
+| `OPENNLP-XXXX-predicate-annotators` | `809f047144` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-region-vote` | `beb3a7d3bd` | 0 | Via hierarchy tip | Numeric + #1154 gazetteer | Matches fork |
+| `OPENNLP-XXXX-spellcheck-recase` | `150f50a267` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-symbol-joiner` | `f63eb5aa7f` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-text-artifacts` | `1db01a0899` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-wordnet-extension` | `b6f1ed265f` | 0 | Direct | #1155 WordNet | Matches fork |
 
-## Parent updates still required
+## Verified stacks
 
-| Family | Current state |
-| --- | --- |
-| Subwords and vectors | Static embeddings lacks the current #1165 tip. TurboQuant, vector index, vector evaluation, and the embedding annotator each lack the latest review commit from their immediate parent. |
-| Parser and annotations | Dependency annotations lacks the current parser tip. Relation extraction includes the current annotation tip, so update annotations before relation extraction. |
-| WordNet | Expansion and the research extension do not include the current WordNet API tip. Compare copied code as well as commit ancestry. |
-| Embedded assets | Noise lacks the latest embedded-assets review commit. |
-| Numeric and geocoding | Region vote lacks the latest numeric commit. Geocode and hierarchy include their current immediate parents, but need that update after region vote. |
-| Gazetteer | Place profiles includes the current gazetteer tip. Region vote has a copied API with older Javadoc contracts, including the empty-set contract for `sources()`; reconcile it with the maintained API. |
+- Subword API -> static embeddings -> TurboQuant -> vector index -> evaluation.
+  The embedding annotator contains current static embeddings.
+- Parser -> dependency annotations -> relation extraction.
+- WordNet API -> expansion and research extension.
+- Embedded assets -> noise; feedforward POS -> BiLSTM.
+- Numeric and gazetteer -> region vote -> geocode -> hierarchy.
+  Place profiles contains current gazetteer.
 
-The feedforward/BiLSTM parent relation is current. Both branches still need
-current main. A branch can include its current parent and still need upstream
-updates.
+The TurboQuant cascade carries double-precision analogy queries through its
+internal adapters. The WordNet extension carries the parent's stream ownership,
+definition retention, and malformed-input checks without removing composition.
 
-The selected script tips do not yet include the current heads of #1165,
-#1152, #1213, #1214, #1236, or numeric. Rebuilding with the existing script
-before the cascade would omit some reviewed commits even if the build passes.
-
-`preview-docs` and `preview-accept-major0-models` each lack 5 current main
-commits and also need fork history reconciliation. They are preview support
-branches, outside the 34-feature count.
+`preview-docs` and `preview-accept-major0-models` also contain current main and
+their old fork heads. They are support branches, outside the 34-feature count.
 
 ## Add-ons candidates
 
@@ -316,13 +306,13 @@ rewriting the feature branches.
    package/manual build, and the pre-push review.
 5. Push tested results to the existing fork branch names with normal
    fast-forward pushes. Fetch and reconsider if a remote advances.
-6. Update preview inputs, then update helper and uber after the feature
-   cascade. The current regeneration script resets the integration ref, so it
-   needs a non-rewriting update path before use under this preservation plan.
+6. Update helper and uber after the feature cascade, preserving their old
+   local and published histories. Compare with a fresh scratch integration
+   before publishing the preview.
 
-The workspace execution checklist is `TODO/BRANCH-PUBLICATION.md`. No branch
-history, script membership, PR state, or remote ref was changed by this map
-update. The earlier force-push commands are not the selected publication plan.
+The workspace execution checklist is `TODO/BRANCH-PUBLICATION.md`. Feature
+synchronization and fork publication are complete. Integration validation and
+publication are still in progress. No Apache branch or PR review state changed.
 
 JIRA tracking, add-on migration, Apache branch updates, and PR publication remain
 separate actions. Research can be backed up to the fork without changing
