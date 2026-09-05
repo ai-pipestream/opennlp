@@ -78,6 +78,57 @@ public class KnownMagicsTest {
     assertEquals("ar", KnownMagics.formatOf(ar));
   }
 
+  /** Binary DXF uses control bytes after the ASCII sentinel. */
+  @Test
+  void testBinaryDxfSentinel() {
+    final byte[] header = "AutoCAD Binary DXF\r\n\u001a\u0000"
+        .getBytes(StandardCharsets.US_ASCII);
+    assertEquals(22, header.length);
+    assertEquals("dxf", KnownMagics.formatOf(header));
+    final byte[] content = Arrays.copyOf(header, 30);
+    final String encoded = Base64.getEncoder().encodeToString(content);
+    final EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+    assertEquals("dxf", asset.format());
+    assertEquals("image/vnd.dxf", asset.mediaType());
+    assertEquals(content.length, asset.decode(encoded).length);
+  }
+
+  /** XAR archives are not Xara vector graphics despite sharing an extension. */
+  @Test
+  void testXarArchiveMediaType() {
+    final byte[] header = new byte[28];
+    header[0] = 'x';
+    header[1] = 'a';
+    header[2] = 'r';
+    header[3] = '!';
+    header[5] = 28;
+    header[7] = 1;
+    final String encoded = Base64.getEncoder().encodeToString(header);
+    final EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+    assertEquals("xar", asset.format());
+    assertEquals("application/x-xar", asset.mediaType());
+  }
+
+  /** The XPM header identifies a pixmap, not an XBM bitmap. */
+  @Test
+  void testXpmFormatAndMediaType() {
+    final String xpm = "/* XPM */\nstatic char *image[] = {\n"
+        + "\"1 1 1 1\",\n\". c #000000\",\n\".\"};\n";
+    final String encoded = Base64.getEncoder()
+        .encodeToString(xpm.getBytes(StandardCharsets.US_ASCII));
+    final EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+    assertEquals("xpm", asset.format());
+    assertEquals("image/x-xpixmap", asset.mediaType());
+  }
+
+  /** A textual hexadecimal notation is not the binary DXF sentinel. */
+  @Test
+  void testTextualHexadecimalDxfSuffixIsRejected() {
+    final byte[] header = "AutoCAD Binary DXF\r\n0x1A00"
+        .getBytes(StandardCharsets.US_ASCII);
+    assertNull(KnownMagics.formatOf(header));
+  }
+
   /** Every format constant on the record resolves, except the RIFF-carried ones. */
   @Test
   void testEmbeddedAssetConstantsResolve() {

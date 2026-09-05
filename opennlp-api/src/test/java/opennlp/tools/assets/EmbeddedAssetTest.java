@@ -26,6 +26,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
 
@@ -46,7 +47,7 @@ public class EmbeddedAssetTest {
    *
    * @return An asset with span 4..12, payload 8..12, and matching metadata.
    */
-  private static EmbeddedAsset valid() {
+  private EmbeddedAsset valid() {
     return new EmbeddedAsset(new Span(4, 12), new Span(8, 12), "png", "image/png",
         3, 5, 7);
   }
@@ -55,12 +56,22 @@ public class EmbeddedAssetTest {
    * The invalid constructions the compact constructor documents, each paired with the
    * exact rejection message it must produce.
    *
-   * @return One case per violated constraint: payload starting before the span,
-   *         payload ending behind the span, blank format, blank media type, and a
-   *         negative decoded length.
+   * @return Invalid arguments and their rejection messages.
    */
   private static Stream<Arguments> invalidConstructions() {
     return Stream.of(
+        Arguments.of("span must not be null",
+            (Executable) () -> new EmbeddedAsset(null, new Span(8, 12),
+                "png", "image/png", 3, -1, -1)),
+        Arguments.of("payload must not be null",
+            (Executable) () -> new EmbeddedAsset(new Span(4, 12), null,
+                "png", "image/png", 3, -1, -1)),
+        Arguments.of("format must not be null or blank",
+            (Executable) () -> new EmbeddedAsset(new Span(4, 12), new Span(8, 12),
+                null, "image/png", 3, -1, -1)),
+        Arguments.of("mediaType must not be null or blank",
+            (Executable) () -> new EmbeddedAsset(new Span(4, 12), new Span(8, 12),
+                "png", null, 3, -1, -1)),
         Arguments.of("payload must lie inside the span",
             (Executable) () -> new EmbeddedAsset(new Span(4, 12), new Span(3, 12),
                 "png", "image/png", 3, -1, -1)),
@@ -85,6 +96,49 @@ public class EmbeddedAssetTest {
     final IllegalArgumentException e =
         assertThrows(IllegalArgumentException.class, construction);
     assertEquals(message, e.getMessage());
+  }
+
+  /**
+   * Rejects dimensions that are neither positive nor the unknown sentinel.
+   *
+   * @param dimension The invalid dimension.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {0, -2, Integer.MIN_VALUE})
+  void testRejectsInvalidDimensions(int dimension) {
+    final Span span = new Span(0, 4);
+    assertEquals("width must be positive or -1", assertThrows(IllegalArgumentException.class,
+        () -> new EmbeddedAsset(span, span, "png", "image/png", 3, dimension, 1))
+        .getMessage());
+    assertEquals("height must be positive or -1", assertThrows(IllegalArgumentException.class,
+        () -> new EmbeddedAsset(span, span, "png", "image/png", 3, 1, dimension))
+        .getMessage());
+  }
+
+  /**
+   * Retains positive dimensions and permits an unknown dimension independently.
+   *
+   * @param dimension A positive dimension or the unknown sentinel.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {-1, 1, Integer.MAX_VALUE})
+  void testAcceptsDimensions(int dimension) {
+    final Span span = new Span(0, 4);
+    final EmbeddedAsset asset = new EmbeddedAsset(span, span, "png", "image/png",
+        3, dimension, dimension);
+    assertEquals(dimension, asset.width());
+    assertEquals(dimension, asset.height());
+    assertEquals(dimension, new EmbeddedAsset(span, span, "png", "image/png",
+        3, dimension, -1).width());
+    assertEquals(dimension, new EmbeddedAsset(span, span, "png", "image/png",
+        3, -1, dimension).height());
+  }
+
+  /** Rejects a missing source before attempting to read the payload span. */
+  @Test
+  void testDecodeRejectsNull() {
+    assertEquals("text must not be null", assertThrows(IllegalArgumentException.class,
+        () -> valid().decode(null)).getMessage());
   }
 
   @Test

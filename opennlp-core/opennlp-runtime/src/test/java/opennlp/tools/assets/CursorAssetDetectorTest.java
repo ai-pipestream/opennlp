@@ -29,6 +29,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import static opennlp.tools.assets.AssetTestSupport.gif;
+import static opennlp.tools.assets.AssetTestSupport.png;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -36,51 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the built-in detector against real header bytes built in the test, so every
- * accepted case is a genuine file prefix and every rejected case fails for the reason
- * the class documents.
+ * Tests format identification and source spans using generated header fixtures.
  */
 public class CursorAssetDetectorTest {
 
   private final CursorAssetDetector detector = new CursorAssetDetector();
-
-  /**
-   * Builds a PNG prefix: signature plus an IHDR chunk declaring the dimensions,
-   * padded so the payload is comfortably long.
-   *
-   * @param width The declared width.
-   * @param height The declared height.
-   * @return The leading bytes of a PNG file.
-   */
-  private static byte[] png(int width, int height) {
-    final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    out.writeBytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
-    out.writeBytes(new byte[] {0, 0, 0, 13});
-    out.writeBytes(new byte[] {'I', 'H', 'D', 'R'});
-    out.writeBytes(new byte[] {(byte) (width >>> 24), (byte) (width >>> 16),
-        (byte) (width >>> 8), (byte) width});
-    out.writeBytes(new byte[] {(byte) (height >>> 24), (byte) (height >>> 16),
-        (byte) (height >>> 8), (byte) height});
-    out.writeBytes(new byte[] {8, 6, 0, 0, 0});
-    out.writeBytes(new byte[16]);
-    return out.toByteArray();
-  }
-
-  /**
-   * Builds a GIF prefix with little-endian dimensions.
-   *
-   * @param width The declared width.
-   * @param height The declared height.
-   * @return The leading bytes of a GIF file.
-   */
-  private static byte[] gif(int width, int height) {
-    final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    out.writeBytes(new byte[] {'G', 'I', 'F', '8', '9', 'a'});
-    out.writeBytes(new byte[] {(byte) width, (byte) (width >>> 8),
-        (byte) height, (byte) (height >>> 8)});
-    out.writeBytes(new byte[20]);
-    return out.toByteArray();
-  }
 
   /**
    * Builds a RIFF prefix.
@@ -88,7 +50,7 @@ public class CursorAssetDetectorTest {
    * @param kind The four-character form type, for example {@code WEBP}.
    * @return The leading bytes of a RIFF file.
    */
-  private static byte[] riff(String kind) {
+  private byte[] riff(String kind) {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     out.writeBytes(new byte[] {'R', 'I', 'F', 'F', 100, 0, 0, 0});
     out.writeBytes(kind.getBytes(StandardCharsets.US_ASCII));
@@ -103,7 +65,7 @@ public class CursorAssetDetectorTest {
    * @param prefix The leading bytes.
    * @return The bytes padded to 30, so the base64 form exceeds the bare minimum.
    */
-  private static byte[] padded(byte[] prefix) {
+  private byte[] padded(byte[] prefix) {
     final ByteArrayOutputStream out = new ByteArrayOutputStream();
     out.writeBytes(prefix);
     if (out.size() < 30) {
@@ -118,7 +80,7 @@ public class CursorAssetDetectorTest {
    * @param run The run to embed.
    * @return The run with surrounding text.
    */
-  private static String embed(String run) {
+  private String embed(String run) {
     return "x " + run + " y";
   }
 
@@ -129,7 +91,7 @@ public class CursorAssetDetectorTest {
    * @param width The line width, a multiple of four.
    * @return The wrapped base64 text.
    */
-  private static String wrapped(byte[] bytes, int width) {
+  private String wrapped(byte[] bytes, int width) {
     return Base64.getMimeEncoder(width, "\r\n".getBytes(StandardCharsets.US_ASCII))
         .encodeToString(bytes);
   }

@@ -20,7 +20,7 @@
 	<section xml:id="tools.assets.introduction">
 		<title>Introduction</title>
 		<para>
-			Text dumps carry binaries: web pages inline images as <code>data:</code> URIs,
+			Text can include encoded files: web pages inline images as <code>data:</code> URIs,
 			documents paste base64 payloads, mail wraps MIME bodies, and logs contain PEM
 			envelopes and JSON Web Tokens.
 			The package <code>opennlp.tools.assets</code> finds such assets as exact spans
@@ -28,32 +28,40 @@
 			while keeping every offset mapped to the source.
 		</para>
 		<para>
-			Identification needs no decoding pass: when a payload starts at a file's first
-			byte, the file magic has a fixed base64 image, so detection is literal matching
-			inside base64 runs. A PNG payload always starts <code>iVBORw0KGgo</code>, a
-			JPEG <code>/9j/</code>, a GIF <code>R0lGOD</code>, a RIFF container
-			<code>UklGR</code>, a PDF <code>JVBERi0</code>, and a zip archive
-			<code>UEsDB</code>. The built-in table ranges across image, document, archive,
-			audio, video, font, database, certificate, and executable formats, PNG to
-			Parquet to PEM-armored keys; the magic values are derived from the leading
-			bytes each format's specification publishes and from the mime-type catalog
-			of Apache Tika. Only a magic anchored at the first byte can be scanned for
-			this way, so a container whose signature sits at a later offset, such as the
-			ISO base media format of MP4, is out of scope for bare runs. Signatures that
-			classify loose prose rather than a file, such as mail header lines or
-			source-code conventions, are deliberately absent. A bare run is only
-			reported when it is long enough to be a real payload, carries such a prefix,
-			and its decoded leading bytes verify the magic; a <code>data:</code> URI
-			declares its media type and is reported at any payload length. Decoding the
-			leading bytes also yields image dimensions where the format's header carries
-			them.
+			<code>CursorAssetDetector</code> checks encoded prefixes, validates the payload
+			alphabet and padding, and decodes up to 24 leading bytes for format detection.
+			Bare runs need at least 32 encoded characters and a recognized file signature.
+			The signature table is derived from Apache Tika's media-type catalog. Recognized
+			PNG and GIF headers also provide image dimensions. A declared media type alone
+			does not provide dimensions. Both dimensions are -1 when either
+			is missing or invalid. PNG dimensions require a leading 13-byte
+			<ulink url="https://www.w3.org/TR/png-3/#11IHDR">IHDR chunk</ulink> and positive
+			values no greater than 2,147,483,647. GIF dimensions describe the logical screen.
+			A signature match does not establish that a file is complete, valid, or safe to open.
+		</para>
+		<para>
+			XAR archives are reported as <code>xar</code> with media type
+			<code>application/x-xar</code>, not Xara graphics. Encoded XPM images are
+			reported as <code>xpm</code> with media type <code>image/x-xpixmap</code>.
+		</para>
+		<para>
+			Explicitly typed, base64 <code>data:</code> URIs accept non-empty payloads,
+			including one- and two-byte values. The media type retains parameters such as
+			<code>charset=UTF-8</code>; the format name excludes them. Non-base64 data URIs
+			and percent-encoded payload characters are not supported.
+		</para>
+		<para>
+			Malformed padding, mixed standard and URL-safe alphabets, and line-wrapped
+			URL-safe payloads are rejected. For an unpadded run with length 1 modulo 4,
+			the scanner omits the final character to recover a decodable prefix. This
+			recovery does not repair or validate the underlying file.
 		</para>
 	</section>
 
 	<section xml:id="tools.assets.detection">
 		<title>Detecting and decoding</title>
 		<para>
-			The example below embeds a minimal 5x7 PNG as a data URI:
+			This example uses a 45-byte PNG header fixture with dimensions 5 by 7:
 			<programlisting language="java"><![CDATA[
 String text = "An image data:image/png;base64,"
     + "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAYAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -68,10 +76,8 @@ EmbeddedAsset asset = detector.detect(text).get(0);
 // asset.decodedLength() = 45
 byte[] bytes = asset.decode(text);  // the original 45 bytes]]>
 			</programlisting>
-			The asset's span covers the whole URI; its payload span covers just the
-			base64 characters, and <code>decode</code> reads them straight from the
-			original text.
-			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
+			The asset span covers the URI and the payload span covers the base64 text.
+			<code>decode</code> returns the payload bytes from the original text.
 		</para>
 		<para>
 			Detection needs no <code>data:</code> URI: the same payload pasted bare into
@@ -88,9 +94,18 @@ EmbeddedAsset found = new CursorAssetDetector().detect(bare).get(0);
 // found.height()        = 7
 // found.decodedLength() = 45]]>
 			</programlisting>
-			A bare run carries no URI around its payload, so the asset's span and its
-			payload span cover the same characters.
-			<code>AssetsManualExampleTest</code> asserts the behavior shown here.
+			For a bare run, the asset span and payload span cover the same characters.
+		</para>
+		<para>
+			A short text payload does not require a file signature:
+			<programlisting language="java"><![CDATA[
+String note = "data:text/plain;charset=UTF-8;base64,SGk=";
+EmbeddedAsset asset = new CursorAssetDetector().detect(note).get(0);
+String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
+// decoded = "Hi"
+// asset.format() = "plain"
+// asset.mediaType() = "text/plain;charset=UTF-8"]]>
+			</programlisting>
 		</para>
 	</section>
 
@@ -121,7 +136,8 @@ EmbeddedAsset found = new CursorAssetDetector().detect(bare).get(0);
 			as UTF-8 JSON objects, the header must carry a non-empty string-valued
 			<code>alg</code>, and each segment is bounded to 16 KiB. For an unsecured token,
 			<code>alg</code> must be <code>none</code> and the signature segment must be empty;
-			all other algorithms require a non-empty signature segment. The full token is
+			all other algorithms require a non-empty signature segment with valid unpadded
+			base64url encoding. The full token is
 			the asset span and the claims segment is the payload:
 			<programlisting language="java"><![CDATA[
 String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
@@ -133,8 +149,7 @@ EmbeddedAsset token = new CursorAssetDetector().detect(jwt).get(0);
 // new String(token.decode(jwt), StandardCharsets.UTF_8) = "{\"sub\":\"123\"}"]]>
 			</programlisting>
 			Detection validates structure only. It does not verify a JWT signature, trust a
-			key, or make an authorization decision. <code>AssetsManualExampleTest</code>
-			asserts the example exactly.
+			key, or make an authorization decision.
 		</para>
 	</section>
 
@@ -158,9 +173,8 @@ AlignedText folded = AssetFolder.fold(document, AssetFolder.caption());
 		</para>
 		<para>
 			What replaces an asset is the caller's choice through the replacement
-			function. A <code>BinaryContentDescriber</code>, the seam for external binary
-			understanding such as document text extraction or image description, composes
-			in directly:
+			function. A <code>BinaryContentDescriber</code> can extract document text or
+			generate an image description:
 			<programlisting language="java"><![CDATA[
 BinaryContentDescriber describer = ...;  // supplied by the caller
 
@@ -169,8 +183,7 @@ AlignedText described = AssetFolder.fold(document, annotation ->
         annotation.value().mediaType()));]]>
 			</programlisting>
 			The interface takes bytes and a media type and returns text. OpenNLP ships no
-			implementation: the caller supplies one, so integrating a binary
-			understanding service adds no dependency to this toolkit.
+			implementation. Applications provide the extraction or captioning service.
 		</para>
 	</section>
 </chapter>

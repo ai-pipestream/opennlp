@@ -28,9 +28,7 @@ import opennlp.tools.util.normalizer.AlignedText;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Runs the manual's asset examples (docbkx {@code assets.xml}) verbatim: every value
- * the chapter states is asserted here, so a change breaking this test breaks the
- * manual.
+ * Tests detection, decoding, and replacement examples from {@code assets.xml}.
  */
 public class AssetsManualExampleTest {
 
@@ -79,6 +77,18 @@ public class AssetsManualExampleTest {
     assertEquals("application/jwt", token.mediaType());
     assertEquals("{\"sub\":\"123\"}",
         new String(token.decode(JWT), StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void testShortTextExample() {
+    String note = "data:text/plain;charset=UTF-8;base64,SGk=";
+    EmbeddedAsset asset = new CursorAssetDetector().detect(note).get(0);
+    String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
+
+    assertEquals("Hi", decoded);
+    assertEquals("plain", asset.format());
+    assertEquals("text/plain;charset=UTF-8", asset.mediaType());
+    assertEquals(2, asset.decodedLength());
   }
 
   @Test

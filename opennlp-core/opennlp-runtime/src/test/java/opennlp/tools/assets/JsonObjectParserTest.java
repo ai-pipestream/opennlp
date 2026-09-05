@@ -90,4 +90,12 @@ public class JsonObjectParserTest {
     assertFalse(JsonObjectParser.parse("{\"alg\":\"HS256\",\"alg\":\"RS256\"}",
         "alg").valid());
   }
+
+  @Test
+  void testNestingDepthBoundary() {
+    final String permitted = "{\"v\":" + "[".repeat(63) + "0" + "]".repeat(63) + "}";
+    final String excessive = "{\"v\":" + "[".repeat(64) + "0" + "]".repeat(64) + "}";
+    assertTrue(JsonObjectParser.parse(permitted, null).valid());
+    assertFalse(JsonObjectParser.parse(excessive, null).valid());
+  }
 }
