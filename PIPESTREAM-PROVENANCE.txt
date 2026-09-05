@@ -2,31 +2,29 @@
 # Built from unmerged development branches of Apache OpenNLP.
 # Not an Apache Software Foundation release. Apache OpenNLP is a trademark of the ASF.
 version: 0.1.0-alpha4-SNAPSHOT
-generated: 2026-09-05T15:49:19Z
-main: 535c6d43a
-ref: 0e9e30752  OPENNLP-1879-gazetteer-api  apache
-ref: ff2ce79c5  OPENNLP-1880-wordnet-api  apache
-ref: d7588618c  OPENNLP-1886-light-stemmers  apache
-ref: acb88dfc8  OPENNLP-1887-wordnet-expansion  apache
-ref: 8baa234d0  OPENNLP-1893-hunspell-followup  apache
-ref: c27a02967  OPENNLP-1925-regex-hardening  apache
-ref: fdcff8429  OPENNLP-1911-vector-search-evaluation  apache
-ref: 2dfde824f  OPENNLP-1920-relation-extraction  apache
-ref: 1db01a089  OPENNLP-XXXX-text-artifacts  research
-ref: 5595f6e1b  OPENNLP-XXXX-embedded-assets  research
-ref: a447c4918  OPENNLP-XXXX-noise  research
-ref: 809f04714  OPENNLP-XXXX-predicate-annotators  research
-ref: f42e28a8a  OPENNLP-XXXX-ff-postagger  research
-ref: cb290868e  OPENNLP-XXXX-bilstm-tagger  research
-ref: b203456a7  OPENNLP-XXXX-glossary  research
-ref: 81bf8be34  OPENNLP-XXXX-pii  research
-ref: af595babd  OPENNLP-XXXX-coref  research
-ref: 9eb7aef3d  OPENNLP-XXXX-hierarchy-annotator  research
-ref: b38a19aee  OPENNLP-XXXX-place-profiles  research
-ref: 417efc857  OPENNLP-XXXX-wordnet-extension  research
-ref: 3e238895c  OPENNLP-XXXX-embedding-annotator  research
-ref: f63eb5aa7  OPENNLP-XXXX-symbol-joiner  research
-ref: 150f50a26  OPENNLP-XXXX-spellcheck-recase  research
-ref: ca75cb2d1  OPENNLP-XXXX-morfologik-fsa  research
-ref: 028077eeb  OPENNLP-XXXX-dehyphenation  research
-ref: b4bed4a05  preview-accept-major0-models  research
+generated: 2026-09-05T19:19:23Z
+main: 34ff57bcf
+ref: c246d8662  OPENNLP-1879-gazetteer-api  apache
+ref: 7616812cc  OPENNLP-1880-wordnet-api  apache
+ref: 192d9d314  OPENNLP-1886-light-stemmers  apache
+ref: ef88b0bf5  OPENNLP-1887-wordnet-expansion  apache
+ref: cc397113c  OPENNLP-1911-vector-search-evaluation  apache
+ref: 3ae7526df  OPENNLP-1920-relation-extraction  apache
+ref: 8499ffe5c  OPENNLP-XXXX-text-artifacts  research
+ref: c7fa05d51  OPENNLP-XXXX-embedded-assets  research
+ref: e686aced4  OPENNLP-XXXX-noise  research
+ref: 9072270c4  OPENNLP-XXXX-predicate-annotators  research
+ref: d6429bd00  OPENNLP-XXXX-ff-postagger  research
+ref: 0d1dba6be  OPENNLP-XXXX-bilstm-tagger  research
+ref: 841ae2fb0  OPENNLP-XXXX-glossary  research
+ref: 742076fa2  OPENNLP-XXXX-pii  research
+ref: 1cc9ea7f4  OPENNLP-XXXX-coref  research
+ref: 1921a15f7  OPENNLP-XXXX-hierarchy-annotator  research
+ref: f996cc55c  OPENNLP-XXXX-place-profiles  research
+ref: de001a157  OPENNLP-XXXX-wordnet-extension  research
+ref: a785b1fad  OPENNLP-XXXX-embedding-annotator  research
+ref: b9a246c30  OPENNLP-XXXX-symbol-joiner  research
+ref: ad00ff5ec  OPENNLP-XXXX-spellcheck-recase  research
+ref: 45691be18  OPENNLP-XXXX-morfologik-fsa  research
+ref: 38ea9a9a8  OPENNLP-XXXX-dehyphenation  research
+ref: e04d1e337  preview-accept-major0-models  research
