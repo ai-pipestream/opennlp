@@ -474,3 +474,10 @@ which is dedicated to the public domain by its terms of use
 
     No permission is needed to use Natural Earth. Crediting the authors is
     unnecessary.
+
+The Windows-1252 mapping in opennlp.tools.artifacts.CursorArtifactDetector
+is derived from CP1252.TXT (table version 2.01, 1998-04-15):
+https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT
+
+The Unicode License V3 reproduced above also applies to this mapping.
+Copyright © 1991-2026 Unicode, Inc.
