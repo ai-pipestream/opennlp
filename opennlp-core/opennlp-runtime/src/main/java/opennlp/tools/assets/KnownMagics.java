@@ -1,4 +1,35 @@
 /*
+ * Copyright (c) Ian F. Darwin 1986, 1987, 1989, 1990, 1991, 1992, 1994, 1995.
+ * Software written by Ian F. Darwin and others;
+ * maintained 1994- Christos Zoulas.
+ *
+ * This software is not subject to any export provision of the United States
+ * Department of Commerce, and may be exported to any country or planet.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice immediately at the beginning of the file, without modification,
+ *    this list of conditions, and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -25,25 +56,18 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The magic-byte table of the built-in detector: for every recognized format, the bytes
- * a file of that format starts with, the format tag, and the media type, with the
- * base64 image of those bytes precomputed for prefix scanning.
+ * File signatures, format names, media types, and precomputed base64 prefixes.
  *
- * <p>Magic values are derived from the leading bytes each format's specification
- * publishes, cross-referenced with the mime-type catalog of Apache Tika
- * (tika-mimetypes.xml, Apache License 2.0). Only a magic anchored at the first byte is
- * usable here, because only a fixed leading byte sequence has a fixed base64 image;
- * a format whose magic sits at a later offset, such as the ISO base media container,
- * cannot be recognized by prefix. Signatures that classify loose prose rather than a
- * file, such as mail header lines or source-code conventions, are deliberately absent:
- * the table claims embedded files, not text style. Media types are the IANA-registered
- * types where a registration exists, otherwise the form in prevailing use.</p>
+ * <p>Entries are adapted from
+ * <a href="https://github.com/apache/tika/blob/5837488582bedbe86443ae8fa9265952b8cf96a6/tika-core/src/main/resources/org/apache/tika/mime/tika-mimetypes.xml">
+ * Apache Tika's media-type catalog</a>, using fixed byte sequences at offset zero.
+ * The catalog's Apache, file(1), and PRONOM notices are included in LICENSE and
+ * NOTICE. Matching a signature identifies a possible format; it does not validate
+ * the file. Encoded text formats such as XML and PHP are included.</p>
  *
- * <p>Entries are held longest magic first, so a lookup always yields the most specific
- * match. The bare RIFF container magic is not in this table: its form type sits at
- * offset eight, and {@link CursorAssetDetector} resolves it from the decoded header.
- * Only a RIFF format whose whole leading sequence is fixed, such as CDA, is an entry
- * here.</p>
+ * <p>Lookups prefer the longest matching signature. RIFF form types at offset eight
+ * are handled by {@link CursorAssetDetector}; fixed RIFF prefixes, such as CDA,
+ * can also appear here.</p>
  *
  * @since 3.0.0
  */
@@ -85,8 +109,7 @@ final class KnownMagics {
       e("7f454c46", EmbeddedAsset.FORMAT_ELF, "application/x-elf"),
       e("4d5a9000", EmbeddedAsset.FORMAT_PE,
           "application/vnd.microsoft.portable-executable"), // MZ with the DOS stub
-      // 0xCAFEBABE is also the fat-binary magic of another executable family; the Java
-      // class file is by far the more common embedding, so the tag names it.
+      // This signature also occurs in Mach-O universal binaries; this entry selects Java.
       e("cafebabe", EmbeddedAsset.FORMAT_CLASS, "application/java-vm"),
       e("774f4646", EmbeddedAsset.FORMAT_WOFF, "font/woff"), // wOFF
       e("774f4632", EmbeddedAsset.FORMAT_WOFF2, "font/woff2"), // wOF2
@@ -113,8 +136,8 @@ final class KnownMagics {
       e("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d", "pem-key", "application/x-x509-key"),
       // -----BEGIN RSA PRIVATE K
       e("2d2d2d2d2d424547494e205253412050524956415445204b", "pem-key", "application/x-x509-key"),
-      // AutoCAD Binary DXF..0x1A
-      e("4175746f4341442042696e617279204458460d0a30783141", "dxf", "image/vnd.dxf"),
+      // Binary DXF sentinel ends with CR, LF, SUB, and NUL bytes.
+      e("4175746f4341442042696e617279204458460d0a1a00", "dxf", "image/vnd.dxf"),
       // MPX,Microsoft Project fo
       e("4d50582c4d6963726f736f66742050726f6a65637420666f", "mpx", "application/x-project"),
       // %!PS-Adobe-3.0 EPSF-3.0
@@ -214,7 +237,7 @@ final class KnownMagics {
       e("010009000003", "wmf", "image/wmf"),
       e("01da01010003", "rgb", "image/x-rgb"),
       e("284457462056", "dwf", "model/vnd.dwf"), // (DWF V
-      e("2f2a2058504d", "xbm", "image/x-xbitmap"), // /* XPM
+      e("2f2a2058504d", "xpm", "image/x-xpixmap"), // /* XPM
       e("303730373031", "cpio", "application/x-cpio"), // 070701
       e("303730373032", "cpio", "application/x-cpio"), // 070702
       e("303730373037", "cpio", "application/x-cpio"), // 070707
@@ -299,7 +322,7 @@ final class KnownMagics {
       e("58504453", "dpx", "image/x-dpx"), // XPDS
       e("6465780a", "dex", "application/x-dex"), // dex.
       e("69636e73", "icns", "image/icns"), // icns
-      e("78617221", "xar", "application/vnd.xara"), // xar!
+      e("78617221", "xar", "application/x-xar"), // xar!
       e("8a4d4e47", "mng", "video/x-mng"), // .MNG
       e("8b4a4e47", "jng", "video/x-jng"), // .JNG
       e("b168de3a", "dcx", "image/vnd.zbrush.dcx"),
@@ -333,6 +356,7 @@ final class KnownMagics {
     PREFIXES = List.copyOf(prefixes);
   }
 
+  /** Prevents construction of the signature table utility. */
   private KnownMagics() {
   }
 

@@ -25,22 +25,18 @@ import opennlp.tools.util.normalizer.AlignedText;
 import opennlp.tools.util.normalizer.Alignment;
 
 /**
- * Replaces the embedded assets of a document with text while keeping every offset
- * mapped: the result is an {@link AlignedText} whose alignment converts spans between
- * the folded text and the original, so downstream findings over the cleaned text still
- * locate exactly in the raw input.
+ * Replaces embedded assets with text and returns an {@link AlignedText} mapping
+ * the result's spans to the original document.
  *
- * <p>What replaces an asset is the caller's choice through the replacement function:
- * the {@link #caption()} default renders a short bracketed description from the
- * asset's own metadata, and a {@link BinaryContentDescriber} composes in directly by
- * decoding the payload and describing the bytes.</p>
+ * <p>The replacement function can use {@link #caption()}, omit the asset, or
+ * decode its payload for a {@link BinaryContentDescriber}.</p>
  *
  * @since 3.0.0
  */
 public final class AssetFolder {
 
+  /** Prevents construction of the folding utility. */
   private AssetFolder() {
-    // Static methods only.
   }
 
   /**
@@ -64,8 +60,6 @@ public final class AssetFolder {
       throw new IllegalArgumentException("replacement must not be null");
     }
     if (!document.layers().contains(AssetAnnotator.ASSETS)) {
-      // An absent layer means no detector ran; folding nothing here would silently
-      // return the text unchanged, hiding the missing pipeline step.
       throw new IllegalArgumentException("the document has no "
           + AssetAnnotator.ASSETS.id() + " layer; run an AssetAnnotator first");
     }

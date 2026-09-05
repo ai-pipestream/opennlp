@@ -23,14 +23,11 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * One binary asset embedded in a text as encoded characters: where it sits, where its
- * payload characters are, and what the decoded bytes are.
+ * An encoded payload with source spans, a format, and metadata from its header.
  *
- * <p>The format is an open string so detectors can introduce new formats without an API
- * change; the constants on this record name the most common of the formats the built-in
- * detector recognizes. Detection never alters the text: an asset states exact offsets over the
- * original, so a caller can extract the bytes, replace the span with text, or drop it,
- * without losing where it was.</p>
+ * <p>Format names are open strings; the constants identify selected formats.
+ * Both spans refer to the original text. Callers can decode the payload or replace
+ * the full span while retaining its source location.</p>
  *
  * @param span The full location in the original text, including any URI prefix around
  *             the payload. Must not be {@code null}.
@@ -43,8 +40,8 @@ import opennlp.tools.util.StringUtil;
  * @param mediaType The media type, either as declared by the carrying URI or derived
  *                  from the format. Must not be {@code null} or blank.
  * @param decodedLength The length of the decoded bytes.
- * @param width The pixel width when the format's header carries one, or -1.
- * @param height The pixel height when the format's header carries one, or -1.
+ * @param width The positive pixel width, or -1 when unknown.
+ * @param height The positive pixel height, or -1 when unknown.
  *
  * @since 3.0.0
  */
@@ -134,7 +131,8 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
    *
    * @throws IllegalArgumentException Thrown if a span is {@code null}, {@code payload}
    *         lies outside {@code span}, {@code format} or {@code mediaType} is
-   *         {@code null} or blank, or {@code decodedLength} is negative.
+   *         {@code null} or blank, {@code decodedLength} is negative, or a dimension
+   *         is neither positive nor -1.
    */
   public EmbeddedAsset {
     if (span == null) {
@@ -154,6 +152,12 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
     }
     if (decodedLength < 0) {
       throw new IllegalArgumentException("decodedLength must not be negative");
+    }
+    if (width != -1 && width <= 0) {
+      throw new IllegalArgumentException("width must be positive or -1");
+    }
+    if (height != -1 && height <= 0) {
+      throw new IllegalArgumentException("height must be positive or -1");
     }
   }
 
@@ -214,7 +218,7 @@ public record EmbeddedAsset(Span span, Span payload, String format, String media
    * @param c The character to test.
    * @return {@code true} for an ASCII letter or digit.
    */
-  private static boolean isSharedBase64Char(char c) {
+  private boolean isSharedBase64Char(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
   }
 }
