@@ -35,16 +35,18 @@ import opennlp.tools.document.Layers;
 import opennlp.tools.temporal.DocumentDateAnnotator;
 
 /**
- * Converts the money layer into one target currency: reads {@link MoneyAnnotator#MONEY}
- * and provides {@link #CONVERTED_MONEY}, one annotation per convertible mention with
- * the amount restated in the target currency on the mention's original span.
+ * Converts {@link MoneyAnnotator#MONEY} into a target currency under
+ * {@link #CONVERTED_MONEY}, retaining the original annotation spans.
  *
- * <p>The conversion is as-of dated, from either a fixed date or the document's own
- * reference date. In document-dated mode the annotator reads
- * {@link DocumentDateAnnotator#DOCUMENT_DATE}, so a dateline in the text anchors its
- * conversions; a document without an elected date converts nothing. Mentions without a
- * usable rate are left out of the converted layer and logged at debug level; the
- * original mention stays in the money layer either way, so nothing is lost.</p>
+ * <p>The reference date is fixed at construction or read from
+ * {@link DocumentDateAnnotator#DOCUMENT_DATE}. Without a date, the converted layer is
+ * empty. Mentions without a rate are omitted and logged at debug level. The source
+ * layer is unchanged. Document-date mode requires at most one date annotation;
+ * fixed-date mode does not read that layer.</p>
+ *
+ * <p>Input amount spans must match their annotation spans. Provider results must use
+ * the target currency and preserve those spans. Invalid results are rejected;
+ * exceptions from the provider propagate. No additional rounding is applied.</p>
  *
  * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
@@ -61,6 +63,9 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
   private static final Logger logger =
       LoggerFactory.getLogger(MoneyConversionAnnotator.class);
 
+  private static final String RATES_REQUIRED = "rates must not be null";
+  private static final String TARGET_REQUIRED = "target must not be null or blank";
+
   private final FxRates rates;
   private final String target;
   private final LocalDate asOf;
@@ -76,7 +81,12 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    *         {@code target} is blank.
    */
   public MoneyConversionAnnotator(FxRates rates, String target, LocalDate asOf) {
-    checkProviderAndTarget(rates, target);
+    if (rates == null) {
+      throw new IllegalArgumentException(RATES_REQUIRED);
+    }
+    if (target == null || target.isBlank()) {
+      throw new IllegalArgumentException(TARGET_REQUIRED);
+    }
     if (asOf == null) {
       throw new IllegalArgumentException("asOf must not be null");
     }
@@ -86,8 +96,8 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Initializes the annotator in document-dated mode: each document's conversions are
-   * anchored on its {@link DocumentDateAnnotator#DOCUMENT_DATE} layer.
+   * Initializes the annotator using each document's
+   * {@link DocumentDateAnnotator#DOCUMENT_DATE} layer.
    *
    * @param rates The rate provider. Must not be {@code null}.
    * @param target The ISO 4217 code of the target currency. Must not be {@code null} or
@@ -96,45 +106,26 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
    *         {@code target} is {@code null} or blank.
    */
   public MoneyConversionAnnotator(FxRates rates, String target) {
-    checkProviderAndTarget(rates, target);
+    if (rates == null) {
+      throw new IllegalArgumentException(RATES_REQUIRED);
+    }
+    if (target == null || target.isBlank()) {
+      throw new IllegalArgumentException(TARGET_REQUIRED);
+    }
     this.rates = rates;
     this.target = target;
     this.asOf = null;
   }
 
   /**
-   * Validates the arguments both constructors share.
+   * {@inheritDoc}
    *
-   * @param rates The rate provider.
-   * @param target The ISO 4217 code of the target currency.
-   * @throws IllegalArgumentException Thrown if {@code rates} is {@code null} or
-   *         {@code target} is {@code null} or blank.
-   */
-  private static void checkProviderAndTarget(FxRates rates, String target) {
-    if (rates == null) {
-      throw new IllegalArgumentException("rates must not be null");
-    }
-    if (target == null || target.isBlank()) {
-      throw new IllegalArgumentException("target must not be null or blank");
-    }
-  }
-
-  /**
-   * Restates the money layer in the target currency and adds the
-   * {@link #CONVERTED_MONEY} layer.
+   * <p>Adds validated conversions under {@link #CONVERTED_MONEY}.</p>
    *
-   * <p>The required layers must be present, but they may be empty. A mention without a
-   * usable rate is left out of the converted layer, so the converted layer is a subset
-   * of the money layer, aligned with it by span.</p>
-   *
-   * @param document The document to annotate. Must not be {@code null} and must carry
-   *                 the {@link MoneyAnnotator#MONEY} layer, plus the
-   *                 {@link DocumentDateAnnotator#DOCUMENT_DATE} layer in document-dated
-   *                 mode.
-   * @return A new {@link Document} with the {@link #CONVERTED_MONEY} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or a
-   *         required layer is absent.
+   * @throws IllegalArgumentException Thrown if the output layer is present, an input
+   *         amount span differs from its annotation span, or a provider result is null
+   *         or has an unexpected currency or span, or document-date mode receives
+   *         multiple date annotations.
    */
   @Override
   public Document annotate(Document document) {
@@ -144,33 +135,50 @@ public class MoneyConversionAnnotator implements DocumentAnnotator {
       DocumentAnnotators.requireLayers(document, MoneyAnnotator.MONEY,
           DocumentDateAnnotator.DOCUMENT_DATE);
     }
-    final LocalDate date = asOf != null ? asOf : documentDate(document);
+    if (document.layers().contains(CONVERTED_MONEY)) {
+      throw new IllegalArgumentException("layer is already present: " + CONVERTED_MONEY);
+    }
+    final List<Annotation<MoneyAmount>> amounts = document.get(MoneyAnnotator.MONEY);
+    for (final Annotation<MoneyAmount> amount : amounts) {
+      if (!amount.span().equals(amount.value().span())) {
+        throw new IllegalArgumentException("amount span differs from annotation span: " + amount.span());
+      }
+    }
+    final LocalDate date;
+    if (asOf != null) {
+      date = asOf;
+    } else {
+      final List<Annotation<LocalDate>> dates = document.get(DocumentDateAnnotator.DOCUMENT_DATE);
+      if (dates.size() > 1) {
+        throw new IllegalArgumentException("document date layer must contain at most one annotation");
+      }
+      date = dates.isEmpty() ? null : dates.getFirst().value();
+    }
     final List<Annotation<MoneyAmount>> converted = new ArrayList<>();
     if (date == null) {
-      logger.debug("No document date elected; converting nothing");
+      logger.debug("No document date available for conversion");
       return document.with(CONVERTED_MONEY, converted);
     }
-    for (final Annotation<MoneyAmount> mention : document.get(MoneyAnnotator.MONEY)) {
+    for (final Annotation<MoneyAmount> mention : amounts) {
       final Optional<MoneyAmount> restated = rates.convert(mention.value(), target, date);
+      if (restated == null) {
+        throw new IllegalArgumentException("rate provider returned a null result");
+      }
       if (restated.isPresent()) {
-        converted.add(new Annotation<>(mention.span(), restated.get()));
+        final MoneyAmount amount = restated.get();
+        if (!target.equals(amount.currency())) {
+          throw new IllegalArgumentException("rate provider returned currency " + amount.currency()
+              + "; expected " + target);
+        }
+        if (!mention.span().equals(amount.span())) {
+          throw new IllegalArgumentException("rate provider changed the amount span: " + mention.span());
+        }
+        converted.add(new Annotation<>(mention.span(), amount));
       } else {
         logger.debug("No {} rate as of {} for mention {}", target, date, mention.value());
       }
     }
     return document.with(CONVERTED_MONEY, converted);
-  }
-
-  /**
-   * Reads the document's elected reference date.
-   *
-   * @param document The document being annotated. Must not be {@code null}.
-   * @return The date, or {@code null} when the layer is empty.
-   */
-  private LocalDate documentDate(Document document) {
-    final List<Annotation<LocalDate>> dates =
-        document.get(DocumentDateAnnotator.DOCUMENT_DATE);
-    return dates.isEmpty() ? null : dates.get(0).value();
   }
 
   /** {@inheritDoc} */

@@ -22,14 +22,10 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 /**
- * The interface for foreign exchange rate providers: the rate between two currencies as
- * of a date, and the derived conversion of a {@link MoneyAmount}.
+ * Provides exchange rates for a requested date and converts {@link MoneyAmount} values.
  *
- * <p>Rate data is always supplied by the caller, typically from a downloaded reference
- * table; OpenNLP bundles no rate data. A conversion is as-of dated because rates move:
- * converting money mentioned in a document is only meaningful against the date the
- * document speaks from, which callers can take from document metadata or from a
- * temporal mention in the text.</p>
+ * <p>OpenNLP does not bundle rate data. Use a date from document metadata or an
+ * extracted temporal expression to convert amounts for the document date.</p>
  *
  * @see <a href="https://www.iso.org/iso-4217-currency-codes.html">ISO 4217</a>
  * @since 3.0.0
@@ -48,6 +44,7 @@ public interface FxRates {
    *         no usable rate for the pair at that date. Never {@code null}.
    * @throws IllegalArgumentException Thrown if any parameter is {@code null} or a code
    *         is blank.
+   * @throws ArithmeticException If the result exceeds the supported decimal range.
    */
   Optional<BigDecimal> rate(String from, String to, LocalDate asOf);
 
@@ -62,10 +59,17 @@ public interface FxRates {
    *         when no usable rate exists. Never {@code null}.
    * @throws IllegalArgumentException Thrown if any parameter is {@code null} or
    *         {@code to} is blank.
+   * @throws ArithmeticException If the result exceeds the supported decimal range.
    */
   default Optional<MoneyAmount> convert(MoneyAmount money, String to, LocalDate asOf) {
     if (money == null) {
       throw new IllegalArgumentException("money must not be null");
+    }
+    if (to == null || to.isBlank()) {
+      throw new IllegalArgumentException("to must not be null or blank");
+    }
+    if (asOf == null) {
+      throw new IllegalArgumentException("asOf must not be null");
     }
     return rate(money.currency(), to, asOf)
         .map(rate -> new MoneyAmount(money.span(), money.amount().multiply(rate), to));

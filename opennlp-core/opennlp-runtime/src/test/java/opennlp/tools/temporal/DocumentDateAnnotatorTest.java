@@ -28,13 +28,10 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.util.Span;
 
-/**
- * Tests the document date election rule: the first day-granularity temporal mention in
- * the text wins, coarser mentions never elect a date, and the electing mention's span
- * stays on the annotation for auditability.
- */
+/** Tests reference-date selection, required layers, and calendar-value validation. */
 public class DocumentDateAnnotatorTest {
 
+  /** The first absolute day supplies the reference date and original span. */
   @Test
   void testFirstDayMentionElectsTheDate() {
     final Document document = Document.of("2026-07 report, filed 2026-07-10, due 2026-07-20.")
@@ -55,6 +52,7 @@ public class DocumentDateAnnotatorTest {
     Assertions.assertEquals(new Span(22, 32), dates.get(0).span());
   }
 
+  /** Month and quarter mentions do not supply a day-level reference. */
   @Test
   void testCoarserMentionsNeverElectADate() {
     final Document document = Document.of("the 2026-07 report and 2024-Q3 numbers")
@@ -69,8 +67,7 @@ public class DocumentDateAnnotatorTest {
   }
 
   /**
-   * Verifies the election rule on conflicting dates through the real extractor: when a
-   * document mentions two different days, the first one in text order wins.
+   * The extractor pipeline selects the first date by text position.
    */
   @Test
   void testFirstOfConflictingDatesWinsThroughThePipeline() {
@@ -88,12 +85,10 @@ public class DocumentDateAnnotatorTest {
   }
 
   /**
-   * Verifies that an absent temporal layer fails loud, naming the missing layer, rather
-   * than being read as an empty list, and that an empty temporal layer is valid input
-   * that simply elects nothing.
+   * A missing temporal layer is rejected; an empty temporal layer adds an empty date layer.
    */
   @Test
-  void testMissingTemporalLayerFailsLoud() {
+  void testTemporalLayerRequirement() {
     final IllegalArgumentException e = Assertions.assertThrows(
         IllegalArgumentException.class,
         () -> new DocumentDateAnnotator().annotate(Document.of("no dates here")));
@@ -107,12 +102,10 @@ public class DocumentDateAnnotatorTest {
   }
 
   /**
-   * Verifies that a day-granularity mention whose value is not an ISO 8601 date, as a
-   * third-party extractor may supply, fails loud as {@link IllegalArgumentException}
-   * naming the offending value and its span, not as a raw parse exception.
+   * An invalid date format is reported with the value and original span.
    */
   @Test
-  void testNonIsoDayValueFailsLoudWithValueAndSpan() {
+  void testInvalidDayFormat() {
     final Document document = Document.of("Filed July 14, 2026.")
         .with(TemporalAnnotator.TEMPORALS, List.of(
             new Annotation<>(new Span(6, 19), new TemporalExpression(
@@ -126,13 +119,10 @@ public class DocumentDateAnnotatorTest {
   }
 
   /**
-   * Verifies that a value in {@code yyyy-MM-dd} shape that is not a real calendar day,
-   * such as a February 30th, fails loud the same way as a value that is not ISO-shaped
-   * at all: the javadoc promises rejection of any value that is not an ISO 8601
-   * calendar date, not merely of un-ISO-shaped text.
+   * An impossible calendar date is reported with the value and original span.
    */
   @Test
-  void testIsoShapedImpossibleDayFailsLoudWithValueAndSpan() {
+  void testInvalidCalendarDate() {
     final Document document = Document.of("Filed 2026-02-30.")
         .with(TemporalAnnotator.TEMPORALS, List.of(
             new Annotation<>(new Span(6, 16), new TemporalExpression(
@@ -145,6 +135,7 @@ public class DocumentDateAnnotatorTest {
         "not an ISO 8601 day value at [6..16): 2026-02-30", e.getMessage());
   }
 
+  /** A null document is rejected at the API boundary. */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

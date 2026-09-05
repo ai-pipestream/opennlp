@@ -19,6 +19,11 @@ package opennlp.tools.temporal;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.SignStyle;
+import java.time.temporal.ChronoField;
 import java.time.temporal.IsoFields;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,41 +32,54 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.extraction.NumberScan;
 import opennlp.tools.temporal.TemporalExpression.Granularity;
 import opennlp.tools.temporal.TemporalExpression.Origin;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
- * A deterministic {@link TemporalExtractor}: a single forward scan over the text, no
- * regular expressions, recognizing absolute calendar mentions.
+ * A model-free {@link TemporalExtractor} for calendar dates and relative expressions.
  *
  * <p>Recognized forms: ISO dates ({@code 2026-07-14}), also as the date part of an
- * ISO 8601 timestamp ({@code 2026-07-14T09:30:00Z}), reported at day granularity over
+ * timestamp ({@code 2026-07-14T09:30:00Z}), reported at day granularity over
  * the date part only; written dates in both orders,
  * with optional comma and ordinal suffix ({@code July 14, 2026}, {@code 14th July 2026},
  * {@code Jul 14 2026}); month and year ({@code July 2026}); and quarters
  * ({@code Q3 2024}). Month names are matched case-insensitively as full names or
- * three-letter abbreviations. Years are restricted to 1000 through 2999, and day-level
- * mentions are calendar-validated through {@code java.time}, so {@code February 30}
- * is never reported.</p>
+ * three-letter abbreviations. Absolute mentions require years from 1000 through 2999
+ * and valid calendar days.</p>
+ *
+ * <p>Clock suffixes require {@code T} and hours/minutes, with optional seconds,
+ * a dot or comma fraction of the last component, and {@code Z} or a
+ * {@code +05:30} style offset. Lowercase {@code t} and {@code z} are accepted.
+ * Hour 24 requires zero minutes, seconds, and fraction. Second 60 is accepted
+ * without checking a leap-second calendar. Offset hours are 00 through 23 and
+ * minutes are 00 through 59. The reported date is not converted to UTC.</p>
  *
  * <p>With a reference date, {@link #extract(CharSequence, LocalDate)} additionally
  * resolves relative expressions: {@code today}, {@code yesterday}, {@code tomorrow};
- * {@code last}, {@code this}, or {@code next} week, month, quarter, or year; a count
- * of days, weeks, months, or years followed by {@code ago}; and {@code in} followed
- * by such a count. Each is marked with {@link TemporalExpression.Origin#RELATIVE} and
- * resolves at the granularity its unit names, so {@code last week} is an ISO week and
- * {@code 3 days ago} a calendar day.
- * Without a reference date, relative expressions are not reported at all rather than
- * being guessed against the wall clock.</p>
+ * {@code last}, {@code this}, or {@code next} day, week, month, quarter, or year; and
+ * counts from 0 to 99 of those units with {@code ago} or a leading {@code in}.
+ * Results have {@link TemporalExpression.Origin#RELATIVE} origin and the requested
+ * granularity. Without a reference date, relative expressions are omitted.</p>
+ *
+ * <p>Reference and resolved dates support the full {@link LocalDate} range. An expression
+ * that exceeds this range is omitted without preventing subsequent matches. Normalized
+ * years have at least 4 digits, a negative sign before year zero, and a positive sign
+ * after year 9999. Week values use the ISO week-based year.</p>
  *
  * <p>Not recognized: named weekdays such as {@code next Tuesday}, times of day (the
- * time part of a timestamp is skipped, never reported), bare years, day-and-month
- * without a year, and numeric formats with slashes, whose day and month order is
- * locale-dependent. The extractor holds no per-call state and is safe to
- * share between threads.</p>
+ * time part of a timestamp is not reported), years without a month, day-and-month
+ * without a year, and numeric dates with slashes. Phrases use one ASCII space between
+ * components. The extractor uses no regular expressions or mutable per-call fields
+ * and can be shared between threads.</p>
  *
+ * @see DateTimeFormatter#ISO_LOCAL_DATE
+ * @see DateTimeFormatter#ISO_WEEK_DATE
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc3339.html#section-5.6">RFC 3339 clock fields and offsets</a>
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc3339.html#appendix-A">ISO 8601 time syntax</a>
  * @since 3.0.0
  */
 public class CursorTemporalExtractor implements TemporalExtractor {
@@ -71,8 +89,34 @@ public class CursorTemporalExtractor implements TemporalExtractor {
   private static final int MIN_YEAR = 1000;
   private static final int MAX_YEAR = 2999;
 
+  private static final String DAY_UNIT = "day";
+
+  private static final DateTimeFormatter YEAR_FORMAT = new DateTimeFormatterBuilder()
+      .appendValue(ChronoField.YEAR, 4, 10, SignStyle.EXCEEDS_PAD)
+      .toFormatter(Locale.ROOT);
+
+  private static final DateTimeFormatter MONTH_FORMAT = new DateTimeFormatterBuilder()
+      .append(YEAR_FORMAT).appendLiteral('-').appendValue(ChronoField.MONTH_OF_YEAR, 2)
+      .toFormatter(Locale.ROOT);
+
+  private static final DateTimeFormatter QUARTER_FORMAT = new DateTimeFormatterBuilder()
+      .append(YEAR_FORMAT).appendLiteral("-Q").appendValue(IsoFields.QUARTER_OF_YEAR)
+      .toFormatter(Locale.ROOT);
+
+  private static final DateTimeFormatter WEEK_FORMAT = new DateTimeFormatterBuilder()
+      .appendValue(IsoFields.WEEK_BASED_YEAR, 4, 10, SignStyle.EXCEEDS_PAD)
+      .appendLiteral("-W").appendValue(IsoFields.WEEK_OF_WEEK_BASED_YEAR, 2)
+      .toFormatter(Locale.ROOT);
+
   /** The length of an extended-format ISO date, {@code 2026-07-14}. */
   private static final int ISO_DATE_LENGTH = 10;
+
+  private static final int HOURS_PER_DAY = 24;
+  private static final int MINUTES_PER_HOUR = 60;
+  private static final int SECONDS_PER_MINUTE = 60;
+  private static final char TIME_SEPARATOR = ':';
+  private static final char FRACTION_DOT = '.';
+  private static final char FRACTION_COMMA = ',';
 
   /**
    * How many letters a candidate keyword or month name may have before the scan gives
@@ -88,18 +132,24 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    */
   @Override
   public List<TemporalExpression> extract(CharSequence text) {
+    if (text == null) {
+      throw new IllegalArgumentException("text must not be null");
+    }
     return scan(text, null);
   }
 
   /**
    * {@inheritDoc}
    *
-   * <p>The scan resumes behind each reported mention, so mentions never overlap.</p>
+   * <p>Expressions outside the {@link LocalDate} range are omitted.</p>
    */
   @Override
   public List<TemporalExpression> extract(CharSequence text, LocalDate reference) {
     if (reference == null) {
       throw new IllegalArgumentException("reference must not be null");
+    }
+    if (text == null) {
+      throw new IllegalArgumentException("text must not be null");
     }
     return scan(text, reference);
   }
@@ -111,12 +161,8 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    * @param reference The date relative expressions resolve against, or {@code null} to
    *                  not recognize relative expressions at all.
    * @return The mentions in text order, non-overlapping. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   private List<TemporalExpression> scan(CharSequence text, LocalDate reference) {
-    if (text == null) {
-      throw new IllegalArgumentException("text must not be null");
-    }
     final List<TemporalExpression> mentions = new ArrayList<>();
     int i = 0;
     while (i < text.length()) {
@@ -141,11 +187,15 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    * @return The mention starting at {@code start}, or {@code null} when none matches.
    */
   private TemporalExpression matchAt(CharSequence text, int start, LocalDate reference) {
-    if (!NumberScan.boundaryBefore(text, start)) {
+    final char c = NumberScan.charAt(text, start);
+    if ((!NumberScan.isAsciiDigit(c) && !Character.isLetter(c))
+        || !NumberScan.boundaryBefore(text, start)) {
       return null;
     }
-    final char c = NumberScan.charAt(text, start);
     if (NumberScan.isAsciiDigit(c)) {
+      if (NumberScan.continuesNumber(text, start, NumberNotation.LATIN_US)) {
+        return null;
+      }
       final TemporalExpression iso = isoDate(text, start);
       if (iso != null) {
         return iso;
@@ -187,11 +237,11 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     }
     switch (keyword.lower()) {
       case "today":
-        return resolved(start, keyword.end(), reference, Granularity.DAY);
+        return shifted(start, keyword.end(), DAY_UNIT, 0, reference);
       case "yesterday":
-        return resolved(start, keyword.end(), reference.minusDays(1), Granularity.DAY);
+        return shifted(start, keyword.end(), DAY_UNIT, -1, reference);
       case "tomorrow":
-        return resolved(start, keyword.end(), reference.plusDays(1), Granularity.DAY);
+        return shifted(start, keyword.end(), DAY_UNIT, 1, reference);
       case "last":
       case "this":
       case "next": {
@@ -263,19 +313,35 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    * @param unit The singular unit word, for example {@code week}.
    * @param steps How many units to shift, negative into the past.
    * @param reference The date the expression resolves against. Must not be {@code null}.
-   * @return The resolved mention, or {@code null} when {@code unit} names no known unit.
+   * @return The resolved mention, or {@code null} for an unknown unit or a date outside
+   *         the {@link LocalDate} range.
    */
   private TemporalExpression shifted(int start, int end, String unit,
       int steps, LocalDate reference) {
-    return switch (unit) {
-      case "day" -> resolved(start, end, reference.plusDays(steps), Granularity.DAY);
-      case "week" -> resolved(start, end, reference.plusWeeks(steps), Granularity.WEEK);
-      case "month" -> resolved(start, end, reference.plusMonths(steps), Granularity.MONTH);
-      case "quarter" -> resolved(start, end, reference.plusMonths(3L * steps),
-          Granularity.QUARTER);
-      case "year" -> resolved(start, end, reference.plusYears(steps), Granularity.YEAR);
+    final Granularity granularity = switch (unit) {
+      case DAY_UNIT -> Granularity.DAY;
+      case "week" -> Granularity.WEEK;
+      case "month" -> Granularity.MONTH;
+      case "quarter" -> Granularity.QUARTER;
+      case "year" -> Granularity.YEAR;
       default -> null;
     };
+    if (granularity == null) {
+      return null;
+    }
+    final LocalDate date;
+    try {
+      date = switch (granularity) {
+        case DAY -> reference.plusDays(steps);
+        case WEEK -> reference.plusWeeks(steps);
+        case MONTH -> reference.plusMonths(steps);
+        case QUARTER -> reference.plusMonths(3L * steps);
+        case YEAR -> reference.plusYears(steps);
+      };
+    } catch (DateTimeException e) {
+      return null;
+    }
+    return resolved(start, end, date, granularity);
   }
 
   /**
@@ -301,24 +367,17 @@ public class CursorTemporalExtractor implements TemporalExtractor {
   private TemporalExpression resolved(int start, int end, LocalDate date,
       Granularity granularity) {
     final String value = switch (granularity) {
-      case DAY -> String.format(Locale.ROOT, "%04d-%02d-%02d",
-          date.getYear(), date.getMonthValue(), date.getDayOfMonth());
-      case WEEK -> String.format(Locale.ROOT, "%04d-W%02d",
-          date.get(IsoFields.WEEK_BASED_YEAR), date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR));
-      case MONTH -> String.format(Locale.ROOT, "%04d-%02d",
-          date.getYear(), date.getMonthValue());
-      case QUARTER -> String.format(Locale.ROOT, "%04d-Q%d",
-          date.getYear(), date.get(IsoFields.QUARTER_OF_YEAR));
-      case YEAR -> String.format(Locale.ROOT, "%04d", date.getYear());
+      case DAY -> date.toString();
+      case WEEK -> WEEK_FORMAT.format(date);
+      case MONTH -> MONTH_FORMAT.format(date);
+      case QUARTER -> QUARTER_FORMAT.format(date);
+      case YEAR -> YEAR_FORMAT.format(date);
     };
     return new TemporalExpression(new Span(start, end), value, granularity, Origin.RELATIVE);
   }
 
   /**
-   * Matches {@code 2026-07-14}, alone or as the date part of an ISO 8601 timestamp
-   * such as {@code 2026-07-14T09:30:00Z}. In the timestamp case the mention covers
-   * only the date and stays at day granularity; the time part is skipped, never
-   * reported, since sub-day granularities are out of scope.
+   * Matches an ISO date, including the date part of a supported timestamp.
    *
    * @param text The text being scanned.
    * @param start The offset of the first digit of the year.
@@ -345,37 +404,76 @@ public class CursorTemporalExtractor implements TemporalExtractor {
   }
 
   /**
-   * Checks whether an ISO 8601 time of day starts at a position: a {@code T} followed
-   * by at least hours and minutes ({@code T09:30}), optional further colon-separated
-   * two-digit groups such as seconds, and an optional zone suffix, either {@code Z}
-   * or a {@code +05:30} style offset, ending at a boundary. A {@code T} followed by
-   * prose letters, as in {@code 2026-07-14Tomorrow}, never qualifies.
+   * Checks the clock fields, fraction, offset, and final boundary of a timestamp suffix.
    *
    * @param text The text being scanned.
    * @param start The offset of the candidate {@code T}.
    * @return {@code true} if a time of day starts at {@code start}.
    */
   private boolean timeOfDayAt(CharSequence text, int start) {
-    if (NumberScan.charAt(text, start) != 'T'
-        || digits(text, start + 1, 2) < 0 || NumberScan.charAt(text, start + 3) != ':') {
+    final char separator = NumberScan.charAt(text, start);
+    if ((separator != 'T' && separator != 't')
+        || NumberScan.charAt(text, start + 3) != TIME_SEPARATOR) {
       return false;
     }
-    int i = start + 4;
-    if (digits(text, i, 2) < 0) {
+    final int hour = digits(text, start + 1, 2);
+    final int minute = digits(text, start + 4, 2);
+    if (hour < 0 || hour > HOURS_PER_DAY || minute < 0 || minute >= MINUTES_PER_HOUR) {
       return false;
     }
-    i += 2;
-    while (NumberScan.charAt(text, i) == ':' && digits(text, i + 1, 2) >= 0) {
+    int i = start + 6;
+    int second = 0;
+    if (NumberScan.charAt(text, i) == TIME_SEPARATOR
+        && NumberScan.isAsciiDigit(NumberScan.charAt(text, i + 1))) {
+      second = digits(text, i + 1, 2);
+      if (second < 0 || second > SECONDS_PER_MINUTE) {
+        return false;
+      }
       i += 3;
     }
-    final char zone = NumberScan.charAt(text, i);
-    if (zone == 'Z') {
+    final char decimal = NumberScan.charAt(text, i);
+    boolean nonzeroFraction = false;
+    if ((decimal == FRACTION_DOT || decimal == FRACTION_COMMA)
+        && NumberScan.isAsciiDigit(NumberScan.charAt(text, i + 1))) {
       i++;
-    } else if ((zone == '+' || zone == '-') && digits(text, i + 1, 2) >= 0
-        && NumberScan.charAt(text, i + 3) == ':' && digits(text, i + 4, 2) >= 0) {
+      while (NumberScan.isAsciiDigit(NumberScan.charAt(text, i))) {
+        nonzeroFraction |= NumberScan.charAt(text, i) != '0';
+        i++;
+      }
+    }
+    if (hour == HOURS_PER_DAY && (minute != 0 || second != 0 || nonzeroFraction)) {
+      return false;
+    }
+    final char zone = NumberScan.charAt(text, i);
+    if (zone == 'Z' || zone == 'z') {
+      i++;
+    } else if (zone == '+' || zone == '-') {
+      final int offsetHour = digits(text, i + 1, 2);
+      final int offsetMinute = digits(text, i + 4, 2);
+      if (offsetHour < 0 || offsetHour >= HOURS_PER_DAY
+          || NumberScan.charAt(text, i + 3) != TIME_SEPARATOR
+          || offsetMinute < 0 || offsetMinute >= MINUTES_PER_HOUR) {
+        return false;
+      }
       i += 6;
     }
-    return NumberScan.boundaryAfter(text, i);
+    return timeBoundaryAfter(text, i);
+  }
+
+  /**
+   * Distinguishes trailing punctuation from additional clock fields or fractions.
+   *
+   * @param text The text being scanned.
+   * @param start The offset after a complete time suffix.
+   * @return Whether the time ends here without a numeric or word continuation.
+   */
+  private boolean timeBoundaryAfter(CharSequence text, int start) {
+    int i = start;
+    char next = NumberScan.charAt(text, i);
+    while (next == TIME_SEPARATOR || next == FRACTION_DOT || next == FRACTION_COMMA) {
+      next = NumberScan.charAt(text, ++i);
+    }
+    return next != '+' && next != '-' && NumberScan.boundaryAfter(text, i);
   }
 
   /**
@@ -423,7 +521,7 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     final NumberInText year = yearAt(text, month.end() + 1);
     if (year != null) {
       return new TemporalExpression(new Span(start, year.end()),
-          String.format(Locale.ROOT, "%04d-%02d", year.value(), monthOfYear),
+          MONTH_FORMAT.format(YearMonth.of(year.value(), monthOfYear)),
           Granularity.MONTH);
     }
     final NumberInText day = shortNumber(text, month.end() + 1);
@@ -461,7 +559,8 @@ public class CursorTemporalExtractor implements TemporalExtractor {
       return null;
     }
     return new TemporalExpression(new Span(start, year.end()),
-        String.format(Locale.ROOT, "%04d-Q%d", year.value(), number), Granularity.QUARTER);
+        QUARTER_FORMAT.format(YearMonth.of(year.value(), (number - 1) * 3 + 1)),
+        Granularity.QUARTER);
   }
 
   /**
@@ -480,13 +579,14 @@ public class CursorTemporalExtractor implements TemporalExtractor {
     if (year < MIN_YEAR || year > MAX_YEAR) {
       return null;
     }
+    final LocalDate date;
     try {
-      LocalDate.of(year, month, dayOfMonth);
+      date = LocalDate.of(year, month, dayOfMonth);
     } catch (DateTimeException e) {
       return null;
     }
     return new TemporalExpression(new Span(start, end),
-        String.format(Locale.ROOT, "%04d-%02d-%02d", year, month, dayOfMonth),
+        date.toString(),
         Granularity.DAY);
   }
 
@@ -534,12 +634,14 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    * @return The offset behind the suffix, or {@code index} when none follows.
    */
   private int skipOrdinal(CharSequence text, int index) {
-    final char first = Character.toLowerCase(NumberScan.charAt(text, index));
-    final char second = Character.toLowerCase(NumberScan.charAt(text, index + 1));
-    final boolean ordinal = (first == 's' && second == 't') || (first == 'n' && second == 'd')
-        || (first == 'r' && second == 'd') || (first == 't' && second == 'h');
-    return ordinal && !Character.isLetterOrDigit(NumberScan.charAt(text, index + 2))
-        ? index + 2 : index;
+    final Word suffix = word(text, index);
+    if (suffix == null) {
+      return index;
+    }
+    return switch (suffix.lower()) {
+      case "st", "nd", "rd", "th" -> suffix.end();
+      default -> index;
+    };
   }
 
   /**
@@ -572,16 +674,11 @@ public class CursorTemporalExtractor implements TemporalExtractor {
    *         continues past {@link #MAX_WORD_LENGTH}.
    */
   private Word word(CharSequence text, int start) {
-    int i = start;
-    final StringBuilder run = new StringBuilder();
-    while (Character.isLetter(NumberScan.charAt(text, i)) && run.length() < MAX_WORD_LENGTH) {
-      run.append(Character.toLowerCase(text.charAt(i)));
-      i++;
-    }
-    if (run.isEmpty() || Character.isLetter(NumberScan.charAt(text, i))) {
+    final int end = NumberScan.wordEnd(text, start, MAX_WORD_LENGTH);
+    if (end < 0) {
       return null;
     }
-    return new Word(run.toString(), i);
+    return new Word(StringUtil.toLowerCase(text.subSequence(start, end)), end);
   }
 
   /**

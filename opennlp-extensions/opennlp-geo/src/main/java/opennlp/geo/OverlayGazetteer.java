@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.geo.Gazetteer;
 import opennlp.tools.geo.GazetteerEntry;
 
@@ -46,7 +45,6 @@ import opennlp.tools.geo.GazetteerEntry;
  *
  * <p>Instances are immutable and thread-safe when the composed gazetteers are.</p>
  */
-@ThreadSafe
 public final class OverlayGazetteer implements Gazetteer {
 
   private final Gazetteer base;
@@ -144,12 +142,13 @@ public final class OverlayGazetteer implements Gazetteer {
    */
   @Override
   public Optional<GazetteerEntry> byRegion(String isoCountryCode) throws IOException {
+    final String regionCode = GazetteerIndex.normalizeRegionCode(isoCountryCode);
     final Optional<GazetteerEntry> fromBase =
-        base.byRegion(isoCountryCode).filter(entry -> !suppressed(entry));
+        base.byRegion(regionCode).filter(entry -> !suppressed(entry));
     if (additions == null) {
       return fromBase;
     }
-    final Optional<GazetteerEntry> fromAdditions = additions.byRegion(isoCountryCode);
+    final Optional<GazetteerEntry> fromAdditions = additions.byRegion(regionCode);
     if (fromAdditions.isEmpty() || fromBase.isEmpty()) {
       return fromAdditions.isPresent() ? fromAdditions : fromBase;
     }
