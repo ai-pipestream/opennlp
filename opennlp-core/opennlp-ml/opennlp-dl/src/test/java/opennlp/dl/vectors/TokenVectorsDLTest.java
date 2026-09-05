@@ -54,6 +54,18 @@ public class TokenVectorsDLTest {
   }
 
   @Test
+  void testWordPiecesWithRobertaSpecialTokens() {
+    final Map<String, Integer> vocab = Map.of("<s>", 8, "</s>", 9, "<unk>", 10,
+        "the", 3, "play", 4, "##ing", 5);
+    final TokenVectorsDL encoder = new TokenVectorsDL(null, null, vocab, true);
+
+    Assertions.assertArrayEquals(new long[] {3}, encoder.pieceIds("The"));
+    Assertions.assertArrayEquals(new long[] {4, 5}, encoder.pieceIds("playing"));
+    Assertions.assertArrayEquals(new long[] {10}, encoder.pieceIds("zebra"));
+    Assertions.assertEquals(0, encoder.pieceIds("").length);
+  }
+
+  @Test
   void testWindowsPackWordsUpToTheLimitAndNeverSplitAWord() {
     final List<long[]> pieces = List.of(new long[2], new long[3], new long[1], new long[4],
         new long[0], new long[9]);
