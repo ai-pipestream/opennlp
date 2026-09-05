@@ -12,8 +12,8 @@ those implementations from main.
 
 All 32 active feature branches contain this main and their required updated
 parents. The current cascade uses real merges and preserves the old local and
-published heads. These new merge commits are local and pending validation and
-publication. The merged Hunspell and regex follow-ups are no longer separate
+published heads. These new merge commits are local and pending publication.
+The merged Hunspell and regex follow-ups are no longer separate
 preview inputs.
 
 ## Integration intent and current state
@@ -30,12 +30,15 @@ preview inputs.
   subsume all 32 active feature branches. `--update` preserves integration
   history; `--scratch` checks a fresh detached build. Neither mode resets a
   branch or silently reuses conflict files.
-- Preview regeneration and validation for this main cascade are in progress.
-  The final provenance manifest records the selected heads. No current-cascade
-  feature or integration commit has been pushed.
+- The regenerated preview contains this main and all 32 active feature heads.
+  The provenance manifest records the selected heads. No current-cascade
+  feature or integration commit has been pushed. A clean package build is
+  required before publication; its result is recorded in `QUALITY-PASS.md`.
 - The helper at `0bbc771ff` contains this main and all 12 current public PR
-  heads. Its current validation is in progress. Apache publication remains a
-  separate authorization.
+  heads. Focused Hunspell, regex, installer, and embedding-loader tests passed
+  on both helper and preview: 342 passed in each, with four optional
+  real-dictionary checks skipped because the local data is absent.
+  Apache publication remains a separate authorization.
 - Feature fixes remain on feature branches. Integration branches are not
   sources for feature updates.
 
@@ -316,9 +319,9 @@ rewriting the feature branches.
    local and published histories. Compare with a fresh scratch integration
    before publishing the preview.
 
-The current OpenNLP main cascade is local. Feature ancestry checks are complete;
-helper and preview validation is in progress. Final hashes and test logs belong
-in the workspace `QUALITY-PASS.md`. Pending publication and separate-repository
+The current OpenNLP main cascade is local. Feature and integration ancestry
+checks are complete. Final hashes and test logs are recorded in the workspace
+`QUALITY-PASS.md`. Pending publication and separate-repository
 work is in `TODO/BRANCH-PUBLICATION.md`. No Apache branch or PR review state
 changed.
 
