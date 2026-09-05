@@ -21,12 +21,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -54,7 +54,7 @@ final class GazetteerIndex {
      * Parses one data line.
      *
      * @param line       The data line; never blank and never a skipped comment line.
-     * @param lineNumber The one-based line number, for fail-loud messages.
+     * @param lineNumber The one-based line number, for format-error messages.
      * @return The parsed entry. Never {@code null}.
      * @throws InvalidFormatException Thrown if the line is not a valid row.
      */
@@ -67,24 +67,28 @@ final class GazetteerIndex {
 
   /**
    * Indexes one entry under its canonical and alternate names, its record id, and, when it
-   * carries a country code, as that country's candidate representative.
+   * has a country code, as that country's candidate representative.
    *
    * @param entry The entry to index.
+   * @return {@code true} if the entry was added, or {@code false} if its record id was present.
    */
-  void add(GazetteerEntry entry) {
+  boolean add(GazetteerEntry entry) {
+    if (byId.putIfAbsent(entry.recordId(), entry) != null) {
+      return false;
+    }
     index(entry.name(), entry);
     for (final String alternate : entry.alternateNames()) {
       index(alternate, entry);
     }
-    byId.put(entry.recordId(), entry);
     if (entry.countryCode() != null) {
       byCountry.merge(entry.countryCode(), entry,
           (a, b) -> a.population() >= b.population() ? a : b);
     }
+    return true;
   }
 
   /**
-   * Reads a table into a frozen index: every line is handed to {@code parser} with its
+   * Reads a table into a frozen index: every line is passed to {@code parser} with its
    * one-based line number, except blank lines and, when {@code skipComments} is set,
    * lines starting with {@code #}.
    *
@@ -99,8 +103,7 @@ final class GazetteerIndex {
   static GazetteerIndex load(InputStream in, boolean skipComments, RowParser parser)
       throws IOException {
     final GazetteerIndex index = new GazetteerIndex();
-    final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+    final BufferedReader reader = utf8Reader(in);
     String line;
     int lineNumber = 0;
     while ((line = reader.readLine()) != null) {
@@ -108,7 +111,11 @@ final class GazetteerIndex {
       if (StringUtil.isUnicodeBlank(line) || (skipComments && line.charAt(0) == '#')) {
         continue;
       }
-      index.add(parser.parse(line, lineNumber));
+      final GazetteerEntry entry = parser.parse(line, lineNumber);
+      if (!index.add(entry)) {
+        throw new InvalidFormatException(
+            "line " + lineNumber + " repeats record id: " + entry.recordId());
+      }
     }
     if (index.isEmpty()) {
       throw new InvalidFormatException("the table contains no rows");
@@ -136,7 +143,7 @@ final class GazetteerIndex {
    * @return The candidates in {@link #freeze()} order; empty when nothing matches.
    */
   List<GazetteerEntry> lookup(CharSequence name) {
-    final List<GazetteerEntry> found = byName.get(name.toString().toLowerCase(Locale.ROOT));
+    final List<GazetteerEntry> found = byName.get(StringUtil.toLowerCase(name));
     return found == null ? List.of() : Collections.unmodifiableList(found);
   }
 
@@ -144,7 +151,7 @@ final class GazetteerIndex {
    * Finds the entry with a record id.
    *
    * @param recordId The record id to look up.
-   * @return The entry, or empty when no entry carries that id.
+   * @return The entry, or empty when no entry has that id.
    */
   Optional<GazetteerEntry> byId(String recordId) {
     return Optional.ofNullable(byId.get(recordId));
@@ -187,6 +194,54 @@ final class GazetteerIndex {
   }
 
   /**
+   * Splits a value at each occurrence of a separator and retains empty fields, including a final
+   * empty field.
+   *
+   * @param value The value to split. Must not be {@code null}.
+   * @param separator The separator character.
+   * @return The fields in input order.
+   * @throws IllegalArgumentException Thrown if {@code value} is {@code null}.
+   */
+  static String[] split(String value, char separator) {
+    if (value == null) {
+      throw new IllegalArgumentException("value must not be null");
+    }
+    int fieldCount = 1;
+    for (int i = 0; i < value.length(); i++) {
+      if (value.charAt(i) == separator) {
+        fieldCount++;
+      }
+    }
+    final String[] fields = new String[fieldCount];
+    int field = 0;
+    int start = 0;
+    for (int i = 0; i <= value.length(); i++) {
+      if (i == value.length() || value.charAt(i) == separator) {
+        fields[field++] = value.substring(start, i);
+        start = i + 1;
+      }
+    }
+    return fields;
+  }
+
+  /**
+   * Creates a reader that reports malformed UTF-8 instead of inserting replacement characters.
+   * Closing the reader closes the input stream.
+   *
+   * @param in The input stream. Must not be {@code null}.
+   * @return A buffered strict UTF-8 reader.
+   * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
+   */
+  static BufferedReader utf8Reader(InputStream in) {
+    if (in == null) {
+      throw new IllegalArgumentException("in must not be null");
+    }
+    return new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)));
+  }
+
+  /**
    * Indexes {@code entry} under the lower-cased form of {@code name}, listing it once even when
    * several of its names fold to the same key.
    *
@@ -195,7 +250,7 @@ final class GazetteerIndex {
    */
   private void index(String name, GazetteerEntry entry) {
     final List<GazetteerEntry> entries =
-        byName.computeIfAbsent(name.toLowerCase(Locale.ROOT), key -> new ArrayList<>(2));
+        byName.computeIfAbsent(StringUtil.toLowerCase(name), key -> new ArrayList<>(2));
     if (!entries.contains(entry)) {
       entries.add(entry);
     }

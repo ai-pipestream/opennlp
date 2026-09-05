@@ -68,7 +68,7 @@ public class OverlayGazetteerTest {
     final List<GazetteerEntry> candidates = overlay.lookup("Paris");
     assertEquals(3, candidates.size());
     assertEquals("plant-3", candidates.get(0).recordId(),
-        "the user's alternate name outranks the millions of Paris, France");
+        "the user's alternate name ranks before Paris, France");
     assertEquals("paris-fr", candidates.get(1).recordId());
     assertEquals("paris-us", candidates.get(2).recordId());
   }
@@ -156,5 +156,37 @@ public class OverlayGazetteerTest {
     assertThrows(IllegalArgumentException.class, () -> overlay.lookup(null));
     assertThrows(IllegalArgumentException.class, () -> overlay.byId(null, "x"));
     assertThrows(IllegalArgumentException.class, () -> overlay.byId("test", null));
+  }
+
+  @Test
+  void testValidatesRegionBeforeConsultingDelegates() {
+    final OverlayGazetteer overlay = new OverlayGazetteer(
+        permissiveGazetteer(), null, List.of(new Suppression("unused")));
+
+    assertThrows(IllegalArgumentException.class, () -> overlay.byRegion("USA"));
+  }
+
+  private static Gazetteer permissiveGazetteer() {
+    return new Gazetteer() {
+      @Override
+      public List<GazetteerEntry> lookup(CharSequence name) {
+        return List.of();
+      }
+
+      @Override
+      public Optional<GazetteerEntry> byId(String source, String recordId) {
+        return Optional.empty();
+      }
+
+      @Override
+      public Optional<GazetteerEntry> byRegion(String isoCountryCode) {
+        return Optional.empty();
+      }
+
+      @Override
+      public Set<String> sources() {
+        return Set.of();
+      }
+    };
   }
 }

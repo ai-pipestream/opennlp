@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.geo.Gazetteer;
 import opennlp.tools.geo.GazetteerEntry;
 import opennlp.tools.geo.GeoPoint;
@@ -45,10 +44,9 @@ import opennlp.tools.util.Span;
  * <p>Confidence reflects how decisive the choice was: a single candidate scores high,
  * and an ambiguous one scores by the separation between the best and second-best mean
  * distance, or between the top population priors when no coherence evidence exists.
- * Unresolved mentions are omitted, never fabricated. Instances hold no per-call state
- * and are safe to share between threads.</p>
+ * Unresolved mentions are omitted. Instances are immutable and thread-safe when the supplied
+ * {@link Gazetteer} is.</p>
  */
-@ThreadSafe
 public final class SpatialCoherenceGeocoder implements Geocoder {
 
   /** An unambiguous mention scores high but never certain, since gazetteers are incomplete. */
@@ -91,7 +89,7 @@ public final class SpatialCoherenceGeocoder implements Geocoder {
       final CharSequence mentionText = text.subSequence(mention.getStart(), mention.getEnd());
       final List<GazetteerEntry> found = gazetteer.lookup(mentionText);
       if (found.isEmpty()) {
-        continue; // unresolved mentions are omitted, never fabricated
+        continue;
       }
       final List<GazetteerEntry> ranked = new ArrayList<>(found);
       ranked.sort(CandidateRanking.BY_PRIOR);
@@ -168,6 +166,7 @@ public final class SpatialCoherenceGeocoder implements Geocoder {
     final double a = Math.sin(latDelta / 2) * Math.sin(latDelta / 2)
         + Math.cos(Math.toRadians(from.latitude())) * Math.cos(Math.toRadians(to.latitude()))
         * Math.sin(lonDelta / 2) * Math.sin(lonDelta / 2);
-    return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
+    final double bounded = Math.min(1.0, Math.max(0.0, a));
+    return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(bounded));
   }
 }

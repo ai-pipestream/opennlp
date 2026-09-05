@@ -17,11 +17,9 @@
 
 package opennlp.tools.money;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Optional;
 
@@ -29,14 +27,14 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.util.Span;
 
+import static opennlp.tools.money.EcbFxRatesTestSupport.assertRate;
+import static opennlp.tools.money.EcbFxRatesTestSupport.load;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the reference-history loader and the as-of lookup rules against a small
- * project-authored fixture in the published CSV format; the rates are synthetic and
- * carry no data from any provider.
+ * Tests reference-rate loading and dated lookups with synthetic data.
  */
 public class EcbFxRatesTest {
 
@@ -47,19 +45,21 @@ public class EcbFxRatesTest {
       "2026-06-01,1.0000,150.00,0.9000,",
       "") + "\n";
 
-  private static EcbFxRates rates() throws IOException {
+  /**
+   * Loads the shared table.
+   *
+   * @return The synthetic reference table used by these tests.
+   * @throws IOException If reading fails.
+   */
+  private EcbFxRates rates() throws IOException {
     return load(FIXTURE);
   }
 
-  private static EcbFxRates load(String csv) throws IOException {
-    return EcbFxRates.load(new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
-  }
-
-  private static void assertRate(String expected, Optional<BigDecimal> actual) {
-    assertTrue(actual.isPresent());
-    assertEquals(0, new BigDecimal(expected).compareTo(actual.get()));
-  }
-
+  /**
+   * Euro conversions use the quoted rate or its reciprocal.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testEuroBaseRateOnAReferenceDay() throws IOException {
     assertRate("1.2000", rates().rate("EUR", "USD", LocalDate.parse("2026-07-10")));
@@ -67,6 +67,11 @@ public class EcbFxRatesTest {
         rates().rate("USD", "EUR", LocalDate.parse("2026-07-10")));
   }
 
+  /**
+   * Cross-currency lookup divides the target quote by the source quote.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testCrossRateGoesThroughTheEuroBase() throws IOException {
     // JPY per USD = 160.00 / 1.2000
@@ -74,23 +79,31 @@ public class EcbFxRatesTest {
         rates().rate("USD", "JPY", LocalDate.parse("2026-07-10")));
   }
 
+  /**
+   * Weekend lookups use the most recent reference date.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testWeekendFallsBackToThePreviousReferenceDay() throws IOException {
     assertRate("1.2000", rates().rate("EUR", "USD", LocalDate.parse("2026-07-12")));
   }
 
+  /**
+   * Dates outside the permitted age interval have no result.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testStaleRatesAreAbsentBeyondTheLimit() throws IOException {
-    // the nearest earlier row is 2026-06-01, more than seven days before
     assertTrue(rates().rate("EUR", "USD", LocalDate.parse("2026-07-01")).isEmpty());
-    // and nothing exists before the first row at all
     assertTrue(rates().rate("EUR", "USD", LocalDate.parse("2026-05-01")).isEmpty());
   }
 
   /**
-   * Verifies that the staleness limit is inclusive: a lookup exactly
-   * {@link EcbFxRates#MAX_STALENESS_DAYS} days after the latest row still resolves, and
-   * one day later the rate is absent.
+   * The maximum reference age is inclusive.
+   *
+   * @throws IOException If loading fails.
    */
   @Test
   void testStalenessLimitIsInclusive() throws IOException {
@@ -98,18 +111,33 @@ public class EcbFxRatesTest {
     assertTrue(rates().rate("EUR", "USD", LocalDate.parse("2026-07-18")).isEmpty());
   }
 
+  /**
+   * Unquoted currencies have no result.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testNotAvailableCellsAndUnknownCurrenciesAreAbsent() throws IOException {
     assertTrue(rates().rate("EUR", "GBP", LocalDate.parse("2026-07-09")).isEmpty());
     assertTrue(rates().rate("EUR", "CHF", LocalDate.parse("2026-07-10")).isEmpty());
   }
 
+  /**
+   * Available same-currency rates equal one.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testIdentityRate() throws IOException {
     assertRate("1", rates().rate("EUR", "EUR", LocalDate.parse("2026-07-10")));
     assertRate("1", rates().rate("USD", "USD", LocalDate.parse("2026-07-10")));
   }
 
+  /**
+   * Conversion preserves the input text span.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testConvertKeepsTheSpan() throws IOException {
     final MoneyAmount mention =
@@ -122,6 +150,7 @@ public class EcbFxRatesTest {
     assertEquals("USD", converted.get().currency());
   }
 
+  /** Missing input, headers, dates, and records are rejected. */
   @Test
   void testMalformedContentFailsLoud() {
     assertThrows(IllegalArgumentException.class, () -> load("no header here"));
@@ -131,8 +160,7 @@ public class EcbFxRatesTest {
   }
 
   /**
-   * Verifies that a malformed rate cell fails loud as {@link IllegalArgumentException}
-   * naming the cell and the row, matching the date-cell handling in the same loop.
+   * An invalid rate error identifies the currency and input record.
    */
   @Test
   void testMalformedRateCellFailsLoudWithRowContext() {
@@ -143,6 +171,11 @@ public class EcbFxRatesTest {
         + "2026-07-10,1.08x,160.00,", e.getMessage());
   }
 
+  /**
+   * Lookup and conversion reject invalid arguments.
+   *
+   * @throws IOException If loading fails.
+   */
   @Test
   void testArgumentValidation() throws IOException {
     final EcbFxRates rates = rates();

@@ -106,4 +106,20 @@ public class SpatialCoherenceGeocoderTest {
     assertThrows(IllegalArgumentException.class,
         () -> geocoder.resolve("x", List.of(new Span(0, 5))));
   }
+
+  @Test
+  void testAntipodalContextProducesAFiniteDistance() throws IOException {
+    final GeoPoint ambiguousPoint = new GeoPoint(-61.23628525861706, -132.98189410882517);
+    final Gazetteer antipodalGazetteer = InMemoryGazetteer.fromEntries(List.of(
+        place("first", "Choice", ambiguousPoint.latitude(), ambiguousPoint.longitude(), "US", 2),
+        place("second", "Choice", ambiguousPoint.latitude(), ambiguousPoint.longitude(), "US", 1),
+        place("context", "Context", 61.2362852585404, 47.01810589109053, "AU", 1)));
+    final SpatialCoherenceGeocoder antipodal = new SpatialCoherenceGeocoder(antipodalGazetteer);
+    final String text = "Choice Context";
+
+    final List<GeoResolution> resolutions =
+        antipodal.resolve(text, mentionsOf(text, "Choice", "Context"));
+
+    assertEquals("first", resolutions.get(0).entry().recordId());
+  }
 }
