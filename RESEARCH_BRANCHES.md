@@ -30,10 +30,12 @@ reactor compilation checks.
   Hunspell #1266 and regex #1268. All selected feature tips contain their current
   parents. `--update` preserves integration history; `--scratch` checks a fresh
   detached build. Neither mode resets a branch or silently reuses conflict files.
-- The last completed local preview is still `a0f8efa05`, generated from main
-  `144be05ae`. The new integration build and provenance update are in progress.
-- The helper update is in progress locally using published PR heads, not local
-  research. Apache publication remains a separate authorization.
+- The preview contains current main and all 34 selected feature heads. Its
+  full clean package and combined feature tests passed. The fork update
+  preserves both the old local and old published preview histories.
+- The helper at `2372289be` contains main and all 14 current public PR heads.
+  Its combined tests and manual build passed, and it is pushed to the fork.
+  Apache publication remains a separate authorization.
 - Feature fixes remain on feature branches. Integration branches are not
   sources for feature updates.
 
@@ -119,7 +121,7 @@ flowchart LR
   main --> ffpos --> bilstm
   main --> glossary
   main --> pii
-  main --> coref
+  sentencepiece --> coref
   main --> numeric --> region --> geocode --> hierarchy
   gaz --> region
   gaz --> profiles
@@ -208,6 +210,13 @@ Add-ons #178 is a draft at `b9a57b3dc7`, based on
 `OPENNLP-1924-canary-addon`, not add-ons main. It is a separate repository
 dependency, not an OpenNLP Git parent.
 
+The separate repository audit found follow-up work outside this OpenNLP
+cascade. Add-ons main is included, but #178 is two commits behind canary
+`640bb9935`, which includes proposal #179 and a guidelines update. The sandbox
+server branches are two commits behind their own main `f1cafcf5`; the uber
+server also lacks three current Apache-server development commits. No add-ons
+or sandbox branch was changed or pushed during this cascade.
+
 Hunspell #1266 uses the ResourceInstaller merged through #1211. Its downloader,
 catalog, installer, and installer tests match current main. Review process
 items remain: new JIRA key, title, unsupported-directive policy, and posting
@@ -229,7 +238,7 @@ The hierarchy tip contains current numeric, gazetteer, region, and geocode heads
 | Branch | Local head | Main missing | Preview input | Intended dependency | Fork status |
 | --- | --- | --- | --- | --- | --- |
 | `OPENNLP-XXXX-bilstm-tagger` | `cb290868e6` | 0 | Direct | Feedforward tagger | Matches fork |
-| `OPENNLP-XXXX-coref` | `47256a8786` | 0 | Direct | main | Matches fork |
+| `OPENNLP-XXXX-coref` | `af595babdd` | 0 | Direct | #1165 subword API for the optional ONNX adapter | Matches fork |
 | `OPENNLP-XXXX-dehyphenation` | `028077eebc` | 0 | Direct | main (term vectors included) | Matches fork |
 | `OPENNLP-XXXX-embedded-assets` | `5595f6e1b3` | 0 | Direct | main | Matches fork |
 | `OPENNLP-XXXX-embedding-annotator` | `3e238895c0` | 0 | Direct | #1152 static embeddings | Matches fork |
@@ -247,12 +256,14 @@ The hierarchy tip contains current numeric, gazetteer, region, and geocode heads
 | `OPENNLP-XXXX-spellcheck-recase` | `150f50a267` | 0 | Direct | main | Matches fork |
 | `OPENNLP-XXXX-symbol-joiner` | `f63eb5aa7f` | 0 | Direct | main | Matches fork |
 | `OPENNLP-XXXX-text-artifacts` | `1db01a0899` | 0 | Direct | main | Matches fork |
-| `OPENNLP-XXXX-wordnet-extension` | `b6f1ed265f` | 0 | Direct | #1155 WordNet | Matches fork |
+| `OPENNLP-XXXX-wordnet-extension` | `417efc8573` | 0 | Direct | #1155 WordNet | Matches fork |
 
 ## Verified stacks
 
 - Subword API -> static embeddings -> TurboQuant -> vector index -> evaluation.
   The embedding annotator contains current static embeddings.
+- Subword API -> coreference, for its optional ONNX token-vector adapter.
+  The resolver and trained models are unchanged by this compatibility update.
 - Parser -> dependency annotations -> relation extraction.
 - WordNet API -> expansion and research extension.
 - Embedded assets -> noise; feedforward POS -> BiLSTM.
@@ -310,9 +321,10 @@ rewriting the feature branches.
    local and published histories. Compare with a fresh scratch integration
    before publishing the preview.
 
-The workspace execution checklist is `TODO/BRANCH-PUBLICATION.md`. Feature
-synchronization and fork publication are complete. Integration validation and
-publication are still in progress. No Apache branch or PR review state changed.
+OpenNLP feature synchronization, integration validation and fork publication
+are complete. Final hashes and test logs are recorded in the workspace
+`QUALITY-PASS.md`. Remaining publication and separate-repository work is in
+`TODO/BRANCH-PUBLICATION.md`. No Apache branch or PR review state changed.
 
 JIRA tracking, add-on migration, Apache branch updates, and PR publication remain
 separate actions. Research can be backed up to the fork without changing
