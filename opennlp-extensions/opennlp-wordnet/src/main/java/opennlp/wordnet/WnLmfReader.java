@@ -75,9 +75,9 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * Part-of-speech code {@code s} normalizes to {@link WordNetPOS#ADJECTIVE}, and a {@code similar}
  * relation on a verb synset maps to {@link WordNetRelation#VERB_GROUP} rather than
  * {@link WordNetRelation#SIMILAR_TO}. Use {@link #readResource(Path)} when a document contains
- * several lexicons; the single-lexicon {@code read} methods reject that shape instead of merging
+ * several lexicons; the single-lexicon {@code read} methods reject that document instead of merging
  * language-specific indexes. WN-LMF {@code Requires} declarations are preserved as dependency
- * metadata but never resolved or loaded. Returned resources and lexicons are immutable and safe
+ * metadata but are not resolved or loaded. Returned resources and lexicons are immutable and safe
  * for concurrent lookups.</p>
  *
  * <p>A WN-LMF {@code LexiconExtension} is an additive overlay on a base lexicon supplied in a
@@ -259,7 +259,7 @@ public final class WnLmfReader {
    */
   public static WnLmfResource readResource(Path file, WnLmfResolver resolver) throws IOException {
     if (resolver == null) {
-      throw new IllegalArgumentException("Resolver must not be null");
+      throw new IllegalArgumentException("resolver must not be null");
     }
     return readResourceFromFile(file, resolver);
   }
@@ -336,7 +336,7 @@ public final class WnLmfReader {
   public static WnLmfResource readResource(InputStream in, String resourceName,
       WnLmfResolver resolver) throws IOException {
     if (resolver == null) {
-      throw new IllegalArgumentException("Resolver must not be null");
+      throw new IllegalArgumentException("resolver must not be null");
     }
     return readResourceInternal(in, resourceName, resolver);
   }
@@ -353,10 +353,10 @@ public final class WnLmfReader {
   private static WnLmfResource readResourceFromFile(Path file, WnLmfResolver resolver)
       throws IOException {
     if (file == null) {
-      throw new IllegalArgumentException("File must not be null");
+      throw new IllegalArgumentException("file must not be null");
     }
     if (!Files.isRegularFile(file)) {
-      throw new IllegalArgumentException("File does not exist or is not a regular file: " + file);
+      throw new IllegalArgumentException("file does not exist or is not a regular file: " + file);
     }
     try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
       return readResourceInternal(in, file.toString(), resolver);
@@ -377,10 +377,10 @@ public final class WnLmfReader {
   private static WnLmfResource readResourceInternal(InputStream in, String resourceName,
       WnLmfResolver resolver) throws IOException {
     if (in == null) {
-      throw new IllegalArgumentException("In must not be null");
+      throw new IllegalArgumentException("in must not be null");
     }
     if (resourceName == null) {
-      throw new IllegalArgumentException("ResourceName must not be null");
+      throw new IllegalArgumentException("resourceName must not be null");
     }
     final RawResource raw = parseRaw(in, resourceName, resolver != null);
     rejectSameDocumentBase(raw, resourceName);
@@ -1261,7 +1261,8 @@ public final class WnLmfReader {
         // Share the synset table's id instance so only one copy of each id is retained.
         typed.computeIfAbsent(type, unused -> new LinkedHashSet<>()).add(target.id());
       }
-      final Map<WordNetRelation, List<String>> relations = new LinkedHashMap<>(typed.size() * 2);
+      final Map<WordNetRelation, List<String>> relations =
+          LinkedHashMap.newLinkedHashMap(typed.size());
       for (final Map.Entry<WordNetRelation, LinkedHashSet<String>> entry : typed.entrySet()) {
         relations.put(entry.getKey(), List.copyOf(entry.getValue()));
       }
