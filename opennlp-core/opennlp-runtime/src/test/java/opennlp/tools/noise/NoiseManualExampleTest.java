@@ -22,11 +22,14 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.assets.AssetAnnotator;
+import opennlp.tools.document.Annotation;
+import opennlp.tools.document.Document;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Runs the manual's noise examples (docbkx {@code noise.xml}) verbatim: every value the
- * chapter states is asserted here, so a change breaking this test breaks the manual.
+ * Tests the scoring and document examples in {@code noise.xml}.
  */
 public class NoiseManualExampleTest {
 
@@ -51,5 +54,29 @@ public class NoiseManualExampleTest {
     final List<NoiseSpan> noise = new StructuralNoiseScorer().score(TEXT, List.of());
     assertEquals(1, noise.size());
     assertEquals(NoiseSpan.SEVERITY_GIBBERISH, noise.get(0).severity());
+  }
+
+  @Test
+  void testDocumentExample() {
+    String text = "The scan contains zxkcvbnmsdfg here.";
+    Document document = new AssetAnnotator().annotate(Document.of(text));
+    document = new NoiseAnnotator().annotate(document);
+
+    List<Annotation<NoiseSpan>> noise = document.get(NoiseAnnotator.NOISE);
+    assertEquals(1, noise.size());
+    assertEquals("zxkcvbnmsdfg", noise.get(0).span().getCoveredText(text).toString());
+    assertEquals(NoiseSpan.SEVERITY_GIBBERISH, noise.get(0).value().severity());
+    assertEquals(List.of(), document.get(AssetAnnotator.ASSETS));
+  }
+
+  @Test
+  void testStandaloneDocumentExample() {
+    Document document = new NoiseAnnotator(new StructuralNoiseScorer(), false)
+        .annotate(Document.of("The scan contains zxkcvbnmsdfg here."));
+    List<Annotation<NoiseSpan>> noise = document.get(NoiseAnnotator.NOISE);
+
+    assertEquals(1, noise.size());
+    assertEquals("zxkcvbnmsdfg", noise.get(0).span().getCoveredText(document.text()).toString());
+    assertEquals(NoiseSpan.SEVERITY_GIBBERISH, noise.get(0).value().severity());
   }
 }

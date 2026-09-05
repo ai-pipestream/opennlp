@@ -21,13 +21,11 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * One noisy stretch of a text: the {@link Span} it covers in the original text, how bad
- * it is, and a score within its severity.
+ * A noisy region in the original text, with a severity and score.
  *
- * <p>The severity is an open string so scorers can introduce new tiers without an API
- * change; the constants on this record name the tiers the built-in scorer reports, from
- * mildest to worst. The score orders findings within one severity: higher means the
- * signals agreed more strongly. Scores of different severities are not comparable.</p>
+ * <p>The severity is an open string; custom scorers may use additional values.
+ * Higher scores indicate stronger evidence within a severity. Scores from different
+ * severities are not comparable. A score need not be a probability.</p>
  *
  * @param span The location of the noise in the original text. Must not be
  *             {@code null}.
@@ -40,18 +38,17 @@ import opennlp.tools.util.StringUtil;
 public record NoiseSpan(Span span, String severity, double score) {
 
   /**
-   * A recognizable word damaged by a known confusion, the shape optical recognition
-   * errors take; reported only when a dictionary is available to recognize the repair.
+   * A possible optical character recognition error with a dictionary-supported repair.
    */
   public static final String SEVERITY_MISSPELLED = "misspelled";
 
-  /** Partially readable text with depressed structure. */
+  /** Text with a structural irregularity. */
   public static final String SEVERITY_DAMAGED = "damaged";
 
-  /** Text without linguistic structure. */
+  /** Text with multiple structural irregularities. */
   public static final String SEVERITY_GIBBERISH = "gibberish";
 
-  /** A run shaped like an encoded binary rather than language. */
+  /** Text resembling encoded binary data. */
   public static final String SEVERITY_BINARYISH = "binaryish";
 
   /**
