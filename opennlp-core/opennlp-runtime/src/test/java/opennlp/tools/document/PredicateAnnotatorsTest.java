@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
 
@@ -38,19 +41,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the two predicate-driven wrappers: the conditional keeps the layer contract of a
- * skipped delegate by providing its layers empty, and the filter writes survivors to a
- * distinct layer while the source stays untouched.
+ * Tests conditional branch selection and annotation filtering.
  */
 public class PredicateAnnotatorsTest {
 
+  /** Word annotations used as filter input. */
   private static final LayerKey<String> WORDS =
       LayerKey.of("test.words", String.class);
+  /** Selected word annotations. */
   private static final LayerKey<String> LONG_WORDS =
       LayerKey.of("test.words.long", String.class);
+  /** A second input layer used to test branch requirements. */
+  private static final LayerKey<String> OTHER_WORDS =
+      LayerKey.of("test.words.other", String.class);
 
   /** A minimal producing annotator: every whitespace-free character run is a word. */
   private static final DocumentAnnotator PRODUCER = new DocumentAnnotator() {
+    /** {@inheritDoc} */
     @Override
     public Document annotate(Document document) {
       final String text = document.text().toString();
@@ -68,6 +75,7 @@ public class PredicateAnnotatorsTest {
       return document.with(WORDS, words);
     }
 
+    /** {@inheritDoc} */
     @Override
     public Set<LayerKey<?>> provides() {
       return Set.of(WORDS);
@@ -87,7 +95,7 @@ public class PredicateAnnotatorsTest {
         new ConditionalAnnotator(d -> false, PRODUCER);
     final Document document = guarded.annotate(Document.of("two words"));
     assertTrue(document.layers().contains(WORDS),
-        "a skipped delegate must still provide its layer so downstream requires hold");
+        "a skipped delegate must still provide its layer for downstream requirements");
     assertEquals(List.of(), document.get(WORDS));
     assertEquals(PRODUCER.provides(), guarded.provides());
     assertEquals(PRODUCER.requires(), guarded.requires());
@@ -96,11 +104,13 @@ public class PredicateAnnotatorsTest {
   @Test
   void testSkippedDelegateProvidesEveryOneOfItsLayersEmpty() {
     final DocumentAnnotator twoLayers = new DocumentAnnotator() {
+      /** {@inheritDoc} */
       @Override
       public Document annotate(Document document) {
         throw new AssertionError("the delegate must not run when the condition fails");
       }
 
+      /** {@inheritDoc} */
       @Override
       public Set<LayerKey<?>> provides() {
         return Set.of(WORDS, LONG_WORDS);
@@ -119,7 +129,7 @@ public class PredicateAnnotatorsTest {
     final FilterAnnotator<String> filter = new FilterAnnotator<>(WORDS, LONG_WORDS,
         annotation -> annotation.value().length() > 4);
     final Document filtered = filter.annotate(produced);
-    assertEquals(5, filtered.get(WORDS).size(), "the source layer stays untouched");
+    assertEquals(5, filtered.get(WORDS).size(), "the source layer must be unchanged");
     assertEquals(List.of("lengthy", "words"),
         filtered.get(LONG_WORDS).stream().map(Annotation::value).toList());
     assertEquals(Set.of(WORDS), filter.requires());
@@ -194,9 +204,9 @@ public class PredicateAnnotatorsTest {
       seen.set(d);
       return true;
     }, PRODUCER).annotate(document);
-    assertEquals(1, calls.get(), "the condition must be tested exactly once");
+    assertEquals(1, calls.get(), "the condition must be tested once");
     assertSame(document, seen.get(),
-        "the condition must see the same document instance handed to annotate");
+        "the condition must see the same document instance passed to annotate");
   }
 
   @Test
@@ -206,39 +216,107 @@ public class PredicateAnnotatorsTest {
     final Document filtered =
         new FilterAnnotator<>(WORDS, LONG_WORDS, a -> a.value().length() > 4)
             .annotate(produced);
-    final List<Annotation<String>> survivors = filtered.get(LONG_WORDS);
+    final List<Annotation<String>> matches = filtered.get(LONG_WORDS);
     final List<Annotation<String>> expected =
         source.stream().filter(a -> a.value().length() > 4).toList();
-    assertEquals(expected.size(), survivors.size());
+    assertEquals(expected.size(), matches.size());
     for (int i = 0; i < expected.size(); i++) {
-      assertSame(expected.get(i), survivors.get(i),
-          "a survivor must be the same instance as its source annotation");
+      assertSame(expected.get(i), matches.get(i),
+          "a match must be the same instance as its source annotation");
     }
   }
 
+  @Test
+  void testFilterCanInspectTheOriginalDocumentText() {
+    final Document document = Document.of("Alice met bob").with(WORDS, List.of(
+        new Annotation<>(new Span(0, 5), "alice"),
+        new Annotation<>(new Span(6, 9), "met"),
+        new Annotation<>(new Span(10, 13), "bob")));
+    final Document filtered = new FilterAnnotator<>(WORDS, LONG_WORDS,
+        (source, annotation) -> Character.isUpperCase(
+            source.text().charAt(annotation.span().getStart())))
+        .annotate(document);
+
+    assertEquals(List.of("alice"),
+        filtered.get(LONG_WORDS).stream().map(Annotation::value).toList());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void testConditionalRunsTheSelectedBranch(boolean condition) {
+    final Document document = PRODUCER.annotate(Document.of("a lengthy pair of words"));
+    final DocumentAnnotator longWords =
+        new FilterAnnotator<>(WORDS, LONG_WORDS, a -> a.value().length() > 4);
+    final DocumentAnnotator shortWords =
+        new FilterAnnotator<>(WORDS, LONG_WORDS, a -> a.value().length() <= 4);
+
+    final Document result = new ConditionalAnnotator(d -> condition, longWords, shortWords)
+        .annotate(document);
+
+    assertEquals(condition ? List.of("lengthy", "words") : List.of("a", "pair", "of"),
+        result.get(LONG_WORDS).stream().map(Annotation::value).toList());
+  }
+
+  @Test
+  void testConditionalDeclaresRequirementsFromBothBranches() {
+    final DocumentAnnotator words =
+        new FilterAnnotator<>(WORDS, LONG_WORDS, a -> true);
+    final DocumentAnnotator otherWords =
+        new FilterAnnotator<>(OTHER_WORDS, LONG_WORDS, a -> true);
+    final ConditionalAnnotator conditional =
+        new ConditionalAnnotator(d -> true, words, otherWords);
+
+    assertEquals(Set.of(WORDS, OTHER_WORDS), conditional.requires());
+    final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        () -> conditional.annotate(PRODUCER.annotate(Document.of("two words"))));
+    assertEquals("document lacks the required layer test.words.other<String>",
+        error.getMessage());
+  }
+
+  @Test
+  void testConditionalRejectsBranchesWithDifferentOutputs() {
+    final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        () -> new ConditionalAnnotator(d -> true, PRODUCER,
+            new FilterAnnotator<>(WORDS, LONG_WORDS, a -> true)));
+    assertEquals("branches must provide the same layers", error.getMessage());
+  }
+
+  /**
+   * @return Invalid constructor and annotation calls with their expected messages.
+   */
   private static Stream<Arguments> contractViolations() {
     return Stream.of(
-        Arguments.of("null condition",
+        Arguments.of("null condition", "condition must not be null",
             (Executable) () -> new ConditionalAnnotator(null, PRODUCER)),
-        Arguments.of("null delegate",
+        Arguments.of("null delegate", "delegate must not be null",
             (Executable) () -> new ConditionalAnnotator(d -> true, null)),
-        Arguments.of("null document handed to the conditional",
+        Arguments.of("null true branch", "whenTrue must not be null",
+            (Executable) () -> new ConditionalAnnotator(d -> true, null, PRODUCER)),
+        Arguments.of("null false branch", "whenFalse must not be null",
+            (Executable) () -> new ConditionalAnnotator(d -> true, PRODUCER, null)),
+        Arguments.of("null document passed to the conditional", "document must not be null",
             (Executable) () -> new ConditionalAnnotator(d -> true, PRODUCER).annotate(null)),
-        Arguments.of("null source layer",
+        Arguments.of("null source layer", "source must not be null",
             (Executable) () -> new FilterAnnotator<>(null, LONG_WORDS, a -> true)),
-        Arguments.of("null target layer",
+        Arguments.of("null target layer", "target must not be null",
             (Executable) () -> new FilterAnnotator<>(WORDS, null, a -> true)),
-        Arguments.of("target equal to source, a document rejects a duplicate layer",
+        Arguments.of("target equal to source", "target must differ from source",
             (Executable) () -> new FilterAnnotator<>(WORDS, WORDS, a -> true)),
-        Arguments.of("null predicate",
-            (Executable) () -> new FilterAnnotator<>(WORDS, LONG_WORDS, null)),
-        Arguments.of("null document handed to the filter",
+        Arguments.of("null predicate", "keep must not be null",
+            (Executable) () -> new FilterAnnotator<>(WORDS, LONG_WORDS,
+                (Predicate<Annotation<String>>) null)),
+        Arguments.of("null document-aware predicate", "keep must not be null",
+            (Executable) () -> new FilterAnnotator<>(WORDS, LONG_WORDS,
+                (BiPredicate<Document, Annotation<String>>) null)),
+        Arguments.of("null document passed to the filter", "document must not be null",
             (Executable) () -> new FilterAnnotator<>(WORDS, LONG_WORDS, a -> true).annotate(null)));
   }
 
   @ParameterizedTest(name = "{0}")
   @MethodSource("contractViolations")
-  void testRejectsContractViolations(String violation, Executable call) {
-    assertThrows(IllegalArgumentException.class, call, violation);
+  void testRejectsContractViolations(String violation, String expectedMessage, Executable call) {
+    final IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, call, violation);
+    assertEquals(expectedMessage, error.getMessage());
   }
 }

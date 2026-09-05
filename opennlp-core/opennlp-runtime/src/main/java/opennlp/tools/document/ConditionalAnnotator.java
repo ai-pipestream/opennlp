@@ -17,35 +17,35 @@
 
 package opennlp.tools.document;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * Runs a delegate annotator only when a condition over the document holds. When the
- * condition does not hold, the delegate's provided layers are still added, empty, so
- * the document satisfies every downstream {@link DocumentAnnotator#requires()} exactly
- * as if the delegate had run and found nothing.
+ * Chooses an annotator according to a condition over the document. The two-argument
+ * form adds the true branch's provided layers empty when the condition does not hold.
+ * The three-argument form runs an explicit false branch with the same output layers.
  *
- * <p>This annotator is safe for concurrent use when its delegate and condition
- * are.</p>
+ * <p>This annotator is safe for concurrent use when its condition and delegates are.</p>
  *
  * @since 3.0.0
  */
 public final class ConditionalAnnotator implements DocumentAnnotator {
 
-  /** The message prefix of every absent-required-layer rejection in this wrapper. */
-  private static final String MISSING_LAYER = "document lacks the required layer ";
-
   private final Predicate<Document> condition;
-  private final DocumentAnnotator delegate;
+  private final DocumentAnnotator whenTrue;
+  private final DocumentAnnotator whenFalse;
+  private final Set<LayerKey<?>> required;
+  private final Set<LayerKey<?>> provided;
+  private final LayerKey<?>[] requiredLayers;
 
   /**
-   * Initializes a {@link ConditionalAnnotator}.
+   * Creates a conditional annotator with an empty false branch.
    *
-   * @param condition The condition deciding whether the delegate runs. Must not be
+   * @param condition The condition selecting whether the delegate runs. Must not be
    *                  {@code null}.
-   * @param delegate The annotator to run when the condition holds. Must not be
+   * @param delegate The annotator to run when the condition is true. Must not be
    *                 {@code null}.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
@@ -57,61 +57,101 @@ public final class ConditionalAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("delegate must not be null");
     }
     this.condition = condition;
-    this.delegate = delegate;
+    this.whenTrue = delegate;
+    this.whenFalse = null;
+    required = Set.copyOf(delegate.requires());
+    provided = Set.copyOf(delegate.provides());
+    requiredLayers = required.toArray(LayerKey<?>[]::new);
   }
 
   /**
-   * Tests the condition and either runs the delegate or adds every layer the delegate
-   * provides as an empty layer. The delegate's required layers must be present in both
-   * cases.
+   * Creates a conditional annotator with explicit true and false branches. Both
+   * branches must provide the same layers so downstream pipeline contracts do not
+   * depend on the condition. The wrapper requires the union of their input layers.
    *
-   * @param document The document to annotate. Must not be {@code null} and must carry
-   *                 every layer the delegate requires.
-   * @return A new {@link Document} carrying the delegate's provided layers, populated
-   *         when the condition held and empty otherwise. Never {@code null}.
+   * @param condition The condition selecting the branch. Must not be {@code null}.
+   * @param whenTrue The annotator to run when the condition is true. Must not be
+   *                 {@code null}.
+   * @param whenFalse The annotator to run when the condition does not hold. Must not be
+   *                  {@code null}.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the
+   *         branches provide different layers.
+   */
+  public ConditionalAnnotator(Predicate<Document> condition, DocumentAnnotator whenTrue,
+      DocumentAnnotator whenFalse) {
+    if (condition == null) {
+      throw new IllegalArgumentException("condition must not be null");
+    }
+    if (whenTrue == null) {
+      throw new IllegalArgumentException("whenTrue must not be null");
+    }
+    if (whenFalse == null) {
+      throw new IllegalArgumentException("whenFalse must not be null");
+    }
+    final Set<LayerKey<?>> trueProvided = Set.copyOf(whenTrue.provides());
+    final Set<LayerKey<?>> falseProvided = Set.copyOf(whenFalse.provides());
+    if (!trueProvided.equals(falseProvided)) {
+      throw new IllegalArgumentException("branches must provide the same layers");
+    }
+    final Set<LayerKey<?>> branchRequirements = new HashSet<>(whenTrue.requires());
+    branchRequirements.addAll(whenFalse.requires());
+    this.condition = condition;
+    this.whenTrue = whenTrue;
+    this.whenFalse = whenFalse;
+    required = Set.copyOf(branchRequirements);
+    provided = trueProvided;
+    requiredLayers = required.toArray(LayerKey<?>[]::new);
+  }
+
+  /**
+   * Tests the condition and runs the selected branch. In the two-argument form, a false
+   * condition adds every provided layer empty. All declared required layers must be
+   * present before the condition is tested.
+   *
+   * @param document The document to annotate. Must not be {@code null} and must contain
+   *                 every layer named by {@link #requires()}.
+   * @return A new {@link Document} containing the selected branch's provided layers.
+   *         Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         lacks a layer the delegate requires.
+   *         lacks a layer named by {@link #requires()}.
    */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
-    final Set<LayerKey<?>> present = document.layers();
-    for (final LayerKey<?> required : delegate.requires()) {
-      if (!present.contains(required)) {
-        throw new IllegalArgumentException(MISSING_LAYER + required);
-      }
-    }
+    DocumentAnnotators.requireLayers(document, requiredLayers);
     if (condition.test(document)) {
-      return delegate.annotate(document);
+      return whenTrue.annotate(document);
+    }
+    if (whenFalse != null) {
+      return whenFalse.annotate(document);
     }
     Document result = document;
-    for (final LayerKey<?> provided : delegate.provides()) {
-      result = withEmpty(result, provided);
+    for (final LayerKey<?> layer : provided) {
+      result = withEmpty(result, layer);
     }
     return result;
   }
 
   /**
-   * Adds one layer, present but empty.
+   * Adds an empty output layer for a skipped annotation stage.
    *
-   * @param document The document.
-   * @param layer The layer to add empty.
-   * @param <T> The layer's value type.
-   * @return The document with the layer present and empty.
+   * @param document The input document.
+   * @param layer The output layer key.
+   * @param <T> The annotation value type.
+   * @return The document with an empty output layer.
    */
   private <T> Document withEmpty(Document document, LayerKey<T> layer) {
     return document.with(layer, List.of());
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> requires() {
-    return delegate.requires();
+    return required;
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
-    return delegate.provides();
+    return provided;
   }
 }

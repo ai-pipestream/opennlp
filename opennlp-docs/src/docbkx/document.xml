@@ -393,42 +393,68 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 	</section>
 
 	<section xml:id="tools.document.predicates">
-		<title>Predicate-driven annotators</title>
+		<title>Conditional and filter annotators</title>
 		<para>
-			Two wrappers turn plain predicates into pipeline structure, so any expression
-			engine can compile into a pipeline guard without this toolkit depending on
-			one. <code>ConditionalAnnotator</code> runs its delegate only when a condition
-			over the document holds; when it does not, the delegate's provided layers are
-			still added, empty, so every downstream requirement stays satisfied exactly as
-			if the delegate had run and found nothing:
+			<code>ConditionalAnnotator</code> selects a pipeline stage from a predicate over
+			the document. The two-argument form runs its delegate when the predicate is true.
+			When it is false, the delegate's output layers are added empty:
 		</para>
 		<programlisting language="java">
 				<![CDATA[
 DocumentAnnotator guarded =
-    new ConditionalAnnotator(d -> d.text().length() >= 20, annotator);
-// a short document passes through with the layer present and empty]]>
+    new ConditionalAnnotator(d -> d.text().length() >= 20, new TokenLengthAnnotator());
+// A short document has the output layer, with no annotations.]]>
 		</programlisting>
 		<para>
-			<code>FilterAnnotator</code> writes the annotations of one layer that pass a
-			predicate to a second layer, keeping the raw view intact; the target must
-			differ from the source, because a document rejects a duplicate layer:
+			The three-argument form selects between explicit true and false branches. Both
+			branches must provide the same layers. The wrapper declares the union of their
+			required layers:
 		</para>
 		<programlisting language="java">
 				<![CDATA[
-LayerKey<Integer> LONG_ONES = LayerKey.of("token-lengths-long", Integer.class);
+LayerKey<Integer> SELECTED_LENGTHS =
+    LayerKey.of("token-lengths-selected", Integer.class);
 
-DocumentAnnotator filter =
-    new FilterAnnotator<>(TOKEN_LENGTHS, LONG_ONES, a -> a.value() >= 5);
-// for the text above, LONG_ONES holds the values 6 and 5;
-// TOKEN_LENGTHS still holds all five]]>
+DocumentAnnotator selected = new ConditionalAnnotator(
+    d -> d.text().length() >= 20,
+    new FilterAnnotator<>(TOKEN_LENGTHS, SELECTED_LENGTHS, a -> a.value() >= 5),
+    new FilterAnnotator<>(TOKEN_LENGTHS, SELECTED_LENGTHS, a -> a.value() < 5));]]>
 		</programlisting>
 		<para>
-			Both wrappers reject a document that lacks a layer they require, with an
+			<code>FilterAnnotator</code> copies matching annotations to a distinct layer without
+			modifying the source layer:
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+LayerKey<Integer> SELECTED_LENGTHS =
+    LayerKey.of("token-lengths-selected", Integer.class);
+
+DocumentAnnotator filter =
+    new FilterAnnotator<>(TOKEN_LENGTHS, SELECTED_LENGTHS, a -> a.value() >= 5);
+// SELECTED_LENGTHS contains 6 and 5. TOKEN_LENGTHS still contains all five values.]]>
+		</programlisting>
+		<para>
+			A two-argument filter predicate receives an annotation. A document-aware
+			predicate receives the document too, so it can compare a normalized value with
+			the original text at the annotation span:
+		</para>
+		<programlisting language="java">
+				<![CDATA[
+LayerKey<String> NORMALIZED_WORDS =
+    LayerKey.of("normalized-words", String.class);
+LayerKey<String> CAPITALIZED_WORDS =
+    LayerKey.of("capitalized-words", String.class);
+
+DocumentAnnotator capitalized = new FilterAnnotator<>(
+    NORMALIZED_WORDS, CAPITALIZED_WORDS,
+    (document, word) -> Character.isUpperCase(
+        document.text().charAt(word.span().getStart())));]]>
+		</programlisting>
+		<para>
+			Both wrappers reject a document that lacks a required layer, with an
 			<code>IllegalArgumentException</code> naming the layer: the filter needs its
-			source layer, and the conditional needs every layer its delegate requires,
-			whether or not the condition holds, so a skipped stage cannot hide an assembly
-			error. For the filter above, handed a fresh document that carries no
-			token-length layer yet, that rejection reads:
+			source layer, and the conditional needs the declared inputs of every branch.
+			For the filter above, a document without the token-length layer produces:
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -436,8 +462,7 @@ filter.annotate(Document.of("The dog barks. It naps."));
 // IllegalArgumentException: document lacks the required layer token-lengths<Integer>]]>
 		</programlisting>
 		<para>
-			<code>PredicateManualExampleTest</code> asserts the values and the rejection
-			shown above.
+			<code>PredicateManualExampleTest</code> runs the examples above.
 		</para>
 	</section>
 </chapter>
