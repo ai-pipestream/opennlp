@@ -21,11 +21,13 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -41,8 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the user-file loader over synthetic customer-site rows: the format positions, the
- * bounding-box and attribute columns, the location fallback, and the fail-loud paths with their
- * line numbers.
+ * bounding-box and attribute columns, the location fallback, and malformed-input diagnostics.
  */
 public class UserGazetteerTest {
 
@@ -154,6 +155,15 @@ public class UserGazetteerTest {
   }
 
   @Test
+  void testRejectsMalformedUtf8() {
+    final byte[] content = "a\tPlace\t\t1.0\t2.0\n".getBytes(StandardCharsets.UTF_8);
+    content[2] = (byte) 0xc3;
+
+    assertThrows(IOException.class,
+        () -> UserGazetteer.load(new ByteArrayInputStream(content), "customer"));
+  }
+
+  @Test
   void testRejectsInvalidArguments() {
     assertThrows(IllegalArgumentException.class,
         () -> UserGazetteer.load((InputStream) null, "customer"));
@@ -163,6 +173,12 @@ public class UserGazetteerTest {
     assertThrows(IllegalArgumentException.class, () -> gazetteer().lookup(null));
     assertThrows(IllegalArgumentException.class, () -> gazetteer().byId(null, "x"));
     assertThrows(IllegalArgumentException.class, () -> gazetteer().byId("customer", null));
+  }
+
+  @Test
+  void testPathLoadValidatesSourceBeforeOpeningFile(@TempDir Path dir) {
+    assertThrows(IllegalArgumentException.class,
+        () -> UserGazetteer.load(dir.resolve("missing.tsv"), null));
   }
 
   @Test
@@ -187,6 +203,15 @@ public class UserGazetteerTest {
   void testSuppressionFileMayBeEmpty() throws IOException {
     assertEquals(List.of(), UserGazetteer.loadSuppressions(
         new ByteArrayInputStream("# nothing\n".getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void testSuppressionFileRejectsMalformedUtf8() {
+    final byte[] content = "Place\tUS\n".getBytes(StandardCharsets.UTF_8);
+    content[0] = (byte) 0xc3;
+
+    assertThrows(IOException.class,
+        () -> UserGazetteer.loadSuppressions(new ByteArrayInputStream(content)));
   }
 
   @ParameterizedTest

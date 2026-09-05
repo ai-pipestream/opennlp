@@ -42,12 +42,11 @@ import opennlp.tools.util.InvalidFormatException;
  * <p>The upstream <a href="https://docs.overturemaps.org/guides/divisions/">divisions
  * theme</a> is published under the
  * <a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License</a>, whose
- * attribution and database share-alike terms follow the derived table; it is
- * distributed as partitioned Parquet, which this module deliberately does not parse.
- * The derivation script flattens the division features into this plain table, and the
- * script's output header carries the derivation record. Because divisions include countries and
- * regions, not only settlements, a derived table also resolves mentions like
- * {@code Australia} or {@code Bavaria} that place-only gazetteers miss.</p>
+ * attribution and database share-alike terms follow the derived table. The upstream data uses
+ * partitioned Parquet; the derivation script flattens the division features into this plain table.
+ * Its output header records the source. Because divisions include countries and regions, not only
+ * settlements, a derived table also resolves mentions like {@code Australia} or {@code Bavaria}
+ * that place-only gazetteers miss.</p>
  *
  * <p>Lookup matches the primary and every alternate name case-insensitively;
  * candidates are ranked by population descending. Subtypes map coarsely:
@@ -68,10 +67,10 @@ public final class OvertureGazetteer implements Gazetteer {
   private static final int COLUMNS = 8;
 
   /** The separator between the fields of one row. */
-  private static final String FIELD_SEPARATOR = "\t";
+  private static final char FIELD_SEPARATOR = '\t';
 
   /** The separator between the elements of the alternate-names field. */
-  private static final String LIST_SEPARATOR = ",";
+  private static final char LIST_SEPARATOR = ',';
 
   private static final Set<String> SUB_LOCALITY_SUBTYPES =
       Set.of("borough", "macrohood", "neighborhood", "microhood");
@@ -154,11 +153,11 @@ public final class OvertureGazetteer implements Gazetteer {
     return Set.of(SOURCE);
   }
 
-  /** Parses one derived row into an entry, failing loud with the line number. */
+  /** Parses one derived row into an entry and includes the line number in format errors. */
   private static GazetteerEntry parseRow(String line, int lineNumber)
       throws InvalidFormatException {
-    final String[] fields = line.split(FIELD_SEPARATOR, -1);
-    if (fields.length < COLUMNS) {
+    final String[] fields = GazetteerIndex.split(line, FIELD_SEPARATOR);
+    if (fields.length != COLUMNS) {
       throw new InvalidFormatException("line " + lineNumber + " has " + fields.length
           + " columns, expected " + COLUMNS);
     }
@@ -166,7 +165,7 @@ public final class OvertureGazetteer implements Gazetteer {
       final String id = fields[0].trim();
       final String name = fields[1].trim();
       final Set<String> alternates = new LinkedHashSet<>();
-      for (final String alternate : fields[2].split(LIST_SEPARATOR)) {
+      for (final String alternate : GazetteerIndex.split(fields[2], LIST_SEPARATOR)) {
         final String trimmed = alternate.trim();
         if (!trimmed.isEmpty() && !trimmed.equals(name)) {
           alternates.add(trimmed);

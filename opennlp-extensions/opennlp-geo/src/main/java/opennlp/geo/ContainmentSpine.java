@@ -19,11 +19,7 @@ package opennlp.geo;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -41,17 +37,17 @@ import opennlp.tools.util.StringUtil;
 
 /**
  * An immutable, in-memory containment hierarchy over user-supplied place tables: each
- * place carries its parent, name, and type, and {@link #ancestors(String)} walks the
+ * place stores its parent, name, and type, and {@link #ancestors(String)} walks the
  * chain outward. No hierarchy data is bundled; the user supplies the tables, and the
  * license of a supplied table stays with its files.
  *
  * <p>Two table formats load through the builder. The neutral tab-separated format
- * carries {@code id}, {@code parent_id}, {@code name}, and {@code type} columns, one
+ * has {@code id}, {@code parent_id}, {@code name}, and {@code type} columns, one
  * place per line, empty parent for roots; a containment table derived from any source,
  * for example an administrative-territory query result, fits it. The Who's On First
  * meta CSV format is read directly by its header columns, so the published per-placetype
  * tables load without conversion; non-positive parent identifiers mean no usable
- * parent, as in the source data.</p>
+ * parent, as in the source data. Parent identifiers must be signed decimal integers.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  */
@@ -143,7 +139,7 @@ public final class ContainmentSpine implements PlaceHierarchy {
      * earlier place, so the last addition wins.
      *
      * @param id The place identifier. Must not be {@code null} or blank.
-     * @param parentId The parent identifier, or {@code null} for a root.
+     * @param parentId The non-blank parent identifier, or {@code null} for a root.
      * @param name The place name. Must not be {@code null} or blank.
      * @param type The place type. Must not be {@code null} or blank.
      * @return This builder.
@@ -160,6 +156,9 @@ public final class ContainmentSpine implements PlaceHierarchy {
       if (StringUtil.isUnicodeBlank(type)) {
         throw new IllegalArgumentException("type must not be null or blank");
       }
+      if (parentId != null && StringUtil.isUnicodeBlank(parentId)) {
+        throw new IllegalArgumentException("parentId must be null or non-blank");
+      }
       places.put(id, new Node(parentId, name, type));
       return this;
     }
@@ -172,7 +171,7 @@ public final class ContainmentSpine implements PlaceHierarchy {
      * @param table The table file, UTF-8. Must not be {@code null}.
      * @return This builder.
      * @throws IOException Thrown if reading fails.
-     * @throws InvalidFormatException Thrown if a line is malformed: too few columns, or
+     * @throws InvalidFormatException Thrown if a line is malformed: not exactly four columns, or
      *         a blank id, name, or type column.
      * @throws IllegalArgumentException Thrown if {@code table} is {@code null}.
      */
@@ -183,11 +182,11 @@ public final class ContainmentSpine implements PlaceHierarchy {
       int lineNumber = 0;
       for (final String line : readLines(table)) {
         lineNumber++;
-        if (line.isEmpty() || line.startsWith("#")) {
+        if (StringUtil.isUnicodeBlank(line) || line.startsWith("#")) {
           continue;
         }
         final List<String> fields = splitOn(line, '\t');
-        if (fields.size() < 4) {
+        if (fields.size() != 4) {
           throw new InvalidFormatException("malformed containment line " + lineNumber
               + " in " + table);
         }
@@ -214,11 +213,9 @@ public final class ContainmentSpine implements PlaceHierarchy {
      * carry commas, doubled quotes, and line breaks, and such a field stays part of the
      * single row it belongs to.</p>
      *
-     * <p>Every row of the file must describe a usable place. A row that is too short to
-     * reach a required column, a row whose name or placetype column is empty, and a
-     * quoted field the file never closes each fail loud, naming the line the offending
-     * row starts on; no row is dropped silently, because a dropped row would end every
-     * containment chain running through that place at a dangling parent.</p>
+     * <p>Every row must describe a usable place. Malformed rows report the line where the row
+     * starts. This includes short rows, empty required fields, invalid parent identifiers, and
+     * unterminated quoted fields.</p>
      *
      * @param metaCsv The meta CSV file, UTF-8. Must not be {@code null}.
      * @return This builder.
@@ -254,42 +251,52 @@ public final class ContainmentSpine implements PlaceHierarchy {
     }
 
     /**
-     * Reads a Who's On First parent identifier, where a non-positive value means the
+     * Reads a Who's On First parent identifier, where a non-positive decimal integer means the
      * row has no usable parent.
      *
      * @param parent The parent column, already trimmed.
      * @return The identifier, or {@code null} when the row is a root.
+     * @throws IllegalArgumentException Thrown if {@code parent} is not empty and is not a signed
+     *     decimal integer.
      */
     private static String positiveOrNull(String parent) {
-      if (parent.isEmpty() || parent.startsWith("-") || "0".equals(parent)) {
+      if (parent.isEmpty()) {
         return null;
       }
-      return parent;
+      int digit = 0;
+      final boolean negative = parent.charAt(0) == '-';
+      if (negative) {
+        digit++;
+      }
+      if (digit == parent.length()) {
+        throw new IllegalArgumentException("parent_id must be a signed decimal integer: " + parent);
+      }
+      boolean nonZero = false;
+      for (; digit < parent.length(); digit++) {
+        final char c = parent.charAt(digit);
+        if (c < '0' || c > '9') {
+          throw new IllegalArgumentException(
+              "parent_id must be a signed decimal integer: " + parent);
+        }
+        nonZero |= c != '0';
+      }
+      return negative || !nonZero ? null : parent;
     }
   }
 
   /**
-   * Reads a file as UTF-8 lines, ending a line on {@code LF} or {@code CRLF}.
+   * Reads a file as UTF-8 lines, accepting {@code LF}, {@code CRLF}, or {@code CR} endings.
    *
    * @param file The file to read.
    * @return The lines without their terminators.
    * @throws IOException Thrown if reading fails.
    */
   private static List<String> readLines(Path file) throws IOException {
-    final String content;
-    try (InputStream in = Files.newInputStream(file)) {
-      content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-    }
     final List<String> lines = new ArrayList<>();
-    int start = 0;
-    for (int i = 0; i <= content.length(); i++) {
-      if (i == content.length() || content.charAt(i) == '\n') {
-        int end = i;
-        if (end > start && content.charAt(end - 1) == '\r') {
-          end--;
-        }
-        lines.add(content.substring(start, end));
-        start = i + 1;
+    try (BufferedReader reader = GazetteerIndex.utf8Reader(Files.newInputStream(file))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        lines.add(line);
       }
     }
     return lines;
@@ -382,18 +389,24 @@ public final class ContainmentSpine implements PlaceHierarchy {
             + file + ": id " + id);
       }
       final String parent = StringUtil.trimUnicodeWhitespace(fields.get(parentColumn));
-      builder.add(id, Builder.positiveOrNull(parent), name, type);
+      final String parentId;
+      try {
+        parentId = Builder.positiveOrNull(parent);
+      } catch (IllegalArgumentException e) {
+        throw new InvalidFormatException("invalid parent_id column at line " + line + " in "
+            + file + ": " + e.getMessage(), e);
+      }
+      builder.add(id, parentId, name, type);
     }
   }
 
   /**
    * Parses a CSV file row by row, with double-quote quoting, doubled-quote escapes,
    * and quoted fields that may span lines, so a row is only ended by a line break
-   * outside a quoted field. Blank lines between rows are dropped. Both {@code LF} and
-   * {@code CRLF} end a line, inside a quoted field as well as outside, and a quoted
-   * line break is kept in the field as a single {@code LF}. A quote inside an unquoted
-   * field and content after a field's closing quote both fail loud, because either
-   * would otherwise splice neighboring fields or rows together silently.
+   * outside a quoted field. Blank lines between rows are dropped. {@code LF} and {@code CRLF} end
+   * a line, inside a quoted field as well as outside, and a quoted line break is kept in the field
+   * as a single {@code LF}. A quote inside an unquoted field and content after a field's closing
+   * quote are rejected.
    *
    * <p>The file is streamed, never materialized whole, so a table of any size parses
    * in memory proportional to its longest row.</p>
@@ -405,13 +418,7 @@ public final class ContainmentSpine implements PlaceHierarchy {
    *         appears inside an unquoted field, or content follows a closing quote.
    */
   private static void parseCsv(Path file, CsvRows consumer) throws IOException {
-    // The file streams through a replacing UTF-8 decoder, so tables larger than any
-    // in-memory buffer parse in constant memory and stray malformed bytes read as
-    // replacement characters instead of aborting the load.
-    try (Reader in = new BufferedReader(new InputStreamReader(Files.newInputStream(file),
-        StandardCharsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPLACE)
-            .onUnmappableCharacter(CodingErrorAction.REPLACE)))) {
+    try (Reader in = GazetteerIndex.utf8Reader(Files.newInputStream(file))) {
       final StringBuilder field = new StringBuilder();
       List<String> fields = new ArrayList<>();
       boolean quoted = false;
@@ -492,7 +499,7 @@ public final class ContainmentSpine implements PlaceHierarchy {
     }
   }
 
-  /** Hands the row to the consumer unless it is a blank line, which carries no fields. */
+  /** Passes a nonblank row to the consumer. */
   private static void emitRow(CsvRows consumer, int line, List<String> fields)
       throws InvalidFormatException {
     if (fields.size() == 1 && fields.get(0).isEmpty()) {

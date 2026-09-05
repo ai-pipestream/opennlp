@@ -121,16 +121,42 @@ public class OvertureGazetteerTest {
 
   @ParameterizedTest
   @ValueSource(strings = {"", "C", "CHE", "C1"})
-  void testByRegionMalformedCodeFailsLoud(String malformed) throws IOException {
+  void testByRegionRejectsMalformedCode(String malformed) throws IOException {
     final OvertureGazetteer gazetteer = gazetteer();
     assertThrows(IllegalArgumentException.class, () -> gazetteer.byRegion(malformed));
   }
 
   @ParameterizedTest
   @MethodSource("malformedContent")
-  void testMalformedContentFailsLoud(String content) {
+  void testRejectsMalformedContent(String content) {
     assertThrows(InvalidFormatException.class, () -> OvertureGazetteer.load(
         new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void testRejectsExtraColumns() {
+    final String content = row("d9", "Nowhere", "", "1", "2", "DE", "region", "1")
+        + "\textra\n";
+    assertThrows(InvalidFormatException.class, () -> OvertureGazetteer.load(
+        new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void testRejectsDuplicateRecordIds() {
+    final String content = row("d9", "First", "", "1", "2", "DE", "region", "1")
+        + "\n" + row("d9", "Second", "", "3", "4", "DE", "region", "1") + "\n";
+    assertThrows(InvalidFormatException.class, () -> OvertureGazetteer.load(
+        new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void testRejectsMalformedUtf8() {
+    final byte[] content = (row("d9", "Nowhere", "", "1", "2", "DE", "region", "1")
+        + "\n").getBytes(StandardCharsets.UTF_8);
+    content[3] = (byte) 0xc3;
+
+    assertThrows(IOException.class,
+        () -> OvertureGazetteer.load(new ByteArrayInputStream(content)));
   }
 
   private static List<String> malformedContent() {
@@ -141,7 +167,7 @@ public class OvertureGazetteerTest {
   }
 
   @Test
-  void testNullStreamFailsLoud() {
+  void testRejectsNullStream() {
     assertThrows(IllegalArgumentException.class,
         () -> OvertureGazetteer.load((InputStream) null));
   }
