@@ -26,14 +26,14 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
 
 /**
- * Adapts a {@link QuantityExtractor} to the document pipeline: scans the document text
- * and provides {@link #QUANTITIES}, one annotation per mention carrying its
- * {@link Quantity}.
+ * Extracts quantities from the original document text into {@link #QUANTITIES}.
  *
- * <p>The extractor works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline.</p>
+ * <p>No input layers are required. Results must be non-null, in text order,
+ * non-overlapping, and within the text bounds. Values and spans are retained without
+ * normalization or reordering.</p>
  *
  * @since 3.0.0
  */
@@ -62,24 +62,42 @@ public class QuantityAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Scans the document text and adds the {@link #QUANTITIES} layer.
+   * {@inheritDoc}
    *
-   * <p>No other layer is read, so a document without any layer yields the quantity layer
-   * present and, if the text holds no quantity mention, empty.</p>
+   * <p>Adds the validated extraction results under {@link #QUANTITIES}.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #QUANTITIES} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   * @throws IllegalArgumentException Thrown if the output layer is present or the
+   *         extractor returns a null result, null mention, or invalid span sequence.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
     }
+    if (document.layers().contains(QUANTITIES)) {
+      throw new IllegalArgumentException("layer is already present: " + QUANTITIES);
+    }
+    final CharSequence text = document.text();
+    final int textLength = text.length();
+    final List<Quantity> extracted = extractor.extract(text);
+    if (extracted == null) {
+      throw new IllegalArgumentException("extractor returned a null result");
+    }
     final List<Annotation<Quantity>> mentions = new ArrayList<>();
-    for (final Quantity quantity : extractor.extract(document.text())) {
-      mentions.add(new Annotation<>(quantity.span(), quantity));
+    int previousEnd = 0;
+    for (final Quantity quantity : extracted) {
+      if (quantity == null) {
+        throw new IllegalArgumentException("extractor returned a null mention");
+      }
+      final Span span = quantity.span();
+      if (span.getEnd() > textLength) {
+        throw new IllegalArgumentException("extractor returned a span beyond the text: " + span);
+      }
+      if (span.getStart() < previousEnd) {
+        throw new IllegalArgumentException("extractor returned an unordered or overlapping span: " + span);
+      }
+      previousEnd = span.getEnd();
+      mentions.add(new Annotation<>(span, quantity));
     }
     return document.with(QUANTITIES, mentions);
   }

@@ -28,30 +28,22 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
 
 /**
- * Adapts a {@link TemporalExtractor} to the document pipeline: scans the document text
- * and provides {@link #TEMPORALS}, one annotation per mention carrying its
- * {@link TemporalExpression}.
+ * Extracts calendar mentions from the original document text into {@link #TEMPORALS}.
  *
- * <p>Relative expressions such as {@code yesterday} need a reference date, and this
- * annotator finds one in the document itself. The text is scanned twice: the first pass
- * reports absolute mentions only, and if one of them is a day-granularity mention, it
- * dates the document and a second pass resolves the relative expressions against it
- * through {@link TemporalExtractor#extract(CharSequence, LocalDate)}. The mentions of
- * the second pass are the ones reported, so a dateline makes relative expressions
- * resolvable. The electing mention is the first absolute day-granularity mention in text
- * order, the same rule {@link DocumentDateAnnotator} applies.</p>
+ * <p>The default mode extracts absolute mentions, selects the first absolute day as
+ * the reference date, then extracts again to resolve relative expressions. The final
+ * layer contains the results of that second pass. If no reference date is available,
+ * the absolute results are used without consulting the system clock.</p>
  *
- * <p>A document that dates itself nowhere keeps the absolute-only mentions: relative
- * expressions stay unreported rather than being guessed against the wall clock, since a
- * document read a year after it was written would otherwise resolve them wrongly and
- * silently. A caller who knows the date from metadata rather than from the text supplies
- * it through {@link #TemporalAnnotator(TemporalExtractor, LocalDate)}, which skips the
- * election and wins over any dateline.</p>
+ * <p>A fixed date supplied to {@link #TemporalAnnotator(TemporalExtractor, LocalDate)}
+ * takes precedence over dates in the text and requires one extraction pass.</p>
  *
- * <p>The extractor works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline.</p>
+ * <p>No input layers are required. Each extraction pass must return non-null results
+ * in text order, without overlaps, and within the text bounds. The absolute pass is
+ * validated before selecting a reference date.</p>
  *
  * @since 3.0.0
  */
@@ -64,9 +56,11 @@ public class TemporalAnnotator implements DocumentAnnotator {
   public static final LayerKey<TemporalExpression> TEMPORALS =
       Layers.key("temporals", TemporalExpression.class);
 
+  private static final String EXTRACTOR_REQUIRED = "extractor must not be null";
+
   private final TemporalExtractor extractor;
 
-  /** The caller-fixed reference date, or {@code null} to elect one per document. */
+  /** The configured reference date, or {@code null} to select one from the text. */
   private final LocalDate reference;
 
   /**
@@ -77,7 +71,10 @@ public class TemporalAnnotator implements DocumentAnnotator {
    * @throws IllegalArgumentException Thrown if {@code extractor} is {@code null}.
    */
   public TemporalAnnotator(TemporalExtractor extractor) {
-    this.extractor = requireExtractor(extractor);
+    if (extractor == null) {
+      throw new IllegalArgumentException(EXTRACTOR_REQUIRED);
+    }
+    this.extractor = extractor;
     this.reference = null;
   }
 
@@ -92,30 +89,31 @@ public class TemporalAnnotator implements DocumentAnnotator {
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
   public TemporalAnnotator(TemporalExtractor extractor, LocalDate reference) {
-    this.extractor = requireExtractor(extractor);
+    if (extractor == null) {
+      throw new IllegalArgumentException(EXTRACTOR_REQUIRED);
+    }
     if (reference == null) {
       throw new IllegalArgumentException("reference must not be null");
     }
+    this.extractor = extractor;
     this.reference = reference;
   }
 
   /**
-   * Scans the document text and adds the {@link #TEMPORALS} layer.
+   * {@inheritDoc}
    *
-   * <p>No other layer is read, so a document without any layer yields the temporal layer
-   * present and, if the text holds no calendar mention, empty. Relative expressions are
-   * resolved against the fixed reference date, or against the document's own dateline
-   * when none was fixed; a document with neither reports its absolute mentions only.</p>
+   * <p>Adds validated mentions under {@link #TEMPORALS}.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #TEMPORALS} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   * @throws IllegalArgumentException Thrown if the output layer is present or the
+   *         extractor returns a null result, null mention, or invalid span sequence.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    if (document.layers().contains(TEMPORALS)) {
+      throw new IllegalArgumentException("layer is already present: " + TEMPORALS);
     }
     final List<Annotation<TemporalExpression>> mentions = new ArrayList<>();
     for (final TemporalExpression expression : resolved(document.text())) {
@@ -125,34 +123,60 @@ public class TemporalAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Extracts the mentions of a text with the reference date the document supplies, if
-   * any.
+   * Extracts and validates mentions using a configured or textual reference date.
    *
    * @param text The document text. Must not be {@code null}.
-   * @return The mentions in text order. Never {@code null}.
+   * @return The non-null mentions in text order.
+   * @throws IllegalArgumentException If an extraction result is invalid.
    */
   private List<TemporalExpression> resolved(CharSequence text) {
     if (reference != null) {
-      return extractor.extract(text, reference);
+      return checked(extractor.extract(text, reference), text.length());
     }
-    final List<TemporalExpression> absolute = extractor.extract(text);
+    final List<TemporalExpression> absolute = checked(extractor.extract(text), text.length());
     final LocalDate dateline = dateline(absolute);
-    return dateline == null ? absolute : extractor.extract(text, dateline);
+    return dateline == null ? absolute : checked(extractor.extract(text, dateline), text.length());
   }
 
   /**
-   * Elects the document's date from its absolute mentions: the first absolute
-   * day-granularity mention wins.
+   * Validates one extraction result before using it for date selection or annotation.
    *
-   * <p>A day-granularity value that is not an ISO 8601 calendar date, as a third-party
-   * {@link TemporalExtractor} may supply, elects nothing; the mentions then stay the
-   * absolute ones. {@link DocumentDateAnnotator} reports such a value as an error when
-   * it reaches the same mention, so the pipeline still fails loud rather than silently
-   * dating the document wrongly.</p>
+   * @param mentions The provider result.
+   * @param textLength The document length in UTF-16 code units.
+   * @return The validated result without copying or reordering.
+   * @throws IllegalArgumentException If the result is null, contains null, or has
+   *         out-of-bounds, unordered, or overlapping spans.
+   */
+  private List<TemporalExpression> checked(List<TemporalExpression> mentions, int textLength) {
+    if (mentions == null) {
+      throw new IllegalArgumentException("extractor returned a null result");
+    }
+    int previousEnd = 0;
+    for (final TemporalExpression mention : mentions) {
+      if (mention == null) {
+        throw new IllegalArgumentException("extractor returned a null mention");
+      }
+      final Span span = mention.span();
+      if (span.getEnd() > textLength) {
+        throw new IllegalArgumentException("extractor returned a span beyond the text: " + span);
+      }
+      if (span.getStart() < previousEnd) {
+        throw new IllegalArgumentException("extractor returned an unordered or overlapping span: " + span);
+      }
+      previousEnd = span.getEnd();
+    }
+    return mentions;
+  }
+
+  /**
+   * Parses the first absolute day mention as a reference date.
+   *
+   * <p>If that value is invalid, the absolute results are retained without resolving
+   * relative expressions. {@link DocumentDateAnnotator} rejects the invalid value.</p>
    *
    * @param mentions The absolute mentions in text order. Must not be {@code null}.
-   * @return The elected date, or {@code null} when the text holds no usable
-   *         day-granularity mention.
+   * @return The reference date, or {@code null} if no absolute day exists or the first
+   *         absolute day value is invalid.
    */
   private LocalDate dateline(List<TemporalExpression> mentions) {
     for (final TemporalExpression mention : mentions) {
@@ -166,20 +190,6 @@ public class TemporalAnnotator implements DocumentAnnotator {
       }
     }
     return null;
-  }
-
-  /**
-   * Validates the extractor a constructor was given.
-   *
-   * @param extractor The extractor to validate.
-   * @return {@code extractor}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code extractor} is {@code null}.
-   */
-  private TemporalExtractor requireExtractor(TemporalExtractor extractor) {
-    if (extractor == null) {
-      throw new IllegalArgumentException("extractor must not be null");
-    }
-    return extractor;
   }
 
   /** {@inheritDoc} */
