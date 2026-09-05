@@ -80,7 +80,8 @@ The dictionary is immutable and safe to share between threads; the factory hands
 The in-tree tests use project-authored fixtures only. An opt-in test class, `HunspellRealDictionaryTest`, also checks everyday morphology with the LibreOffice `en_US`, `de_DE_frami`, and `hu_HU` dictionaries. Point it at one directory containing all listed `<name>.aff` and `<name>.dic` files. A missing dictionary skips the associated test; a dictionary that cannot be loaded fails it.
 
 ```
-./mvnw test -pl opennlp-core/opennlp-runtime -Dtest=HunspellRealDictionaryTest \
+./mvnw test -pl opennlp-core/opennlp-runtime -am \
+    -Dtest=HunspellRealDictionaryTest -Dsurefire.failIfNoSpecifiedTests=false \
     -Dopennlp.hunspell.dict.dir=/tmp/hunspell-dicts
 ```
 
@@ -91,3 +92,7 @@ The engine applies `PFX` and `SFX` rules with strip strings and character-class 
 Compound decomposition supports `COMPOUNDFLAG`, `COMPOUNDBEGIN`, `COMPOUNDMIDDLE`, `COMPOUNDEND`, `COMPOUNDMIN`, `COMPOUNDWORDMAX`, `COMPOUNDPERMITFLAG`, `COMPOUNDFORBIDFLAG`, `CHECKCOMPOUNDDUP`, `CHECKCOMPOUNDCASE`, and `CHECKCOMPOUNDTRIPLE`. Compound boundaries and minimum lengths use Unicode code points. `NEEDAFFIX` (also named `PSEUDOROOT`), `ONLYINCOMPOUND`, `FORBIDDENWORD`, `CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted.
 
 Other directives are skipped. Their conversion, suggestion, or advanced compound behavior is not applied by this affix stemmer. Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
+
+Skipped directives include `ICONV`, `OCONV`, `COMPLEXPREFIXES`, `COMPOUNDRULE`,
+`IGNORE`, and `KEEPCASE`. Loading a dictionary does not apply these rules;
+results can differ from Hunspell for words that need them.
