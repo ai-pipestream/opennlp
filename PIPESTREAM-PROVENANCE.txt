@@ -2,7 +2,7 @@
 # Built from unmerged development branches of Apache OpenNLP.
 # Not an Apache Software Foundation release. Apache OpenNLP is a trademark of the ASF.
 version: 0.1.0-alpha4-SNAPSHOT
-generated: 2026-09-05T15:42:06Z
+generated: 2026-09-05T15:49:19Z
 main: 535c6d43a
 ref: 0e9e30752  OPENNLP-1879-gazetteer-api  apache
 ref: ff2ce79c5  OPENNLP-1880-wordnet-api  apache
