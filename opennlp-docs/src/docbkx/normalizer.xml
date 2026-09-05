@@ -131,10 +131,11 @@
 					</row>
 					<row>
 						<entry><code>SymbolJoinerCharSequenceNormalizer</code></entry>
-						<entry>Spells out a whole-token symbol as its English word
+						<entry>Replaces a supported single-symbol input with a fixed English word
 							(<code>&amp;</code> to <code>and</code>, <code>§</code> to
-							<code>section</code>, <code>™</code> to <code>trademark</code>); a symbol
-							embedded in a larger token is left alone.</entry>
+							<code>section</code>, <code>™</code> to <code>trademark</code>).
+							It does not tokenize or trim text. See
+							<xref linkend="tools.normalizer.symboltokens"/>.</entry>
 					</row>
 					<row>
 						<entry><code>EllipsisCharSequenceNormalizer</code></entry>
@@ -208,6 +209,53 @@ String clean = ws.normalize("a 　b").toString();   // "a b"
 String hyphen = DashCharSequenceNormalizer.getInstance()
     .normalize("state—of–the‐art").toString(); // "state-of-the-art"]]>
 		</programlisting>
+	</section>
+
+	<section xml:id="tools.normalizer.symboltokens">
+		<title>Normalizing symbol tokens</title>
+		<para>
+			<code>SymbolJoinerCharSequenceNormalizer</code> maps a supported symbol only when
+			it is the complete input. A phrase such as <code>Dungeons &amp; Dragons</code>,
+			an embedded symbol such as <code>R&amp;D</code>, padded input such as
+			<code>" &amp; "</code>, and ASCII forms such as <code>(TM)</code> are unchanged.
+			The fixed English replacements are matching conventions, not rules for reading
+			symbols in context. Currency symbols and symbols followed by variation selectors
+			are unchanged.
+		</para>
+		<para>
+			For per-token matching, use tokens that retain the symbols. The following example
+			uses whitespace boundaries and stores normalized forms with the original spans:
+		</para>
+		<programlisting language="java">
+<![CDATA[import opennlp.tools.tokenize.WhitespaceTokenizer;
+import opennlp.tools.util.Span;
+import opennlp.tools.util.normalizer.CharSequenceNormalizer;
+import opennlp.tools.util.normalizer.SymbolJoinerCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.TextNormalizer;
+
+String text = "Dungeons & Dragons";
+CharSequenceNormalizer normalizer = TextNormalizer.builder()
+    .with(SymbolJoinerCharSequenceNormalizer.getInstance())
+    .caseFold()
+    .build();
+Span[] spans = WhitespaceTokenizer.INSTANCE.tokenizePos(text);
+String[] forms = new String[spans.length];
+for (int i = 0; i < spans.length; i++) {
+  forms[i] = normalizer.normalize(spans[i].getCoveredText(text)).toString();
+}
+// forms: ["dungeons", "and", "dragons"]
+// spans[1]: [9, 10), covering the original ampersand]]>
+		</programlisting>
+		<para>
+			<code>WordTokenizer</code>, used by default in <code>TermAnalyzer</code>, omits the
+			ampersand; applying a normalizer afterward cannot recover it. Choose a tokenizer
+			that retains the symbols needed for matching, or supply pretokenized input.
+			There is no built-in symbol-expansion term dimension; normalize token forms
+			explicitly as above.
+			This normalizer does not implement <code>OffsetAwareNormalizer</code> and cannot
+			be included in <code>buildAligned()</code>. In the example, the spans refer to the
+			original tokens, not character positions within the expanded words.
+		</para>
 	</section>
 
 	<section xml:id="tools.normalizer.pipeline">

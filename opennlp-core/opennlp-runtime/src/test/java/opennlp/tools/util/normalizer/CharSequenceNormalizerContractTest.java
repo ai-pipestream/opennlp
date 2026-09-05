@@ -33,6 +33,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 class CharSequenceNormalizerContractTest {
 
+  /**
+   * Supplies the normalizers checked for null and empty input.
+   *
+   * @return Named normalizer instances.
+   */
   static Stream<Arguments> allNormalizers() {
     return Stream.of(
         Arguments.of("accentFold", AccentFoldCharSequenceNormalizer.getInstance()),
@@ -46,6 +51,7 @@ class CharSequenceNormalizerContractTest {
         Arguments.of("number", NumberCharSequenceNormalizer.getInstance()),
         Arguments.of("shrink", ShrinkCharSequenceNormalizer.getInstance()),
         Arguments.of("socialMedia", SocialMediaCharSequenceNormalizer.getInstance()),
+        Arguments.of("symbolJoiner", SymbolJoinerCharSequenceNormalizer.getInstance()),
         Arguments.of("url", UrlCharSequenceNormalizer.getInstance()),
         Arguments.of("bullet", BulletCharSequenceNormalizer.getInstance()),
         Arguments.of("dash", DashCharSequenceNormalizer.getInstance()),
