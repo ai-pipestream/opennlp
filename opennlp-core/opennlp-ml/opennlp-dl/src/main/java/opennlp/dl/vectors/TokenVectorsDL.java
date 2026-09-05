@@ -199,8 +199,8 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @return The classification and separator token ids.
    */
   private long[] specials() {
-    final String[] empty = tokenizer.tokenize("");
-    return new long[] {id(empty[0]), id(empty[empty.length - 1])};
+    final long[] empty = encodeTokens("").ids();
+    return new long[] {empty[0], empty[empty.length - 1]};
   }
 
   /** {@inheritDoc} */
@@ -242,11 +242,11 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @return Its piece ids, possibly empty. Never {@code null}.
    */
   long[] pieceIds(final String word) {
-    final String[] pieces = tokenizer.tokenize(word);
+    final long[] pieces = encodeTokens(word).ids();
     final int count = Math.max(0, pieces.length - SPECIAL_PIECES);
     final long[] ids = new long[count];
     for (int p = 0; p < count; p++) {
-      ids[p] = id(pieces[p + 1]);
+      ids[p] = pieces[p + 1];
     }
     return ids;
   }
@@ -459,19 +459,4 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
     return hidden;
   }
 
-  /**
-   * Looks up a vocabulary id.
-   *
-   * @param piece The wordpiece.
-   * @return Its vocabulary id.
-   * @throws IllegalStateException Thrown if the tokenizer emitted a piece the
-   *         vocabulary lacks.
-   */
-  private long id(final String piece) {
-    final Integer id = vocab.get(piece);
-    if (id == null) {
-      throw new IllegalStateException("piece is not in the vocabulary: " + piece);
-    }
-    return id;
-  }
 }
