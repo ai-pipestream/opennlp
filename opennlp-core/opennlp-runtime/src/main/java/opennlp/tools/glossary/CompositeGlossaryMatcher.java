@@ -20,25 +20,23 @@ package opennlp.tools.glossary;
 import java.util.ArrayList;
 import java.util.List;
 
+import opennlp.tools.util.Span;
+
 /**
- * A {@link GlossaryMatcher} that merges the hits of several matchers into one
- * non-overlapping result, so a pipeline can combine, for example, the exact
- * {@link AhoCorasickGlossaryMatcher} with the inflected
- * {@link TermAnalyzingGlossaryMatcher} behind a single
+ * Combines glossary matchers into a non-overlapping result for a single
  * {@link GlossaryAnnotator}.
  *
- * <p>Matchers are consulted in the order given, and earlier matchers win: a hit
- * is accepted only when its span intersects no hit already accepted from an
- * earlier matcher (or an earlier hit of the same matcher). Register the exact
- * matcher first and the inflected matcher second, and an inflected hit survives
- * only where no exact hit covers that stretch of text. Spans that merely touch,
- * where one ends exactly where the other starts, do not intersect and both
- * survive. Accepted hits are reported in text order.</p>
+ * <p>List order determines priority. A match is accepted only if it does not
+ * overlap an accepted match. For example, place {@link AhoCorasickGlossaryMatcher}
+ * before {@link TermAnalyzingGlossaryMatcher} to prefer exact matches to inflected
+ * matches. Overlap uses {@link Span#intersects(Span)}: adjacent non-empty spans
+ * do not overlap, but a zero-length span intersects a span containing that offset,
+ * including its end offset. Results are returned in text order.</p>
  *
  * <p>Delegate results satisfy the {@link GlossaryMatcher} contract: they are sorted
  * and non-overlapping. The composite filters and merges each result in a linear pass.
- * It holds no per-call state and is safe to share across threads when every delegate
- * is.</p>
+ * Calls share no mutable matching state. Concurrent use requires thread-safe
+ * delegates.</p>
  *
  * @since 3.0.0
  */
@@ -69,11 +67,7 @@ public final class CompositeGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * {@inheritDoc}
-   *
-   * <p>Each delegate runs in priority order and a hit is accepted only when its
-   * span intersects no already-accepted hit. The merged hits are returned sorted
-   * by start offset.</p>
+   * {@inheritDoc} Delegate list order determines priority for overlapping matches.
    */
   @Override
   public List<GlossaryMatch> match(CharSequence text) {
@@ -95,7 +89,7 @@ public final class CompositeGlossaryMatcher implements GlossaryMatcher {
 
   /**
    * Removes candidates that intersect a higher-priority hit or an earlier candidate.
-   * Both inputs are in text order, so only the next accepted hit and the last surviving
+   * Both inputs are in text order, so only the next accepted hit and the last retained
    * candidate can intersect the current candidate.
    *
    * @param accepted The higher-priority hits already retained.
@@ -108,7 +102,8 @@ public final class CompositeGlossaryMatcher implements GlossaryMatcher {
     int acceptedIndex = 0;
     for (final GlossaryMatch candidate : candidates) {
       while (acceptedIndex < accepted.size()
-          && accepted.get(acceptedIndex).span().getEnd() <= candidate.span().getStart()) {
+          && accepted.get(acceptedIndex).span().getEnd() <= candidate.span().getStart()
+          && !accepted.get(acceptedIndex).span().intersects(candidate.span())) {
         acceptedIndex++;
       }
       final boolean intersectsAccepted = acceptedIndex < accepted.size()

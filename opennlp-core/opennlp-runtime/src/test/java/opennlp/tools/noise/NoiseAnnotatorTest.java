@@ -25,17 +25,19 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.assets.AssetAnnotator;
+import opennlp.tools.assets.EmbeddedAsset;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the document adapter and the hand-off between the asset detector and the noise
- * scorer: an embedded binary the asset layer explains is never reported again as
- * noise.
+ * Tests document annotations and asset exclusions.
  */
 public class NoiseAnnotatorTest {
 
@@ -45,6 +47,7 @@ public class NoiseAnnotatorTest {
     assertEquals(Set.of(),
         new NoiseAnnotator(new StructuralNoiseScorer(), false).requires());
     assertEquals("opennlp:noise", NoiseAnnotator.NOISE.id());
+    assertEquals(Set.of(NoiseAnnotator.NOISE), new NoiseAnnotator().provides());
   }
 
   @Test
@@ -80,9 +83,7 @@ public class NoiseAnnotatorTest {
   }
 
   /**
-   * The default mode enforces its {@link NoiseAnnotator#requires()} contract: a
-   * pipeline that forgot the asset detector fails loud, naming the missing layer,
-   * instead of silently scoring every embedded payload as noise.
+   * Default mode requires an asset layer before invoking the scorer.
    */
   @Test
   void testDefaultModeRejectsADocumentWithoutTheAssetLayer() {
@@ -97,5 +98,47 @@ public class NoiseAnnotatorTest {
     assertThrows(IllegalArgumentException.class, () -> new NoiseAnnotator(null, true));
     assertThrows(IllegalArgumentException.class,
         () -> new NoiseAnnotator().annotate(null));
+  }
+
+  @Test
+  void testEmptyInputAddsAnEmptyNoiseLayer() {
+    final Document input = Document.of("").with(AssetAnnotator.ASSETS, List.of());
+    final Document result = new NoiseAnnotator().annotate(input);
+    assertTrue(result.layers().contains(NoiseAnnotator.NOISE));
+    assertEquals(List.of(), result.get(NoiseAnnotator.NOISE));
+    assertFalse(input.layers().contains(NoiseAnnotator.NOISE));
+  }
+
+  @Test
+  void testScorerReceivesFullAssetSpansAndPreservesInputLayers() {
+    final String text = "abc bcdfg";
+    final Span full = new Span(0, 3);
+    final EmbeddedAsset asset = new EmbeddedAsset(full, new Span(1, 2),
+        "raw", "application/octet-stream", 1, -1, -1);
+    final Annotation<EmbeddedAsset> assetAnnotation = new Annotation<>(full, asset);
+    final Document input = Document.of(text).with(AssetAnnotator.ASSETS, List.of(assetAnnotation));
+    final NoiseSpan noise = new NoiseSpan(new Span(4, 9), NoiseSpan.SEVERITY_DAMAGED, 0.5);
+    final int[] calls = {0};
+    final NoiseScorer delegate = (source, exclude) -> {
+      calls[0]++;
+      assertEquals(text, source);
+      assertEquals(List.of(full), exclude);
+      return List.of(noise);
+    };
+
+    final Document result = new NoiseAnnotator(delegate, true).annotate(input);
+    assertEquals(1, calls[0]);
+    assertEquals(text, result.text());
+    assertSame(assetAnnotation, result.get(AssetAnnotator.ASSETS).get(0));
+    assertSame(noise, result.get(NoiseAnnotator.NOISE).get(0).value());
+    assertEquals(noise.span(), result.get(NoiseAnnotator.NOISE).get(0).span());
+    assertFalse(input.layers().contains(NoiseAnnotator.NOISE));
+
+    final Document standalone = new NoiseAnnotator((source, exclude) -> {
+      assertEquals(List.of(), exclude);
+      return List.of();
+    }, false).annotate(input);
+    assertEquals(List.of(), standalone.get(NoiseAnnotator.NOISE));
+    assertSame(assetAnnotation, standalone.get(AssetAnnotator.ASSETS).get(0));
   }
 }

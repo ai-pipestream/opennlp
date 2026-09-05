@@ -50,6 +50,29 @@ public final class CorefEvalSupport {
         System.getProperty("user.home") + "/.opennlp"));
   }
 
+  /**
+   * Splits text at an exact delimiter and preserves empty fields.
+   *
+   * @param value The text. Must not be {@code null}.
+   * @param delimiter The delimiter.
+   * @return The fields in order.
+   * @throws IllegalArgumentException Thrown if {@code value} is {@code null}.
+   */
+  public static String[] splitOn(String value, char delimiter) {
+    if (value == null) {
+      throw new IllegalArgumentException("value must not be null");
+    }
+    final List<String> fields = new ArrayList<>();
+    int start = 0;
+    for (int i = 0; i <= value.length(); i++) {
+      if (i == value.length() || value.charAt(i) == delimiter) {
+        fields.add(value.substring(start, i));
+        start = i + 1;
+      }
+    }
+    return fields.toArray(new String[0]);
+  }
+
   /** Loads the person, location, and organization name finders. */
   public static List<NameFinderME> nameFinders(Path models) throws IOException {
     final List<NameFinderME> finders = new ArrayList<>();

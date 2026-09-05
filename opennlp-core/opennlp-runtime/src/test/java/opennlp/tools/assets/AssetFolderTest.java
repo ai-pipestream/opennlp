@@ -17,7 +17,6 @@
 
 package opennlp.tools.assets;
 
-import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 import java.util.List;
 
@@ -28,6 +27,7 @@ import opennlp.tools.document.Document;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.normalizer.AlignedText;
 
+import static opennlp.tools.assets.AssetTestSupport.png;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -39,34 +39,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class AssetFolderTest {
 
   /**
-   * Builds the leading bytes of a PNG declaring the given dimensions, padded so the
-   * encoded payload is long enough for bare-run detection.
-   *
-   * @param width The declared width.
-   * @param height The declared height.
-   * @return The leading bytes of a PNG file, 45 in total.
-   */
-  private static byte[] png(int width, int height) {
-    final ByteArrayOutputStream out = new ByteArrayOutputStream();
-    out.writeBytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
-    out.writeBytes(new byte[] {0, 0, 0, 13});
-    out.writeBytes(new byte[] {'I', 'H', 'D', 'R'});
-    out.writeBytes(new byte[] {(byte) (width >>> 24), (byte) (width >>> 16),
-        (byte) (width >>> 8), (byte) width});
-    out.writeBytes(new byte[] {(byte) (height >>> 24), (byte) (height >>> 16),
-        (byte) (height >>> 8), (byte) height});
-    out.writeBytes(new byte[] {8, 6, 0, 0, 0});
-    out.writeBytes(new byte[16]);
-    return out.toByteArray();
-  }
-
-  /**
-   * Builds a document whose text embeds one real PNG payload between two sentences,
-   * annotated by the real detector.
+   * Detects a PNG header fixture between two sentences.
    *
    * @return The annotated document.
    */
-  private static Document annotated() {
+  private Document annotated() {
     final String encoded = Base64.getEncoder().encodeToString(png(5, 7));
     return new AssetAnnotator().annotate(
         Document.of("Before the image. " + encoded + " After the image."));
@@ -78,7 +55,7 @@ public class AssetFolderTest {
    *
    * @return The text with a 5x7 and a 2x3 PNG payload between words.
    */
-  private static String twoAssetText() {
+  private String twoAssetText() {
     final String first = Base64.getEncoder().encodeToString(png(5, 7));
     final String second = Base64.getEncoder().encodeToString(png(2, 3));
     return "One " + first + " two " + second + " three.";

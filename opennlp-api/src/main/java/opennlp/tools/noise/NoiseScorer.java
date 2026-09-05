@@ -23,8 +23,7 @@ import java.util.List;
 import opennlp.tools.util.Span;
 
 /**
- * Scores the noisy stretches of a text and reports them as {@link NoiseSpan} findings
- * over the original, unmodified text.
+ * Reports noisy regions as {@link NoiseSpan} values with original-text offsets.
  *
  * <p>Thread safety is implementation specific.</p>
  *
@@ -33,16 +32,16 @@ import opennlp.tools.util.Span;
 public interface NoiseScorer {
 
   /**
-   * Scores the noise of a text.
+   * Scores text without changing it.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @param exclude Regions to leave out of scoring, such as spans another detector
-   *                already explained. May be empty; must not be {@code null} or hold
-   *                {@code null}.
-   * @return The noise spans in order of appearance; empty when the text is clean.
-   *         Never {@code null}.
+   * @param exclude Regions omitted from scoring. The collection and entries must not
+   *                be {@code null}. Spans must fit within {@code text}; they may overlap
+   *                or be unordered. Empty spans are ignored.
+   * @return A non-null list of noise spans in text order, without overlaps with
+   *         {@code exclude}. An empty result means no noise was detected.
    * @throws IllegalArgumentException Thrown if an argument is {@code null} or
-   *         {@code exclude} holds {@code null}.
+   *         {@code exclude} contains {@code null} or a span outside {@code text}.
    */
   List<NoiseSpan> score(CharSequence text, Collection<Span> exclude);
 }

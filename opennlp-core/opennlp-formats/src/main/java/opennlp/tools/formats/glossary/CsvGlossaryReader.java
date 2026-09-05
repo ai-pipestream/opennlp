@@ -21,6 +21,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,19 +32,20 @@ import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.StringUtil;
 
 /**
- * A {@link GlossaryReader} for CSV and TSV term lists, the de facto interchange shape
- * for glossaries: one row per entry, the first column the identifier, the second the
- * term. Columns beyond the second are ignored, leaving room for metadata columns such
- * as language or status.
+ * Reads CSV and TSV term lists. Each record contains an identifier followed by a term.
+ * Additional columns are parsed but their values are ignored.
  *
- * <p>Parsing follows RFC&#160;4180: fields may be quoted, a quoted field may contain
- * the delimiter, doubled quotes, and line breaks, and rows end with LF or CRLF. Input
- * is decoded as UTF-8 and a leading byte order mark (the Excel export signature) is
- * stripped. Blank lines are skipped. Rows with fewer than two columns, blank
- * identifiers or terms, and quotes left open at end of input fail loud as
- * {@link InvalidFormatException} naming the offending line.</p>
+ * <p>Quoting follows <a href="https://www.rfc-editor.org/rfc/rfc4180#section-2">
+ * RFC 4180</a>: quoted fields may contain delimiters, doubled quotes, and line breaks.
+ * An unquoted field cannot contain quotes, and only a delimiter, record end, or input
+ * end may follow a closing quote. Records may end with LF, CRLF, or CR. Blank lines
+ * are skipped, and a leading UTF-8 byte order mark is removed.</p>
  *
- * <p>The reader holds no per-call state and is safe to share across threads.</p>
+ * <p>Invalid UTF-8, malformed quoting, missing columns, and blank identifiers or terms
+ * produce {@link InvalidFormatException}. Record errors include a line number.
+ * Quoting is checked in headers and ignored columns as well as data fields.</p>
+ *
+ * <p>Configuration is immutable. Concurrent calls with separate streams are supported.</p>
  *
  * @see <a href="https://www.rfc-editor.org/rfc/rfc4180">RFC 4180</a>
  * @since 3.0.0
@@ -51,6 +54,8 @@ public final class CsvGlossaryReader implements GlossaryReader {
 
   private static final char QUOTE = '"';
   private static final char BYTE_ORDER_MARK = '\uFEFF';
+  private static final char LINE_FEED = '\n';
+  private static final char CARRIAGE_RETURN = '\r';
 
   /** The character separating fields; comma for CSV, tab for TSV. */
   private final char delimiter;
@@ -75,7 +80,7 @@ public final class CsvGlossaryReader implements GlossaryReader {
    *         character or a line break.
    */
   public CsvGlossaryReader(char delimiter, boolean skipHeader) {
-    if (delimiter == QUOTE || delimiter == '\n' || delimiter == '\r') {
+    if (delimiter == QUOTE || delimiter == LINE_FEED || delimiter == CARRIAGE_RETURN) {
       throw new IllegalArgumentException(
           "delimiter must not be the quote character or a line break");
     }
@@ -83,18 +88,38 @@ public final class CsvGlossaryReader implements GlossaryReader {
     this.skipHeader = skipHeader;
   }
 
+  /** {@inheritDoc} */
   @Override
   public List<GlossaryEntry> read(InputStream in) throws IOException {
     if (in == null) {
       throw new IllegalArgumentException("in must not be null");
     }
-    final List<GlossaryEntry> entries = new ArrayList<>();
-    final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+    final BufferedReader reader = new BufferedReader(new InputStreamReader(in,
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)));
+    try {
+      return readRecords(reader);
+    } catch (CharacterCodingException e) {
+      throw new InvalidFormatException("glossary content is not valid UTF-8", e);
+    }
+  }
 
+  /**
+   * Parses decoded CSV records without closing the input.
+   *
+   * @param reader The decoded character stream.
+   * @return The entries in file order.
+   * @throws InvalidFormatException Thrown if a record has invalid quoting or fields.
+   * @throws IOException Thrown if reading fails.
+   */
+  private List<GlossaryEntry> readRecords(BufferedReader reader) throws IOException {
+    final List<GlossaryEntry> entries = new ArrayList<>();
     final List<String> fields = new ArrayList<>();
     final StringBuilder field = new StringBuilder();
     boolean inQuotes = false;
+    boolean quoteClosed = false;
+    boolean previousCr = false;
     boolean recordHasContent = false;
     boolean headerPending = skipHeader;
     int line = 1;
@@ -106,6 +131,10 @@ public final class CsvGlossaryReader implements GlossaryReader {
     }
     while (read >= 0) {
       final char c = (char) read;
+      if (c == CARRIAGE_RETURN || (c == LINE_FEED && !previousCr)) {
+        line++;
+      }
+      previousCr = c == CARRIAGE_RETURN;
       if (inQuotes) {
         if (c == QUOTE) {
           final int next = reader.read();
@@ -113,41 +142,33 @@ public final class CsvGlossaryReader implements GlossaryReader {
             field.append(QUOTE);
           } else {
             inQuotes = false;
+            quoteClosed = true;
             read = next;
             continue;
           }
         } else {
-          if (c == '\n') {
-            line++;
-          }
           field.append(c);
         }
-      } else if (c == QUOTE && field.isEmpty()) {
+      } else if (quoteClosed && c != delimiter && c != LINE_FEED && c != CARRIAGE_RETURN) {
+        throw new InvalidFormatException(
+            "unexpected character after closing quote on line " + line);
+      } else if (c == QUOTE) {
+        if (!field.isEmpty()) {
+          throw new InvalidFormatException("quote in unquoted field on line " + line);
+        }
         inQuotes = true;
         recordHasContent = true;
       } else if (c == delimiter) {
         fields.add(field.toString());
         field.setLength(0);
+        quoteClosed = false;
         recordHasContent = true;
-      } else if (c == '\n' || c == '\r') {
-        if (c == '\r') {
-          final int next = reader.read();
-          if (next != '\n' && next >= 0) {
-            line++;
-            if (recordHasContent || !field.isEmpty()) {
-              headerPending = endRecord(fields, field, entries, recordLine, headerPending);
-            }
-            recordHasContent = false;
-            recordLine = line;
-            read = next;
-            continue;
-          }
-        }
-        line++;
+      } else if (c == LINE_FEED || c == CARRIAGE_RETURN) {
         if (recordHasContent || !field.isEmpty()) {
           headerPending = endRecord(fields, field, entries, recordLine, headerPending);
         }
         recordHasContent = false;
+        quoteClosed = false;
         recordLine = line;
       } else {
         field.append(c);
@@ -156,7 +177,7 @@ public final class CsvGlossaryReader implements GlossaryReader {
     }
     if (inQuotes) {
       throw new InvalidFormatException(
-          "quote opened on line " + recordLine + " is never closed");
+          "unclosed quoted field in record starting on line " + recordLine);
     }
     if (recordHasContent || !field.isEmpty()) {
       endRecord(fields, field, entries, recordLine, headerPending);
@@ -165,8 +186,7 @@ public final class CsvGlossaryReader implements GlossaryReader {
   }
 
   /**
-   * Finishes one record: validates the column shape, converts it to an entry unless
-   * it is the pending header, and resets the field buffers.
+   * Validates a record, adds an entry unless the record is a header, and clears buffers.
    *
    * @param fields The completed fields of the record; emptied by this call.
    * @param field The trailing field in progress; emptied by this call.

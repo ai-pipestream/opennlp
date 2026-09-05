@@ -25,11 +25,14 @@ import java.util.Set;
 
 import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.extraction.NumberScan;
+import opennlp.tools.money.CursorMoneyExtractor;
+import opennlp.tools.money.MoneyAmount;
+import opennlp.tools.money.MoneyExtractor;
 import opennlp.tools.util.Span;
 
 /**
- * A deterministic {@link QuantityExtractor}: a single forward scan over the text, no
- * regular expressions, recognizing numbers with a percent marker or a unit token.
+ * A model-free {@link QuantityExtractor} recognizing numbers with a percent marker or
+ * a unit token, without regular expressions.
  *
  * <p>Recognized forms: percentages as {@code 50%}, {@code 3.5 %}, or {@code 50 percent}
  * (all reported with the unit {@code %}); unit quantities with the unit immediately
@@ -38,19 +41,23 @@ import opennlp.tools.util.Span;
  * convention the scanner cannot parse, for example the Indian-grouped {@code 1,00,000},
  * is rejected entirely rather than truncated to a wrong value, and the
  * separator-adjoined tail of such a number never seeds a mention of its own. A bare
- * number without a percent marker or unit is never a quantity, which also keeps money
- * mentions such as {@code $3 billion} out of this layer.</p>
+ * number without a percent marker or unit is never a quantity.</p>
  *
  * <p>Numbers are read in one {@link NumberNotation}, {@link NumberNotation#LATIN_US} by
  * default, so {@code 1,250 GB} is a little over a thousand gigabytes. A document written
  * in the European convention is read by an extractor built for it, in which
- * {@code 1.250 GB} means the same; text in the other notation is rejected rather than
- * misread.</p>
+ * {@code 1.250 GB} means the same. Inputs valid in both notations are interpreted using
+ * the selected one; invalid grouping is rejected.</p>
  *
  * <p>Units are matched exactly, case-sensitively, against a curated default set of
  * common measurement tokens; ambiguous English words such as {@code in} are deliberately
  * excluded. Callers extend or replace the set through
  * {@link #CursorQuantityExtractor(Set)}. No unit conversion is performed.</p>
+ *
+ * <p>Currency amounts recognized by {@link CursorMoneyExtractor} with the default symbol
+ * table and the selected number notation take precedence over quantities, including
+ * custom units. Thus {@code $3m} is not reported as 3 meters. Currency amounts are scanned
+ * first; a forward quantity scan then excludes overlapping spans.</p>
  *
  * <p>The extractor holds no per-call state and is safe to share between threads.</p>
  *
@@ -82,14 +89,14 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   private final Set<String> units;
 
   private final NumberNotation notation;
+  private final MoneyExtractor moneyExtractor;
 
   /**
    * Initializes the extractor with the default unit set and
    * {@link NumberNotation#LATIN_US}.
    */
   public CursorQuantityExtractor() {
-    this.units = DEFAULT_UNITS;
-    this.notation = NumberNotation.LATIN_US;
+    this(DEFAULT_UNITS, NumberNotation.LATIN_US);
   }
 
   /**
@@ -100,8 +107,7 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
    */
   public CursorQuantityExtractor(NumberNotation notation) {
-    this.units = DEFAULT_UNITS;
-    this.notation = requireNotation(notation);
+    this(DEFAULT_UNITS, notation);
   }
 
   /**
@@ -109,7 +115,8 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *
    * @param units The unit tokens to recognize, matched exactly and case-sensitively.
    *              Must not be {@code null} or empty, and no token may be {@code null},
-   *              blank, longer than six characters, or contain anything but letters.
+   *              empty, longer than six UTF-16 code units, or contain anything but
+   *              Unicode letters.
    * @throws IllegalArgumentException Thrown if the set is {@code null}, empty, or
    *         contains an invalid token.
    */
@@ -122,7 +129,8 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *
    * @param units The unit tokens to recognize, matched exactly and case-sensitively.
    *              Must not be {@code null} or empty, and no token may be {@code null},
-   *              blank, longer than six characters, or contain anything but letters.
+   *              empty, longer than six UTF-16 code units, or contain anything but
+   *              Unicode letters.
    * @param notation The written convention numbers group digits and mark fractions in.
    *                 Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if the set is {@code null}, empty, contains
@@ -137,22 +145,12 @@ public class CursorQuantityExtractor implements QuantityExtractor {
         throw new IllegalArgumentException("not a valid unit token: " + unit);
       }
     }
-    this.units = Set.copyOf(units);
-    this.notation = requireNotation(notation);
-  }
-
-  /**
-   * Validates the notation a constructor was given.
-   *
-   * @param notation The notation to validate.
-   * @return {@code notation}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code notation} is {@code null}.
-   */
-  private NumberNotation requireNotation(NumberNotation notation) {
     if (notation == null) {
       throw new IllegalArgumentException("notation must not be null");
     }
-    return notation;
+    this.units = Set.copyOf(units);
+    this.notation = notation;
+    this.moneyExtractor = new CursorMoneyExtractor(notation);
   }
 
   /**
@@ -163,13 +161,15 @@ public class CursorQuantityExtractor implements QuantityExtractor {
    *         and consists only of letters representable by the scanner.
    */
   private boolean validUnit(String unit) {
-    if (unit == null || unit.isBlank() || unit.length() > MAX_UNIT_LENGTH) {
+    if (unit == null || unit.isEmpty() || unit.length() > MAX_UNIT_LENGTH) {
       return false;
     }
-    for (int i = 0; i < unit.length(); i++) {
-      if (!Character.isLetter(unit.charAt(i))) {
+    for (int i = 0; i < unit.length();) {
+      final int cp = unit.codePointAt(i);
+      if (!Character.isLetter(cp)) {
         return false;
       }
+      i += Character.charCount(cp);
     }
     return true;
   }
@@ -177,19 +177,31 @@ public class CursorQuantityExtractor implements QuantityExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>The scan resumes behind each reported mention, so mentions never overlap.</p>
+   * <p>Excludes recognized money spans and returns non-overlapping quantity mentions.</p>
    */
   @Override
   public List<Quantity> extract(CharSequence text) {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
+    final List<MoneyAmount> amounts = moneyExtractor.extract(text);
     final List<Quantity> mentions = new ArrayList<>();
     int i = 0;
+    int amountIndex = 0;
     while (i < text.length()) {
+      while (amountIndex < amounts.size() && amounts.get(amountIndex).span().getEnd() <= i) {
+        amountIndex++;
+      }
+      if (amountIndex < amounts.size() && amounts.get(amountIndex).span().getStart() <= i) {
+        i = amounts.get(amountIndex).span().getEnd();
+        continue;
+      }
       final Quantity mention = matchAt(text, i);
       if (mention != null) {
-        mentions.add(mention);
+        if (amountIndex == amounts.size()
+            || mention.span().getEnd() <= amounts.get(amountIndex).span().getStart()) {
+          mentions.add(mention);
+        }
         i = mention.span().getEnd();
       } else {
         i += Character.charCount(Character.codePointAt(text, i));
@@ -263,20 +275,15 @@ public class CursorQuantityExtractor implements QuantityExtractor {
     if (NumberScan.charAt(text, start) == '%') {
       return NumberScan.boundaryAfter(text, start + 1) ? new Unit(PERCENT, start + 1) : null;
     }
-    int i = start;
-    final StringBuilder token = new StringBuilder();
-    while (Character.isLetter(NumberScan.charAt(text, i)) && token.length() < MAX_TOKEN_LENGTH) {
-      token.append(text.charAt(i));
-      i++;
-    }
-    if (token.isEmpty() || Character.isLetterOrDigit(NumberScan.charAt(text, i))) {
+    final int end = NumberScan.wordEnd(text, start, MAX_TOKEN_LENGTH);
+    if (end < 0) {
       return null;
     }
-    final String word = token.toString();
+    final String word = text.subSequence(start, end).toString();
     if (PERCENT_WORD.equalsIgnoreCase(word)) {
-      return new Unit(PERCENT, i);
+      return new Unit(PERCENT, end);
     }
-    return units.contains(word) ? new Unit(word, i) : null;
+    return units.contains(word) ? new Unit(word, end) : null;
   }
 
   /** An intermediate parse result: the unit token and the exclusive end offset. */

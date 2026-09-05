@@ -25,13 +25,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/**
- * Holds the detector to multilingual and punctuation-heavy clean text so extensions to
- * suspicious Unicode families do not turn ordinary writing into findings.
- */
+/** Checks ordinary multilingual text and punctuation for false positives. */
 public class ArtifactFalsePositiveTest {
 
-  private static final CursorArtifactDetector DETECTOR = new CursorArtifactDetector();
+  private final CursorArtifactDetector detector = new CursorArtifactDetector();
 
   private static final String[] CLEAN_TEXT = {
       "OpenNLP 3.0 processes ordinary ASCII and version 3.0.0.",
@@ -59,21 +56,21 @@ public class ArtifactFalsePositiveTest {
   @ParameterizedTest
   @MethodSource("cleanText")
   void testCleanTextYieldsNothing(String text) {
-    assertEquals(List.of(), DETECTOR.detect(text), text);
+    assertEquals(List.of(), detector.detect(text), text);
   }
 
-  /** Fixture seams cannot manufacture an artifact. */
+  /** Joining the examples with punctuation produces no artifacts. */
   @Test
   void testJoinedCorpusYieldsNothing() {
-    assertEquals(List.of(), DETECTOR.detect(String.join(" | ", CLEAN_TEXT)));
+    assertEquals(List.of(), detector.detect(String.join(" | ", CLEAN_TEXT)));
   }
 
-  /** The corpus is not green because the detector is silent. */
+  /** Reports encoding damage and hidden tags in a positive control. */
   @Test
   void testControlTextStillFindsDamageAndHiddenTags() {
     final String hidden = new String(new int[] {0xE0073, 0xE0065, 0xE0063, 0xE007F}, 0, 4);
     final String damaged = new String(new int[] {0x00E2, 0x0082, 0x00AC}, 0, 3);
 
-    assertEquals(2, DETECTOR.detect("price " + damaged + " " + hidden).size());
+    assertEquals(2, detector.detect("price " + damaged + " " + hidden).size());
   }
 }

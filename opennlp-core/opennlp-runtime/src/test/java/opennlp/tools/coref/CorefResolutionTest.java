@@ -95,6 +95,11 @@ public class CorefResolutionTest {
       return document(false).with(ParserAnnotator.PHRASES, phrases);
     }
 
+    /** Builds a document with both chunk and parse phrase layers. */
+    Document parsedWithChunks() {
+      return document(true).with(ParserAnnotator.PHRASES, phrases);
+    }
+
     private Span find(String phrase, List<Annotation<String>> after) {
       final int from = after.isEmpty() ? 0 : after.get(after.size() - 1).span().getEnd();
       final int start = text.indexOf(phrase, from);
@@ -116,7 +121,7 @@ public class CorefResolutionTest {
   }
 
   /** Resolves and renders every chain of two or more mentions as its surface forms. */
-  private static List<List<String>> chains(Document document) {
+  private List<List<String>> chains(Document document) {
     final Document resolved = new CorefAnnotator().annotate(document);
     final List<Annotation<CorefMention>> layer = resolved.get(CorefAnnotator.CHAINS);
     final List<List<String>> chains = new ArrayList<>();
@@ -158,6 +163,46 @@ public class CorefResolutionTest {
         .entity("Mr. Kowalczyk", "person").entity("Mrs. Nowak", "person")
         .document(false);
     Assertions.assertEquals(List.of(List.of("Mrs. Nowak", "She")), chains(document));
+  }
+
+  @Test
+  void testFirstNameSetsGenderWhenNameFinderMissesBothPeople() {
+    final Document document = new Fixture()
+        .sentence("Alice/NNP", "met/VBD", "John/NNP", "./.")
+        .sentence("She/PRP", "smiled/VBD", "./.")
+        .chunk("Alice", "NP").chunk("John", "NP").chunk("She", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Alice", "She")), chains(document));
+  }
+
+  @Test
+  void testTitleSetsGenderWhenNameFinderMissesBothPeople() {
+    final Document document = new Fixture()
+        .sentence("Mrs./NNP", "Nowak/NNP", "met/VBD", "Mr./NNP", "Kowalczyk/NNP", "./.")
+        .sentence("She/PRP", "spoke/VBD", "./.")
+        .chunk("Mrs. Nowak", "NP").chunk("Mr. Kowalczyk", "NP").chunk("She", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Mrs. Nowak", "She")), chains(document));
+  }
+
+  @Test
+  void testUnknownProperNounPhraseRejectsNeutralPronoun() {
+    final Document document = new Fixture()
+        .sentence("Kowalczyk/NNP", "arrived/VBD", "./.")
+        .sentence("It/PRP", "expanded/VBD", "./.")
+        .chunk("Kowalczyk", "NP").chunk("It", "NP")
+        .document(true);
+    Assertions.assertTrue(chains(document).isEmpty());
+  }
+
+  @Test
+  void testUnknownProperNounPhraseAcceptsAnimatePronoun() {
+    final Document document = new Fixture()
+        .sentence("Kowalczyk/NNP", "arrived/VBD", "./.")
+        .sentence("She/PRP", "spoke/VBD", "./.")
+        .chunk("Kowalczyk", "NP").chunk("She", "NP")
+        .document(true);
+    Assertions.assertEquals(List.of(List.of("Kowalczyk", "She")), chains(document));
   }
 
   @Test
@@ -269,6 +314,41 @@ public class CorefResolutionTest {
   }
 
   @Test
+  void testParserAndChunkNounPhrasesAreCombinedWithoutDuplicates() {
+    final Document document = new Fixture()
+        .sentence("The/DT", "cat/NN", "saw/VBD", "Alice/NNP", "./.")
+        .chunk("The cat", "NP").chunk("Alice", "NP")
+        .phrase("NP", 0, "Alice", "Alice")
+        .parsedWithChunks();
+    final Document resolved = new CorefAnnotator().annotate(document);
+
+    Assertions.assertEquals(List.of("The cat", "Alice"),
+        resolved.get(CorefAnnotator.CHAINS).stream()
+            .map(mention -> resolved.text().subSequence(
+                mention.span().getStart(), mention.span().getEnd()).toString())
+            .toList());
+  }
+
+  @Test
+  void testParserAppositiveKeepsDistinctChunkNounPhrases() {
+    final Document document = new Fixture()
+        .sentence("Joshua/NNP", "Norton/NNP", ",/,", "known/VBN", "as/IN",
+            "Emperor/NNP", "Norton/NNP", "spoke/VBD", "./.")
+        .chunk("Joshua Norton", "NP").chunk("Emperor Norton", "NP")
+        .phrase("NP", 0, "Joshua Norton , known as Emperor Norton", "Norton")
+        .phrase("NP", 2, "Emperor Norton", "Norton")
+        .parsedWithChunks();
+    final Document resolved = new CorefAnnotator().annotate(document);
+
+    Assertions.assertEquals(List.of(
+            "Joshua Norton , known as Emperor Norton", "Joshua Norton", "Emperor Norton"),
+        resolved.get(CorefAnnotator.CHAINS).stream()
+            .map(mention -> resolved.text().subSequence(
+                mention.span().getStart(), mention.span().getEnd()).toString())
+            .toList());
+  }
+
+  @Test
   void testCoordinatedNounPhrasesFormAPluralMention() {
     final Document document = new Fixture()
         .sentence("Kim/NNP", "and/CC", "Lee/NNP", "arrived/VBD", "./.")
@@ -338,6 +418,22 @@ public class CorefResolutionTest {
         .document(false);
     Assertions.assertEquals(List.of(List.of("World Health Organization", "WHO")),
         chains(document));
+  }
+
+  @Test
+  void testAcronymSupportsSupplementaryUppercaseInitials() {
+    final String firstInitial = "\uD801\uDC00";
+    final String secondInitial = "\uD801\uDC01";
+    final String firstName = firstInitial + "lpha";
+    final String secondName = secondInitial + "eta";
+    final String fullName = firstName + " " + secondName;
+    final String acronym = firstInitial + secondInitial;
+    final Document document = new Fixture()
+        .sentence((firstName + "/NNP"), (secondName + "/NNP"), "met/VBD", "./.")
+        .sentence((acronym + "/NNP"), "agreed/VBD", "./.")
+        .entity(fullName, "organization").entity(acronym, "organization")
+        .document(false);
+    Assertions.assertEquals(List.of(List.of(fullName, acronym)), chains(document));
   }
 
   @Test

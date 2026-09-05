@@ -25,11 +25,18 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
 
+/** Tests supported expansions, ambiguous forms, and the aligned builder. */
 public class EnglishContractionCharSequenceNormalizerTest {
 
   private final EnglishContractionCharSequenceNormalizer normalizer =
       EnglishContractionCharSequenceNormalizer.getInstance();
 
+  /**
+   * Expands supported forms with their original case and apostrophe variants.
+   *
+   * @param input The contraction text.
+   * @param expected The expanded text.
+   */
   @ParameterizedTest
   @CsvSource(value = {
       "can't|can not",
@@ -52,12 +59,18 @@ public class EnglishContractionCharSequenceNormalizerTest {
     Assertions.assertEquals(expected, normalizer.normalize(input).toString());
   }
 
+  /**
+   * Preserves ambiguous forms and lexical apostrophes.
+   *
+   * @param input The text to preserve.
+   */
   @ParameterizedTest
   @ValueSource(strings = {"he's", "she'd", "John's", "ain't", "o'clock"})
   void testLeavesAmbiguousAndLexicalizedApostrophesUntouched(String input) {
     Assertions.assertSame(input, normalizer.normalize(input));
   }
 
+  /** Maps the full expansion and individual replacement blocks to their source spans. */
   @Test
   void testAlignmentKeepsTheOriginalContraction() {
     final AlignedText aligned = normalizer.normalizeAligned("can't");
@@ -68,6 +81,7 @@ public class EnglishContractionCharSequenceNormalizerTest {
     Assertions.assertEquals(new Span(3, 5), aligned.toOriginalSpan(4, 7));
   }
 
+  /** Adds contraction expansion through the aligned pipeline builder. */
   @Test
   void testBuilderProducesAnOffsetAwareContractionPipeline() {
     final OffsetAwareNormalizer pipeline = TextNormalizer.builder()
@@ -79,6 +93,17 @@ public class EnglishContractionCharSequenceNormalizerTest {
     Assertions.assertEquals(new Span(0, 5), aligned.toOriginalSpan(0, 7));
   }
 
+  /** Verifies the manual's quoted contraction and original-text span. */
+  @Test
+  void testQuotedManualExample() {
+    final OffsetAwareNormalizer english = TextNormalizer.builder()
+        .englishContractions().buildAligned();
+    final AlignedText expanded = english.normalizeAligned("we 'can't' leave");
+    Assertions.assertEquals("we 'can not' leave", expanded.normalizedString());
+    Assertions.assertEquals(new Span(4, 9), expanded.toOriginalSpan(4, 11));
+  }
+
+  /** Rejects a null input on both normalization entry points. */
   @Test
   void testRejectsNullText() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> normalizer.normalize(null));

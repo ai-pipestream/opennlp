@@ -30,7 +30,7 @@ import opennlp.tools.namefind.NameFinderAnnotator;
 
 /**
  * A union-find forest over mention indices that carries each cluster's accumulated
- * attributes, so the sieves compare entities rather than single mentions.
+ * attributes, so the sieves compare entities instead of individual mentions.
  *
  * <p>A cluster's attribute sets hold the known values of its members; an unknown value
  * contributes nothing. Two clusters agree on an attribute when either side knows
@@ -102,6 +102,15 @@ final class Clusters {
     }
   }
 
+  /**
+   * Creates an enum set containing one known value.
+   *
+   * @param enumType The enum type.
+   * @param value The observed value.
+   * @param unknown The value representing missing evidence.
+   * @param <E> The enum type.
+   * @return An empty set for the unknown value, otherwise a singleton set.
+   */
   private <E extends Enum<E>> Set<E> known(Class<E> enumType, E value, E unknown) {
     final Set<E> set = EnumSet.noneOf(enumType);
     if (value != unknown) {
@@ -110,6 +119,12 @@ final class Clusters {
     return set;
   }
 
+  /**
+   * Normalizes an entity type that supplies no type evidence.
+   *
+   * @param label The entity type.
+   * @return The known type, or {@code null}.
+   */
   private String knownType(String label) {
     return label == null || NameFinderAnnotator.UNTYPED.equals(label) ? null : label;
   }
@@ -147,7 +162,12 @@ final class Clusters {
     return typeA == null || typeB == null || typeA.equals(typeB);
   }
 
-  /** {@return the known entity type of a mention's cluster, or {@code null}} */
+  /**
+   * Reads the entity type known for a cluster.
+   *
+   * @param i The mention index.
+   * @return The known entity type of the mention's cluster, or {@code null}.
+   */
   String type(int i) {
     return type[find(i)];
   }
@@ -179,6 +199,14 @@ final class Clusters {
     return agree(numbers.get(find(a)), numbers.get(find(b)));
   }
 
+  /**
+   * Checks whether two sets of known values intersect or lack evidence.
+   *
+   * @param a The first set.
+   * @param b The second set.
+   * @param <E> The value type.
+   * @return {@code true} if either set is empty or the sets intersect.
+   */
   private <E> boolean agree(Set<E> a, Set<E> b) {
     if (a.isEmpty() || b.isEmpty()) {
       return true;
@@ -191,49 +219,86 @@ final class Clusters {
     return false;
   }
 
-  /** {@return whether a mention's cluster knows the given gender} */
+  /**
+   * Checks whether a cluster contains a gender.
+   *
+   * @param i The mention index.
+   * @param gender The gender to find.
+   * @return Whether the mention's cluster contains the gender.
+   */
   boolean hasGender(int i, Gender gender) {
     return genders.get(find(i)).contains(gender);
   }
 
-  /** {@return whether a mention's cluster knows the given animacy} */
+  /**
+   * Checks whether a cluster contains an animacy value.
+   *
+   * @param i The mention index.
+   * @param animacy The animacy to find.
+   * @return Whether the mention's cluster contains the animacy.
+   */
   boolean hasAnimacy(int i, Animacy animacy) {
     return animacies.get(find(i)).contains(animacy);
   }
 
-  /** {@return the content words accumulated in a mention's cluster} */
+  /**
+   * Reads the content words accumulated for a cluster.
+   *
+   * @param i The mention index.
+   * @return The content words accumulated in the mention's cluster.
+   */
   Set<String> words(int i) {
     return words.get(find(i));
   }
 
-  /** {@return the head words accumulated in a mention's cluster} */
+  /**
+   * Reads the head words accumulated for a cluster.
+   *
+   * @param i The mention index.
+   * @return The head words accumulated in the mention's cluster.
+   */
   Set<String> heads(int i) {
     return heads.get(find(i));
   }
 
-  /** {@return the normalized texts of the mentions in a mention's cluster} */
+  /**
+   * Reads the normalized mention texts accumulated for a cluster.
+   *
+   * @param i The mention index.
+   * @return The normalized mention texts accumulated in the mention's cluster.
+   */
   Set<String> normalizedForms(int i) {
     return normalizedForms.get(find(i));
   }
 
-  /** {@return how many mentions a mention's cluster holds} */
+  /**
+   * Counts the mentions in a cluster.
+   *
+   * @param i The mention index.
+   * @return The number of mentions in the mention's cluster.
+   */
   int size(int i) {
     return size[find(i)];
   }
 
-  /** {@return the indexes of the mentions in a mention's cluster, in merge order} */
+  /**
+   * Reads the mention indexes in a cluster.
+   *
+   * @param i The mention index.
+   * @return The mention indexes in the mention's cluster, in merge order.
+   */
   List<Integer> members(int i) {
     return members.get(find(i));
   }
 
   /**
    * Merges two mentions' clusters unless their known types differ. The earlier root
-   * survives and takes the union of both attribute sets.
+   * remains and takes the union of both attribute sets.
    *
    * @param a The first mention index.
    * @param b The second mention index.
    * @return {@code true} if the two mentions share a cluster when the call returns,
-   *         {@code false} if the merge was refused over a type conflict.
+   *         {@code false} if the types conflict.
    */
   boolean union(int a, int b) {
     final int rootA = find(a);

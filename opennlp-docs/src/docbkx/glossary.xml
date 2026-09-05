@@ -23,24 +23,20 @@
 			A glossary maps surface forms, including multiword terms, to stable
 			identifiers. The package <code>opennlp.tools.glossary</code> compiles a
 			list of <code>GlossaryEntry</code> values into an
-			<code>AhoCorasickGlossaryMatcher</code> and mounts that matcher on the
-			document pipeline through <code>GlossaryAnnotator</code>. Every hit is a
-			span over the original text, so consumers read identifiers and covered
-			text without re-tokenizing.
+			<code>AhoCorasickGlossaryMatcher</code>. Use <code>GlossaryAnnotator</code>
+			to add the matches to a document. Results contain the registered identifier,
+			term, and span in the original text.
 		</para>
 	</section>
 
 	<section xml:id="tools.glossary.pipeline">
 		<title>Matching through a pipeline</title>
 		<para>
-			The annotator requires no other layer, so it can sit anywhere in a
-			<code>DocumentAnalyzer</code>. The example below builds a three-entry
-			glossary, runs it after a model-free tokenizer, and reads
-			<code>GlossaryAnnotator.GLOSSARY</code> back with exact spans.
-			Case-insensitive matching is on, so a registered lowercase term still
-			covers a mixed-case mention while the span points at the original
-			characters.
-			<code>GlossaryUsageExampleTest</code> asserts the behavior shown here.
+			The annotator requires no input layers. This example combines glossary
+			matching with a model-free tokenizer in a <code>DocumentAnalyzer</code>.
+			The glossary layer is <code>GlossaryAnnotator.GLOSSARY</code>; token
+			annotations remain available separately. Case-insensitive matching accepts
+			capitalization differences without changing the source offsets.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -61,8 +57,11 @@ List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
 // three hits: "Apache OpenNLP", "Maximum Entropy model", "perceptron model"]]>
 		</programlisting>
 		<para>
-			A document that never saw a glossary annotator reads as an empty
-			glossary layer, and the key is absent from <code>layers()</code>.
+			After annotation, the glossary layer is present even when no matches are
+			found. Before annotation, <code>get(GlossaryAnnotator.GLOSSARY)</code>
+			returns an empty list but <code>layers()</code> does not contain the key.
+			An existing glossary layer is rejected before the matcher runs. Combine
+			matchers in one annotator when they contribute to the same output layer.
 		</para>
 	</section>
 
@@ -74,9 +73,8 @@ List<Annotation<GlossaryMatch>> hits = document.get(GlossaryAnnotator.GLOSSARY);
 			as German umlaut expansion, full Unicode case folding, whitespace collapse,
 			or dash folding are supplied through the three-argument constructor that
 			takes a non-null <code>OffsetAwareNormalizer</code>. Terms and text are
-			folded before the automaton runs, and every hit span is mapped back to the
-			original text. Stemming and lemmatization are not expressible this way.
-			<code>GlossaryUsageExampleTest</code> mirrors the example below.
+			normalized before matching, and result spans map back to the original text.
+			Use <code>TermAnalyzingGlossaryMatcher</code> for token-level stemming.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -88,6 +86,13 @@ AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
 List<GlossaryMatch> hits = matcher.match("Die Straße ist frei.");
 // one hit whose span covers the original "Straße"]]>
 		</programlisting>
+		<para>
+			A custom aligned normalizer may insert text without consuming source
+			characters. A match covering only inserted text has a zero-length source
+			span. Overlap selection follows <code>Span.intersects</code>, including
+			for such spans; a zero-length span intersects a span containing that
+			offset, including the end offset.
+		</para>
 	</section>
 
 	<section xml:id="tools.glossary.inflection">
@@ -99,21 +104,19 @@ List<GlossaryMatch> hits = matcher.match("Die Straße ist frei.");
 			matcher runs Aho-Corasick over normalized tokens and reports spans from the
 			first matched token's original start to the last matched token's original
 			end, so a registered <code>hot dog</code> covers the surface
-			<code>hot dogs</code>. Keep <code>AhoCorasickGlossaryMatcher</code> for
+			<code>hot dogs</code>. Use <code>AhoCorasickGlossaryMatcher</code> for
 			exact and orthographic matching when no tokenizer is required.
-			<code>GlossaryUsageExampleTest</code> mirrors the example below;
-			<code>TermAnalyzingGlossaryMatcherTest</code> pins the reproduction.
 		</para>
 		<para>
-			The word tokenizer drops punctuation, so the characters between consecutive
+			The word tokenizer excludes punctuation, so the characters between consecutive
 			tokens do not take part in matching: <code>hot-dogs</code>,
-			<code>hot, dogs</code>, and even the sentence-crossing
+			<code>hot, dogs</code>, and
 			<code>hot. Dogs</code> all match a registered <code>hot dog</code>, with
-			the span covering the separators between the matched tokens. Matching
-			hyphenated compounds is intentional; run sentence-sized inputs when a hit must
-			not cross a sentence boundary. A lemmatizing analyzer is rejected at
-			construction, because lemmas need part-of-speech tags that plain text
-			cannot supply.
+			the span covering the separators between the matched tokens. Process
+			individual sentences when matches must not span sentence boundaries.
+			Tokens that normalize to blank are omitted during input matching, but a
+			registered term containing such a token is rejected. A lemmatizing analyzer
+			is rejected at construction because this matcher does not supply POS tags.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -133,9 +136,9 @@ List<GlossaryMatch> hits = matcher.match("the hot dogs were cold");
 			This is required for a transform that changes one source token into multiple
 			tokens, such as English contraction expansion. The three-argument matcher
 			constructor applies the transform to both registered terms and source text,
-			then maps matched tokens back to source offsets. Ambiguous contractions fail
-			closed rather than guessing a meaning. <code>GlossaryUsageExampleTest</code>
-			mirrors this example.
+			then maps matched tokens back to source offsets. Ambiguous contractions are
+			preserved. Quoted contractions expand, but fragments inside longer words or
+			identifiers do not.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -144,25 +147,22 @@ OffsetAwareNormalizer contractions = TextNormalizer.builder()
     .buildAligned();
 
 TermAnalyzingGlossaryMatcher expanded = new TermAnalyzingGlossaryMatcher(
-    List.of(new GlossaryEntry("ACTION", "can not dog")), terms, contractions);
+    List.of(new GlossaryEntry("SHIPPING", "can not ship order")), terms, contractions);
 
-List<GlossaryMatch> expandedHits = expanded.match("can't dogs");
-// one hit whose span covers the untouched source text "can't dogs"]]>
+List<GlossaryMatch> expandedHits = expanded.match("We 'can't ship orders' today.");
+// SHIPPING at [4..21), covering "can't ship orders"]]>
 		</programlisting>
 	</section>
 	<section xml:id="tools.glossary.composite">
 		<title>Combining matchers with CompositeGlossaryMatcher</title>
 		<para>
-			A document can only carry one glossary layer, so a pipeline that wants both
-			exact and inflected hits combines the matchers behind a single
-			<code>GlossaryAnnotator</code> with a <code>CompositeGlossaryMatcher</code>.
-			Delegates are consulted in the order given and earlier matchers win: a hit
-			survives only when its span overlaps no hit already accepted from an
-			earlier matcher. Register the exact matcher first and the inflected matcher
-			second, and the inflected path fills only the gaps the exact automaton
-			misses. Merged hits come back in text order.
-			<code>GlossaryUsageExampleTest</code> mirrors the example below;
-			<code>CompositeGlossaryMatcherTest</code> pins the merge rules.
+			Use <code>CompositeGlossaryMatcher</code> to combine exact and inflected
+			matches in a single <code>GlossaryAnnotator</code>. List order determines
+			priority: a match is accepted only if it does not overlap an accepted
+			match. Placing the exact matcher before the inflected matcher gives exact
+			matches priority. Adjacent non-empty spans are accepted, and results are
+			returned in text order. Custom delegates must return sorted, non-overlapping matches,
+			as required by <code>GlossaryMatcher</code>.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -192,10 +192,10 @@ List<GlossaryMatch> matches = composite.match("Hot dogs are sold across New York
 			This includes apostrophes, combining marks, variation selectors, connector
 			punctuation, emoji ZWJ sequences, and supplementary-plane characters. Han
 			ideographs and hiragana receive character-granularity boundaries, so glossary
-			terms match inside unspaced Chinese and Japanese text with no separate
-			segmenter, while spans still cover the original characters. Latin contractions
-			stay whole, so <code>can</code> does not match inside <code>can't</code>.
-			<code>GlossaryUsageExampleTest</code> mirrors the example below.
+			terms match inside unspaced Chinese and Japanese text without configuring
+			a tokenizer. Spans refer to the original characters. An English contraction
+			is a single word segment, so <code>can</code> does not match inside
+			<code>can't</code>.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -206,35 +206,54 @@ List<GlossaryMatch> hits = matcher.match("私は東京に住む");
 // one hit whose span covers 東京 inside the unspaced sentence]]>
 		</programlisting>
 		<para>
-			The default UAX #29 rules are locale-neutral boundaries, not linguistic word
+			The default UAX #29 rules define locale-neutral boundaries, not linguistic word
 			segmentation. Katakana and Hangul runs stay joined, and scripts such as Thai,
 			Lao, Khmer, and Myanmar need dictionary-based tailoring when callers require
 			language-specific words. The
-			<code>TermAnalyzingGlossaryMatcher</code> behaves the same way, since the
-			exact and token paths now share the same <code>WordSegmenter</code>.
+			<code>TermAnalyzingGlossaryMatcher</code> uses these boundaries too: both
+			matcher types use <code>WordSegmenter</code>.
 		</para>
 	</section>
 	<section xml:id="tools.glossary.loading">
 		<title>Loading glossaries from TBX and CSV files</title>
 		<para>
-			Glossaries usually arrive as files, not as Java lists. The package
-			<code>opennlp.tools.formats.glossary</code> in the
-			<code>opennlp-formats</code> module reads the two shapes that cover the
-			terminology industry: <code>TbxGlossaryReader</code> for TBX termbases
-			(ISO 30042, the format CAT tools and public termbases such as IATE
-			export, in both the TBX 2 martif and TBX 3 element vocabularies) and
-			<code>CsvGlossaryReader</code> for CSV and TSV term lists following
-			RFC 4180. Both return <code>GlossaryEntry</code> values in file order,
-			with synonyms arriving as several entries sharing one id, exactly the
-			alias convention the matchers already understand.
-			<code>GlossaryLoadingExampleTest</code> asserts both examples below.
+			The <code>opennlp.tools.formats.glossary</code> package in
+			<code>opennlp-formats</code> loads TBX, CSV, and TSV files.
+			<code>TbxGlossaryReader</code> accepts TBX 2 and TBX 3 element names;
+			<code>CsvGlossaryReader</code> loads delimited term lists. Both return
+			<code>GlossaryEntry</code> values in file order. Aliases use the same
+			identifier in multiple entries. <code>GlossaryLoadingExampleTest</code>
+			verifies the examples below.
 		</para>
 		<para>
-			A termbase is multilingual while a matcher wants one language, so the TBX
-			reader selects a language at construction; <code>en</code> also selects
-			<code>en-US</code>, following BCP 47 lookup. The DOCTYPE real
-			exports carry is tolerated but nothing external is ever fetched, and
-			malformed content fails as <code>InvalidFormatException</code>.
+			The TBX reader selects a language at construction, ignoring case and
+			accepting additional subtags: <code>en</code> selects <code>en-US</code>,
+			but <code>en-GB</code> does not select <code>en-US</code>. A DOCTYPE is
+			accepted and internal entities are expanded. External DTD content is not
+			loaded. External entity declarations, including unused ones, are rejected
+			with <code>InvalidFormatException</code>, as are missing unqualified
+			<code>id</code> attributes, blank selected terms, and malformed XML.
+		</para>
+		<para>
+			Term extraction follows <code>text/body</code>, then a concept entry,
+			a language section, and a term container. Containers are <code>tig</code>
+			or <code>ntig/termGrp</code> in TBX 2 and <code>termSec</code> in TBX 3.
+			Header, back-matter, and metadata subtrees are ignored, even when they
+			contain elements named <code>term</code>. Inline text inside a selected
+			term is retained. This reader extracts terms; it does not validate the
+			complete TBX schema.
+		</para>
+		<para>
+			Structural elements must use the namespace
+			<code>urn:iso:std:iso:30042:ed-2</code> or no namespace. Namespace prefixes
+			are accepted. Extension fields in other namespaces are ignored, including
+			fields with names such as <code>term</code> or <code>termSec</code>.
+		</para>
+		<para>
+			Both readers leave the supplied stream open on success or failure. Close
+			it after use, as in this example. Input I/O failures propagate as
+			<code>IOException</code>; invalid file content is reported as
+			<code>InvalidFormatException</code>.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -246,15 +265,25 @@ try (InputStream in = Files.newInputStream(Path.of("terms.tbx"))) {
 
 AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
 List<GlossaryMatch> hits = matcher.match("A frankfurter, please.");
-// the hit reports the concept id the term belongs to in the termbase]]>
+// the hit reports the term's concept identifier]]>
 		</programlisting>
 		<para>
 			The CSV reader takes the delimiter and header convention explicitly: the
-			first column is the identifier, the second the term, and further columns
-			are ignored so metadata columns do no harm. Quoted fields may contain the
-			delimiter, doubled quotes, and line breaks; a UTF-8 byte order mark is
-			stripped; rows with missing columns or blank fields fail with their line
-			number.
+			first column is the identifier, the next is the term, and additional column
+			values are ignored. Quoting follows
+			<ulink url="https://www.rfc-editor.org/rfc/rfc4180#section-2">RFC 4180</ulink>:
+			quoted fields may contain delimiters, doubled quotes, and line breaks.
+			Unquoted fields cannot contain quotes. After a closing quote, only a
+			delimiter, record end, or input end is accepted. These checks also apply
+			to headers and ignored columns.
+		</para>
+		<para>
+			CSV input must be valid UTF-8; a leading byte order mark is removed.
+			Malformed encoded characters produce <code>InvalidFormatException</code>
+			instead of replacement characters. LF, CRLF, and CR record separators
+			are supported. Blank lines are skipped. Errors in quoting, missing columns,
+			and blank identifiers or terms include physical line numbers, accounting
+			for line breaks inside quoted fields.
 		</para>
 		<programlisting language="java">
 				<![CDATA[
@@ -266,6 +295,40 @@ List<GlossaryEntry> glossary = reader.read(
 AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
 List<GlossaryMatch> hits = matcher.match("From Manhattan to New York City.");
 // two hits: Q11299 and Q60]]>
+		</programlisting>
+		<para>
+			Quote a term containing the delimiter. This list registers an alias under
+			the same identifier and reports offsets into the original matching text:
+		</para>
+		<programlisting language="java"><![CDATA[
+String csv = "id,term\nNY,\"New York, NY\"\nNY,NYC\n";
+List<GlossaryEntry> glossary = new CsvGlossaryReader(',', true).read(
+    new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+List<GlossaryMatch> hits = matcher.match("Visit New York, NY or NYC.");
+// NY: "New York, NY" at [6..18), "NYC" at [22..25)]]>
+		</programlisting>
+		<para>
+			Inline TBX markup contributes text to a term, while notes do not.
+			This example loads the term <code>New York</code> and locates it in
+			the input string:
+		</para>
+		<programlisting language="java"><![CDATA[
+String tbx = """
+    <tbx xmlns="urn:iso:std:iso:30042:ed-2">
+      <text><body><conceptEntry id="NY">
+        <langSec xml:lang="en"><termSec>
+          <term>New <hi>York</hi></term>
+          <note>Place name</note>
+        </termSec></langSec>
+      </conceptEntry></body></text>
+    </tbx>
+    """;
+List<GlossaryEntry> glossary = new TbxGlossaryReader("en").read(
+    new ByteArrayInputStream(tbx.getBytes(StandardCharsets.UTF_8)));
+AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+List<GlossaryMatch> hits = matcher.match("From New York to Boston.");
+// NY: "New York" at [5..13)]]>
 		</programlisting>
 	</section>
 </chapter>

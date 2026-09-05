@@ -30,18 +30,15 @@ import opennlp.tools.formats.AbstractFormatTest;
 import opennlp.tools.glossary.AhoCorasickGlossaryMatcher;
 import opennlp.tools.glossary.GlossaryEntry;
 import opennlp.tools.glossary.GlossaryMatch;
+import opennlp.tools.util.Span;
 
-/**
- * Mirrors the glossary-loading examples in the manual: a TBX termbase and a CSV term
- * list load into {@link GlossaryEntry} lists that feed an
- * {@link AhoCorasickGlossaryMatcher} directly.
- */
+/** Verifies the manual's glossary-loading and matching examples. */
 public class GlossaryLoadingExampleTest extends AbstractFormatTest {
 
   /**
-   * Mirrors the TBX example in {@code glossary.xml}: the English terms of a TBX
-   * termbase become the glossary, and an alias registered under the same concept id
-   * reports that id.
+   * Loads English terms from TBX and matches an alias to a concept identifier.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testTbxManualExample() throws IOException {
@@ -62,8 +59,9 @@ public class GlossaryLoadingExampleTest extends AbstractFormatTest {
   }
 
   /**
-   * Mirrors the CSV example in {@code glossary.xml}: a two-column term list with a
-   * header loads and matches.
+   * Loads a CSV term list with a header and matches the listed places.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testCsvManualExample() throws IOException {
@@ -78,5 +76,48 @@ public class GlossaryLoadingExampleTest extends AbstractFormatTest {
     Assertions.assertEquals(2, hits.size());
     Assertions.assertEquals("Q11299", hits.get(0).id());
     Assertions.assertEquals("Q60", hits.get(1).id());
+  }
+
+  /**
+   * Loads a quoted term and an alias with the same identifier.
+   *
+   * @throws IOException If reading fails.
+   */
+  @Test
+  void testQuotedAliasExample() throws IOException {
+    final String csv = "id,term\nNY,\"New York, NY\"\nNY,NYC\n";
+    final List<GlossaryEntry> glossary = new CsvGlossaryReader(',', true)
+        .read(new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+    final List<GlossaryMatch> hits = matcher.match("Visit New York, NY or NYC.");
+
+    Assertions.assertEquals(List.of(
+        new GlossaryMatch(new Span(6, 18), "NY", "New York, NY"),
+        new GlossaryMatch(new Span(22, 25), "NY", "NYC")), hits);
+  }
+
+  /**
+   * Loads inline TBX markup as term text and matches it in the original input.
+   *
+   * @throws IOException If reading fails.
+   */
+  @Test
+  void testInlineTbxExample() throws IOException {
+    final String tbx = """
+        <tbx xmlns="urn:iso:std:iso:30042:ed-2">
+          <text><body><conceptEntry id="NY">
+            <langSec xml:lang="en"><termSec>
+              <term>New <hi>York</hi></term>
+              <note>Place name</note>
+            </termSec></langSec>
+          </conceptEntry></body></text>
+        </tbx>
+        """;
+    final List<GlossaryEntry> glossary = new TbxGlossaryReader("en").read(
+        new ByteArrayInputStream(tbx.getBytes(StandardCharsets.UTF_8)));
+    final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(glossary, true);
+    final List<GlossaryMatch> hits = matcher.match("From New York to Boston.");
+
+    Assertions.assertEquals(List.of(new GlossaryMatch(new Span(5, 13), "NY", "New York")), hits);
   }
 }

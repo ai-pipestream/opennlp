@@ -25,20 +25,20 @@ import opennlp.tools.glossary.GlossaryEntry;
 import opennlp.tools.util.InvalidFormatException;
 
 /**
- * Reads a glossary file format into {@link GlossaryEntry} values ready for the
- * {@code opennlp.tools.glossary} matchers. Implementations cover one format each:
- * {@link TbxGlossaryReader} for TBX termbases and {@link CsvGlossaryReader} for
- * CSV and TSV term lists.
+ * Reads glossary entries in file order. Entries with the same identifier represent
+ * aliases for that identifier.
+ *
+ * <p>Thread safety is implementation specific.</p>
  *
  * @since 3.0.0
  */
 public interface GlossaryReader {
 
   /**
-   * Reads every glossary entry from a stream, in file order. Aliases are expressed as
-   * several entries sharing one id, which the matchers already understand.
+   * Reads glossary entries from a stream.
    *
-   * @param in The stream to read. Must not be {@code null}. The caller closes it.
+   * @param in The stream to read. Must not be {@code null}. This method does not close
+   *           the stream, including when reading fails.
    * @return The entries in file order. Never {@code null}, possibly empty.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    * @throws InvalidFormatException Thrown if the content is not valid for the format.

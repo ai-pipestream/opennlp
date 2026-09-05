@@ -16,56 +16,42 @@
  */
 package opennlp.tools.util.normalizer;
 
-import java.util.Map;
+import java.io.Serial;
 
 /**
- * A {@link CharSequenceNormalizer} that spells out a symbol-joiner token as its
- * word: a text consisting of exactly an ampersand ({@code "&"}) normalizes to
- * {@code "and"}. A document writing "Dungeons &amp; Dragons" and a query writing
- * "dungeons and dragons" then agree on term identity once terms are folded and
- * stemmed, because the ampersand token and the word "and" collapse onto the same
- * term.
+ * Replaces a supported single-symbol input with a fixed English word.
  *
- * <p>The table covers the symbols that appear as standalone tokens in running
- * prose and have an unambiguous spelled-out English form: the joiners
- * ({@code &}, {@code +}, {@code @}), the unit and reference marks of legal and
- * technical writing ({@code %} percent, {@code §} section, {@code ¶} paragraph,
- * {@code °} degree), and the IP marks ({@code ©} copyright, {@code ®}
- * registered, {@code ™} trademark). Currency symbols are deliberately absent:
- * their words differ by locale and they almost never appear as standalone
- * tokens.</p>
+ * <p>Mappings are {@code &} to {@code and}, {@code +} to {@code plus}, {@code @}
+ * to {@code at}, {@code %} to {@code percent}, {@code §} to {@code section},
+ * {@code ¶} to {@code paragraph}, {@code °} to {@code degree}, {@code ©} to
+ * {@code copyright}, {@code ®} to {@code registered}, and {@code ™} to
+ * {@code trademark}. These are matching conventions, not context-dependent
+ * readings of the symbols. Currency symbols are not mapped.</p>
  *
- * <p>Only a text consisting of exactly the symbol is rewritten; a symbol
- * embedded in a larger token ("R&amp;D", "AT&amp;T", "TSR®") is left unchanged,
- * because expanding it inside the token would invent a word that appears in
- * neither the document nor the query. Comparison is by whole-string equality,
- * so it is exact under UTF-16 and needs no pattern machinery.</p>
+ * <p>The complete input must be one supported symbol. This normalizer does not
+ * tokenize or trim: {@code R&D}, {@code TSR®}, {@code (TM)}, and {@code " & "}
+ * are unchanged. For a phrase such as {@code Dungeons & Dragons}, tokenize it
+ * separately and normalize each token, preserving symbol tokens.</p>
  *
- * <p>Texts that are not a known symbol are returned without copying, like the
- * sibling normalizers.</p>
+ * <p>Unchanged input is returned as the supplied object. Matching does not convert
+ * the input to a String. The shared instance is stateless and thread-safe.</p>
  *
  * @since 3.0.0
  */
 public class SymbolJoinerCharSequenceNormalizer implements CharSequenceNormalizer {
 
+  @Serial
   private static final long serialVersionUID = -6772513786580257420L;
 
-  private static final Map<String, String> WORD_BY_SYMBOL = Map.of(
-      "&", "and",
-      "+", "plus",
-      "@", "at",
-      "%", "percent",
-      "§", "section",
-      "¶", "paragraph",
-      "°", "degree",
-      "©", "copyright",
-      "®", "registered",
-      "™", "trademark");
-
+  /** Shared stateless normalizer. */
   private static final SymbolJoinerCharSequenceNormalizer INSTANCE =
       new SymbolJoinerCharSequenceNormalizer();
 
-  /** {@return the shared, stateless instance} */
+  /**
+   * Returns the shared normalizer.
+   *
+   * @return The stateless instance.
+   */
   public static SymbolJoinerCharSequenceNormalizer getInstance() {
     return INSTANCE;
   }
@@ -76,9 +62,33 @@ public class SymbolJoinerCharSequenceNormalizer implements CharSequenceNormalize
   @Override
   public CharSequence normalize(CharSequence text) {
     if (text == null) {
-      throw new IllegalArgumentException("The text must not be null.");
+      throw new IllegalArgumentException("text must not be null");
     }
-    final String word = WORD_BY_SYMBOL.get(text.toString());
-    return word != null ? word : text;
+    if (text.length() != 1) {
+      return text;
+    }
+    return switch (text.charAt(0)) {
+      case '&' -> "and";
+      case '+' -> "plus";
+      case '@' -> "at";
+      case '%' -> "percent";
+      case '§' -> "section";
+      case '¶' -> "paragraph";
+      case '°' -> "degree";
+      case '©' -> "copyright";
+      case '®' -> "registered";
+      case '™' -> "trademark";
+      default -> text;
+    };
+  }
+
+  /**
+   * Restores the shared instance after deserialization.
+   *
+   * @return The shared normalizer.
+   */
+  @Serial
+  private Object readResolve() {
+    return INSTANCE;
   }
 }

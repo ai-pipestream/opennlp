@@ -34,33 +34,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Pins the structural scorer's calibration: the most consonant-heavy legitimate
- * English words sit provably below every threshold, and each tier has measured
- * examples on both sides of its boundary.
+ * Tests noise categories, exclusions, and dictionary-based repairs.
  */
 public class StructuralNoiseScorerTest {
 
   private final StructuralNoiseScorer scorer = new StructuralNoiseScorer();
 
   /**
-   * Words at the structural extremes of legitimate English, all of which must stay
-   * clean: strengths has the language's lowest common vowel share (1 of 9, 0.111,
-   * above the 0.10 signal), catchphrase carries a six-consonant run (below the
-   * seven signal), rhythms leans on y as its vowel, and bookkeeper doubles pairs
-   * without a four-repeat.
-   *
-   * @return The words.
+   * @return English words with consonant runs, repeated letters, or low vowel proportions.
    */
-  static Stream<String> hardestCleanWords() {
+  static Stream<String> representativeWords() {
     return Stream.of("strengths", "catchphrase", "rhythms", "bookkeeper",
         "latchstring", "twelfths");
   }
 
   @ParameterizedTest
-  @MethodSource("hardestCleanWords")
-  void testHardestLegitimateWordsStayClean(String word) {
+  @MethodSource("representativeWords")
+  void testRepresentativeWordsProduceNoNoise(String word) {
     assertEquals(List.of(), scorer.score("before " + word + " after", List.of()),
-        () -> word + " must stay below every structural signal");
+        word);
   }
 
   @Test
@@ -87,14 +79,50 @@ public class StructuralNoiseScorerTest {
         scorer.score("see AbstractSingletonProxyFactoryBean docs", List.of()));
   }
 
+  @Test
+  void testLongIdentifierWithOneDigitStaysClean() {
+    assertEquals(List.of(), scorer.score("DocumentationVersion2Api", List.of()));
+  }
+
+  @Test
+  void testMisspelledBoundaryRequiresARepairToAKnownWord() {
+    final StructuralNoiseScorer withDictionary =
+        new StructuralNoiseScorer(Set.of("modern")::contains);
+    assertEquals(List.of(), withDictionary.score("rxodern", List.of()));
+    assertEquals(NoiseSpan.SEVERITY_MISSPELLED,
+        withDictionary.score("rnodern", List.of()).get(0).severity());
+  }
+
+  @Test
+  void testDamagedBoundaryStartsAtSevenConsonants() {
+    assertEquals(List.of(), scorer.score("astrchmo", List.of()));
+    assertEquals(NoiseSpan.SEVERITY_DAMAGED,
+        scorer.score("astrchmfo", List.of()).get(0).severity());
+  }
+
+  @Test
+  void testGibberishBoundaryStartsAtTwoSignals() {
+    assertEquals(NoiseSpan.SEVERITY_DAMAGED,
+        scorer.score("asdkfjqwza", List.of()).get(0).severity());
+    assertEquals(NoiseSpan.SEVERITY_GIBBERISH,
+        scorer.score("asdkfjqwzx", List.of()).get(0).severity());
+  }
+
+  @Test
+  void testBinaryishBoundaryStartsAtTwentyFourCharacters() {
+    assertEquals(List.of(), scorer.score("AbAbAbAbAbAbAbAbAbAbAbA", List.of()));
+    assertEquals(NoiseSpan.SEVERITY_BINARYISH,
+        scorer.score("AbAbAbAbAbAbAbAbAbAbAbAb", List.of()).get(0).severity());
+  }
+
   /**
-   * @return Gibberish with the two agreeing signals each case relies on.
+   * @return Tokens with multiple structural signals.
    */
   static Stream<Arguments> gibberish() {
     return Stream.of(
         // Vowel share exactly 0.10 over ten letters plus a nine-consonant run.
         Arguments.of("asdkfjqwzx"),
-        // Vowelless and an eight-repeat.
+        // No vowels, a consonant run, and repeated characters.
         Arguments.of("xxxxxxxx"),
         // Vowelless and a twelve-consonant run.
         Arguments.of("zxkcvbnmsdfg"));
@@ -126,10 +154,10 @@ public class StructuralNoiseScorerTest {
     assertEquals(NoiseSpan.SEVERITY_DAMAGED, found.get(0).severity());
   }
 
-  /** A base64-shaped run with a digit scores binary-ish, with punctuation trimmed. */
+  /** Common punctuation is excluded from the encoded-content span. */
   @Test
   void testBase64ShapedRunIsBinaryish() {
-    final String token = "QWxhZGRpbjpvcGVuIHNlc2FtZQ==".replace(":", "");
+    final String token = "QWxhZGRpbjpvcGVuIHNlc2FtZQ==";
     final String text = "payload (" + token + ").";
     final List<NoiseSpan> found = scorer.score(text, List.of());
     assertEquals(1, found.size());
@@ -148,6 +176,47 @@ public class StructuralNoiseScorerTest {
     assertEquals(NoiseSpan.SEVERITY_GIBBERISH, found.get(0).severity());
   }
 
+  @Test
+  void testEmptyExclusionDoesNotSuppressAToken() {
+    final String text = "zxkcvbnmsdfg";
+    assertEquals(scorer.score(text, List.of()),
+        scorer.score(text, List.of(new Span(3, 3))));
+  }
+
+  @Test
+  void testFindingsDoNotMergeAcrossExcludedWhitespace() {
+    final String text = "bcdfg \t bcdfg";
+    assertEquals(List.of(
+        new NoiseSpan(new Span(0, 5), NoiseSpan.SEVERITY_DAMAGED, 0.5),
+        new NoiseSpan(new Span(8, 13), NoiseSpan.SEVERITY_DAMAGED, 0.5)),
+        scorer.score(text, List.of(new Span(6, 7))));
+  }
+
+  @Test
+  void testExclusionsMustFitTheText() {
+    final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        () -> scorer.score("text", List.of(new Span(3, 5))));
+    assertEquals("exclude spans must fit within text", error.getMessage());
+    assertThrows(IllegalArgumentException.class,
+        () -> scorer.score("", List.of(new Span(1, 1))));
+  }
+
+  @Test
+  void testUnsortedOverlappingExclusionsAreAccepted() {
+    final String text = "bcdfg hello bcdfg end bcdfg";
+    final List<Span> exclude = List.of(new Span(12, 16), new Span(0, 3),
+        new Span(11, 14), new Span(0, 3));
+    assertEquals(List.of(new NoiseSpan(new Span(22, 27),
+        NoiseSpan.SEVERITY_DAMAGED, 0.5)), scorer.score(text, exclude));
+  }
+
+  @Test
+  void testTouchingExclusionsDoNotSuppressAToken() {
+    final String text = " bcdfg ";
+    assertEquals(scorer.score(text, List.of()),
+        scorer.score(text, List.of(new Span(0, 1), new Span(6, 7))));
+  }
+
   /** Adjacent findings merge into one span of the worse severity. */
   @Test
   void testAdjacentFindingsMergeToTheWorseSeverity() {
@@ -159,9 +228,8 @@ public class StructuralNoiseScorerTest {
   }
 
   /**
-   * A merged span carries the score belonging to the surviving severity. Scores of
-   * different severities are not comparable, so a gibberish finding next to a
-   * misspelled one must not borrow the milder tier's higher number.
+   * Merging preserves the higher severity's score even if the lower severity has
+   * a larger numeric score.
    */
   @Test
   void testMergedSpanCarriesTheSurvivingSeveritysScore() {

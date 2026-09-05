@@ -25,8 +25,9 @@ import opennlp.tools.util.Span;
  *
  * <p>The value follows the ISO 8601 style at the mention's granularity:
  * {@code 2026-07-14} for a day, {@code 2026-W29} for an ISO week, {@code 2026-07} for
- * a month, {@code 2024-Q3} for a quarter, and {@code 2026} for a year. Day-level
- * values are calendar-validated, so {@code February 30} is never reported.</p>
+ * a month, {@code 2024-Q3} for a quarter, and {@code 2026} for a year. Years use
+ * at least 4 digits, with a negative sign before year zero and a positive sign
+ * after year 9999. Construction validates required fields, not the calendar value.</p>
  *
  * @param span The location of the mention in the original text. Must not be {@code null}.
  * @param value The normalized calendar value. Must not be {@code null} or blank.

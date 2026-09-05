@@ -44,7 +44,7 @@ import opennlp.tools.util.normalizer.TermAnalyzer;
  * JMH throughput for the three glossary matching paths: the exact character
  * automaton, the offset-aware orthographic fold, and the token-normalized
  * {@link TermAnalyzingGlossaryMatcher}. Two inputs per path: a short mixed text
- * and a realistic 4 KiB document. The exact and token-normalized paths also run
+ * and a 4 KiB document. The exact and token-normalized paths also run
  * the 4 KiB input against a 2,007-entry glossary.
  */
 @BenchmarkMode(Mode.Throughput)
@@ -59,7 +59,7 @@ public class AhoCorasickGlossaryMatcherBenchmark {
       + "City und Manhattan. Machine Learning meets maximum entropy model. ")
       .repeat(20);
 
-  /** A realistic paragraph repeated to roughly 4 KiB of prose. */
+  /** A paragraph repeated and truncated to 4,096 ASCII characters. */
   private static final String FOUR_KIB_TEXT = buildFourKibText();
 
   /** A 4 KiB document with no registered glossary term. */
@@ -73,6 +73,11 @@ public class AhoCorasickGlossaryMatcherBenchmark {
   private static final String CONTRACTION_TEXT =
       "We can't leave because they won't stop and we're not ready. ".repeat(70);
 
+  /**
+   * Builds the 4 KiB matching input.
+   *
+   * @return The fixed-length document text.
+   */
   private static String buildFourKibText() {
     final String paragraph = "The vendors sold hot dogs and soft drinks near the "
         + "hot dog stands along the avenue, while machine learning engineers from "
@@ -86,6 +91,11 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     return text.substring(0, 4096);
   }
 
+  /**
+   * Creates the terms used by the small-glossary measurements.
+   *
+   * @return Seven glossary entries.
+   */
   private static List<GlossaryEntry> smallGlossary() {
     final List<GlossaryEntry> glossary = new ArrayList<>();
     glossary.add(new GlossaryEntry("ST", "strasse"));
@@ -98,7 +108,11 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     return glossary;
   }
 
-  /** The small glossary plus synthetic entries, wide enough to stress the automaton. */
+  /**
+   * Adds generated terms to the small glossary.
+   *
+   * @return The 2,007-entry glossary.
+   */
   private static List<GlossaryEntry> wideGlossary() {
     final List<GlossaryEntry> glossary = smallGlossary();
     for (int i = 0; i < 1000; i++) {
@@ -108,6 +122,7 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     return glossary;
   }
 
+  /** Prebuilt matchers shared by benchmark invocations. */
   @State(Scope.Benchmark)
   public static class MatcherState {
     AhoCorasickGlossaryMatcher exact;
@@ -118,6 +133,7 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     TermAnalyzingGlossaryMatcher termAnalyzing;
     TermAnalyzingGlossaryMatcher termAnalyzingWide;
 
+    /** Builds the matchers before timing starts. */
     @Setup(Level.Trial)
     public void setUp() {
       final List<GlossaryEntry> small = smallGlossary();
@@ -142,59 +158,122 @@ public class AhoCorasickGlossaryMatcherBenchmark {
     }
   }
 
+  /**
+   * Matches the shorter input without an additional normalizer.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void exactIgnoreCaseShortText(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.exact.match(SHORT_TEXT));
   }
 
+  /**
+   * Matches a 4 KiB input without an additional normalizer.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void exactIgnoreCaseFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.exact.match(FOUR_KIB_TEXT));
   }
 
+  /**
+   * Matches the larger glossary against the 4 KiB input.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void exactWideGlossaryFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.exactWide.match(FOUR_KIB_TEXT));
   }
 
-  /** Measures the lazy-boundary path when the automaton finds no candidate. */
+  /**
+   * Measures input with no candidate matches.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void exactNoHitFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.exact.match(NO_HIT_FOUR_KIB_TEXT));
   }
 
-  /** Measures boundary resolution and overlap handling for 1,024 exact hits. */
+  /**
+   * Measures boundary checks and overlap handling for 1,024 exact hits.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void exactHitHeavyFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.exactHitHeavy.match(HIT_HEAVY_FOUR_KIB_TEXT));
   }
 
+  /**
+   * Matches the shorter input after German umlaut normalization.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void offsetAwareGermanUmlautShortText(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.offsetAware.match(SHORT_TEXT));
   }
 
+  /**
+   * Matches the 4 KiB input after German umlaut normalization.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void offsetAwareGermanUmlautFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.offsetAware.match(FOUR_KIB_TEXT));
   }
 
-  /** Measures aligned English contraction expansion and original-span recovery. */
+  /**
+   * Measures contraction expansion, matching, and source-span mapping.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void offsetAwareEnglishContractions(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.contractionAware.match(CONTRACTION_TEXT));
   }
 
+  /**
+   * Matches stemmed terms in the shorter input.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void termAnalyzingStemShortText(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.termAnalyzing.match(SHORT_TEXT));
   }
 
+  /**
+   * Matches stemmed terms in the 4 KiB input.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void termAnalyzingStemFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.termAnalyzing.match(FOUR_KIB_TEXT));
   }
 
+  /**
+   * Matches the larger glossary against the stemmed 4 KiB input.
+   *
+   * @param state The prebuilt matchers.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void termAnalyzingWideGlossaryFourKib(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.termAnalyzingWide.match(FOUR_KIB_TEXT));

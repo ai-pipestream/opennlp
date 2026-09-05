@@ -28,53 +28,24 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import static opennlp.tools.artifacts.ArtifactTestSupport.cp;
+import static opennlp.tools.artifacts.ArtifactTestSupport.tags;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the built-in detector: every artifact class has an accepting and a rejecting
- * case, spans are exact against the original text, and clean text of several scripts
- * yields nothing. Test strings are built from explicit code points so the sources stay
- * printable and reviewable.
+ * Tests artifact types, original-text offsets, and multilingual text examples.
  */
 public class CursorArtifactDetectorTest {
 
   private final CursorArtifactDetector detector = new CursorArtifactDetector();
 
   /**
-   * Builds a string from code points.
-   *
-   * @param codePoints The code points.
-   * @return The string.
-   */
-  private static String cp(int... codePoints) {
-    return new String(codePoints, 0, codePoints.length);
-  }
-
-  /**
-   * Encodes ASCII as Unicode tag characters.
-   *
-   * @param ascii The ASCII text to encode.
-   * @param cancel Whether to append CANCEL TAG.
-   * @return The tag character sequence.
-   */
-  private static String tags(String ascii, boolean cancel) {
-    final StringBuilder tagged = new StringBuilder();
-    for (int i = 0; i < ascii.length(); i++) {
-      tagged.appendCodePoint(0xE0000 + ascii.charAt(i));
-    }
-    if (cancel) {
-      tagged.appendCodePoint(0xE007F);
-    }
-    return tagged.toString();
-  }
-
-  /**
    * @return One accepting case per artifact class: the text, the expected type, and the
    *         expected covered text.
    */
-  static Stream<Arguments> flagged() {
+  private static Stream<Arguments> flagged() {
     final String replacementRun = cp(0xFFFD, 0xFFFD);
     final String nul = cp(0x0000);
     final String escape = cp(0x001B);
@@ -117,6 +88,13 @@ public class CursorArtifactDetectorTest {
             TextArtifact.TYPE_MOJIBAKE, accentMojibake));
   }
 
+  /**
+   * Reports the expected type and covered text.
+   *
+   * @param text The input text.
+   * @param type The expected artifact type.
+   * @param covered The expected source substring.
+   */
   @ParameterizedTest
   @MethodSource("flagged")
   void testFlagsTheClassWithExactSpan(String text, String type, String covered) {
@@ -129,7 +107,7 @@ public class CursorArtifactDetectorTest {
   }
 
   /** @return Clean texts that must produce no artifact at all. */
-  static Stream<Arguments> clean() {
+  private static Stream<Arguments> clean() {
     return Stream.of(
         Arguments.of("plain ASCII", "plain ASCII text, with punctuation."),
         // Precomposed accents and typographic punctuation are not mojibake: their
@@ -154,6 +132,12 @@ public class CursorArtifactDetectorTest {
         Arguments.of("supplementary han", "han " + cp(0x23BB4) + " text"));
   }
 
+  /**
+   * Produces no artifacts for ordinary text examples.
+   *
+   * @param label The example description.
+   * @param text The input text.
+   */
   @ParameterizedTest
   @MethodSource("clean")
   void testCleanTextYieldsNothing(String label, String text) {
@@ -161,7 +145,11 @@ public class CursorArtifactDetectorTest {
         () -> "false positive in " + label + ": <" + text + ">");
   }
 
-  /** An unpaired surrogate is reported on its own char, high and low alike. */
+  /**
+   * Reports an unpaired surrogate at the source character offset.
+   *
+   * @param surrogate The unpaired high or low surrogate.
+   */
   @ParameterizedTest
   @ValueSource(chars = {0xD83D, 0xDC69})
   void testUnpairedSurrogates(char surrogate) {
@@ -209,10 +197,7 @@ public class CursorArtifactDetectorTest {
     assertTrue(artifacts.get(1).span().getEnd() <= artifacts.get(2).span().getStart());
   }
 
-  /**
-   * Double-encoded text yields one finding per damaged run; ASCII between the runs
-   * splits them and stays clean.
-   */
+  /** ASCII separates damaged runs into independent spans. */
   @Test
   void testMojibakeRunsAreSeparatedByAscii() {
     final String damagedE = cp(0x00C3, 0x00A9);
@@ -258,7 +243,7 @@ public class CursorArtifactDetectorTest {
     assertEquals(hidden, artifacts.get(0).span().getCoveredText(text).toString());
   }
 
-  /** The whole Tags block, including deprecated and unassigned slots, is classified. */
+  /** Reports samples from the Tags block, including deprecated and unassigned values. */
   @Test
   void testWholeUnicodeTagsBlockIsClassified() {
     final String hidden = cp(0xE0000, 0xE0001, 0xE0010, 0xE007F);
@@ -269,7 +254,7 @@ public class CursorArtifactDetectorTest {
     assertEquals(hidden, artifacts.get(0).span().getCoveredText(hidden).toString());
   }
 
-  /** A well-formed subdivision flag keeps its Unicode tag sequence as orthographic. */
+  /** Does not report the England flag's Unicode tag sequence. */
   @Test
   void testEmojiTagFlagIsOrthographic() {
     final String england = cp(0x1F3F4) + tags("gbeng", true);
@@ -289,9 +274,9 @@ public class CursorArtifactDetectorTest {
   }
 
   /**
-   * @return Texts whose single-byte image fails the strict UTF-8 test, with the reason.
+   * @return Single-byte text mappings that fail UTF-8 validation, with the reason.
    */
-  static Stream<Arguments> invalidUtf8Images() {
+  private static Stream<Arguments> invalidUtf8Images() {
     return Stream.of(
         // C0 80 is the classic overlong NUL; C0 maps from U+00C0.
         Arguments.of("overlong", "x " + cp(0x00C0, 0x20AC) + " y"),
@@ -301,7 +286,12 @@ public class CursorArtifactDetectorTest {
         Arguments.of("encoded surrogate", cp(0x00ED, 0x00A0, 0x20AC)));
   }
 
-  /** An image that is not strictly well-formed UTF-8 leaves its carrier unflagged. */
+  /**
+   * Does not report invalid UTF-8 mappings as mojibake.
+   *
+   * @param label The invalid encoding case.
+   * @param text The input text.
+   */
   @ParameterizedTest
   @MethodSource("invalidUtf8Images")
   void testInvalidUtf8ImagesAreNotMojibake(String label, String text) {
@@ -309,10 +299,7 @@ public class CursorArtifactDetectorTest {
         () -> "false positive for " + label + ": <" + text + ">");
   }
 
-  /**
-   * Abutting runs of different classes yield two artifacts meeting at a shared offset:
-   * a control run flushed by the replacement character that immediately follows it.
-   */
+  /** Adjacent control and replacement runs produce separate spans. */
   @Test
   void testAdjacentDifferentTypeRunsAbut() {
     final String text = "x" + cp(0x0007, 0xFFFD) + "y";
@@ -326,7 +313,7 @@ public class CursorArtifactDetectorTest {
     assertEquals(3, artifacts.get(1).span().getEnd());
   }
 
-  /** A high surrogate as the very last char has no pair to look ahead to, flagged. */
+  /** Reports a high surrogate at the end of the input. */
   @Test
   void testUnpairedHighSurrogateAtEndOfText() {
     final String text = "abc" + (char) 0xD83D;
@@ -337,7 +324,7 @@ public class CursorArtifactDetectorTest {
     assertEquals(text.length(), artifacts.get(0).span().getEnd());
   }
 
-  /** A run still open at the end of the text is flushed with its end at the length. */
+  /** Reports a replacement run through the end of the input. */
   @Test
   void testRunEndingExactlyAtTextLength() {
     final String text = "ok" + cp(0xFFFD, 0xFFFD);
@@ -348,11 +335,7 @@ public class CursorArtifactDetectorTest {
     assertEquals(text.length(), artifacts.get(0).span().getEnd());
   }
 
-  /**
-   * The javadoc claims the reported spans never overlap: a text mixing a zero-width
-   * run, a control run, mojibake, and two abutting runs yields spans sorted by start
-   * with each span ending no later than the next one begins.
-   */
+  /** Reports sorted spans without overlap for mixed artifact types. */
   @Test
   void testSpansAreSortedAndNeverOverlap() {
     final String text = "a." + cp(0x200B, 0x200B) + "b" + cp(0x0007, 0x001B)
@@ -369,7 +352,7 @@ public class CursorArtifactDetectorTest {
     }
   }
 
-  /** A non-String character sequence is detected exactly like the equal String. */
+  /** Produces the same results for String and StringBuilder inputs. */
   @Test
   void testCharSequenceInputMatchesStringInput() {
     final String text = "a" + cp(0x0007) + " caf" + cp(0x00C3, 0x00A9) + " " + cp(0xFFFD);
@@ -379,11 +362,13 @@ public class CursorArtifactDetectorTest {
     assertEquals(fromString, fromBuilder);
   }
 
+  /** Rejects a null character sequence. */
   @Test
   void testRejectsNull() {
     assertThrows(IllegalArgumentException.class, () -> detector.detect(null));
   }
 
+  /** Returns an empty result for empty text. */
   @Test
   void testEmptyTextYieldsNothing() {
     assertEquals(List.of(), detector.detect(""));
@@ -418,7 +403,7 @@ public class CursorArtifactDetectorTest {
     assertEquals("types contains an unrecognized type: unknown", unknownType.getMessage());
   }
 
-  /** The constructor snapshots its type set instead of retaining caller-owned state. */
+  /** Changes to the supplied set do not alter the detector configuration. */
   @Test
   void testTypeLimitedDetectorDefensivelyCopiesSet() {
     final Set<String> types = new HashSet<>();

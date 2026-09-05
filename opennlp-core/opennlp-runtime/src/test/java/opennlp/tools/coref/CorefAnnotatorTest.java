@@ -28,11 +28,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 import opennlp.tools.namefind.NameFinderAnnotator;
+import opennlp.tools.parser.ParserAnnotator;
+import opennlp.tools.parser.ParserAnnotator.Phrase;
 import opennlp.tools.util.Span;
 
 public class CorefAnnotatorTest {
@@ -42,7 +45,7 @@ public class CorefAnnotatorTest {
       List.of(Layers.SENTENCES, Layers.TOKENS, Layers.POS_TAGS, Layers.ENTITIES);
 
   /** Builds token annotations by locating each token left to right in the text. */
-  private static List<Annotation<String>> tokens(String text, String... forms) {
+  private List<Annotation<String>> tokens(String text, String... forms) {
     final List<Annotation<String>> annotations = new ArrayList<>(forms.length);
     int cursor = 0;
     for (final String form : forms) {
@@ -54,7 +57,7 @@ public class CorefAnnotatorTest {
   }
 
   /** Builds a token-aligned layer that carries one value on each token's span. */
-  private static List<Annotation<String>> values(List<Annotation<String>> tokens,
+  private List<Annotation<String>> values(List<Annotation<String>> tokens,
       String... tags) {
     final List<Annotation<String>> annotations = new ArrayList<>(tags.length);
     for (int i = 0; i < tags.length; i++) {
@@ -63,8 +66,32 @@ public class CorefAnnotatorTest {
     return annotations;
   }
 
+  /** Builds the minimal document needed to validate one entity annotation. */
+  private Document documentWithEntity(String text, Span entity, String type) {
+    final List<Annotation<String>> toks = tokens(text, "Ada", ".");
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, text.length()), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "."))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(entity, type)));
+  }
+
+  /** Builds two annotated sentences for optional-layer validation. */
+  private Document twoSentenceDocument() {
+    final String text = "Alice left. She stayed.";
+    final List<Annotation<String>> toks = tokens(text,
+        "Alice", "left", ".", "She", "stayed", ".");
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 23), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of());
+  }
+
   /** A three-sentence document with two entity types, a repeated name, and two pronouns. */
-  private static Document storyDocument() {
+  private Document storyDocument() {
     final String text = "Mary Jones leads Acme Corp. She joined Acme in 2020. It thrived.";
     final List<Annotation<String>> toks = tokens(text,
         "Mary", "Jones", "leads", "Acme", "Corp", ".",
@@ -121,6 +148,29 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(2, chains.size());
     Assertions.assertEquals(0, chains.get(0).value().chain());
     Assertions.assertEquals(1, chains.get(1).value().chain());
+  }
+
+  /** Supplementary Unicode digits remain distinct numeric name modifiers. */
+  @Test
+  void testSupplementaryDigitModifiersKeepNamesApart() {
+    final String text = "𝟙 Project launched. 𝟚 Project failed.";
+    final int second = text.indexOf("𝟚");
+    final List<Annotation<String>> toks = tokens(text,
+        "𝟙", "Project", "launched", ".", "𝟚", "Project", "failed", ".");
+    final Document document = new CorefAnnotator().annotate(Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, second - 1), "s"),
+            new Annotation<>(new Span(second, text.length()), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS,
+            values(toks, "CD", "NNP", "VBD", ".", "CD", "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of(
+            new Annotation<>(new Span(0, text.indexOf(" launched")), "organization"),
+            new Annotation<>(new Span(second, text.indexOf(" failed")), "organization"))));
+
+    final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(2, chains.size());
+    Assertions.assertNotEquals(chains.get(0).value().chain(), chains.get(1).value().chain());
   }
 
   @Test
@@ -191,6 +241,110 @@ public class CorefAnnotatorTest {
         .with(Layers.ENTITIES, List.of());
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> annotator.annotate(misaligned));
+  }
+
+  @Test
+  void testTokenAndTagSpansMustAlign() {
+    final String text = "a b";
+    final List<Annotation<String>> toks = tokens(text, "a", "b");
+    final Document misaligned = Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 3), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, List.of(
+            new Annotation<>(toks.get(0).span(), "DT"),
+            new Annotation<>(toks.get(0).span(), "NN")))
+        .with(Layers.ENTITIES, List.of());
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(misaligned));
+  }
+
+  @Test
+  void testTokenSpansMustBeOrderedAndDisjoint() {
+    final String text = "Alice left.";
+    final List<Annotation<String>> toks = tokens(text, "Alice", "left", ".");
+    final List<Annotation<String>> reversed = List.of(toks.get(1), toks.get(0), toks.get(2));
+    final Document outOfOrder = Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, text.length()), "s")))
+        .with(Layers.TOKENS, reversed)
+        .with(Layers.POS_TAGS, values(reversed, "VBD", "NNP", "."))
+        .with(Layers.ENTITIES, List.of());
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(outOfOrder));
+
+    final List<Annotation<String>> overlapping = List.of(
+        toks.get(0), new Annotation<>(new Span(4, 10), "left"), toks.get(2));
+    final Document overlap = Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, text.length()), "s")))
+        .with(Layers.TOKENS, overlapping)
+        .with(Layers.POS_TAGS, values(overlapping, "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of());
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(overlap));
+  }
+
+  @Test
+  void testEveryTokenMustBelongToASentence() {
+    final String text = "a b";
+    final List<Annotation<String>> toks = tokens(text, "a", "b");
+    final Document uncovered = Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, 1), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "DT", "NN"))
+        .with(Layers.ENTITIES, List.of());
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(uncovered));
+  }
+
+  /** Overlapping sentence spans make a token's sentence index ambiguous. */
+  @Test
+  void testSentenceSpansMustNotOverlap() {
+    final String text = "Alice left.";
+    final List<Annotation<String>> toks = tokens(text, "Alice", "left", ".");
+    final Document overlapping = Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 10), "s"),
+            new Annotation<>(new Span(6, 11), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", "."))
+        .with(Layers.ENTITIES, List.of());
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(overlapping));
+  }
+
+  /** A single entity mention cannot extend across two sentences. */
+  @Test
+  void testEntitySpanMustFitOneSentence() {
+    final String text = "Alice left. She stayed.";
+    final List<Annotation<String>> toks =
+        tokens(text, "Alice", "left", ".", "She", "stayed", ".");
+    final Document crossing = Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 11), "s"),
+            new Annotation<>(new Span(12, 23), "s")))
+        .with(Layers.TOKENS, toks)
+        .with(Layers.POS_TAGS, values(toks, "NNP", "VBD", ".", "PRP", "VBD", "."))
+        .with(Layers.ENTITIES,
+            List.of(new Annotation<>(new Span(0, 15), "person")));
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(crossing));
+  }
+
+  /** An entity still requires a containing sentence when the token layer is empty. */
+  @Test
+  void testEntityRequiresSentenceWhenTokensAreEmpty() {
+    final Document inconsistent = Document.of("Alice")
+        .with(Layers.SENTENCES, List.of())
+        .with(Layers.TOKENS, List.of())
+        .with(Layers.POS_TAGS, List.of())
+        .with(Layers.ENTITIES,
+            List.of(new Annotation<>(new Span(0, 5), "person")));
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator().annotate(inconsistent));
   }
 
   private static Stream<Arguments> invalidTypeSets() {
@@ -379,7 +533,7 @@ public class CorefAnnotatorTest {
   }
 
   /**
-   * A shared head word alone never links two names: word inclusion refuses the pair
+   * A shared head word alone never links two names: word inclusion rejects the pair
    * because each mention carries a content word the other chain lacks.
    */
   @Test
@@ -621,10 +775,9 @@ public class CorefAnnotatorTest {
   }
 
   /**
-   * In a document mixing typed and untyped entities, the typed rules are unchanged and
-   * the untyped entities participate as unknown types: the neutral pronoun still skips
-   * the person mention but links to the untyped {@code Acme}, and the gendered pronoun
-   * links to the person mention as before.
+   * In a document mixing typed and untyped entities, an untyped proper name is treated
+   * as animate. The neutral pronoun does not claim it, while the gendered pronoun still
+   * links to the known person.
    */
   @Test
   void testMixedTypedAndUntypedEntitiesResolve() {
@@ -648,7 +801,7 @@ public class CorefAnnotatorTest {
 
     final List<Annotation<CorefMention>> chains = document.get(CorefAnnotator.CHAINS);
     Assertions.assertEquals(5, chains.size());
-    Assertions.assertArrayEquals(new int[] {0, 1, 0, 1, 0},
+    Assertions.assertArrayEquals(new int[] {0, 1, 0, 2, 0},
         chains.stream().mapToInt(a -> a.value().chain()).toArray());
     Assertions.assertEquals(new Span(38, 40), chains.get(3).span());
     Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(3).value().kind());
@@ -656,11 +809,7 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(CorefMention.KIND_PRONOUN, chains.get(4).value().kind());
   }
 
-  /**
-   * An untyped entity is type-unknown, not type-mismatched: the exact match sieve links
-   * it to a typed mention with identical text, unlike two differently typed mentions,
-   * which stay apart.
-   */
+  /** An untyped entity can match an earlier typed entity with the same text. */
   @Test
   void testUntypedEntityMatchesTypedEntityWithSameText() {
     final String text = "Paris met Paris.";
@@ -679,11 +828,7 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(0, chains.get(1).value().chain());
   }
 
-  /**
-   * The mirror image of the case above: the untyped mention comes first and the typed
-   * one second, exercising the other operand of the type guard and the candidate-side
-   * scan of the exact match sieve.
-   */
+  /** An untyped entity can match a later typed entity with the same text. */
   @Test
   void testTypedEntityMatchesEarlierUntypedEntityWithSameText() {
     final String text = "Paris met Paris.";
@@ -702,14 +847,7 @@ public class CorefAnnotatorTest {
     Assertions.assertEquals(0, chains.get(1).value().chain());
   }
 
-  /**
-   * An unknown-typed mention joins a chain but never bridges two known types: three
-   * identical names typed person, untyped, and location resolve into a person chain
-   * that absorbs the untyped mention, and a separate location chain. Without the
-   * chain-level type, the untyped middle mention would link to the person and the
-   * location would link to the untyped one, collapsing a person and a place into one
-   * chain.
-   */
+  /** An untyped mention does not join chains with incompatible known types. */
   @Test
   void testUntypedMentionNeverBridgesDifferentlyTypedChains() {
     final String text = "Georgia met Georgia in Georgia.";
@@ -731,11 +869,7 @@ public class CorefAnnotatorTest {
         chains.stream().mapToInt(a -> a.value().chain()).toArray());
   }
 
-  /**
-   * The same three-way constellation with the known types swapped: whichever known
-   * type absorbs the untyped mention, the chain invariant holds, and the person and
-   * location mentions never share a chain.
-   */
+  /** The incompatible-type check is independent of the known types' order. */
   @Test
   void testBridgeInvariantHoldsWithTypesInReverseOrder() {
     final String text = "Georgia met Georgia in Georgia.";
@@ -757,11 +891,7 @@ public class CorefAnnotatorTest {
         chains.stream().mapToInt(a -> a.value().chain()).toArray());
   }
 
-  /**
-   * The containment sieve's cross-type path: a typed full name and an untyped
-   * whitespace-delimited suffix of it link, in both orders of appearance, since an
-   * unknown type never blocks a containment link.
-   */
+  /** A typed full name links to an untyped suffix of that name. */
   @Test
   void testContainmentLinksTypedNameWithUntypedSuffix() {
     final String text = "Barack Obama spoke. Obama left.";
@@ -810,7 +940,7 @@ public class CorefAnnotatorTest {
 
   /**
    * A document without entities or third-person pronouns gets an empty chains layer
-   * rather than an exception, and so does a document whose required layers are all
+   * instead of an exception, and so does a document whose required layers are all
    * present but empty.
    */
   @Test
@@ -830,5 +960,81 @@ public class CorefAnnotatorTest {
     }
     final Document empty = new CorefAnnotator().annotate(blank);
     Assertions.assertTrue(empty.get(CorefAnnotator.CHAINS).isEmpty());
+  }
+
+  @Test
+  void testEmptyTokenLayerStillValidatesOptionalLayers() {
+    Document base = Document.of("orphan")
+        .with(Layers.SENTENCES,
+            List.of(new Annotation<>(new Span(0, 6), "s")))
+        .with(Layers.TOKENS, List.of())
+        .with(Layers.POS_TAGS, List.of())
+        .with(Layers.ENTITIES, List.of());
+    final CorefAnnotator annotator = new CorefAnnotator();
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ChunkerAnnotator.CHUNKS,
+            List.of(new Annotation<>(new Span(0, 6), "NP")))));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ParserAnnotator.PHRASES,
+            List.of(new Annotation<>(new Span(0, 6),
+                new Phrase("NP", new Span(0, 6)))))));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(CorefAnnotator.SPEAKERS,
+            List.of(new Annotation<>(new Span(0, 6), " ")))));
+  }
+
+  @Test
+  void testRejectsBlankEntitySpansAndTypes() {
+    final CorefAnnotator annotator = new CorefAnnotator();
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(documentWithEntity("Ada.", new Span(0, 0), "person")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(documentWithEntity(" Ada.", new Span(0, 1), "person")));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(documentWithEntity("Ada.", new Span(0, 3), " ")));
+  }
+
+  @Test
+  void testRejectsMalformedChunkLayer() {
+    final CorefAnnotator annotator = new CorefAnnotator();
+    final Document base = twoSentenceDocument();
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ChunkerAnnotator.CHUNKS,
+            List.of(new Annotation<>(new Span(0, 15), "NP")))));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ChunkerAnnotator.CHUNKS,
+            List.of(new Annotation<>(new Span(1, 5), "NP")))));
+  }
+
+  @Test
+  void testRejectsMalformedPhraseLayer() {
+    final CorefAnnotator annotator = new CorefAnnotator();
+    final Document base = twoSentenceDocument();
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ParserAnnotator.PHRASES,
+            List.of(new Annotation<>(new Span(0, 15),
+                new Phrase("NP", new Span(0, 5)))))));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(ParserAnnotator.PHRASES,
+            List.of(new Annotation<>(new Span(0, 5),
+                new Phrase("NP", new Span(1, 5)))))));
+  }
+
+  @Test
+  void testRejectsMalformedSpeakerLayer() {
+    final CorefAnnotator annotator = new CorefAnnotator();
+    final Document base = twoSentenceDocument();
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(CorefAnnotator.SPEAKERS,
+            List.of(new Annotation<>(new Span(0, 11), " ")))));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base.with(CorefAnnotator.SPEAKERS, List.of(
+            new Annotation<>(new Span(0, 15), "Alice"),
+            new Annotation<>(new Span(12, 23), "Bob")))));
   }
 }

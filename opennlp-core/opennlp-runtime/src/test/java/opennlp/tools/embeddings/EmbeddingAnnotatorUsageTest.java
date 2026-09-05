@@ -17,43 +17,29 @@
 
 package opennlp.tools.embeddings;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
-import opennlp.tools.document.DocumentAnnotator;
-import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.Layers;
+import opennlp.tools.tokenize.SimpleTokenizer;
+import opennlp.tools.tokenize.TokenizerAnnotator;
 import opennlp.tools.util.Span;
 
 /**
- * Demonstrates the realistic {@link EmbeddingAnnotator} flow with fully deterministic
- * collaborators: a stub tokenizer annotator produces the token layer, a stub embedder
- * turns each covered text into a fixed three-dimensional vector, and the tests assert
- * the exact vectors, spans, and derived layer identifiers that come out of the pipeline.
+ * Examples using the document pipeline and tokenizer with a test embedder.
+ * Character sums make the expected values explicit; they are not semantic embeddings.
  */
 public class EmbeddingAnnotatorUsageTest {
 
-  /**
-   * A deterministic {@link TextEmbedder} that folds the character codes of a text into a
-   * fixed three-dimensional vector: the code of the character at index {@code i} is
-   * added to vector component {@code i % 3}. Equal texts always map to equal vectors,
-   * which makes every expected value in this class computable by hand.
-   */
+  /** Sums character codes into three components by character index modulo three. */
   private static final class CharSumEmbedder implements TextEmbedder {
 
-    /**
-     * Embeds a text by summing its character codes into three components.
-     *
-     * @param text The text to embed. Must not be {@code null}.
-     * @return A vector of length three; the zero vector for empty text.
-     * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
-     */
+    /** {@inheritDoc} */
     @Override
     public float[] embed(CharSequence text) {
       if (text == null) {
@@ -66,73 +52,23 @@ public class EmbeddingAnnotatorUsageTest {
       return vector;
     }
 
-    /**
-     * @return The constant vector length three.
-     */
+    /** {@inheritDoc} */
     @Override
     public int dimension() {
       return 3;
     }
   }
 
-  /**
-   * A stub {@link DocumentAnnotator} that provides {@link Layers#TOKENS} by splitting
-   * the document text on the literal space character. Each token annotation covers one
-   * maximal run of non-space characters and carries its covered text as the value. This
-   * keeps the pipeline example self-contained without loading a tokenizer model.
-   */
-  private static final class SpaceTokenizerAnnotator implements DocumentAnnotator {
-
-    /**
-     * Tokenizes the document text on spaces and adds the token layer.
-     *
-     * @param document The document to annotate. Must not be {@code null}.
-     * @return A new {@link Document} carrying {@link Layers#TOKENS} in addition to the
-     *         input layers. Never {@code null}.
-     * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
-     */
-    @Override
-    public Document annotate(Document document) {
-      if (document == null) {
-        throw new IllegalArgumentException("document must not be null");
-      }
-      final CharSequence text = document.text();
-      final List<Annotation<String>> tokens = new ArrayList<>();
-      int start = -1;
-      for (int i = 0; i <= text.length(); i++) {
-        final boolean boundary = i == text.length() || text.charAt(i) == ' ';
-        if (boundary && start >= 0) {
-          tokens.add(new Annotation<>(new Span(start, i), text.subSequence(start, i).toString()));
-          start = -1;
-        } else if (!boundary && start < 0) {
-          start = i;
-        }
-      }
-      return document.with(Layers.TOKENS, tokens);
-    }
-
-    /**
-     * @return The single-element set holding the token layer. Never {@code null}.
-     */
-    @Override
-    public Set<LayerKey<?>> provides() {
-      return Set.of(Layers.TOKENS);
-    }
-  }
-
-  /**
-   * Runs the two-step pipeline of tokenizing and then embedding the token layer, and
-   * asserts the exact vector of every token, that every vector sits on the span of its
-   * source token, and that the provided layer identifier derives from the token layer.
-   */
+  /** The manual's tokenizer-and-embedding pipeline preserves every token span. */
   @Test
   void testPipelineEmbedsEveryToken() {
-    final Document tokenized = new SpaceTokenizerAnnotator().annotate(
-        Document.of("Dogs bark loudly"));
-
     final EmbeddingAnnotator annotator =
         new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS);
-    final Document embedded = annotator.annotate(tokenized);
+    final DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+        .add(new TokenizerAnnotator(SimpleTokenizer.INSTANCE))
+        .add(annotator)
+        .build();
+    final Document embedded = analyzer.analyze("Dogs bark loudly");
 
     Assertions.assertEquals("embeddings:opennlp:tokens", annotator.layer().id());
     Assertions.assertEquals(float[].class, annotator.layer().type());
@@ -141,6 +77,12 @@ public class EmbeddingAnnotatorUsageTest {
     final List<Annotation<float[]>> vectors = embedded.get(annotator.layer());
     Assertions.assertEquals(3, tokens.size());
     Assertions.assertEquals(tokens.size(), vectors.size());
+    final Annotation<float[]> first = vectors.getFirst();
+    final String covered = first.span().getCoveredText(embedded.text()).toString();
+    Assertions.assertEquals("Dogs", covered);
+    final float[] editable = first.value().clone();
+    editable[0] = -1;
+    Assertions.assertEquals(183, first.value()[0]);
     for (int i = 0; i < tokens.size(); i++) {
       Assertions.assertEquals(tokens.get(i).span(), vectors.get(i).span());
     }
@@ -152,25 +94,10 @@ public class EmbeddingAnnotatorUsageTest {
     Assertions.assertArrayEquals(new float[] {208, 219, 238}, vectors.get(2).value());
   }
 
-  /**
-   * Adds one annotator over the token layer and one over the sentence layer to the same
-   * document and asserts that both provided layers coexist, that each carries its own
-   * derived identifier, and that the exact sentence and token vectors are present.
-   */
+  /** Token and sentence vectors are computed from their respective covered texts. */
   @Test
   void testTokenAndSentenceAnnotatorsCoexist() {
-    final String text = "Dogs bark. Cats nap.";
-    final Document base = Document.of(text)
-        .with(Layers.SENTENCES, List.of(
-            new Annotation<>(new Span(0, 10), "Dogs bark."),
-            new Annotation<>(new Span(11, 20), "Cats nap.")))
-        .with(Layers.TOKENS, List.of(
-            new Annotation<>(new Span(0, 4), "Dogs"),
-            new Annotation<>(new Span(5, 9), "bark"),
-            new Annotation<>(new Span(9, 10), "."),
-            new Annotation<>(new Span(11, 15), "Cats"),
-            new Annotation<>(new Span(16, 19), "nap"),
-            new Annotation<>(new Span(19, 20), ".")));
+    final Document base = EmbeddingAnnotatorTestSupport.sentencesAndTokens();
 
     final CharSumEmbedder embedder = new CharSumEmbedder();
     final EmbeddingAnnotator overTokens = new EmbeddingAnnotator(embedder, Layers.TOKENS);
@@ -197,5 +124,39 @@ public class EmbeddingAnnotatorUsageTest {
     Assertions.assertArrayEquals(new float[] {182, 97, 116}, tokens.get(3).value());
     // "." is a single character, code 46, landing in the first component only.
     Assertions.assertArrayEquals(new float[] {46, 0, 0}, tokens.get(5).value());
+  }
+
+  /** The pipeline rejects a missing tokenizer before running any analysis. */
+  @Test
+  void testMissingPipelineInput() {
+    final EmbeddingAnnotator annotator =
+        new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS);
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> DocumentAnalyzer.builder().add(annotator).build());
+  }
+
+  /** Two embedders over the same source collide under the current derived-key API. */
+  @Test
+  void testDuplicatePipelineOutput() {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> DocumentAnalyzer.builder()
+        .add(new TokenizerAnnotator(SimpleTokenizer.INSTANCE))
+        .add(new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS))
+        .add(new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS))
+        .build());
+  }
+
+  /** An empty analyzed document retains the declared token and vector layers. */
+  @Test
+  void testEmptyPipelineInput() {
+    final EmbeddingAnnotator annotator =
+        new EmbeddingAnnotator(new CharSumEmbedder(), Layers.TOKENS);
+    final DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+        .add(new TokenizerAnnotator(SimpleTokenizer.INSTANCE))
+        .add(annotator)
+        .build();
+    final Document document = analyzer.analyze("");
+    Assertions.assertTrue(document.layers().contains(Layers.TOKENS));
+    Assertions.assertTrue(document.layers().contains(annotator.layer()));
+    Assertions.assertTrue(document.get(annotator.layer()).isEmpty());
   }
 }

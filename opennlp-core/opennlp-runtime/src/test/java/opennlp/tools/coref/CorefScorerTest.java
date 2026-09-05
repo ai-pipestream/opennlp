@@ -42,7 +42,7 @@ public class CorefScorerTest {
   private static final List<Set<String>> RESPONSE =
       List.of(Set.of("a", "b"), Set.of("c", "d"), Set.of("f", "g", "h", "i"));
 
-  private static CorefScores scoreExample() {
+  private CorefScores scoreExample() {
     final CorefScorer scorer = new CorefScorer();
     scorer.add(KEY, RESPONSE);
     return scorer.scores();
@@ -174,7 +174,7 @@ public class CorefScorerTest {
     }
   }
 
-  private static double bestByPermutation(double[][] similarity, boolean[] used,
+  private double bestByPermutation(double[][] similarity, boolean[] used,
       int row) {
     if (row == similarity.length) {
       return 0.0;
@@ -199,5 +199,15 @@ public class CorefScorerTest {
         () -> new Score(0.0, Double.NaN, 0.0));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new CorefScores(null, null, null, null, null, 0.0));
+  }
+
+  @Test
+  void testScoreRecordsRejectInconsistentDerivedValues() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new Score(1.0, 1.0, 0.0));
+
+    final Score perfect = new Score(1.0, 1.0, 1.0);
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefScores(perfect, perfect, perfect, perfect, perfect, 0.0));
   }
 }

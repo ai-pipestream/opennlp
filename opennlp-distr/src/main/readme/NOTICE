@@ -4,6 +4,19 @@ Copyright 2021-2026 The Apache Software Foundation
 This product includes software developed at
 The Apache Software Foundation (http://www.apache.org/).
 
+The file signature table in opennlp.tools.assets.KnownMagics is adapted from
+Apache Tika's tika-mimetypes.xml.
+Apache Tika: Copyright 2021 The Apache Software Foundation.
+
+Tika's catalog includes MIME type information from file-4.26:
+Copyright (c) Ian F. Darwin 1986, 1987, 1989, 1990, 1991, 1992, 1994, 1995.
+Software written by Ian F. Darwin and others; maintained 1994- Christos Zoulas.
+
+The catalog also includes definitions adapted from the PRONOM Technical
+Registry by The National Archives (https://www.nationalarchives.gov.uk/PRONOM/).
+Contains public sector information licensed under the Open Government Licence v3.0.
+https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+
 ============================================================================
 
 The snowball stemmers in
@@ -94,6 +107,10 @@ SOFTWARE.
 
 ============================================================================
 
+This product includes an English first-name gender table derived from the national
+baby-name data published by the United States Social Security Administration:
+https://www.ssa.gov/oact/babynames/
+
 This product bundles data files from the Unicode Character Database (UCD)
 and the Unicode Security Mechanisms, version 17.0.0, published by Unicode,
 Inc. (https://www.unicode.org/Public/).
@@ -137,6 +154,15 @@ Copyright (c) 1991-2025 Unicode, Inc. All rights reserved.
 The top-level-domain label data used by opennlp.tools.pii.IanaTlds is derived
 from the IANA Root Zone Database maintained by Public Technical Identifiers,
 an affiliate of the Internet Corporation for Assigned Names and Numbers.
+
+============================================================================
+The Windows-1252 mapping in
+opennlp.tools.artifacts.CursorArtifactDetector is derived from CP1252.TXT,
+table version 2.01 (1998-04-15), published at:
+https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT
+
+Copyright © 1991-2026 Unicode, Inc.
+Distributed under the Unicode License V3 reproduced in LICENSE.
 
 ============================================================================
 List of third-party dependencies grouped by their license type.

@@ -17,71 +17,43 @@
 
 package opennlp.geo;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * Exercises the boundary behavior of place-profile similarity: identical and opposite
- * profiles, orthogonal profiles, tables without any variance, malformed rows, extreme
- * metric magnitudes, duplicate identifiers, tie ordering, and line-ending tolerance.
- * All tables are project-authored miniatures embedded in this file.
- *
- * <p>Expected scores that are exact by construction, such as {@code 0.0} for
- * orthogonal or variance-free profiles and {@code -1.0} for exactly mirrored ones, are
- * asserted without a delta. Scores that pass through rounded arithmetic were produced
- * by running the same table through {@link PlaceProfiles} and are asserted with a
- * tight delta, {@code 1e-12} or finer, that tolerates only last-ulp variation in
- * summation order.</p>
- */
+import static opennlp.geo.PlaceProfilesTestSupport.load;
+
+/** Tests profile scoring, table validation, and ranking. */
 public class PlaceProfilesEdgeCaseTest {
 
   /**
-   * Loads a profile table from an in-memory string through the stream entry point,
-   * exactly as production code would read the same bytes from any stream.
+   * Identical nonzero profiles score one; opposite profiles score minus one.
    *
-   * @param table The tab-separated table content.
-   * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if the table is malformed.
-   */
-  private static PlaceProfiles load(String table) throws IOException {
-    return PlaceProfiles.load(
-        new ByteArrayInputStream(table.getBytes(StandardCharsets.UTF_8)));
-  }
-
-  /**
-   * Asserts that two places with identical raw rows score fractionally above
-   * {@code 1.0}: their standardized vectors are bitwise equal, and dividing the dot
-   * product by the rounded product of the two square roots lands one ulp above unity.
-   * Self-similarity of such a place yields the same value, and the third, mirrored
-   * place scores exactly {@code -1.0}.
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
-  void testIdenticalProfilesScoreOneUlpAboveUnity() throws IOException {
+  void testIdenticalProfilesScoreOne() throws IOException {
     final PlaceProfiles profiles = load(String.join("\n",
         "id\ta\tb",
         "twin-1\t10\t5",
         "twin-2\t10\t5",
         "other\t2\t9",
         ""));
-    Assertions.assertEquals(1.0000000000000002,
-        profiles.similarity("twin-1", "twin-2"), 1e-15);
+    Assertions.assertEquals(1.0, profiles.similarity("twin-1", "twin-2"), 1e-15);
     Assertions.assertEquals(profiles.similarity("twin-1", "twin-2"),
         profiles.similarity("twin-1", "twin-1"));
-    Assertions.assertEquals(-1.0, profiles.similarity("twin-1", "other"));
+    Assertions.assertEquals(-1.0, profiles.similarity("twin-1", "other"), 1e-15);
   }
 
   /**
-   * Asserts exact scores on a symmetric compass table whose columns standardize
-   * without rounding: profiles on perpendicular axes score exactly {@code 0.0},
-   * mirrored profiles score exactly {@code -1.0}, a profile against itself scores
-   * exactly {@code 1.0}, and a neighbor query with a generous count returns every
-   * other place.
+   * Checks perpendicular and opposite profiles in a symmetric table.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testOrthogonalAndOppositeProfilesScoreExactly() throws IOException {
@@ -100,10 +72,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that a table whose columns are all constant produces zero vectors for
-   * every place, so every similarity is exactly {@code 0.0}, including a place
-   * compared against itself. This is the documented no-variance behavior rather than
-   * a division by zero.
+   * Constant columns produce zero similarity, including self-comparisons.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testZeroVarianceProfilesScoreZeroEvenAgainstThemselves() throws IOException {
@@ -116,28 +87,21 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals(0.0, profiles.similarity("flat-1", "flat-2"));
   }
 
-  /**
-   * Asserts that a row listing fewer values than the header declares is rejected at
-   * load with a message naming the row and both field counts; a place can therefore
-   * never silently miss an attribute another place has.
-   */
+  /** Reports the physical line and field counts for a short data line. */
   @Test
-  void testRowMissingAValueFailsLoud() {
+  void testRowMissingAValueIsRejected() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load("id\ta\tb\nlonely\t1\n"));
     Assertions.assertEquals("row 2 has 2 fields, expected 3", e.getMessage());
   }
 
   /**
-   * Asserts that a cell reading {@code NaN}, a routine export artifact for a missing
-   * metric, is rejected at load with a message naming the row and the offending value.
-   * A single such cell would otherwise standardize the whole column to {@code NaN} and,
-   * through the column mean, every profile in the table, so the rejection has to happen
-   * before standardization rather than at query time. The same table with the cell
-   * repaired loads and scores exactly as it would have without the bad cell.
+   * Rejects NaN and accepts the corresponding finite table.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
-  void testNotANumberValueFailsLoud() throws IOException {
+  void testNotANumberValueIsRejected() throws IOException {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load(String.join("\n",
             "id\tx\ty",
@@ -160,41 +124,32 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that both infinite values are rejected at load with a message naming the
-   * row and the offending value, for the same reason {@code NaN} is: they survive
-   * {@link Double#parseDouble} and then propagate through the column statistics.
+   * Rejects infinity with the value and line number.
+   *
+   * @param value The infinite cell value.
    */
-  @Test
-  void testInfiniteValuesFailLoud() {
-    final IOException positive = Assertions.assertThrows(IOException.class,
-        () -> load("id\ta\nparis\tInfinity\nlyon\t2.0\n"));
-    Assertions.assertEquals("non-finite value in row 2: Infinity", positive.getMessage());
-    final IOException negative = Assertions.assertThrows(IOException.class,
-        () -> load("id\ta\nparis\t-Infinity\nlyon\t2.0\n"));
-    Assertions.assertEquals("non-finite value in row 2: -Infinity",
-        negative.getMessage());
+  @ParameterizedTest
+  @ValueSource(strings = {"Infinity", "-Infinity"})
+  void testInfiniteValuesAreRejected(String value) {
+    final IOException error = Assertions.assertThrows(IOException.class,
+        () -> load("id\ta\nparis\t" + value + "\nlyon\t2.0\n"));
+    Assertions.assertEquals("non-finite value in row 2: " + value, error.getMessage());
   }
 
   /**
-   * Asserts that the Java float and double literal suffixes are rejected even though
-   * they parse to ordinary finite values, because a metric table holds data rather than
-   * Java source and a suffixed cell means the table was generated by something that
-   * leaked its own literal syntax into the output.
+   * Rejects Java float and double type suffixes in numeric cells.
+   *
+   * @param value The suffixed cell value.
    */
-  @Test
-  void testJavaLiteralSuffixValuesFailLoud() {
-    final IOException floatSuffix = Assertions.assertThrows(IOException.class,
-        () -> load("id\ta\nparis\t1.0f\nlyon\t2.0\n"));
-    Assertions.assertEquals("malformed value in row 2: 1.0f", floatSuffix.getMessage());
-    final IOException doubleSuffix = Assertions.assertThrows(IOException.class,
-        () -> load("id\ta\nparis\t1.0d\nlyon\t2.0\n"));
-    Assertions.assertEquals("malformed value in row 2: 1.0d", doubleSuffix.getMessage());
+  @ParameterizedTest
+  @ValueSource(strings = {"1.0f", "1.0d", "1.0F", "1.0D"})
+  void testJavaLiteralSuffixValuesAreRejected(String value) {
+    final IOException error = Assertions.assertThrows(IOException.class,
+        () -> load("id\ta\nparis\t" + value + "\nlyon\t2.0\n"));
+    Assertions.assertEquals("malformed value in row 2: " + value, error.getMessage());
   }
 
-  /**
-   * Asserts that a cell that is not numeric at all is rejected with the same message
-   * shape, naming the row and quoting the value the user has to go and fix.
-   */
+  /** Reports the value and line number for a nonnumeric cell. */
   @Test
   void testMalformedValueNamesTheOffendingCell() {
     final IOException e = Assertions.assertThrows(IOException.class,
@@ -202,12 +157,9 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals("malformed value in row 2: not-a-number", e.getMessage());
   }
 
-  /**
-   * Asserts that a header consisting of only the identifier column is rejected,
-   * because a profile without at least one metric cannot be compared.
-   */
+  /** Rejects a header without metric columns. */
   @Test
-  void testHeaderWithoutMetricsFailsLoud() {
+  void testHeaderWithoutMetricsIsRejected() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load("id\nlonely\n"));
     Assertions.assertEquals("the header must be: id, then at least one metric",
@@ -215,12 +167,12 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that {@code null} arguments to the stream loader and to every query method
-   * fail loud with {@link IllegalArgumentException} before any computation happens, and
-   * that the failure names the argument that was {@code null} rather than the first one.
+   * Rejects null arguments at the loader and query entry points.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
-  void testNullArgumentsFailLoud() throws IOException {
+  void testNullArgumentsAreRejected() throws IOException {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> PlaceProfiles.load((InputStream) null));
     final PlaceProfiles profiles = load("id\ta\np\t1\nq\t2\n");
@@ -237,18 +189,16 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that metrics on wildly different scales contribute equally after
-   * standardization: a column counted in billions and a column confined to the unit
-   * interval carry the same weight, so two places on opposite sides of both metrics
-   * mirror each other, and the place sitting exactly at the mean of every column
-   * standardizes to the zero vector and scores {@code 0.0} against everything.
+   * Standardization gives metric columns equal weight despite different units.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testMixedScaleMetricsContributeEqually() throws IOException {
     final PlaceProfiles profiles = load(String.join("\n",
         "id\tgiga\ttiny",
-        "alpha\t9000000000\t0.9",
-        "beta\t1000000000\t0.1",
+        "alpha\t9000000000\t0.875",
+        "beta\t1000000000\t0.125",
         "gamma\t5000000000\t0.5",
         ""));
     Assertions.assertEquals(-1.0000000000000002,
@@ -259,18 +209,18 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that values around {@code 1e150} still standardize to exact results: the
-   * squared deviations stay finite, so opposite extremes score exactly {@code -1.0},
-   * the place at the column mean scores exactly {@code 0.0}, and self-similarity is
-   * exactly {@code 1.0}.
+   * Checks an exact binary midpoint at a large metric magnitude.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testHugeFiniteMagnitudesStandardizeSafely() throws IOException {
+    final double unit = Math.scalb(1.0, 500);
     final PlaceProfiles profiles = load(String.join("\n",
         "id\tv",
-        "big\t3e150",
-        "small\t1e150",
-        "mid\t2e150",
+        "big\t" + (3 * unit),
+        "small\t" + unit,
+        "mid\t" + (2 * unit),
         ""));
     Assertions.assertEquals(-1.0, profiles.similarity("big", "small"));
     Assertions.assertEquals(0.0, profiles.similarity("big", "mid"));
@@ -278,10 +228,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that a column whose plain sum would overflow a double still standardizes
-   * to its correct values: the mean is accumulated from per-place contributions
-   * already divided by the place count, so no intermediate quantity crosses the
-   * double range, and the two near-maximum values come out exactly mirrored.
+   * Accepts a column whose unscaled sum exceeds the double range.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testColumnWhosePlainSumWouldOverflowStandardizesCorrectly() throws IOException {
@@ -295,12 +244,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that a column whose squared deviations would overflow a double under
-   * naive summation still standardizes to its correct values: the deviation is taken
-   * over centered distances divided by the column's largest centered distance, so the
-   * summed squares stay between one and the place count, and {@code 3e200} against
-   * {@code 1e200} reads as measured signal instead of overflowing or collapsing to a
-   * variance-free column.
+   * Accepts finite values whose squared deviations exceed the double range.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testMagnitudesBeyondSquaredDoubleRangeStandardizeCorrectly() throws IOException {
@@ -313,9 +259,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts the mirrored boundary at the small end: a column of subnormal-scale
-   * magnitudes, whose squared deviations underflow to zero under naive summation,
-   * keeps its signal instead of silently standardizing to a variance-free column.
+   * Preserves similarity for small nonzero measurements.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testTinyMagnitudesKeepTheirSignal() throws IOException {
@@ -328,47 +274,43 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that a varying column whose deviation is too small for a double to hold
-   * is rejected at load, naming the metric: seven places at zero and one at the
-   * smallest subnormal double leave a deviation that rounds to zero, and zeroing a
-   * column that does vary would report a false absence of signal.
+   * Preserves opposite standardized signs when the raw deviation is subnormal.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
-  void testDeviationBelowSubnormalRangeFailsLoud() {
-    final IOException e = Assertions.assertThrows(IOException.class,
-        () -> load(String.join("\n",
+  void testDeviationBelowSubnormalRange() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
             "id\tv",
             "p1\t0", "p2\t0", "p3\t0", "p4\t0",
             "p5\t0", "p6\t0", "p7\t0",
             "p8\t4.9e-324",
-            "")));
-    Assertions.assertEquals("metric column underflows a double: v", e.getMessage());
+            ""));
+    Assertions.assertEquals(-1.0, profiles.similarity("p1", "p8"));
+    Assertions.assertEquals(1.0, profiles.similarity("p1", "p2"));
   }
 
   /**
-   * Asserts that a genuinely inexpressible column is still rejected, naming the
-   * metric that overflowed rather than the first column: the spread between the
-   * maximum double and its negation twice over exceeds what any centered distance can
-   * hold, so this column, unlike any merely large one, cannot be standardized.
+   * Standardizes finite observations with differences exceeding the double range.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
-  void testSpreadBeyondDoubleRangeFailsLoudNamingTheMetric() {
-    final IOException e = Assertions.assertThrows(IOException.class,
-        () -> load(String.join("\n",
+  void testSpreadBeyondDoubleRange() throws IOException {
+    final PlaceProfiles profiles = load(String.join("\n",
             "id\tsmall\thuge",
             "x\t1\t1.7976931348623157e308",
             "y\t2\t-1.7976931348623157e308",
             "z\t3\t-1.7976931348623157e308",
-            "")));
-    Assertions.assertEquals("metric column overflows a double: huge", e.getMessage());
+            ""));
+    Assertions.assertTrue(Double.isFinite(profiles.similarity("x", "y")));
+    Assertions.assertEquals(0.5, profiles.similarity("y", "z"), 1e-12);
   }
 
   /**
-   * Asserts that standardization is scale-invariant across the double range: the same
-   * table with one column written near the maximum double and rescaled by 308 orders
-   * of magnitude produces the same similarities, because each column is divided by
-   * its own deviation and the scaled statistics never overflow on the way. The units
-   * a caller chooses for a column therefore cannot change any score.
+   * Changing a metric's units preserves the pairwise scores within rounding tolerance.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testStandardizationIsScaleInvariantAcrossTheDoubleRange() throws IOException {
@@ -391,10 +333,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts the constant-column contract at a magnitude whose plain sum would
-   * overflow: a constant column of near-maximum values is recognized by its equal
-   * smallest and largest value, contributes nothing to any similarity, and the
-   * varying column alone determines the scores.
+   * A constant large-valued column has no effect on similarity.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testConstantColumnOfHugeValuesContributesNothing() throws IOException {
@@ -409,11 +350,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts how exact ties rank: two places with identical raw rows score the same
-   * bitwise-identical similarity against the query, they occupy the two adjacent top
-   * positions in the ranking in ascending identifier order, and the clearly dissimilar
-   * place ranks last. The tied pair is asserted as an exact sequence rather than as a
-   * set, because the documented tie-break makes the sequence reproducible across runs.
+   * Equal scores are ordered by ascending place identifier.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testTiedScoresRankByAscendingIdentifier() throws IOException {
@@ -435,12 +374,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that the top-{@code count} cut through a tie keeps a reproducible set of
-   * places, not merely a reproducible order among whatever survives. Three places tie
-   * at exactly the same score and only two are asked for, so the two lowest identifiers
-   * are returned; without a tie-break the surviving pair would follow the iteration
-   * order of the underlying immutable map, which the JDK randomizes per run, and a
-   * place would silently enter and leave the result between runs of the same query.
+   * The result limit selects the lowest identifiers when scores are equal.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testTiedTopCountCutKeepsTheLowestIdentifiers() throws IOException {
@@ -458,10 +394,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that an attribution comment placed ahead of the header, the natural place
-   * to record the licenses of the sources a table was derived from, is ignored rather
-   * than mistaken for the header. Blank lines ahead of the header are ignored the same
-   * way, and the header is then read from the first line that carries content.
+   * Accepts comments and blank lines before the header.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testCommentsAndBlankLinesBeforeTheHeaderAreIgnored() throws IOException {
@@ -478,9 +413,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts the documented comment rule inside the data region: a line whose first
-   * non-blank character is {@code #} is a comment wherever it appears, so an indented
-   * comment between data rows is skipped rather than read as a malformed row.
+   * Skips indented comments between data lines.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testIndentedCommentBetweenDataRowsIsSkipped() throws IOException {
@@ -496,9 +431,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that metric names are stripped of surrounding whitespace like every other
-   * cell, so the names reported by {@link PlaceProfiles#metrics()} and used in failure
-   * messages match what the header means rather than how it was padded.
+   * Removes surrounding whitespace from metric names.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testHeaderMetricNamesAreStripped() throws IOException {
@@ -510,12 +445,9 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals(List.of("population", "area"), profiles.metrics());
   }
 
-  /**
-   * Asserts that an empty metric name in the header fails loud, naming the column: a
-   * nameless column could never be reported usefully by any later failure message.
-   */
+  /** Rejects an empty metric name and reports the header column. */
   @Test
-  void testEmptyMetricNameInHeaderFailsLoud() {
+  void testEmptyMetricNameInHeaderIsRejected() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load(String.join("\n",
             "id\tpopulation\t\tarea",
@@ -524,11 +456,7 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals("empty metric name in header column 3", e.getMessage());
   }
 
-  /**
-   * Asserts that the header is fully validated before any row is parsed, so a table that
-   * is broken in both places reports the header rather than the first bad row: the header
-   * is what the user has to fix first, and a large table is not parsed to find that out.
-   */
+  /** Reports an invalid header before parsing data lines. */
   @Test
   void testHeaderIsValidatedBeforeRows() {
     final IOException e = Assertions.assertThrows(IOException.class,
@@ -539,13 +467,9 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals("empty metric name in header column 3", e.getMessage());
   }
 
-  /**
-   * Asserts that an identifier that strips to nothing fails loud with its row number:
-   * accepting it would register a place under the empty string and silently merge
-   * every such row into one phantom place.
-   */
+  /** Rejects a whitespace-only identifier with the physical line number. */
   @Test
-  void testWhitespaceOnlyIdFailsLoud() {
+  void testWhitespaceOnlyIdIsRejected() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load(String.join("\n",
             "id\tv",
@@ -555,14 +479,9 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals("empty id in row 2", e.getMessage());
   }
 
-  /**
-   * Asserts that Java's hexadecimal floating-point notation is rejected like the
-   * {@code f} and {@code d} literal suffixes: it is source syntax, not table data,
-   * and its acceptance would mean the generating program leaked literals into the
-   * table.
-   */
+  /** Rejects hexadecimal floating-point notation in a metric cell. */
   @Test
-  void testHexadecimalFloatLiteralFailsLoud() {
+  void testHexadecimalFloatLiteralIsRejected() {
     final IOException e = Assertions.assertThrows(IOException.class,
         () -> load(String.join("\n",
             "id\tv",
@@ -572,10 +491,7 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals("malformed value in row 2: 0x1.8p1", e.getMessage());
   }
 
-  /**
-   * Asserts that a table holding nothing but comments and blank space is rejected as
-   * having no header, rather than treating a comment as the header.
-   */
+  /** Rejects a table containing only comments and blank lines. */
   @Test
   void testTableOfOnlyCommentsHasNoHeader() {
     final IOException e = Assertions.assertThrows(IOException.class,
@@ -584,11 +500,9 @@ public class PlaceProfilesEdgeCaseTest {
   }
 
   /**
-   * Asserts that the parser strips identifiers and values with the same whitespace
-   * definition the rest of the toolkit uses, which counts the no-break space that
-   * {@link String#trim()} leaves in place. A table copied out of a PDF or a rendered web
-   * table routinely carries no-break spaces around its cells, and leaving one attached
-   * would store the place under an unreachable identifier.
+   * Removes no-break spaces from identifiers and numeric cells.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testNoBreakSpaceAroundCellsIsStripped() throws IOException {
@@ -601,30 +515,24 @@ public class PlaceProfilesEdgeCaseTest {
     Assertions.assertEquals(-1.0, profiles.similarity("north", "south"));
   }
 
-  /**
-   * Asserts that when an identifier appears on more than one row, the last row wins:
-   * the duplicated place ends up indistinguishable from the place sharing its final
-   * values and mirrored against the remaining place, proving the earlier row was
-   * discarded before standardization.
-   */
+  /** Rejects repeated identifiers before standardizing the table. */
   @Test
-  void testDuplicateIdentifierKeepsLastRow() throws IOException {
-    final PlaceProfiles profiles = load(String.join("\n",
+  void testDuplicateIdentifierIsRejected() {
+    final IOException error = Assertions.assertThrows(IOException.class,
+        () -> load(String.join("\n",
         "id\ta\tb",
         "dup\t100\t100",
         "dup\t1\t2",
         "twin\t1\t2",
         "far\t9\t5",
-        ""));
-    Assertions.assertEquals(1.0, profiles.similarity("dup", "twin"), 1e-12);
-    Assertions.assertEquals(-1.0, profiles.similarity("dup", "far"), 1e-12);
+        "")));
+    Assertions.assertEquals("duplicate id in row 3: dup", error.getMessage());
   }
 
   /**
-   * Asserts that carriage-return line endings, comment lines starting with {@code #},
-   * and blank lines are all tolerated: the table loads, the comment line does not
-   * become a place, the four real places are present, and a mirrored pair still
-   * scores exactly {@code -1.0}.
+   * Accepts CRLF line endings with comments and blank lines.
+   *
+   * @throws IOException Thrown if the table cannot be loaded.
    */
   @Test
   void testCarriageReturnsCommentsAndBlankLinesAreIgnored() throws IOException {

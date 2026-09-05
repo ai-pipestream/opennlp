@@ -37,8 +37,8 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * from a WN-LMF {@code LexiconExtension}, it carries the exact {@code Extends} reference, the
  * identity components describe the extension itself, and {@link #knowledgeBase()} contains the
  * resolved base plus the extension's additive content. {@code Extends} is never mixed into
- * {@link #dependencies()}. The list and maps are immutable. Thread safety of the knowledge
- * base depends on its implementation.</p>
+ * {@link #dependencies()}. The list and maps are immutable. Thread safety of the
+ * knowledge base depends on its implementation.</p>
  *
  * @param id            The WN-LMF lexicon id. Must not be {@code null} or empty.
  * @param label         The human-readable label. Must not be {@code null} or empty.
@@ -54,6 +54,7 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
  * @since 3.0.0
  */
+
 public record WnLmfLexicon(
     String id,
     String label,
@@ -99,7 +100,7 @@ public record WnLmfLexicon(
       }
     }
     if (extensionOf == null) {
-      throw new IllegalArgumentException("extensionOf must not be null; use Optional.empty()");
+      throw new IllegalArgumentException("ExtensionOf must not be null; use Optional.empty()");
     }
     if (knowledgeBase == null) {
       throw new IllegalArgumentException("knowledgeBase must not be null");
@@ -118,6 +119,7 @@ public record WnLmfLexicon(
    * @param metadata      The remaining Lexicon attributes. Must not be {@code null}.
    * @param dependencies  The required lexicons in source order. Must not be {@code null}.
    * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
+ * @since 3.0.0
    * @throws IllegalArgumentException Thrown if a component violates its documented constraint.
    */
   public WnLmfLexicon(String id, String label, String language, String version,

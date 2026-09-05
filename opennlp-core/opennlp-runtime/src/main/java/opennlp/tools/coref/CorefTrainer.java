@@ -22,10 +22,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
@@ -44,33 +46,19 @@ import opennlp.tools.util.TrainingParameters;
  * Trains a {@link CorefModel} from documents that carry the input layers of
  * {@link CorefAnnotator} and a {@link CorefAnnotator#GOLD_CHAINS} layer.
  *
- * <p>Every document is processed the way the annotator will process it: mentions are
- * detected from its layers and the speaker and string sieves run. Then each remaining
- * anaphor,
- * in text order, yields one training pair per candidate antecedent in salience order:
- * the nearest preceding candidate that shares the anaphor's gold chain is a link, the
- * candidates between the two are apart, and when no candidate shares the chain every
- * candidate is apart, unless the chain started earlier in mentions the detector missed,
- * in which case the anaphor is left out as unlearnable. Gold links are applied as they
- * are found, so cluster-level
- * features during training reflect the gold clustering reached so far, as the
- * predicted clustering will at annotation time. Gold chains are matched to detected
- * mentions by exact span; a gold mention the detector misses contributes nothing.</p>
+ * <p>Training uses the annotator's mention detection, candidate order, and speaker and
+ * string sieves. Gold chains match detected mentions by exact span. An anaphor is
+ * omitted when its gold antecedent was not detected.</p>
  *
  * <p>{@link #trainRanking} learns a mention ranker instead, after
  * <a href="https://aclanthology.org/D13-1203/">Durrett and Klein (EMNLP 2013)</a>: for
- * each anaphor the options are its candidates and the option of starting a new chain,
- * and the model maximizes the log probability of the gold options under a softmax over
- * all options, with any gold antecedent counting rather than only the nearest. The
- * learned weights are stored as a {@link GISModel} whose link probability is a
- * monotone function of the score, so the annotator compares candidates and the
- * new-chain option through the same model interface.</p>
+ * each anaphor the options are its candidates and a new-chain option. The model
+ * maximizes the combined probability of all gold options under a softmax. Its weights
+ * are stored in a {@link GISModel}.</p>
  *
  * <p>A corpus that annotates singleton entities annotates every mention of its scheme,
- * so a detected mention absent from such a document's gold layer lies outside the scheme
- * (LitBank, for one, marks entities of the ACE types only) and is neither taught as a
- * first mention nor as an anaphor; in a corpus without singletons, OntoNotes style, an
- * unannotated mention is a true singleton and is taught to start a chain.</p>
+ * so a detected mention absent from that gold layer is excluded from training. In data
+ * without gold singletons, an unannotated mention trains as a new chain.</p>
  *
  * @since 3.0.0
  */
@@ -96,6 +84,12 @@ public final class CorefTrainer {
    * being new chain, and with contextual vectors the anaphor's span vector and each
    * candidate's, from which the real-valued features derive as
    * {@link CorefContextGenerator.Features} describes.
+   *
+   * @param options The sparse feature ids of each option.
+   * @param anaphor The anaphor vector, or {@code null}.
+   * @param antecedents The antecedent vector of each option, with {@code null} for the
+   *                    new-chain option or when no vectors are used.
+   * @param gold Which options are correct.
    */
   private record RankingInstance(int[][] options, float[] anaphor, float[][] antecedents,
       boolean[] gold) {
@@ -108,6 +102,12 @@ public final class CorefTrainer {
     final double[] difference;
     final double[] newChain;
 
+    /**
+     * Allocates zero-initialized sparse and dense weights.
+     *
+     * @param features The number of sparse features.
+     * @param dimension The dense vector dimension.
+     */
     Weights(int features, int dimension) {
       sparse = new double[features];
       product = new double[dimension];
@@ -121,33 +121,43 @@ public final class CorefTrainer {
 
     private final CorefAnnotator annotator;
 
+    /**
+     * Creates an event stream over annotated documents.
+     *
+     * @param documents The document stream.
+     * @param annotator The mention detector and resolver configuration.
+     */
     PairEventStream(ObjectStream<Document> documents, CorefAnnotator annotator) {
       super(documents);
       this.annotator = annotator;
     }
 
+    /** {@inheritDoc} */
     @Override
     protected Iterator<Event> createEvents(Document document) {
       return pairs(document, annotator).iterator();
     }
   }
 
+  /** Prevents construction of this training utility. */
   private CorefTrainer() {
-    // Not instantiated; this class provides the static train method only.
   }
 
   /**
    * Trains a model with the conventional entity types of {@link CorefAnnotator}.
    *
-   * @param languageCode The ISO language code of the documents.
+   * @param languageCode The ISO language code of the documents. Must not be
+   *                     {@code null} or blank.
    * @param documents The training documents, each carrying the annotator's required
    *                  layers and {@link CorefAnnotator#GOLD_CHAINS}. Must not be
    *                  {@code null}.
    * @param parameters The training parameters. Must not be {@code null}.
    * @return The model. Never {@code null}.
    * @throws IOException Thrown if reading the documents fails.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a
-   *         document lacks a required layer.
+   * @throws IllegalArgumentException Thrown if an argument is invalid or a document
+   *         lacks a required layer.
+   * @throws IllegalStateException Thrown if a vector provider violates its return
+   *         contract.
    */
   public static CorefModel train(String languageCode, ObjectStream<Document> documents,
       TrainingParameters parameters) throws IOException {
@@ -157,18 +167,22 @@ public final class CorefTrainer {
   /**
    * Trains a model for the entity types and pronoun classes of an annotator.
    *
-   * @param languageCode The ISO language code of the documents.
+   * @param languageCode The ISO language code of the documents. Must not be
+   *                     {@code null} or blank.
    * @param documents The training documents. Must not be {@code null}.
    * @param parameters The training parameters. Must not be {@code null}.
    * @param annotator The rule-based annotator whose mention detection and speaker
    *                  sieve the model is trained against. Must not be {@code null}.
    * @return The model. Never {@code null}.
    * @throws IOException Thrown if reading the documents fails.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a
-   *         document lacks a required layer.
+   * @throws IllegalArgumentException Thrown if an argument is invalid or a document
+   *         lacks a required layer.
+   * @throws IllegalStateException Thrown if a vector provider violates its return
+   *         contract.
    */
   public static CorefModel train(String languageCode, ObjectStream<Document> documents,
       TrainingParameters parameters, CorefAnnotator annotator) throws IOException {
+    CorefModel.requireLanguageCode(languageCode);
     if (documents == null) {
       throw new IllegalArgumentException("documents must not be null");
     }
@@ -182,22 +196,27 @@ public final class CorefTrainer {
     final EventTrainer<TrainingParameters> trainer =
         TrainerFactory.getEventTrainer(parameters, manifestInfoEntries);
     final MaxentModel pairModel = trainer.train(new PairEventStream(documents, annotator));
-    return new CorefModel(languageCode, pairModel, manifestInfoEntries);
+    return new CorefModel(languageCode, pairModel, false,
+        annotator.tokenVectorDimension(), manifestInfoEntries);
   }
 
   /**
    * Trains a ranking model with the settings chosen on the OntoGUM development split:
    * {@link #DEFAULT_EPOCHS}, {@link #DEFAULT_LEARNING_RATE}, and {@link #DEFAULT_L2}.
    *
-   * @param languageCode The ISO language code of the documents.
-   * @param documents The training documents. Must not be {@code null}.
+   * @param languageCode The ISO language code of the documents. Must not be
+   *                     {@code null} or blank.
+   * @param documents The training documents. Must not be {@code null} and must produce
+   *                  at least one ranking instance.
    * @param annotator The rule-based annotator whose mention detection, speaker and
    *                  string sieves, and word vectors the model is trained against.
    *                  Must not be {@code null}.
    * @return The model. Never {@code null}.
    * @throws IOException Thrown if reading the documents fails.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a
-   *         document lacks a required layer.
+   * @throws IllegalArgumentException Thrown if an argument is invalid, a document lacks
+   *         a required layer, or the data produces no ranking instances.
+   * @throws IllegalStateException Thrown if a vector provider violates its return
+   *         contract.
    */
   public static CorefModel trainRanking(String languageCode, ObjectStream<Document> documents,
       CorefAnnotator annotator) throws IOException {
@@ -208,22 +227,27 @@ public final class CorefTrainer {
   /**
    * Trains a ranking model.
    *
-   * @param languageCode The ISO language code of the documents.
-   * @param documents The training documents. Must not be {@code null}.
+   * @param languageCode The ISO language code of the documents. Must not be
+   *                     {@code null} or blank.
+   * @param documents The training documents. Must not be {@code null} and must produce
+   *                  at least one ranking instance.
    * @param epochs How many passes over the anaphors to make. Must be positive.
-   * @param learningRate The AdaGrad step size. Must be positive.
-   * @param l2 The L2 regularization weight. Must not be negative.
+   * @param learningRate The AdaGrad step size. Must be positive and finite.
+   * @param l2 The L2 regularization weight. Must be finite and not negative.
    * @param annotator The rule-based annotator whose mention detection, speaker and
    *                  string sieves, and word vectors the model is trained against.
    *                  Must not be {@code null}.
    * @return The model. Never {@code null}.
    * @throws IOException Thrown if reading the documents fails.
    * @throws IllegalArgumentException Thrown if an argument is invalid or a document
-   *         lacks a required layer.
+   *         lacks a required layer, or the data produces no ranking instances.
+   * @throws IllegalStateException Thrown if a vector provider violates its return
+   *         contract.
    */
   public static CorefModel trainRanking(String languageCode, ObjectStream<Document> documents,
       int epochs, double learningRate, double l2, CorefAnnotator annotator)
       throws IOException {
+    CorefModel.requireLanguageCode(languageCode);
     if (documents == null) {
       throw new IllegalArgumentException("documents must not be null");
     }
@@ -233,23 +257,28 @@ public final class CorefTrainer {
     if (epochs <= 0) {
       throw new IllegalArgumentException("epochs must be positive: " + epochs);
     }
-    if (!(learningRate > 0.0)) {
-      throw new IllegalArgumentException("learningRate must be positive: " + learningRate);
+    if (!Double.isFinite(learningRate) || learningRate <= 0.0) {
+      throw new IllegalArgumentException(
+          "learningRate must be positive and finite: " + learningRate);
     }
-    if (!(l2 >= 0.0)) {
-      throw new IllegalArgumentException("l2 must not be negative: " + l2);
+    if (!Double.isFinite(l2) || l2 < 0.0) {
+      throw new IllegalArgumentException("l2 must be finite and not negative: " + l2);
     }
     final Map<String, Integer> featureIds = new HashMap<>();
     final List<RankingInstance> instances = new ArrayList<>();
-    int dimension = 0;
+    final int dimension = annotator.tokenVectorDimension();
     Document document;
     while ((document = documents.read()) != null) {
       for (final RankingInstance instance : rankingInstances(document, annotator, featureIds)) {
         instances.add(instance);
-        if (instance.anaphor() != null) {
-          dimension = instance.anaphor().length;
+        if (instance.anaphor() != null && instance.anaphor().length != dimension) {
+          throw new IllegalStateException("token encoder returned dimension "
+              + instance.anaphor().length + ", expected " + dimension);
         }
       }
+    }
+    if (instances.isEmpty()) {
+      throw new IllegalArgumentException("training data produced no ranking instances");
     }
     final Weights weights = new Weights(featureIds.size(), dimension);
     final Weights squares = new Weights(featureIds.size(), dimension);
@@ -283,12 +312,19 @@ public final class CorefTrainer {
     }
     final GISModel model = new GISModel(parameters, predicates,
         new String[] {SieveResolver.LINK, SieveResolver.APART});
-    return new CorefModel(languageCode, model, true, new HashMap<>());
+    return new CorefModel(languageCode, model, true, dimension, new HashMap<>());
   }
 
   /**
    * Takes one AdaGrad step up the log probability of the gold options: the gradient is
    * the expected feature count under the gold options minus that under all options.
+   *
+   * @param instance The ranking instance.
+   * @param weights The current weights.
+   * @param squares The accumulated squared gradients.
+   * @param gradient Reusable sparse-gradient storage.
+   * @param learningRate The AdaGrad step size.
+   * @param l2 The L2 regularization weight.
    */
   private static void step(RankingInstance instance, Weights weights, Weights squares,
       double[] gradient, double learningRate, double l2) {
@@ -319,7 +355,9 @@ public final class CorefTrainer {
         gold += Math.exp(scores[o] - goldMax);
       }
     }
-    final List<Integer> touched = new ArrayList<>();
+    final int[] touched = new int[gradient.length];
+    final boolean[] queued = new boolean[gradient.length];
+    int touchedCount = 0;
     final int dimension = u == null ? 0 : u.length;
     final double[] productGradient = new double[dimension];
     final double[] differenceGradient = new double[dimension];
@@ -332,8 +370,9 @@ public final class CorefTrainer {
         continue;
       }
       for (final int f : options[o]) {
-        if (gradient[f] == 0.0) {
-          touched.add(f);
+        if (!queued[f]) {
+          queued[f] = true;
+          touched[touchedCount++] = f;
         }
         gradient[f] += delta;
       }
@@ -349,7 +388,8 @@ public final class CorefTrainer {
         }
       }
     }
-    for (final int f : touched) {
+    for (int i = 0; i < touchedCount; i++) {
+      final int f = touched[i];
       update(weights.sparse, squares.sparse, f, gradient[f], learningRate, l2);
       gradient[f] = 0.0;
     }
@@ -360,7 +400,14 @@ public final class CorefTrainer {
     }
   }
 
-  /** {@return the dense part of an option's score: a pair's, or the new-chain option's} */
+  /**
+   * Computes the dense portion of an option score.
+   *
+   * @param weights The current weights.
+   * @param u The anaphor vector.
+   * @param v The antecedent vector, or {@code null} for a new chain.
+   * @return The dense portion of the option score.
+   */
   private static double dense(Weights weights, float[] u, float[] v) {
     double score = 0.0;
     for (int d = 0; d < u.length; d++) {
@@ -373,7 +420,16 @@ public final class CorefTrainer {
     return score;
   }
 
-  /** Applies one AdaGrad update to a weight from its gradient and L2 penalty. */
+  /**
+   * Applies one AdaGrad update.
+   *
+   * @param weights The weight array.
+   * @param squares The accumulated squared gradients.
+   * @param f The weight index.
+   * @param gradient The likelihood gradient.
+   * @param learningRate The step size.
+   * @param l2 The regularization weight.
+   */
   private static void update(double[] weights, double[] squares, int f, double gradient,
       double learningRate, double l2) {
     final double g = gradient - l2 * weights[f];
@@ -385,6 +441,12 @@ public final class CorefTrainer {
    * Builds the ranking instances of one document: for each anaphor the feature ids of
    * every admissible candidate and of the new-chain option, with the gold options
    * marked, applying gold links as they are found.
+   *
+   * @param document The training document.
+   * @param annotator The mention detector and resolver configuration.
+   * @param featureIds The feature dictionary to extend.
+   * @return The document's ranking instances.
+   * @throws IllegalArgumentException Thrown if the gold chains layer is absent.
    */
   private static List<RankingInstance> rankingInstances(Document document,
       CorefAnnotator annotator, Map<String, Integer> featureIds) {
@@ -402,23 +464,18 @@ public final class CorefTrainer {
     final Clusters clusters = resolver.clusters();
     final int[] gold = goldChains(document, mentions);
     final int[] chainStarts = chainStarts(document);
-    final boolean partial = annotatesSingletons(document);
+    final boolean completeGold = annotatesSingletons(document);
     final CorefContextGenerator features = new CorefContextGenerator(resolver);
     for (int j = 0; j < mentions.size(); j++) {
-      if (clusters.find(j) != j || !resolver.rankable(j) || partial && gold[j] < 0) {
+      if (clusters.find(j) != j || !resolver.rankable(j) || completeGold && gold[j] < 0) {
         continue;
       }
       final List<Integer> candidates = resolver.rankerCandidates(j);
-      final int[][] options = new int[candidates.size() + 1][];
-      final float[][] antecedents = new float[options.length][];
-      final boolean[] goldOptions = new boolean[options.length];
+      final boolean[] goldOptions = new boolean[candidates.size() + 1];
       int nearest = -1;
       boolean anyGold = false;
       for (int o = 0; o < candidates.size(); o++) {
         final int i = candidates.get(o);
-        final CorefContextGenerator.Features pair = features.features(i, j);
-        options[o] = ids(pair.names(), featureIds);
-        antecedents[o] = pair.antecedent();
         goldOptions[o] = gold[j] >= 0 && gold[i] == gold[j];
         anyGold |= goldOptions[o];
         if (goldOptions[o] && i > nearest) {
@@ -427,6 +484,15 @@ public final class CorefTrainer {
       }
       if (!anyGold && unlearnable(mentions.get(j), gold[j], chainStarts)) {
         continue;
+      }
+      final int[][] options = new int[candidates.size() + 1][];
+      final float[][] antecedents = new float[options.length][];
+      for (int o = 0; o < candidates.size(); o++) {
+        final CorefContextGenerator.Features pair = features.features(candidates.get(o), j);
+        // Ranking stores the vectors, but inference expands them into float features.
+        features.values(pair);
+        options[o] = ids(pair.names(), featureIds);
+        antecedents[o] = pair.antecedent();
       }
       final CorefContextGenerator.Features newChain = features.newChainFeatures(j);
       options[candidates.size()] = ids(newChain.names(), featureIds);
@@ -439,7 +505,13 @@ public final class CorefTrainer {
     return instances;
   }
 
-  /** Maps feature strings to ids, minting ids for unseen features. */
+  /**
+   * Maps feature strings to ids, assigning ids to unseen features.
+   *
+   * @param features The feature strings.
+   * @param featureIds The feature dictionary to extend.
+   * @return The corresponding feature ids.
+   */
   private static int[] ids(String[] features, Map<String, Integer> featureIds) {
     final int[] ids = new int[features.length];
     for (int f = 0; f < features.length; f++) {
@@ -471,10 +543,10 @@ public final class CorefTrainer {
     final Clusters clusters = resolver.clusters();
     final int[] gold = goldChains(document, mentions);
     final int[] chainStarts = chainStarts(document);
-    final boolean partial = annotatesSingletons(document);
+    final boolean completeGold = annotatesSingletons(document);
     final CorefContextGenerator features = new CorefContextGenerator(resolver);
     for (int j = 0; j < mentions.size(); j++) {
-      if (clusters.find(j) != j || !resolver.rankable(j) || partial && gold[j] < 0) {
+      if (clusters.find(j) != j || !resolver.rankable(j) || completeGold && gold[j] < 0) {
         continue;
       }
       final List<Integer> candidates = resolver.rankerCandidates(j);
@@ -504,7 +576,12 @@ public final class CorefTrainer {
     return events;
   }
 
-  /** {@return whether any gold chain of the document has a single mention} */
+  /**
+   * Checks whether the gold layer includes singleton chains.
+   *
+   * @param document The training document.
+   * @return Whether any gold chain contains one mention.
+   */
   private static boolean annotatesSingletons(Document document) {
     final Map<Integer, Integer> sizes = new HashMap<>();
     for (final Annotation<CorefMention> mention : document.get(CorefAnnotator.GOLD_CHAINS)) {
@@ -516,14 +593,24 @@ public final class CorefTrainer {
   /**
    * Checks whether an anaphor's gold antecedents are all missing from the detected
    * mentions: its gold chain starts before it, yet no candidate shares the chain. Such
-   * an anaphor is coreferent in truth, so teaching it as a first mention or as a
-   * refusal to link would be wrong; it is left out of training.
+   * an anaphor is coreferent in the annotation, so treating it as a first mention or an
+   * unlinked pair would be incorrect; it is omitted from training.
+   *
+   * @param anaphor The detected anaphor.
+   * @param goldChain Its gold chain id, or {@code -1}.
+   * @param chainStarts The first offset of every gold chain.
+   * @return Whether the gold antecedent is absent from detected candidates.
    */
   private static boolean unlearnable(Mention anaphor, int goldChain, int[] chainStarts) {
     return goldChain >= 0 && chainStarts[goldChain] < anaphor.span().getStart();
   }
 
-  /** {@return the start offset of the earliest gold mention of every chain} */
+  /**
+   * Finds the first mention offset of each gold chain.
+   *
+   * @param document The training document.
+   * @return The first mention offset of each gold chain.
+   */
   private static int[] chainStarts(Document document) {
     int chains = 0;
     for (final Annotation<CorefMention> gold : document.get(CorefAnnotator.GOLD_CHAINS)) {
@@ -537,12 +624,32 @@ public final class CorefTrainer {
     return starts;
   }
 
-  /** Maps each detected mention to its gold chain, or {@code -1} when it has none. */
+  /**
+   * Maps detected mentions to gold chains by exact span.
+   *
+   * @param document The training document.
+   * @param mentions The detected mentions.
+   * @return The gold chain id of each mention, or {@code -1}.
+   * @throws IllegalArgumentException Thrown if gold mention spans repeat or chain ids
+   *         are not consecutive in first-mention order.
+   */
   private static int[] goldChains(Document document, List<Mention> mentions) {
     final Map<Span, Integer> chainOfSpan = new HashMap<>();
-    for (final Annotation<CorefMention> gold : document.get(CorefAnnotator.GOLD_CHAINS)) {
-      chainOfSpan.put(new Span(gold.span().getStart(), gold.span().getEnd()),
-          gold.value().chain());
+    final List<Annotation<CorefMention>> annotations =
+        new ArrayList<>(document.get(CorefAnnotator.GOLD_CHAINS));
+    annotations.sort((first, second) -> first.span().compareTo(second.span()));
+    final Set<Integer> seenChains = new HashSet<>();
+    for (final Annotation<CorefMention> gold : annotations) {
+      final Span span = new Span(gold.span().getStart(), gold.span().getEnd());
+      if (chainOfSpan.putIfAbsent(span, gold.value().chain()) != null) {
+        throw new IllegalArgumentException("duplicate gold mention span: " + span);
+      }
+      if (seenChains.add(gold.value().chain())
+          && gold.value().chain() != seenChains.size() - 1) {
+        throw new IllegalArgumentException("gold chain identifiers must start at zero in "
+            + "first-mention order: expected " + (seenChains.size() - 1) + ", found "
+            + gold.value().chain() + " at " + span);
+      }
     }
     final int[] chains = new int[mentions.size()];
     for (int m = 0; m < chains.length; m++) {

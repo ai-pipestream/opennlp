@@ -18,23 +18,30 @@
 package opennlp.tools.glossary;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
-import opennlp.tools.stemmer.snowball.SnowballStemmer;
-import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
+import opennlp.tools.document.LayerKey;
+import opennlp.tools.document.Layers;
+import opennlp.tools.util.Span;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
+import static opennlp.tools.glossary.GlossaryTestSupport.englishStemmingAnalyzer;
+
+/** Tests glossary annotation and document layer validation. */
 public class GlossaryAnnotatorTest {
 
-  /** The single glossary entry every test in this class matches against. */
+  /** City entry used in document layer tests. */
   private static final GlossaryEntry NEW_YORK_CITY = new GlossaryEntry("Q60", "New York City");
 
   /**
-   * Builds an annotator over a glossary holding {@link #NEW_YORK_CITY} alone.
+   * Builds an annotator for {@link #NEW_YORK_CITY}.
    *
    * @param ignoreCase Whether the matcher matches regardless of character case.
    * @return The annotator to exercise. Never {@code null}.
@@ -44,6 +51,9 @@ public class GlossaryAnnotatorTest {
         new AhoCorasickGlossaryMatcher(List.of(NEW_YORK_CITY), ignoreCase));
   }
 
+  /**
+   * Adds matching identifiers and spans to the glossary layer.
+   */
   @Test
   void testProvidesGlossaryLayer() {
     final GlossaryAnnotator annotator = annotator(true);
@@ -60,10 +70,7 @@ public class GlossaryAnnotatorTest {
   }
 
   /**
-   * Verifies that a text without any glossary hit, including the empty text, still gets
-   * a glossary layer: the layer key is present on the document and its annotation list
-   * is empty, so consumers can distinguish "annotator ran, found nothing" from
-   * "annotator never ran".
+   * Adds an empty glossary layer when the input contains no matching terms.
    */
   @Test
   void testNoHitsStillProvidesEmptyGlossaryLayer() {
@@ -79,9 +86,7 @@ public class GlossaryAnnotatorTest {
   }
 
   /**
-   * Verifies that annotating the same document twice fails loud: the second run tries
-   * to add the glossary layer again and the document rejects the duplicate layer with
-   * an {@link IllegalArgumentException}.
+   * Rejects annotation of a document that already has a glossary layer.
    */
   @Test
   void testAnnotateTwiceRejectsDuplicateGlossaryLayer() {
@@ -92,6 +97,24 @@ public class GlossaryAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(once));
   }
 
+  /**
+   * Rejects a duplicate output layer before invoking a potentially expensive matcher.
+   *
+   * @param text The already annotated source text.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"", "New York City"})
+  void testDuplicateLayerRejectedBeforeMatching(String text) {
+    final Document document = Document.of(text).with(GlossaryAnnotator.GLOSSARY, List.of());
+    final GlossaryAnnotator annotator = new GlossaryAnnotator(input -> {
+      throw new AssertionError("matcher must not run for a duplicate output layer");
+    });
+    Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(document));
+  }
+
+  /**
+   * Rejects a null matcher or document.
+   */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new GlossaryAnnotator(null));
@@ -99,20 +122,46 @@ public class GlossaryAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 
+  /** Checks the pipeline input and output layer declarations. */
+  @Test
+  void testLayerDeclarations() {
+    final GlossaryAnnotator annotator = annotator(false);
+    Assertions.assertEquals(Set.of(), annotator.requires());
+    Assertions.assertEquals(Set.of(GlossaryAnnotator.GLOSSARY), annotator.provides());
+  }
+
+  /** Preserves input text, token annotations, and a separately named glossary layer. */
+  @Test
+  void testPreservesInputAndOtherLayers() {
+    final LayerKey<GlossaryMatch> referenceKey =
+        LayerKey.of("reference:glossary", GlossaryMatch.class);
+    final List<Annotation<String>> tokens = List.of(new Annotation<>(new Span(0, 3), "New"));
+    final List<Annotation<GlossaryMatch>> reference = List.of(new Annotation<>(new Span(0, 8),
+        new GlossaryMatch(new Span(0, 8), "STATE", "New York")));
+    final Document input = Document.of(NEW_YORK_CITY.term())
+        .with(Layers.TOKENS, tokens).with(referenceKey, reference);
+
+    final Document result = annotator(false).annotate(input);
+
+    Assertions.assertNotSame(input, result);
+    Assertions.assertEquals(input.text(), result.text());
+    Assertions.assertEquals(tokens, result.get(Layers.TOKENS));
+    Assertions.assertEquals(reference, result.get(referenceKey));
+    Assertions.assertFalse(input.layers().contains(GlossaryAnnotator.GLOSSARY));
+    Assertions.assertEquals(List.of(new Annotation<>(new Span(0, 13),
+        new GlossaryMatch(new Span(0, 13), NEW_YORK_CITY.id(), NEW_YORK_CITY.term()))),
+        result.get(GlossaryAnnotator.GLOSSARY));
+  }
+
   /**
-   * Pins the collision {@link CompositeGlossaryMatcher} solves: a document already carrying
-   * a glossary layer from one {@link GlossaryAnnotator} rejects a second annotator with a
-   * different matcher, because {@link Document} forbids adding the same layer twice.
+   * Rejects a duplicate glossary layer even when a different matcher is used.
    */
   @Test
   void testSecondGlossaryAnnotatorRejectsDuplicateLayer() {
     final List<GlossaryEntry> glossary = List.of(NEW_YORK_CITY);
     final GlossaryAnnotator exact =
         new GlossaryAnnotator(new AhoCorasickGlossaryMatcher(glossary, true));
-    final TermAnalyzer analyzer = TermAnalyzer.builder()
-        .caseFold()
-        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
-        .build();
+    final TermAnalyzer analyzer = englishStemmingAnalyzer();
     final GlossaryAnnotator inflected =
         new GlossaryAnnotator(new TermAnalyzingGlossaryMatcher(glossary, analyzer));
 
@@ -122,20 +171,14 @@ public class GlossaryAnnotatorTest {
   }
 
   /**
-   * Verifies that one {@link GlossaryAnnotator} wrapping a {@link CompositeGlossaryMatcher}
-   * of exact then inflected matchers records both kinds of hit on a single glossary layer:
-   * the plural {@code Hot dogs} from the inflected path, then {@code New York City} from
-   * the exact path, in text order.
+   * Adds exact and inflected matches to a single glossary layer in source order.
    */
   @Test
   void testCompositeMatcherCarriesExactAndInflectedHitsInOneLayer() {
     final List<GlossaryEntry> glossary = List.of(
         new GlossaryEntry("NYC", "New York City"),
         new GlossaryEntry("FOOD", "hot dog"));
-    final TermAnalyzer analyzer = TermAnalyzer.builder()
-        .caseFold()
-        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
-        .build();
+    final TermAnalyzer analyzer = englishStemmingAnalyzer();
     final GlossaryMatcher composite = new CompositeGlossaryMatcher(List.of(
         new AhoCorasickGlossaryMatcher(glossary, true),
         new TermAnalyzingGlossaryMatcher(glossary, analyzer)));

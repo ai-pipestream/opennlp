@@ -35,12 +35,16 @@ import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
 import opennlp.tools.util.normalizer.TextNormalizer;
 import opennlp.tools.util.normalizer.WhitespaceCharSequenceNormalizer;
 
+/** Tests character matching, word boundaries, and normalized source offsets. */
 public class AhoCorasickGlossaryMatcherTest {
 
   /** A case-sensitive one-term glossary, shared by the word boundary tests. */
   private static final AhoCorasickGlossaryMatcher CAT_MATCHER =
       new AhoCorasickGlossaryMatcher(List.of(new GlossaryEntry("CAT", "cat")), false);
 
+  /**
+   * Finds registered phrases and single words in source order.
+   */
   @Test
   void testFindsSingleAndMultiwordTerms() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(List.of(
@@ -59,6 +63,9 @@ public class AhoCorasickGlossaryMatcherTest {
         matches.get(1).span().getStart(), matches.get(1).span().getEnd()));
   }
 
+  /**
+   * Selects the longest match at a shared start offset.
+   */
   @Test
   void testPrefersLongestMatch() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(List.of(
@@ -71,6 +78,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals("CITY", matches.get(0).id());
   }
 
+  /**
+   * Prefers the earlier start when phrases overlap.
+   */
   @Test
   void testLeftmostWinsOverLaterOverlap() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(List.of(
@@ -83,6 +93,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals("A", matches.get(0).id());
   }
 
+  /**
+   * Preserves source offsets and the registered term when case is ignored.
+   */
   @Test
   void testIgnoreCaseKeepsOriginalSpan() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
@@ -97,6 +110,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals("machine learning", matches.get(0).term());
   }
 
+  /**
+   * Rejects case differences when ignoreCase is disabled.
+   */
   @Test
   void testCaseSensitiveByDefaultDoesNotCrossCase() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
@@ -105,6 +121,12 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertTrue(matcher.match("Machine Learning is popular.").isEmpty());
   }
 
+  /**
+   * Matches complete words at punctuation and text limits.
+   *
+   * @param text The source text.
+   * @param expectedHits The expected match count.
+   */
   @ParameterizedTest
   @CsvSource({
       "concatenate the files, 0",
@@ -116,6 +138,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals(expectedHits, CAT_MATCHER.match(text).size());
   }
 
+  /**
+   * Reports distinct registered aliases under a shared identifier.
+   */
   @Test
   void testAliasesShareOneId() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(List.of(
@@ -132,6 +157,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals("press for widgets", matches.get(1).term());
   }
 
+  /**
+   * Uses registration order for duplicate terms.
+   */
   @Test
   void testDuplicateTermFirstRegistrationWins() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(List.of(
@@ -144,6 +172,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals("FIRST", matches.get(0).id());
   }
 
+  /**
+   * Reports repeated occurrences when case is ignored.
+   */
   @Test
   void testRepeatedHitsAllReported() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
@@ -154,9 +185,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies exact spans for hits touching both text edges: one term starts at offset
-   * zero and another ends exactly at the text length, exercising both boundary checks
-   * that have no neighboring character to inspect.
+   * Returns correct offsets at the start and end of the input.
    */
   @Test
   void testTermsAtTextStartAndEndReportExactSpans() {
@@ -178,9 +207,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies overlap resolution when one registered term is a prefix of another: where
-   * both start together the longer term is the only reported hit, while a standalone
-   * occurrence of the shorter term elsewhere is still reported with its exact span.
+   * Reports a prefix term only where a longer match does not cover it.
    */
   @Test
   void testPrefixTermSuppressedInsideLongerMatchButReportedAlone() {
@@ -201,9 +228,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies overlap resolution when one registered term occurs strictly inside another:
-   * the inner term is suppressed where the longer term matches, while a standalone
-   * occurrence of the inner term elsewhere is still reported with its exact span.
+   * Reports an inner term only where a longer match does not cover it.
    */
   @Test
   void testInnerTermSuppressedInsideLongerMatchButReportedAlone() {
@@ -224,8 +249,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that a term occurring twice is reported once per occurrence, in text
-   * order, with the exact span of each occurrence.
+   * Returns source offsets for repeated occurrences in text order.
    */
   @Test
   void testSameTermTwiceReportsBothOccurrences() {
@@ -245,7 +269,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that scanning an empty text is legal and yields no matches.
+   * Returns an empty list for empty input.
    */
   @Test
   void testEmptyTextYieldsNoMatches() {
@@ -256,9 +280,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that spans count UTF-16 chars, not code points: each supplementary
-   * character before the term occupies two char positions, so the hit starts at offset
-   * five rather than three.
+   * Counts supplementary characters as UTF-16 surrogate pairs in source offsets.
    */
   @Test
   void testSpansCountUtf16CharsForSupplementaryCharacters() {
@@ -277,15 +299,13 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that a term containing a non-ASCII letter matches with its exact span and
-   * that the accented character counts as one char position.
+   * Returns source offsets for a phrase containing an accented letter.
    */
   @Test
   void testAccentedTermMatchesWithExactSpan() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
         List.of(new GlossaryEntry("CAF", "caf\u00E9 au lait")), false);
 
-    // The e with acute accent (U+00E9) stays a single char in span arithmetic.
     final String text = "I ordered caf\u00E9 au lait today.";
     final List<GlossaryMatch> matches = matcher.match(text);
 
@@ -297,10 +317,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies the digit half of the boundary contract: a hit whose neighbor is a digit
-   * continues a word exactly like one whose neighbor is a letter, so a code embedded
-   * in a longer alphanumeric run never matches, while the same code between
-   * non-alphanumeric neighbors does.
+   * Rejects terms inside alphanumeric words and accepts parenthesized terms.
    */
   @Test
   void testDigitNeighborsBlockTheBoundary() {
@@ -314,9 +331,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that a supplementary letter next to a hit blocks the boundary like a
-   * basic-plane one: Deseret letters lie above U+FFFF, and a term glued to one is
-   * inside a word, not on a boundary.
+   * Treats an adjacent Deseret letter as part of the same word.
    */
   @Test
   void testSupplementaryLetterNeighborBlocksTheBoundary() {
@@ -327,16 +342,13 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that boundary filtering happens per hit, before overlap resolution: a
-   * longer candidate rejected at its boundary does not shadow a shorter overlapping
-   * term that sits on clean boundaries of its own.
+   * Applies word boundaries before choosing among overlapping phrases.
    */
   @Test
   void testBoundaryRejectedLongerCandidateLetsTheShorterTermThrough() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
         List.of(new GlossaryEntry("LONG", "launch pad"),
             new GlossaryEntry("SHORT", "launch")), false);
-    // "pads" continues the longer term's last word, so only the shorter term stands
     final List<GlossaryMatch> matches = matcher.match("launch pads ready");
     Assertions.assertEquals(1, matches.size());
     Assertions.assertEquals("SHORT", matches.get(0).id());
@@ -344,30 +356,24 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies case-insensitive matching on a non-ASCII basic-plane pair and pins the
-   * documented limitation at the same time: the per-code-point mapping folds a
-   * dotted-capital letter to its simple lowercase, so the sharp s never folds to
-   * {@code ss} and a term spelled with {@code ss} does not match the sharp s.
+   * Supports accented case pairs without treating sharp s as {@code ss}.
    */
   @Test
   void testNonAsciiCasePairFoldsAndMultiCharacterFoldingDoesNot() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
         List.of(new GlossaryEntry("RES", "r\u00E9sum\u00E9")), true);
-    // U+00C9/U+00E9, the accented E pair, folds per code point
     final List<GlossaryMatch> matches = matcher.match("R\u00C9SUM\u00C9 attached");
     Assertions.assertEquals(1, matches.size());
     Assertions.assertEquals(new Span(0, 6), matches.get(0).span());
 
     final AhoCorasickGlossaryMatcher sharp = new AhoCorasickGlossaryMatcher(
         List.of(new GlossaryEntry("ST", "strasse")), true);
-    // U+00DF, the sharp s: its full folding is the two-letter ss, which the
-    // per-code-point mapping deliberately does not apply
+    // U+00DF requires full case normalization for expansion to ss.
     Assertions.assertTrue(sharp.match("stra\u00DFe").isEmpty());
   }
 
   /**
-   * An {@link OffsetAwareNormalizer} folds length-changing forms before the automaton
-   * runs, and the hit span maps back to the original characters that produced the fold.
+   * Maps German sharp-s expansion back to the source characters.
    */
   @Test
   void testOffsetAwareNormalizerMatchesEszettAndKeepsOriginalSpan() {
@@ -386,8 +392,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * German umlaut expansion matches both directions of the DIN fold: an ASCII registration
-   * hits both the ASCII and umlaut surfaces, and spans cover the original characters.
+   * Matches umlauts and their ASCII expansions with source offsets.
    */
   @Test
   void testGermanUmlautNormalizerMatchesUmlautAndAsciiSpellings() {
@@ -411,8 +416,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * A term registered with the eszett spelling still matches ASCII {@code ss} text once
-   * both sides pass through the same expanding fold.
+   * Normalizes registered sharp-s terms as well as input text.
    */
   @Test
   void testTermRegisteredWithEszettMatchesAsciiSsText() {
@@ -427,9 +431,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Full Unicode case folding is supplied through the normalizer hook, so {@code ignoreCase}
-   * stays off and the expanding sharp-s fold still matches while the span covers the
-   * original eszett spelling.
+   * Uses full case normalization to match capitalized sharp-s text.
    */
   @Test
   void testFullCaseFoldNormalizerMatchesCapitalizedEszettForm() {
@@ -447,9 +449,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * The capital sharp s (U+1E9E) expands to {@code SS} under the German fold. With
-   * {@code ignoreCase}, that still matches a lowercase registration, and hits at the
-   * very start or end of the text report a tight original span.
+   * Maps capital sharp-s expansion at the text limits.
    */
   @Test
   void testCapitalEszettAtTextEdgesMapsTightOriginalSpans() {
@@ -469,8 +469,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * {@code ignoreCase} still applies after the offset-aware fold, so a lowercase term
-   * matches a mixed-case umlaut surface without requiring full case folding.
+   * Applies case comparison after German character expansion.
    */
   @Test
   void testIgnoreCaseAppliesAfterOffsetAwareFold() {
@@ -486,9 +485,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Whitespace collapse, dash folding, and invisible stripping compose through
-   * {@link TextNormalizer.Builder#buildAligned()}, and every hit span is expressed in
-   * original-text coordinates across those edits.
+   * Maps offsets through invisible-character removal, whitespace normalization, and dash conversion.
    */
   @Test
   void testAlignedPipelineNormalizerMapsHitsAcrossCollapseAndDashFold() {
@@ -512,8 +509,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Leading and trailing whitespace collapsed by the normalizer must not be pulled into
-   * the hit span; only the original characters that produced the match are covered.
+   * Excludes surrounding whitespace from the mapped match.
    */
   @Test
   void testWhitespaceCollapseDoesNotExpandSpanIntoNeighborSpaces() {
@@ -530,8 +526,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * After folding, a longer term still wins over a shorter overlapping one, and the
-   * reported span covers the original (pre-fold) characters of the longer hit.
+   * Reports the longer phrase after sharp-s expansion.
    */
   @Test
   void testLongestMatchWinsAfterLengthChangingFold() {
@@ -549,8 +544,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Two registrations that become the same pattern after folding keep first-wins
-   * registration order; a later distinct folded term still matches beside it.
+   * Uses registration order when normalization makes terms equal.
    */
   @Test
   void testDuplicateFoldedTermsKeepRegistrationOrder() {
@@ -567,8 +561,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * The three-argument constructor rejects a null normalizer; the two-argument form
-   * remains the identity path.
+   * Requires a normalizer when the normalizing constructor is selected.
    */
   @Test
   void testThreeArgumentConstructorRejectsNullNormalizer() {
@@ -580,8 +573,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Word-boundary filtering still uses the original text after a length-changing fold,
-   * so a match whose original edges sit inside a letter or digit run is dropped.
+   * Rejects normalized candidates inside longer source words.
    */
   @Test
   void testNormalizerHitStillRespectsOriginalWordBoundaries() {
@@ -597,10 +589,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * A glossary term that normalizes to blank is rejected at construction so the
-   * automaton never holds an empty pattern. Invisible-only terms (accepted by
-   * {@link GlossaryEntry} because zero-width space is not toolkit whitespace) are the
-   * concrete case.
+   * Rejects registrations containing only removable invisible characters.
    */
   @Test
   void testRejectsTermThatNormalizesToBlank() {
@@ -615,8 +604,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Three-argument construction still validates the glossary the same way as the
-   * two-argument form, and {@code match(null)} still fails loud.
+   * Validates registrations and input text on the normalizing path.
    */
   @Test
   void testThreeArgumentConstructorValidatesGlossaryAndText() {
@@ -633,8 +621,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Single-purpose offset-aware rungs remain usable without a builder pipeline, including
-   * en-dash and em-dash folds and a miss when the dash shape is absent from the text.
+   * Supports standalone dash and whitespace normalizers.
    */
   @Test
   void testDashAndWhitespaceNormalizersAlone() {
@@ -658,8 +645,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Two non-overlapping folded hits in one scan keep text order, and an empty scan with
-   * a normalizer present returns an empty list rather than failing.
+   * Returns normalized matches in source order and accepts empty input.
    */
   @Test
   void testMultipleFoldedHitsPreserveOrderAndEmptyTextIsEmpty() {
@@ -678,9 +664,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Verifies that ignoring case folds a supplementary-plane pair: the Deseret capital
-   * U+10400 lowercases to U+10428 under the per-code-point mapping, so a term
-   * registered lowercase matches the capital spelling with its exact span.
+   * Matches Deseret capital and lowercase forms with UTF-16 offsets.
    */
   @Test
   void testSupplementaryCasePairFoldsWhenIgnoringCase() {
@@ -692,9 +676,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Unspaced Han text matches: under UAX&#160;#29 every ideograph is its own word, so a
-   * neighboring ideograph never continues a word across the hit edge. Tokyo (U+6771
-   * U+4EAC) is found inside an unspaced Japanese sentence with its exact span.
+   * Finds Tokyo in unspaced Japanese text.
    */
   @Test
   void testUnspacedHanTermMatchesInsideJapaneseSentence() {
@@ -713,10 +695,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * A Han term inside a longer Han run matches: China (U+4E2D U+56FD) is reported
-   * inside "Chinese person" (U+4E2D U+56FD U+4EBA), because the trailing ideograph is
-   * its own word rather than a continuation. This is how dictionary matching behaves
-   * in unspaced scripts, the reverse of the Latin cat/concatenate rule.
+   * Accepts Han ideograph boundaries within an unspaced character sequence.
    */
   @Test
   void testHanTermInsideLongerHanRunMatches() {
@@ -732,9 +711,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * A Latin letter next to a Han hit does not block it: UAX&#160;#29 places a word
-   * boundary between an alphabetic run and an ideograph, so a term glued to ASCII
-   * letters still matches with its exact span.
+   * Accepts boundaries between Latin letters and Han ideographs.
    */
   @Test
   void testLatinNeighborDoesNotBlockHanHit() {
@@ -749,8 +726,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Hiragana characters are each their own UAX&#160;#29 word, so a hiragana greeting is
-   * found inside a longer unspaced hiragana run with its exact span.
+   * Matches a hiragana term using character boundaries.
    */
   @Test
   void testHiraganaTermMatchesInsideUnspacedHiraganaRun() {
@@ -766,9 +742,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Katakana chains under UAX&#160;#29 (a katakana run is one word), so a term embedded
-   * in a longer katakana run stays rejected, exactly like cat inside concatenate. The
-   * same term beside non-katakana neighbors matches.
+   * Rejects a term inside longer katakana text but accepts a preceding Han boundary.
    */
   @Test
   void testKatakanaRunStillHidesEmbeddedTerm() {
@@ -786,8 +760,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Hangul chains under UAX&#160;#29 (Korean separates words with spaces), so a syllable
-   * embedded in a longer Hangul run stays rejected while the spaced occurrence matches.
+   * Rejects a term inside longer Hangul text but accepts a space boundary.
    */
   @Test
   void testHangulRunStillHidesEmbeddedTerm() {
@@ -802,9 +775,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * The UAX&#160;#29 boundary rule composes with an offset-aware normalizer: after a
-   * whitespace collapse the hit span maps back to original coordinates, and Han
-   * neighbors in the original text do not block the mapped hit.
+   * Checks Han source boundaries when a normalizer is configured.
    */
   @Test
   void testHanBoundaryAppliesToNormalizedHitsInOriginalCoordinates() {
@@ -819,8 +790,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * UAX&#160;#29 keeps an apostrophe inside an English contraction, so the uncontracted
-   * prefix is not a complete word at that offset.
+   * Rejects a prefix ending inside an English contraction.
    */
   @Test
   void testContractionInteriorIsNotAWordBoundary() {
@@ -831,8 +801,12 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Optional English contraction expansion runs on both the registered term and source
-   * text, while the aligned hit still covers the untouched source contraction.
+   * Returns the source contraction span for an expanded phrase.
+   *
+   * @param term The registered expansion.
+   * @param text The contracted source text.
+   * @param expectedStart The source start offset.
+   * @param expectedEnd The source end offset.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -855,8 +829,10 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * A normalized subword still maps to an interior source offset, so UAX&#160;#29
-   * prevents contraction expansion from exposing a false standalone hit.
+   * Rejects matches that cover only part of a source contraction.
+   *
+   * @param term The registered fragment.
+   * @param text The contraction.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -872,7 +848,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertTrue(matcher.match(text).isEmpty());
   }
 
-  /** Ambiguous English suffixes fail closed instead of guessing their expansion. */
+  /**
+   * Does not expand ambiguous apostrophe-s forms.
+   */
   @Test
   void testContractionExpansionLeavesAmbiguousSuffixUnmatched() {
     final AhoCorasickGlossaryMatcher matcher = new AhoCorasickGlossaryMatcher(
@@ -883,8 +861,10 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * UAX&#160;#29 rule WB4 keeps extending marks with their base. A glossary term that
-   * omits the mark must not stop inside the resulting word segment.
+   * Rejects a match ending before a combining mark or variation selector.
+   *
+   * @param term The registered prefix.
+   * @param text The source including the extending mark.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -899,8 +879,10 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * UAX&#160;#29 joins letters to connector punctuation and joins acronym components
-   * across mid-letter punctuation, so neither prefix is a complete word.
+   * Rejects prefixes within connector-delimited words and acronyms.
+   *
+   * @param term The registered prefix.
+   * @param text The complete source word.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -915,9 +897,10 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Terminal mid-word punctuation forms a boundary, while full stop and colon join a following
-   * Unicode letter under UAX&#160;#29. Comma is a numeric joiner, not a letter joiner. These cases
-   * pin both sides of the ASCII fast path.
+   * Checks punctuation boundaries before spaces and Unicode letters.
+   *
+   * @param text The punctuated source text.
+   * @param expectedMatches The expected match count.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -933,8 +916,10 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Full stop joins letters on both sides but forms a boundary at the start of text. This pins the
-   * leading-punctuation side of the ASCII fast path.
+   * Checks initial punctuation and punctuation joining Unicode letters.
+   *
+   * @param text The punctuated source text.
+   * @param expectedMatches The expected match count.
    */
   @ParameterizedTest
   @CsvSource(value = {
@@ -947,8 +932,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * UAX&#160;#29 rule WB3c keeps an extended pictograph after a zero-width joiner in
-   * the same segment, so one pictograph inside the sequence is not a complete hit.
+   * Rejects a match ending inside a joined emoji sequence.
    */
   @Test
   void testEmojiZwjSequenceDoesNotExposeAnInteriorBoundary() {
@@ -961,8 +945,7 @@ public class AhoCorasickGlossaryMatcherTest {
   }
 
   /**
-   * Supplementary Han ideographs receive the same per-ideograph UAX&#160;#29
-   * boundaries as basic-plane Han characters while spans remain UTF-16 offsets.
+   * Returns UTF-16 offsets for a supplementary Han ideograph.
    */
   @Test
   void testSupplementaryHanTermMatchesBetweenHanNeighbors() {
@@ -977,6 +960,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertEquals(new Span(1, 3), matches.get(0).span());
   }
 
+  /**
+   * Rejects invalid registration collections and null input.
+   */
   @Test
   void testInvalidMatcherArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -988,6 +974,9 @@ public class AhoCorasickGlossaryMatcherTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> CAT_MATCHER.match(null));
   }
 
+  /**
+   * Rejects missing or blank entry fields.
+   */
   @Test
   void testInvalidGlossaryEntryArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -1004,6 +993,9 @@ public class AhoCorasickGlossaryMatcherTest {
         () -> new GlossaryEntry("id", " "));
   }
 
+  /**
+   * Rejects missing spans and missing or blank match fields.
+   */
   @Test
   void testInvalidGlossaryMatchArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

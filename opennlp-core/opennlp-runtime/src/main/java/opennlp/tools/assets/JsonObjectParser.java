@@ -19,7 +19,8 @@ package opennlp.tools.assets;
 
 /**
  * A bounded JSON syntax cursor used to validate decoded JWT objects without adding a
- * JSON library to the runtime. It recognizes RFC 8259 values and can capture one
+ * JSON library to the runtime. It recognizes
+ * <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a> values and can capture one
  * string-valued member from the outermost object.
  */
 final class JsonObjectParser {
@@ -219,7 +220,12 @@ final class JsonObjectParser {
     return value;
   }
 
-  /** @return The ASCII hexadecimal value, or -1 for any other character. */
+  /**
+   * Converts one ASCII hexadecimal digit.
+   *
+   * @param c The character to convert.
+   * @return The digit value, or -1 for any other character.
+   */
   private int hexDigit(char c) {
     if (c >= '0' && c <= '9') {
       return c - '0';
@@ -269,7 +275,12 @@ final class JsonObjectParser {
     return index > start;
   }
 
-  /** @return {@code true} when the literal was consumed at the cursor. */
+  /**
+   * Consumes a literal at the cursor.
+   *
+   * @param literal The expected text.
+   * @return {@code true} when the literal was consumed.
+   */
   private boolean literal(String literal) {
     if (index + literal.length() > json.length()) {
       return false;
@@ -283,7 +294,12 @@ final class JsonObjectParser {
     return true;
   }
 
-  /** Enters a container while enforcing the nesting bound. */
+  /**
+   * Enters a container while enforcing the nesting bound.
+   *
+   * @param opening The opening bracket or brace.
+   * @return {@code true} when the container was entered.
+   */
   private boolean enter(char opening) {
     if (!take(opening) || depth == MAX_DEPTH) {
       return false;
@@ -308,7 +324,12 @@ final class JsonObjectParser {
     }
   }
 
-  /** @return {@code true} when the expected character was consumed. */
+  /**
+   * Consumes one expected character.
+   *
+   * @param expected The expected character.
+   * @return {@code true} when the character was consumed.
+   */
   private boolean take(char expected) {
     if (index < json.length() && json.charAt(index) == expected) {
       index++;
@@ -317,12 +338,22 @@ final class JsonObjectParser {
     return false;
   }
 
-  /** @return {@code true} when the expected character is at the cursor. */
+  /**
+   * Checks the character at the cursor without advancing.
+   *
+   * @param expected The expected character.
+   * @return {@code true} when the expected character is at the cursor.
+   */
   private boolean peek(char expected) {
     return index < json.length() && json.charAt(index) == expected;
   }
 
-  /** @return {@code true} for one ASCII digit. */
+  /**
+   * Tests for an ASCII digit.
+   *
+   * @param c The character to test.
+   * @return {@code true} for an ASCII digit.
+   */
   private boolean isDigit(char c) {
     return c >= '0' && c <= '9';
   }

@@ -18,9 +18,7 @@
 package opennlp.tools.assets;
 
 /**
- * Turns the bytes of an embedded asset into a text description, for example by
- * extracting the text of a document or by captioning an image. Callers supply the
- * implementation; this toolkit ships none.
+ * Describes binary content as text, for example an image caption or extracted document text.
  *
  * <p>Thread safety is implementation specific.</p>
  *

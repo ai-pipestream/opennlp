@@ -31,23 +31,18 @@ import opennlp.tools.document.Layers;
 import opennlp.tools.util.Span;
 
 /**
- * Adapts a {@link NoiseScorer} to the document pipeline: scores the document text and
- * provides {@link #NOISE}, one annotation per finding carrying its {@link NoiseSpan}.
+ * Adds {@link NoiseScorer} results to a document's {@link #NOISE} layer.
  *
  * <p>In its default mode this annotator requires {@link AssetAnnotator#ASSETS} and
- * excludes those spans from scoring, so an embedded binary another detector already
- * explained is never reported a second time as noise; a document without that layer
- * is rejected loudly. The standalone mode skips that requirement and scores the whole
- * text; what this annotator requires therefore depends on the mode it was built
- * with.</p>
+ * excludes those spans from scoring. The layer may be empty, but must be present.
+ * Standalone mode does not require or exclude asset annotations.</p>
  *
  * @since 3.0.0
  */
 public class NoiseAnnotator implements DocumentAnnotator {
 
   /**
-   * Noisy stretches of the text; each annotation covers one finding and carries its
-   * {@link NoiseSpan}.
+   * Noise annotations with original-text offsets and {@link NoiseSpan} values.
    */
   public static final LayerKey<NoiseSpan> NOISE = Layers.key("noise", NoiseSpan.class);
 
@@ -80,18 +75,7 @@ public class NoiseAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Scores the document text and adds the {@link #NOISE} layer. The asset-excluding
-   * mode enforces {@link #requires()} before scoring, so a pipeline that forgot the
-   * asset detector fails loud instead of silently scoring every embedded payload as
-   * noise.
-   *
-   * @param document The document to annotate. Must not be {@code null}; in the
-   *                 asset-excluding mode it must carry {@link AssetAnnotator#ASSETS}.
-   * @return A new {@link Document} with the {@link #NOISE} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, or
-   *         if the annotator excludes assets and the document lacks
-   *         {@link AssetAnnotator#ASSETS}.
+   * {@inheritDoc}
    */
   @Override
   public Document annotate(Document document) {
@@ -123,6 +107,7 @@ public class NoiseAnnotator implements DocumentAnnotator {
     return excludeAssets ? Set.of(AssetAnnotator.ASSETS) : Set.of();
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(NOISE);

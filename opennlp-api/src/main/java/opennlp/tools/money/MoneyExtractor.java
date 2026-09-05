@@ -32,8 +32,8 @@ public interface MoneyExtractor {
    * Extracts all monetary mentions from a text.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @return The mentions in text order, non-overlapping. Never {@code null}; empty when
-   *         the text contains no monetary mention.
+   * @return A non-null list of non-null mentions in text order, with non-overlapping
+   *         spans within the original text; empty if there are no monetary mentions.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   List<MoneyAmount> extract(CharSequence text);

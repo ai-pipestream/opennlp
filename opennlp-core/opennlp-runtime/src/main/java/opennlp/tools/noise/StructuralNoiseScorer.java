@@ -20,34 +20,29 @@ package opennlp.tools.noise;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Predicate;
 
 import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * The built-in {@link NoiseScorer}: structural signals over whitespace-delimited
- * tokens, a single cursor pass with no regular expression and no bundled data.
+ * Scores whitespace-delimited ASCII tokens using character-pattern heuristics.
  *
- * <p>The signals are deliberately conservative, calibrated so the most
- * consonant-heavy legitimate English words stay below every threshold: a token only
- * scores {@link NoiseSpan#SEVERITY_GIBBERISH} when at least two independent signals
- * agree, and one signal alone means {@link NoiseSpan#SEVERITY_DAMAGED}. Structural
- * signals apply to ASCII-letter tokens only, so text in other scripts is never
- * flagged by them. A stretch shaped like an encoded binary rather than language
- * scores {@link NoiseSpan#SEVERITY_BINARYISH}; spans a caller excludes, such as
- * assets another detector already explained, are not scored at all.</p>
+ * <p>After common ASCII punctuation is trimmed, cores shorter than 3 characters or
+ * containing non-ASCII characters are skipped. Signals include consonant runs,
+ * repeated characters, low vowel proportions, and letter-digit transitions. One
+ * signal produces {@link NoiseSpan#SEVERITY_DAMAGED}; multiple signals produce
+ * {@link NoiseSpan#SEVERITY_GIBBERISH}. Long base64-alphabet tokens with symbols or
+ * frequent case changes produce {@link NoiseSpan#SEVERITY_BINARYISH}.</p>
  *
- * <p>{@link NoiseSpan#SEVERITY_MISSPELLED} requires a dictionary: a token the
- * dictionary rejects but a single known confusion repair turns into a dictionary word
- * is reported as misspelled, the shape optical recognition damage takes. Without a
- * dictionary that tier never fires. A token the dictionary accepts is never flagged,
- * whatever its structure.</p>
+ * <p>Dictionary-accepted words are omitted. For remaining tokens with no other signal,
+ * an OCR substitution producing a dictionary word results in
+ * {@link NoiseSpan#SEVERITY_MISSPELLED}. This category requires a dictionary.</p>
  *
- * <p>Known limitations: a mash of ordinary syllables with normal vowel spacing passes
- * the structural signals, and tokens interleaving letters and digits heavily are
- * reported as damaged, which can flag technical identifiers in running prose.</p>
+ * <p>Technical identifiers can produce false positives. Damaged text with ordinary
+ * letter patterns can produce false negatives. Tokens overlapping an exclusion are
+ * omitted. Results separated by whitespace are merged unless that whitespace is
+ * excluded.</p>
  *
  * <p>The scorer is stateless beyond its dictionary and safe for concurrent use when
  * the dictionary is.</p>
@@ -56,44 +51,43 @@ import opennlp.tools.util.StringUtil;
  */
 public final class StructuralNoiseScorer implements NoiseScorer {
 
-  /** Cores shorter than this are never scored. */
+  /** Minimum core length to examine. */
   private static final int MIN_CORE_LENGTH = 3;
 
-  /** Tokens at least this long with base64 shape score as binary-ish. */
+  /** Minimum length for a binary-content result. */
   private static final int BINARYISH_MIN_LENGTH = 24;
 
-  /** The core length at which the binary-ish score reaches {@code 1.0}. */
+  /** Core length corresponding to the maximum binary-content score. */
   private static final double BINARYISH_SATURATION_LENGTH = 48.0;
 
-  /**
-   * Case flips marking base64 shape in a pure-letter run. A camel-case identifier
-   * yields two flips per hump plus one, so even a four-hump name stays at nine;
-   * random-case letters flip about every second character.
-   */
+  /** Minimum adjacent case changes in an alphabetic binary-content candidate. */
   private static final int BINARYISH_MIN_CASE_FLIPS = 12;
 
-  /** The longest consonant run legitimate English reaches is six. */
+  /** Minimum case changes for a long alphanumeric token containing digits. */
+  private static final int BINARYISH_MIN_ALNUM_CASE_FLIPS = 8;
+
+  /** Minimum consecutive consonants for a structural signal. */
   private static final int CONSONANT_RUN_SIGNAL = 7;
 
-  /** No English word repeats one character four times in a row. */
+  /** Minimum consecutive repetitions for a structural signal. */
   private static final int REPEAT_RUN_SIGNAL = 4;
 
-  /** Below this vowel share a long token is vowel-starved; {@code strengths} is 0.111. */
+  /** Maximum positive vowel proportion for a structural signal. */
   private static final double LOW_VOWEL_RATIO = 0.10;
 
   /** A vowelless core needs at least this many letters to raise a signal. */
   private static final int VOWELLESS_MIN_LETTERS = 5;
 
-  /** A core needs at least this many letters before its vowel share is judged. */
+  /** Minimum letter count for the positive vowel-proportion test. */
   private static final int LOW_VOWEL_MIN_LETTERS = 8;
 
-  /** Letter-digit alternations marking interleaved damage. */
+  /** Minimum letter-digit transitions for a structural signal. */
   private static final int INTERLEAVE_SIGNAL = 4;
 
-  /** A core needs at least this many characters before interleaving is judged. */
+  /** Minimum core length for the letter-digit transition test. */
   private static final int INTERLEAVE_MIN_LENGTH = 8;
 
-  /** Agreeing signals needed for the gibberish tier; one alone is damage. */
+  /** Minimum structural signal count for the gibberish category. */
   private static final int GIBBERISH_MIN_SIGNALS = 2;
 
   /** The signal count at which the gibberish score reaches {@code 1.0}. */
@@ -106,9 +100,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
   private static final double MISSPELLED_SCORE = 0.9;
 
   /**
-   * The confusion pairs of optical recognition damage, as from-to sibling entries.
-   * Project-authored from the classic confusions; both directions are listed where
-   * both occur in practice.
+   * OCR substitutions to try when checking dictionary repairs, as source and replacement.
    */
   private static final String[][] CONFUSIONS = {
       {"rn", "m"}, {"m", "rn"},
@@ -121,7 +113,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
 
   private final Predicate<CharSequence> dictionary;
 
-  /** Initializes the scorer without a dictionary; the misspelled tier never fires. */
+  /** Initializes the scorer without dictionary-based spelling checks. */
   public StructuralNoiseScorer() {
     this.dictionary = null;
   }
@@ -140,6 +132,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     this.dictionary = dictionary;
   }
 
+  /** {@inheritDoc} */
   @Override
   public List<NoiseSpan> score(CharSequence text, Collection<Span> exclude) {
     if (text == null) {
@@ -151,6 +144,9 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     for (final Span span : exclude) {
       if (span == null) {
         throw new IllegalArgumentException("exclude must not contain null");
+      }
+      if (span.getEnd() > text.length()) {
+        throw new IllegalArgumentException("exclude spans must fit within text");
       }
     }
     final List<NoiseSpan> findings = new ArrayList<>();
@@ -172,7 +168,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
         }
       }
     }
-    return merge(findings, text);
+    return merge(findings, text, exclude);
   }
 
   /**
@@ -192,22 +188,23 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     }
     final int coreStart = start + from;
     final Span span = new Span(coreStart, coreStart + core.length());
-    if (dictionary != null && dictionary.test(core.toLowerCase(Locale.ROOT))) {
+    final String lower = StringUtil.toLowerCase(core);
+    if (dictionary != null && dictionary.test(lower)) {
       return null;
     }
     final NoiseSpan binaryish = binaryish(core, span);
     if (binaryish != null) {
       return binaryish;
     }
-    final NoiseSpan structural = structural(core, span);
+    final NoiseSpan structural = structural(lower, span);
     if (structural != null) {
       return structural;
     }
-    return misspelled(core, span);
+    return misspelled(lower, span);
   }
 
   /**
-   * The binary-shape tier: long, base64-alphabet, and unlike a word or an identifier.
+   * Checks the base64 alphabet, token length, and adjacent case changes.
    *
    * @param core The token without surrounding punctuation.
    * @param span The token span.
@@ -239,7 +236,8 @@ public final class StructuralNoiseScorer implements NoiseScorer {
       lastLetter = upper || lower;
       lastUpper = upper;
     }
-    if (digit || symbol || caseFlips >= BINARYISH_MIN_CASE_FLIPS) {
+    if (symbol || caseFlips >= BINARYISH_MIN_CASE_FLIPS
+        || (digit && caseFlips >= BINARYISH_MIN_ALNUM_CASE_FLIPS)) {
       return new NoiseSpan(span, NoiseSpan.SEVERITY_BINARYISH,
           Math.min(1.0, core.length() / BINARYISH_SATURATION_LENGTH));
     }
@@ -247,10 +245,9 @@ public final class StructuralNoiseScorer implements NoiseScorer {
   }
 
   /**
-   * The structural tiers over an ASCII token: two agreeing signals are gibberish, one
-   * is damage.
+   * Counts structural signals in a lowercase ASCII token.
    *
-   * @param core The token without surrounding punctuation.
+   * @param core The lowercase token without surrounding punctuation.
    * @param span The token span.
    * @return The finding, or {@code null}.
    */
@@ -266,7 +263,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     boolean lastLetter = false;
     char last = 0;
     for (int i = 0; i < core.length(); i++) {
-      final char c = Character.toLowerCase(core.charAt(i));
+      final char c = core.charAt(i);
       final boolean letter = c >= 'a' && c <= 'z';
       final boolean digit = c >= '0' && c <= '9';
       if (letter) {
@@ -318,9 +315,9 @@ public final class StructuralNoiseScorer implements NoiseScorer {
   }
 
   /**
-   * The misspelled tier: one confusion repair reaches a dictionary word.
+   * Checks whether an OCR substitution produces a dictionary word.
    *
-   * @param core The token without surrounding punctuation.
+   * @param core The lowercase token without surrounding punctuation.
    * @param span The token span.
    * @return The finding, or {@code null} without a dictionary or a repairing
    *         confusion.
@@ -329,41 +326,41 @@ public final class StructuralNoiseScorer implements NoiseScorer {
     if (dictionary == null) {
       return null;
     }
-    final String lower = core.toLowerCase(Locale.ROOT);
+    final StringBuilder candidate = new StringBuilder(core.length());
     for (final String[] confusion : CONFUSIONS) {
       final String from = confusion[0];
       final String to = confusion[1];
-      int at = lower.indexOf(from);
+      int at = core.indexOf(from);
       while (at >= 0) {
-        final String candidate =
-            lower.substring(0, at) + to + lower.substring(at + from.length());
-        if (dictionary.test(candidate)) {
+        candidate.setLength(0);
+        candidate.append(core, 0, at).append(to).append(core, at + from.length(), core.length());
+        if (dictionary.test(candidate.toString())) {
           return new NoiseSpan(span, NoiseSpan.SEVERITY_MISSPELLED, MISSPELLED_SCORE);
         }
-        at = lower.indexOf(from, at + 1);
+        at = core.indexOf(from, at + 1);
       }
     }
     return null;
   }
 
   /**
-   * Merges adjacent findings separated by nothing but whitespace into one span of the
-   * worst severity, carrying that severity's own score. Scores of different
-   * severities are not comparable, so the milder neighbor's number is never borrowed;
-   * only when both findings share the surviving severity does the higher of their
-   * scores win.
+   * Merges results separated by non-excluded whitespace. The highest severity and
+   * the maximum score within that severity are used.
    *
    * @param findings The per-token findings in order.
    * @param text The text, to check that only whitespace separates neighbors.
+   * @param exclude The excluded regions.
    * @return The merged findings. Never {@code null}.
    */
-  private List<NoiseSpan> merge(List<NoiseSpan> findings, CharSequence text) {
+  private List<NoiseSpan> merge(List<NoiseSpan> findings, CharSequence text,
+      Collection<Span> exclude) {
     final List<NoiseSpan> merged = new ArrayList<>();
     for (final NoiseSpan finding : findings) {
       if (!merged.isEmpty()) {
         final NoiseSpan previous = merged.get(merged.size() - 1);
         if (onlyWhitespaceBetween(text, previous.span().getEnd(),
-            finding.span().getStart())) {
+            finding.span().getStart())
+            && !overlapsAny(previous.span().getEnd(), finding.span().getStart(), exclude)) {
           final String severity = worse(previous.severity(), finding.severity());
           final double score;
           if (previous.severity().equals(finding.severity())) {
@@ -488,7 +485,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
   }
 
   /**
-   * Whether a token region overlaps any excluded span.
+   * Tests whether a region intersects a non-empty excluded span.
    *
    * @param start The token start.
    * @param end The token end.
@@ -497,7 +494,7 @@ public final class StructuralNoiseScorer implements NoiseScorer {
    */
   private boolean overlapsAny(int start, int end, Collection<Span> exclude) {
     for (final Span span : exclude) {
-      if (start < span.getEnd() && span.getStart() < end) {
+      if (span.getStart() < span.getEnd() && start < span.getEnd() && span.getStart() < end) {
         return true;
       }
     }

@@ -97,17 +97,17 @@
     </dependency>
     <dependency>
       <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-wordnet</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
       <artifactId>opennlp-subword</artifactId>
     </dependency>
 
     <dependency>
       <groupId>org.apache.opennlp</groupId>
       <artifactId>opennlp-embeddings</artifactId>
-    </dependency>
-
-    <dependency>
-      <groupId>org.apache.opennlp</groupId>
-      <artifactId>opennlp-wordnet</artifactId>
     </dependency>
 
     <!-- OpenNLP Docs - Ensure that "docs" are build before distribution -->

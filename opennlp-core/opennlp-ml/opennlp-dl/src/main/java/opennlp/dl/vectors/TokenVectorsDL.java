@@ -25,10 +25,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import ai.onnxruntime.NodeInfo;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import ai.onnxruntime.TensorInfo;
 
 import opennlp.dl.AbstractDL;
 import opennlp.dl.InferenceOptions;
@@ -58,6 +60,15 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
   /** The classification and separator token ids, in that order. */
   private final long[] specials;
 
+  /** Whether to supply an attention mask to the model. */
+  private final boolean includeAttentionMask;
+
+  /** Whether to supply token type ids to the model. */
+  private final boolean includeTokenTypeIds;
+
+  /** The hidden-state dimension declared by the ONNX model. */
+  private final int dimension;
+
   /**
    * Initializes the encoder for an uncased model.
    *
@@ -65,6 +76,7 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @param vocabulary The vocabulary file. Must not be {@code null}.
    * @throws OrtException Thrown if the model cannot be loaded.
    * @throws IOException Thrown if the model or vocabulary cannot be read.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}.
    */
   public TokenVectorsDL(final File model, final File vocabulary)
       throws OrtException, IOException {
@@ -79,15 +91,16 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @param lowerCase {@code true} for an uncased model, {@code false} for a cased one.
    * @throws OrtException Thrown if the model cannot be loaded.
    * @throws IOException Thrown if the model or vocabulary cannot be read.
+   * @throws IllegalArgumentException Thrown if a file argument is {@code null}.
    */
   public TokenVectorsDL(final File model, final File vocabulary, final boolean lowerCase)
       throws OrtException, IOException {
-    super(model, vocabulary, new OrtSession.SessionOptions(), lowerCase);
-    this.specials = specials();
+    this(model, vocabulary, lowerCase, new InferenceOptions());
   }
 
   /**
-   * Initializes the encoder with inference options, for GPU execution.
+   * Initializes the encoder with inference options for execution providers and optional
+   * model inputs.
    *
    * @param model The ONNX model file. Must not be {@code null}.
    * @param vocabulary The vocabulary file. Must not be {@code null}.
@@ -95,11 +108,16 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @param options The inference options. Must not be {@code null}.
    * @throws OrtException Thrown if the model cannot be loaded.
    * @throws IOException Thrown if the model or vocabulary cannot be read.
+   * @throws IllegalArgumentException Thrown if a reference argument is {@code null} or
+   *         the model does not declare a positive hidden-state dimension.
    */
   public TokenVectorsDL(final File model, final File vocabulary, final boolean lowerCase,
       final InferenceOptions options) throws OrtException, IOException {
     super(model, vocabulary, sessionOptions(options), lowerCase);
     this.specials = specials();
+    this.includeAttentionMask = options.isIncludeAttentionMask();
+    this.includeTokenTypeIds = options.isIncludeTokenTypeIds();
+    this.dimension = outputDimension();
   }
 
   /**
@@ -110,23 +128,92 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
    * @param session The ONNX session, or {@code null}.
    * @param vocab The vocabulary map.
    * @param lowerCase {@code true} for an uncased model.
+   * @throws IllegalArgumentException Thrown if {@code vocab} is {@code null}.
    */
   protected TokenVectorsDL(final OrtEnvironment env, final OrtSession session,
       final Map<String, Integer> vocab, final boolean lowerCase) {
-    super(env, session, vocab, lowerCase);
-    this.specials = specials();
+    this(env, session, vocab, lowerCase, new InferenceOptions());
   }
 
-  /** {@return the ids of the classification and separator tokens the tokenizer adds} */
+  /**
+   * Initializes an encoder over shared state with configurable model inputs.
+   *
+   * @param env The ONNX environment, or {@code null}.
+   * @param session The ONNX session, or {@code null}.
+   * @param vocab The vocabulary map.
+   * @param lowerCase {@code true} for an uncased model.
+   * @param options The inference options. Must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code vocab} or {@code options} is
+   *         {@code null}.
+   */
+  TokenVectorsDL(final OrtEnvironment env, final OrtSession session,
+      final Map<String, Integer> vocab, final boolean lowerCase,
+      final InferenceOptions options) {
+    this(env, session, vocab, lowerCase, options, 1);
+  }
+
+  /**
+   * Initializes an encoder over shared state with a declared output dimension.
+   *
+   * @param env The ONNX environment, or {@code null} in tests.
+   * @param session The ONNX session, or {@code null} in tests.
+   * @param vocab The vocabulary map.
+   * @param lowerCase {@code true} for an uncased model.
+   * @param options The inference options. Must not be {@code null}.
+   * @param dimension The positive hidden-state dimension.
+   * @throws IllegalArgumentException Thrown if an argument is invalid.
+   */
+  TokenVectorsDL(final OrtEnvironment env, final OrtSession session,
+      final Map<String, Integer> vocab, final boolean lowerCase,
+      final InferenceOptions options, final int dimension) {
+    super(env, session, requireVocabulary(vocab), lowerCase);
+    this.specials = specials();
+    if (options == null) {
+      throw new IllegalArgumentException("options must not be null");
+    }
+    if (dimension <= 0) {
+      throw new IllegalArgumentException("dimension must be positive: " + dimension);
+    }
+    this.includeAttentionMask = options.isIncludeAttentionMask();
+    this.includeTokenTypeIds = options.isIncludeTokenTypeIds();
+    this.dimension = dimension;
+  }
+
+  /**
+   * Validates a vocabulary before superclass construction.
+   *
+   * @param vocab The vocabulary map.
+   * @return The validated map.
+   * @throws IllegalArgumentException Thrown if {@code vocab} is {@code null}.
+   */
+  private static Map<String, Integer> requireVocabulary(Map<String, Integer> vocab) {
+    if (vocab == null) {
+      throw new IllegalArgumentException("vocab must not be null");
+    }
+    return vocab;
+  }
+
+  /**
+   * Reads the special token ids from the tokenizer.
+   *
+   * @return The classification and separator token ids.
+   */
   private long[] specials() {
     final String[] empty = tokenizer.tokenize("");
     return new long[] {id(empty[0]), id(empty[empty.length - 1])};
   }
 
+  /** {@inheritDoc} */
+  @Override
+  public int dimension() {
+    return dimension;
+  }
+
   /**
    * {@inheritDoc} Each word's vector is the mean of its wordpiece hidden states.
    *
-   * @throws IllegalArgumentException Thrown if {@code tokens} is {@code null} or empty.
+   * @throws IllegalArgumentException Thrown if {@code tokens} is {@code null}, empty, or
+   *         contains {@code null}.
    * @throws IllegalStateException Thrown if inference fails.
    */
   @Override
@@ -135,8 +222,11 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
       throw new IllegalArgumentException("tokens must not be null or empty");
     }
     final List<long[]> pieces = new ArrayList<>(tokens.length);
-    for (final String token : tokens) {
-      pieces.add(pieceIds(token));
+    for (int t = 0; t < tokens.length; t++) {
+      if (tokens[t] == null) {
+        throw new IllegalArgumentException("tokens must not contain null at index " + t);
+      }
+      pieces.add(pieceIds(tokens[t]));
     }
     final float[][] vectors = new float[tokens.length][];
     for (final int[] window : windows(pieces, MAX_PIECES)) {
@@ -188,7 +278,14 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
     return windows;
   }
 
-  /** Encodes the words of one window and writes their mean piece vectors. */
+  /**
+   * Encodes one window and writes its word vectors.
+   *
+   * @param pieces The piece ids of each word.
+   * @param from The first included word index.
+   * @param to The first excluded word index.
+   * @param vectors The output array.
+   */
   private void encode(final List<long[]> pieces, final int from, final int to,
       final float[][] vectors) {
     final int capacity = MAX_PIECES - SPECIAL_PIECES;
@@ -216,44 +313,157 @@ public class TokenVectorsDL extends AbstractDL implements TokenVectors {
     final float[][] hidden = run(ids, ones, zeros);
     for (int w = from; w < to; w++) {
       final int count = pieceCount[w - from];
-      final float[] mean = new float[hidden[0].length];
-      for (int p = 0; p < count; p++) {
-        final float[] piece = hidden[firstPiece[w - from] + p];
-        for (int d = 0; d < mean.length; d++) {
-          mean[d] += piece[d];
-        }
-      }
-      if (count > 1) {
-        for (int d = 0; d < mean.length; d++) {
-          mean[d] /= count;
-        }
-      }
-      vectors[w] = mean;
+      vectors[w] = mean(hidden, firstPiece[w - from], count);
     }
   }
 
-  /** Runs the encoder over one input and returns the hidden state per position. */
+  /**
+   * Averages a consecutive range of hidden vectors.
+   *
+   * @param hidden The hidden vectors.
+   * @param first The first vector to include.
+   * @param count The number of vectors to include.
+   * @return Their component-wise mean, or a zero vector when {@code count} is zero.
+   */
+  static float[] mean(float[][] hidden, int first, int count) {
+    final float[] mean = new float[hidden[0].length];
+    if (count > 0) {
+      for (int d = 0; d < mean.length; d++) {
+        double sum = 0.0;
+        for (int p = 0; p < count; p++) {
+          sum += hidden[first + p][d];
+        }
+        mean[d] = (float) (sum / count);
+      }
+    }
+    return mean;
+  }
+
+  /**
+   * Runs one encoder input.
+   *
+   * @param ids The input token ids.
+   * @param mask The attention mask.
+   * @param types The token type ids.
+   * @return One hidden vector per input position.
+   * @throws IllegalStateException Thrown if inference fails or the output is invalid.
+   */
   private float[][] run(final long[] ids, final long[] mask, final long[] types) {
     final Map<String, OnnxTensor> inputs = new HashMap<>();
+    final Object output;
     try {
       final long[] shape = {1, ids.length};
-      inputs.put(INPUT_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(ids), shape));
-      inputs.put(ATTENTION_MASK, OnnxTensor.createTensor(env, LongBuffer.wrap(mask), shape));
-      inputs.put(TOKEN_TYPE_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(types), shape));
+      for (final Map.Entry<String, long[]> input : inputValues(ids, mask, types).entrySet()) {
+        inputs.put(input.getKey(),
+            OnnxTensor.createTensor(env, LongBuffer.wrap(input.getValue()), shape));
+      }
       try (OrtSession.Result result = session.run(inputs)) {
-        final float[][][] hidden = (float[][][]) result.get(0).getValue();
-        return hidden[0];
+        output = result.get(0).getValue();
       }
     } catch (OrtException e) {
       throw new IllegalStateException("token encoding failed", e);
     } finally {
       inputs.values().forEach(OnnxTensor::close);
     }
+    final float[][] hidden = hiddenFromOutput(output, ids.length);
+    if (hidden[0].length != dimension) {
+      throw new IllegalStateException("token encoder returned dimension "
+          + hidden[0].length + ", expected " + dimension);
+    }
+    return hidden;
   }
 
   /**
-   * {@return the vocabulary id of a piece}
+   * Reads the hidden-state dimension from the first ONNX output.
    *
+   * @return The positive hidden-state dimension.
+   * @throws OrtException Thrown if the output metadata cannot be read.
+   * @throws IllegalArgumentException Thrown if the first output is not a rank-three
+   *         tensor with a fixed positive final dimension.
+   */
+  private int outputDimension() throws OrtException {
+    if (session.getNumOutputs() == 0) {
+      throw new IllegalArgumentException("model must declare an output");
+    }
+    final String outputName = session.getOutputNames().iterator().next();
+    final NodeInfo output = session.getOutputInfo().get(outputName);
+    if (output == null || !(output.getInfo() instanceof TensorInfo tensor)) {
+      throw new IllegalArgumentException("model first output must be a tensor");
+    }
+    final long[] shape = tensor.getShape();
+    if (shape.length != 3 || shape[2] <= 0 || shape[2] > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "model first output must declare a positive hidden-state dimension");
+    }
+    return (int) shape[2];
+  }
+
+  /**
+   * Selects the arrays supplied to the model from the options captured at construction.
+   *
+   * @param ids The input token ids.
+   * @param mask The attention mask.
+   * @param types The token type ids.
+   * @return The selected model inputs by ONNX input name.
+   */
+  Map<String, long[]> inputValues(final long[] ids, final long[] mask, final long[] types) {
+    final Map<String, long[]> inputs = HashMap.newHashMap(3);
+    inputs.put(INPUT_IDS, ids);
+    if (includeAttentionMask) {
+      inputs.put(ATTENTION_MASK, mask);
+    }
+    if (includeTokenTypeIds) {
+      inputs.put(TOKEN_TYPE_IDS, types);
+    }
+    return inputs;
+  }
+
+  /**
+   * Validates and extracts the hidden-state matrix returned for one encoder input.
+   *
+   * @param output The first ONNX output value.
+   * @param expectedPositions The number of input positions.
+   * @return The hidden vector for each input position.
+   * @throws IllegalStateException Thrown if the output is not one finite, rectangular
+   *         {@code float[position][dimension]} matrix with the expected position count.
+   */
+  static float[][] hiddenFromOutput(final Object output, final int expectedPositions) {
+    if (!(output instanceof float[][][] batches) || batches.length != 1
+        || batches[0] == null) {
+      throw new IllegalStateException("token encoder output must contain one float matrix");
+    }
+    final float[][] hidden = batches[0];
+    if (hidden.length != expectedPositions) {
+      throw new IllegalStateException("token encoder returned " + hidden.length
+          + " positions, expected " + expectedPositions);
+    }
+    int dimension = -1;
+    for (int p = 0; p < hidden.length; p++) {
+      final float[] vector = hidden[p];
+      if (vector == null || vector.length == 0) {
+        throw new IllegalStateException("token encoder returned an empty vector at position " + p);
+      }
+      if (dimension < 0) {
+        dimension = vector.length;
+      } else if (vector.length != dimension) {
+        throw new IllegalStateException("token encoder returned dimension " + vector.length
+            + " at position " + p + ", expected " + dimension);
+      }
+      for (int d = 0; d < vector.length; d++) {
+        if (!Float.isFinite(vector[d])) {
+          throw new IllegalStateException("token encoder returned a non-finite value at position "
+              + p + ", dimension " + d);
+        }
+      }
+    }
+    return hidden;
+  }
+
+  /**
+   * Looks up a vocabulary id.
+   *
+   * @param piece The wordpiece.
+   * @return Its vocabulary id.
    * @throws IllegalStateException Thrown if the tokenizer emitted a piece the
    *         vocabulary lacks.
    */

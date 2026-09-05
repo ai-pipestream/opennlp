@@ -28,6 +28,7 @@ import java.util.Properties;
 import opennlp.tools.ml.model.AbstractModel;
 import opennlp.tools.ml.model.MaxentModel;
 import opennlp.tools.util.InvalidFormatException;
+import opennlp.tools.util.StringUtil;
 import opennlp.tools.util.model.BaseModel;
 
 /**
@@ -39,7 +40,7 @@ import opennlp.tools.util.model.BaseModel;
 public class CorefModel extends BaseModel {
 
   @Serial
-  private static final long serialVersionUID = 1409953135923471757L;
+  private static final long serialVersionUID = -674127645048281122L;
 
   private static final String COMPONENT_NAME = "CorefAnnotator";
 
@@ -48,38 +49,74 @@ public class CorefModel extends BaseModel {
   /** The manifest property that marks a model trained by ranking. */
   private static final String RANKING_PROPERTY = "coref.ranking";
 
+  /** The manifest property holding the required contextual token-vector dimension. */
+  private static final String TOKEN_VECTOR_DIMENSION_PROPERTY = "coref.tokenVectorDimension";
+
   /**
    * Initializes a model from a trained pair classifier.
    *
-   * @param languageCode The ISO language code of the training data.
-   * @param pairModel The pair classifier. Must not be {@code null}.
+   * @param languageCode The ISO language code of the training data. Must not be
+   *                     {@code null} or blank.
+   * @param pairModel The pair classifier with the {@code link} and {@code apart}
+   *                  outcomes. Must not be {@code null}.
    * @param manifestInfoEntries Additional manifest entries, or {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code pairModel} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code languageCode} is {@code null} or
+   *         blank, {@code pairModel} is {@code null}, or the model does not contain
+   *         exactly the {@code link} and {@code apart} outcomes.
    */
   public CorefModel(String languageCode, MaxentModel pairModel,
       Map<String, String> manifestInfoEntries) {
-    this(languageCode, pairModel, false, manifestInfoEntries);
+    this(languageCode, pairModel, false, 0, manifestInfoEntries);
   }
 
   /**
    * Initializes a model from a trained pair classifier or ranker.
    *
-   * @param languageCode The ISO language code of the training data.
-   * @param pairModel The pair model. Must not be {@code null}.
+   * @param languageCode The ISO language code of the training data. Must not be
+   *                     {@code null} or blank.
+   * @param pairModel The pair model with the {@code link} and {@code apart} outcomes.
+   *                  Must not be {@code null}.
    * @param ranking Whether the model was trained by ranking, so a candidate is linked
-   *                when it outscores the new-chain option rather than a threshold.
+   *                when it outscores the new-chain option instead of a threshold.
    * @param manifestInfoEntries Additional manifest entries, or {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code pairModel} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code languageCode} is {@code null} or
+   *         blank, {@code pairModel} is {@code null}, or the model does not contain
+   *         exactly the {@code link} and {@code apart} outcomes.
    */
   public CorefModel(String languageCode, MaxentModel pairModel, boolean ranking,
       Map<String, String> manifestInfoEntries) {
-    super(COMPONENT_NAME, languageCode, manifestInfoEntries);
+    this(languageCode, pairModel, ranking, 0, manifestInfoEntries);
+  }
+
+  /**
+   * Initializes a model from a trained pair classifier or ranker.
+   *
+   * @param languageCode The ISO language code of the training data. Must not be
+   *                     {@code null} or blank.
+   * @param pairModel The pair model with the {@code link} and {@code apart} outcomes.
+   *                  Must not be {@code null}.
+   * @param ranking Whether the model was trained by ranking.
+   * @param tokenVectorDimension The contextual token-vector dimension used in training,
+   *                             or zero when training used no token vectors.
+   * @param manifestInfoEntries Additional manifest entries, or {@code null}.
+   * @throws IllegalArgumentException Thrown if an argument is invalid or the model does
+   *         not contain exactly the {@code link} and {@code apart} outcomes.
+   */
+  public CorefModel(String languageCode, MaxentModel pairModel, boolean ranking,
+      int tokenVectorDimension, Map<String, String> manifestInfoEntries) {
+    super(COMPONENT_NAME, requireLanguageCode(languageCode), manifestInfoEntries);
     if (pairModel == null) {
       throw new IllegalArgumentException("pairModel must not be null");
     }
+    if (tokenVectorDimension < 0) {
+      throw new IllegalArgumentException(
+          "tokenVectorDimension must not be negative: " + tokenVectorDimension);
+    }
     artifactMap.put(COREF_MODEL_ENTRY_NAME, pairModel);
-    ((Properties) artifactMap.get(MANIFEST_ENTRY))
-        .setProperty(RANKING_PROPERTY, Boolean.toString(ranking));
+    final Properties manifest = (Properties) artifactMap.get(MANIFEST_ENTRY);
+    manifest.setProperty(RANKING_PROPERTY, Boolean.toString(ranking));
+    manifest.setProperty(TOKEN_VECTOR_DIMENSION_PROPERTY,
+        Integer.toString(tokenVectorDimension));
     checkArtifactMap();
   }
 
@@ -89,13 +126,24 @@ public class CorefModel extends BaseModel {
   }
 
   /**
+   * Returns the contextual token-vector dimension used to train the model.
+   *
+   * @return The positive required dimension, or zero when the model uses no contextual
+   *         token vectors.
+   */
+  public int getTokenVectorDimension() {
+    return Integer.parseInt(getManifestProperty(TOKEN_VECTOR_DIMENSION_PROPERTY));
+  }
+
+  /**
    * Reads a model.
    *
    * @param in The stream to read from. Must not be {@code null}.
    * @throws IOException Thrown if reading fails or the model is invalid.
+   * @throws IllegalArgumentException Thrown if the model contents are invalid.
    */
   public CorefModel(InputStream in) throws IOException {
-    super(COMPONENT_NAME, in);
+    super(COMPONENT_NAME, requireSource(in, "in"));
   }
 
   /**
@@ -103,9 +151,10 @@ public class CorefModel extends BaseModel {
    *
    * @param modelFile The file to read. Must not be {@code null}.
    * @throws IOException Thrown if reading fails or the model is invalid.
+   * @throws IllegalArgumentException Thrown if the model contents are invalid.
    */
   public CorefModel(File modelFile) throws IOException {
-    super(COMPONENT_NAME, modelFile);
+    super(COMPONENT_NAME, requireSource(modelFile, "modelFile"));
   }
 
   /**
@@ -113,17 +162,65 @@ public class CorefModel extends BaseModel {
    *
    * @param modelPath The path to read. Must not be {@code null}.
    * @throws IOException Thrown if reading fails or the model is invalid.
+   * @throws IllegalArgumentException Thrown if the model contents are invalid.
    */
   public CorefModel(Path modelPath) throws IOException {
-    super(COMPONENT_NAME, modelPath);
+    super(COMPONENT_NAME, requireSource(modelPath, "modelPath"));
+  }
+
+  /**
+   * Validates a model source before it is read.
+   *
+   * @param source The model source.
+   * @param name The source parameter name.
+   * @return The validated source.
+   * @param <T> The source type.
+   * @throws IllegalArgumentException Thrown if {@code source} is {@code null}.
+   */
+  private static <T> T requireSource(T source, String name) {
+    if (source == null) {
+      throw new IllegalArgumentException(name + " must not be null");
+    }
+    return source;
+  }
+
+  /**
+   * Validates a language code before model construction or training.
+   *
+   * @param languageCode The language code.
+   * @return The validated language code.
+   * @throws IllegalArgumentException Thrown if {@code languageCode} is {@code null} or
+   *         blank.
+   */
+  static String requireLanguageCode(String languageCode) {
+    if (languageCode == null || StringUtil.isBlank(languageCode)) {
+      throw new IllegalArgumentException("languageCode must not be null or blank");
+    }
+    return languageCode;
   }
 
   /** {@inheritDoc} Requires the pair classifier entry. */
   @Override
   protected void validateArtifactMap() throws InvalidFormatException {
     super.validateArtifactMap();
-    if (!(artifactMap.get(COREF_MODEL_ENTRY_NAME) instanceof AbstractModel)) {
-      throw new InvalidFormatException("Coreference model is incomplete!");
+    if (!(artifactMap.get(COREF_MODEL_ENTRY_NAME) instanceof AbstractModel pairModel)) {
+      throw new InvalidFormatException("Coreference model is incomplete");
+    }
+    if (pairModel.getNumOutcomes() != 2
+        || pairModel.getIndex(SieveResolver.LINK) < 0
+        || pairModel.getIndex(SieveResolver.APART) < 0) {
+      throw new InvalidFormatException(
+          "Coreference model requires exactly the link and apart outcomes");
+    }
+    final String dimension = getManifestProperty(TOKEN_VECTOR_DIMENSION_PROPERTY);
+    try {
+      if (dimension == null || Integer.parseInt(dimension) < 0) {
+        throw new InvalidFormatException(
+            "Coreference model requires a non-negative token-vector dimension");
+      }
+    } catch (NumberFormatException e) {
+      throw new InvalidFormatException(
+          "Coreference model has an invalid token-vector dimension: " + dimension, e);
     }
   }
 

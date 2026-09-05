@@ -32,37 +32,30 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
+import opennlp.tools.embeddings.EmbeddingAnnotatorTestSupport.RecordingEmbedder;
 import opennlp.tools.util.Span;
 
 public class EmbeddingAnnotatorTest {
 
   /** Embeds text as its length and first character code, enough to observe alignment. */
   private static final TextEmbedder FIXTURE = new TextEmbedder() {
+    /** {@inheritDoc} */
     @Override
     public float[] embed(CharSequence text) {
       return new float[] {text.length(), text.isEmpty() ? 0 : text.charAt(0)};
     }
 
+    /** {@inheritDoc} */
     @Override
     public int dimension() {
       return 2;
     }
   };
 
+  /** Token and sentence vectors keep their source spans under separate keys. */
   @Test
   void testTokenAndSentenceEmbeddingsCoexist() {
-    final String text = "Dogs bark. Cats nap.";
-    final Document base = Document.of(text)
-        .with(Layers.SENTENCES, List.of(
-            new Annotation<>(new Span(0, 10), "s"),
-            new Annotation<>(new Span(11, 20), "s")))
-        .with(Layers.TOKENS, List.of(
-            new Annotation<>(new Span(0, 4), "Dogs"),
-            new Annotation<>(new Span(5, 9), "bark"),
-            new Annotation<>(new Span(9, 10), "."),
-            new Annotation<>(new Span(11, 15), "Cats"),
-            new Annotation<>(new Span(16, 19), "nap"),
-            new Annotation<>(new Span(19, 20), ".")));
+    final Document base = EmbeddingAnnotatorTestSupport.sentencesAndTokens();
 
     final EmbeddingAnnotator overTokens = new EmbeddingAnnotator(FIXTURE, Layers.TOKENS);
     final EmbeddingAnnotator overSentences =
@@ -80,6 +73,7 @@ public class EmbeddingAnnotatorTest {
     Assertions.assertNotEquals(overTokens.layer(), overSentences.layer());
   }
 
+  /** Public entry points reject null arguments. */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -90,10 +84,7 @@ public class EmbeddingAnnotatorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> annotator.annotate(null));
   }
 
-  /**
-   * Asserts that a document whose source layer is present but empty still receives the
-   * provided layer, carrying no annotations.
-   */
+  /** An empty source layer still produces a present, empty vector layer. */
   @Test
   void testEmptySourceLayerYieldsEmptyProvidedLayer() {
     final Document base = Document.of("no tokens were found").with(Layers.TOKENS, List.of());
@@ -103,11 +94,7 @@ public class EmbeddingAnnotatorTest {
     Assertions.assertTrue(document.get(annotator.layer()).isEmpty());
   }
 
-  /**
-   * Asserts that a document without the source layer is rejected, the way every other
-   * annotator rejects an absent required layer, instead of being treated as an empty
-   * source layer.
-   */
+  /** Missing input layers are distinct from present, empty layers. */
   @Test
   void testAbsentSourceLayerIsRejected() {
     final EmbeddingAnnotator annotator = new EmbeddingAnnotator(FIXTURE, Layers.TOKENS);
@@ -117,10 +104,7 @@ public class EmbeddingAnnotatorTest {
         e.getMessage());
   }
 
-  /**
-   * Asserts that a document-scoped source layer is rejected at construction: its
-   * annotations carry no span, so there would be no text to embed.
-   */
+  /** Document-scoped layers have no spans and cannot supply covered text. */
   @Test
   void testDocumentScopedSourceLayerIsRejected() {
     final LayerKey<String> language = Layers.documentKey("language", String.class);
@@ -130,29 +114,21 @@ public class EmbeddingAnnotatorTest {
         e.getMessage());
   }
 
-  /**
-   * Asserts that vectors of differing lengths are stored exactly as the embedder
-   * returned them: the annotator applies no dimension check, so an embedder whose
-   * output length varies per input produces a layer with mixed vector lengths.
-   */
+  /** The default embedding loop must also return vectors of the declared dimension. */
   @Test
-  void testInconsistentVectorDimensionsAreStoredAsReturned() {
+  void testInconsistentVectorDimensionsAreRejected() {
     final Document base = Document.of("ab cdef").with(Layers.TOKENS, List.of(
         new Annotation<>(new Span(0, 2), "ab"),
         new Annotation<>(new Span(3, 7), "cdef")));
     final EmbeddingAnnotator annotator =
         new EmbeddingAnnotator(new TextLengthEmbedder(), Layers.TOKENS);
-    final List<Annotation<float[]>> vectors = annotator.annotate(base).get(annotator.layer());
-    Assertions.assertEquals(2, vectors.size());
-    Assertions.assertArrayEquals(new float[] {1, 1}, vectors.get(0).value());
-    Assertions.assertArrayEquals(new float[] {1, 1, 1, 1}, vectors.get(1).value());
+    final IllegalArgumentException error = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> annotator.annotate(base));
+    Assertions.assertEquals("embedder returned a vector of dimension 4 at batch index 1; expected 2",
+        error.getMessage());
   }
 
-  /**
-   * Asserts that an embedder returning {@code null} fails the annotation loudly with an
-   * {@link IllegalArgumentException}, raised when the {@code null} vector is rejected as
-   * an annotation value, instead of storing a {@code null} silently.
-   */
+  /** Null vectors from the default embedding loop are rejected. */
   @Test
   void testNullVectorFromEmbedderFailsLoud() {
     final Document base = Document.of("boom").with(Layers.TOKENS,
@@ -161,15 +137,10 @@ public class EmbeddingAnnotatorTest {
         new EmbeddingAnnotator(new NullVectorEmbedder(), Layers.TOKENS);
     final IllegalArgumentException e = Assertions.assertThrows(
         IllegalArgumentException.class, () -> annotator.annotate(base));
-    Assertions.assertEquals("value must not be null", e.getMessage());
+    Assertions.assertEquals("embedder returned a null vector at batch index 0", e.getMessage());
   }
 
-  /**
-   * Asserts that annotating a document that already carries the provided layer is
-   * rejected: the immutable document refuses duplicate layers, so running the same
-   * annotator twice over one document chain fails with an
-   * {@link IllegalArgumentException} naming the conflicting layer.
-   */
+  /** A second annotation attempt identifies the duplicate output layer. */
   @Test
   void testAnnotatingSameDocumentTwiceIsRejected() {
     final Document base = Document.of("once").with(Layers.TOKENS,
@@ -183,14 +154,9 @@ public class EmbeddingAnnotatorTest {
   }
 
   /**
-   * Verifies the concurrency claim: one annotator instance with a stateless embedder is
-   * driven from several threads over two different documents at once, and every result
-   * must be identical to the sequentially computed reference, span by span and vector
-   * component by vector component.
+   * Concurrent calls with a stateless embedder match sequential results.
    *
-   * @throws Exception Propagated if a worker fails or does not finish in time; a
-   *         propagated {@link java.util.concurrent.ExecutionException} carries the
-   *         worker's assertion failure and fails the test.
+   * @throws Exception Thrown if a worker fails or does not finish in time.
    */
   @Test
   void testConcurrentAnnotationYieldsIdenticalResults() throws Exception {
@@ -237,12 +203,7 @@ public class EmbeddingAnnotatorTest {
     }
   }
 
-  /**
-   * Asserts the batched contract: the embedder is invoked once per document through
-   * {@link TextEmbedder#embedAll(List)} over the distinct covered texts in
-   * first-appearance order, never through {@link TextEmbedder#embed(CharSequence)}, and
-   * two spans covering the same text share the one vector the batch returned for it.
-   */
+  /** One batch embeds distinct texts; repeated texts share a vector on separate spans. */
   @Test
   void testDistinctCoveredTextsEmbedInOneBatch() {
     final Document base = Document.of("Dogs chase Dogs").with(Layers.TOKENS, List.of(
@@ -266,10 +227,7 @@ public class EmbeddingAnnotatorTest {
     Assertions.assertSame(vectors.get(0).value(), vectors.get(2).value());
   }
 
-  /**
-   * Asserts that an embedder whose batch does not hold exactly one vector per distinct
-   * input text fails loudly instead of misaligning vectors against spans.
-   */
+  /** A short batch is rejected before vectors can be assigned to the wrong spans. */
   @Test
   void testShortBatchFromEmbedderFailsLoud() {
     final Document base = Document.of("ab cd").with(Layers.TOKENS, List.of(
@@ -283,107 +241,32 @@ public class EmbeddingAnnotatorTest {
         + "return one vector per input, in input order", e.getMessage());
   }
 
-  /**
-   * A {@link TextEmbedder} that records how it was driven: {@code embedAll} invocations,
-   * {@code embed} invocations, and the texts of the most recent batch. Each batch vector
-   * encodes the text's batch position and length so tests can verify alignment.
-   */
-  private static final class RecordingEmbedder implements TextEmbedder {
-
-    private int batchCalls;
-    private int singleCalls;
-    private List<String> seen = List.of();
-
-    /**
-     * Embeds a text as {@code [position in batch, text length]} and records the call.
-     *
-     * @param texts The texts to embed. Must not be {@code null}.
-     * @return One vector per input, in input order.
-     */
-    @Override
-    public float[][] embedAll(List<? extends CharSequence> texts) {
-      batchCalls++;
-      final List<String> copy = new ArrayList<>(texts.size());
-      final float[][] vectors = new float[texts.size()][];
-      for (int i = 0; i < texts.size(); i++) {
-        copy.add(texts.get(i).toString());
-        vectors[i] = new float[] {i, texts.get(i).length()};
-      }
-      seen = copy;
-      return vectors;
-    }
-
-    /**
-     * Records a single-text call; the batched annotator is expected never to make one.
-     *
-     * @param text The text to embed. Must not be {@code null}.
-     * @return A two-component zero vector.
-     */
-    @Override
-    public float[] embed(CharSequence text) {
-      singleCalls++;
-      return new float[2];
-    }
-
-    /**
-     * @return The constant vector length two.
-     */
-    @Override
-    public int dimension() {
-      return 2;
-    }
-  }
-
-  /**
-   * A misbehaving {@link TextEmbedder} whose batch holds one vector fewer than requested.
-   * It exists to observe how the annotator reacts to an embedder violating the
-   * one-vector-per-input contract.
-   */
+  /** Returns one fewer vector than requested. */
   private static final class ShortBatchEmbedder implements TextEmbedder {
 
-    /**
-     * Violates the batch contract on purpose.
-     *
-     * @param texts The texts to embed.
-     * @return One vector fewer than requested.
-     */
+    /** {@inheritDoc} */
     @Override
     public float[][] embedAll(List<? extends CharSequence> texts) {
       return new float[texts.size() - 1][];
     }
 
-    /**
-     * @param text The text to embed; ignored.
-     * @return A two-component zero vector.
-     */
+    /** {@inheritDoc} */
     @Override
     public float[] embed(CharSequence text) {
       return new float[2];
     }
 
-    /**
-     * @return The constant vector length two.
-     */
+    /** {@inheritDoc} */
     @Override
     public int dimension() {
       return 2;
     }
   }
 
-  /**
-   * A misbehaving {@link TextEmbedder} whose vector length equals the input text length
-   * instead of the two dimensions it declares, with every component set to one. It
-   * exists to observe how the annotator treats vectors of inconsistent dimensions.
-   */
+  /** Returns one component per character, violating the declared dimension. */
   private static final class TextLengthEmbedder implements TextEmbedder {
 
-    /**
-     * Embeds a text as a vector of ones whose length equals the text length.
-     *
-     * @param text The text to embed. Must not be {@code null}.
-     * @return A vector of length {@code text.length()} with every component one.
-     * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
-     */
+    /** {@inheritDoc} */
     @Override
     public float[] embed(CharSequence text) {
       if (text == null) {
@@ -396,37 +279,23 @@ public class EmbeddingAnnotatorTest {
       return vector;
     }
 
-    /**
-     * @return The declared dimension of two, which {@link #embed(CharSequence)}
-     *         deliberately does not honor.
-     */
+    /** {@inheritDoc} */
     @Override
     public int dimension() {
       return 2;
     }
   }
 
-  /**
-   * A broken {@link TextEmbedder} that returns {@code null} for every input. It exists
-   * to observe how the annotator reacts to an embedder violating its contract.
-   */
+  /** Returns a null vector for every input. */
   private static final class NullVectorEmbedder implements TextEmbedder {
 
-    /**
-     * Violates the embedder contract on purpose.
-     *
-     * @param text The text to embed; ignored.
-     * @return Always {@code null}.
-     */
+    /** {@inheritDoc} */
     @Override
     public float[] embed(CharSequence text) {
       return null;
     }
 
-    /**
-     * @return The declared dimension of two, never observable through
-     *         {@link #embed(CharSequence)}.
-     */
+    /** {@inheritDoc} */
     @Override
     public int dimension() {
       return 2;

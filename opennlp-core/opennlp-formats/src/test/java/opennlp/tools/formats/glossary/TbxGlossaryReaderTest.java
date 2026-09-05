@@ -30,19 +30,13 @@ import opennlp.tools.formats.AbstractFormatTest;
 import opennlp.tools.glossary.GlossaryEntry;
 import opennlp.tools.util.InvalidFormatException;
 
-/**
- * Pins the TBX termbase reader: both the TBX&#160;2 martif shape and the TBX&#160;3
- * conceptEntry shape load into {@link GlossaryEntry} lists, language selection follows
- * BCP&#160;47 prefix matching, and malformed or unsafe input fails closed with
- * {@link InvalidFormatException}.
- */
+/** Tests TBX versions, language selection, entity handling, and entry validation. */
 public class TbxGlossaryReaderTest extends AbstractFormatTest {
 
   /**
-   * The TBX 2 fixture carries a DOCTYPE whose SYSTEM identifier exists nowhere, so a
-   * successful read also proves the external DTD is tolerated but never fetched. All
-   * terms of a matching langSet are collected in file order, whether they sit in a
-   * tig or in a nested ntig term group, and aliases share the entry id.
+   * Loads English terms and aliases from TBX 2 with an external DTD declaration.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testReadsV2TermEntriesForLanguage() throws IOException {
@@ -62,8 +56,9 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
   }
 
   /**
-   * The same file serves any of its languages: selecting {@code de} yields the German
-   * term and none of the English ones.
+   * Selects German terms from a multilingual file.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testReadsOtherLanguageFromSameFile() throws IOException {
@@ -79,9 +74,9 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
   }
 
   /**
-   * The TBX 3 shape (conceptEntry, langSec, termSec, ISO 30042 namespace) reads with
-   * the same reader; element names are matched by local name so the namespace does
-   * not matter.
+   * Loads terms and aliases from TBX 3 elements in the ISO 30042 namespace.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testReadsV3ConceptEntries() throws IOException {
@@ -101,9 +96,9 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
   }
 
   /**
-   * Language selection is case-insensitive and prefix-based like BCP 47 lookup:
-   * {@code en} matches {@code en-US}, {@code EN-us} matches it exactly, and
-   * {@code en-GB} does not match {@code en-US}.
+   * Matches language tags without case sensitivity and distinguishes regional subtags.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testLanguageMatchingIsCaseInsensitiveAndPrefixBased() throws IOException {
@@ -116,8 +111,9 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
   }
 
   /**
-   * A language absent from the file reads as an empty list; the matcher constructors
-   * fail loud on an empty glossary, so the miss cannot pass silently downstream.
+   * Returns no entries when the requested language is not present.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testAbsentLanguageYieldsEmptyList() throws IOException {
@@ -128,8 +124,9 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
   }
 
   /**
-   * Internal entities declared in the internal DTD subset resolve normally; real
-   * termbases use them for recurring names.
+   * Expands internal entity references in terms.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testInternalDtdEntityResolves() throws IOException {
@@ -148,10 +145,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
     Assertions.assertEquals("Acme Corp press", entries.get(0).term());
   }
 
-  /**
-   * An external entity reference fails closed as {@link InvalidFormatException}
-   * instead of touching the file system.
-   */
+  /** Rejects an external entity in a term. */
   @Test
   void testExternalEntityFailsClosed() {
     final String doc = "<?xml version=\"1.0\"?>"
@@ -166,11 +160,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
         .read(new ByteArrayInputStream(doc.getBytes(StandardCharsets.UTF_8))));
   }
 
-  /**
-   * A term entry without an id attribute fails loud: the id becomes the
-   * {@link GlossaryEntry} identifier, and inventing one would silently corrupt
-   * downstream joins.
-   */
+  /** Rejects a term entry without an identifier. */
   @Test
   void testMissingEntryIdFailsLoud() {
     final String doc = "<?xml version=\"1.0\"?>"
@@ -186,10 +176,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
     Assertions.assertTrue(ex.getMessage().contains("id"), ex.getMessage());
   }
 
-  /**
-   * A blank term element inside a selected language fails loud rather than producing
-   * an entry the matcher constructors would reject with less context.
-   */
+  /** Rejects a blank term in a selected language. */
   @Test
   void testBlankTermFailsLoud() {
     final String doc = "<?xml version=\"1.0\"?>"
@@ -203,10 +190,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
         .read(new ByteArrayInputStream(doc.getBytes(StandardCharsets.UTF_8))));
   }
 
-  /**
-   * Truncated XML surfaces as {@link InvalidFormatException}, not as an unchecked
-   * parser exception.
-   */
+  /** Reports truncated XML as invalid content. */
   @Test
   void testMalformedXmlFailsAsInvalidFormat() {
     final String doc = "<?xml version=\"1.0\"?><martif type=\"TBX\"><text><body>"
@@ -216,10 +200,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
         .read(new ByteArrayInputStream(doc.getBytes(StandardCharsets.UTF_8))));
   }
 
-  /**
-   * A well-formed document that is not a termbase (wrong root element) is rejected
-   * with a message naming the expected roots.
-   */
+  /** Rejects an unsupported root element. */
   @Test
   void testWrongRootElementFailsLoud() {
     final String doc = "<?xml version=\"1.0\"?><html><body><p>not a termbase</p></body></html>";
@@ -231,10 +212,7 @@ public class TbxGlossaryReaderTest extends AbstractFormatTest {
         || ex.getMessage().contains("tbx"), ex.getMessage());
   }
 
-  /**
-   * Constructor and read-side argument validation fail with
-   * {@link IllegalArgumentException}.
-   */
+  /** Rejects missing language tags and a null input stream. */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> new TbxGlossaryReader(null));

@@ -33,7 +33,7 @@ public interface ArtifactDetector {
    * Detects the artifacts of a text.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @return The artifacts in order of appearance; empty when the text is clean. Never
+   * @return The artifacts in order of appearance; empty when none are detected. Never
    *         {@code null}.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */

@@ -28,11 +28,10 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
 /**
- * Adapts a {@link GlossaryMatcher} to the document pipeline: scans the document text and
- * provides {@link #GLOSSARY}, one annotation per hit carrying its {@link GlossaryMatch}.
+ * Adds glossary matches to a document as the {@link #GLOSSARY} annotation layer.
  *
- * <p>The matcher works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline.</p>
+ * <p>The matcher receives the document text; no input annotation layers are required.
+ * An existing glossary layer is rejected before matching begins.</p>
  *
  * @since 3.0.0
  */
@@ -61,22 +60,18 @@ public final class GlossaryAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Scans the document text for glossary terms and adds the {@link #GLOSSARY} layer, one
-   * annotation per hit on the hit's span.
+   * {@inheritDoc} Adds the {@link #GLOSSARY} layer, including when no matches are found.
    *
-   * <p>No other layer is read, so a document without content yields a present-but-empty
-   * glossary layer.</p>
-   *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #GLOSSARY} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         already carries the {@link #GLOSSARY} layer.
+   * @throws IllegalArgumentException Thrown if the document already contains
+   *         {@link #GLOSSARY}.
    */
   @Override
   public Document annotate(Document document) {
     if (document == null) {
       throw new IllegalArgumentException("document must not be null");
+    }
+    if (document.layers().contains(GLOSSARY)) {
+      throw new IllegalArgumentException("layer is already present: " + GLOSSARY);
     }
     final List<Annotation<GlossaryMatch>> hits = new ArrayList<>();
     for (final GlossaryMatch match : matcher.match(document.text())) {

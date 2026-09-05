@@ -28,18 +28,16 @@ import java.util.List;
 import opennlp.tools.util.Span;
 
 /**
- * The built-in {@link AssetDetector}: a single cursor pass with no regular expression,
- * finding base64-embedded binaries as {@code data:} URIs, bare payload runs,
+ * Detects base64 content in {@code data:} URIs, bare payload runs,
  * <a href="https://www.rfc-editor.org/rfc/rfc7468.html">RFC 7468</a> PEM envelopes,
  * and <a href="https://www.rfc-editor.org/rfc/rfc7519.html">RFC 7519</a> compact JSON
  * Web Tokens.
  *
- * <p>A bare run is only reported when three independent checks agree: it is long enough
- * to be a real payload, its first characters are the base64 image of a known format's
- * magic bytes (a format's leading bytes always encode to the same characters at payload
- * start), and its decoded header actually carries those magic bytes. A {@code data:}
- * URI declares its media type, so it is reported at any payload length, with the format
- * sniffed from the decoded header when it is a known one.</p>
+ * <p>Bare runs require at least 32 encoded characters and a recognized file signature
+ * in the decoded header. Explicitly typed {@code data:} URIs accept non-empty payloads
+ * of any length. Format detection uses the decoded header when recognized; otherwise,
+ * the declared media subtype is used. File signatures identify possible formats, not
+ * complete or safe files.</p>
  *
  * <p>Bare standard-base64 payloads may use the 76-column MIME or 64-column PEM line
  * width with CRLF or LF separators. The
@@ -48,7 +46,11 @@ import opennlp.tools.util.Span;
  * verified before an envelope is reported.
  * A compact JWT is reported only when it has three base64url segments, a UTF-8 JSON
  * object header with a non-empty {@code alg} member, and a UTF-8 JSON object claims
- * set. Signature validity is deliberately out of scope.</p>
+ * set. Signature encoding must be unpadded base64url; cryptographic signatures are
+ * not verified.</p>
+ *
+ * <p>Malformed padding and mixed base64 alphabets are rejected. An unpadded bare run
+ * of length 1 modulo 4 is shortened by one character to recover a decodable prefix.</p>
  *
  * <p>The detector is stateless and safe for concurrent use by multiple threads.</p>
  *
@@ -56,7 +58,7 @@ import opennlp.tools.util.Span;
  */
 public final class CursorAssetDetector implements AssetDetector {
 
-  /** Bare runs shorter than this are never reported; real payloads are far longer. */
+  /** Minimum encoded length for bare-payload detection. */
   private static final int MIN_BARE_PAYLOAD = 32;
 
   private static final String DATA_URI_SCHEME = "data:";
@@ -191,8 +193,7 @@ public final class CursorAssetDetector implements AssetDetector {
     if (mediaType == null) {
       return start;
     }
-    assets.add(asset(start, payload.end(), payload,
-        sniffed != null ? sniffed : subtype(mediaType), mediaType, header));
+    assets.add(asset(start, payload.end(), payload, sniffed, mediaType, header));
     return payload.end();
   }
 
@@ -265,7 +266,7 @@ public final class CursorAssetDetector implements AssetDetector {
             return start;
           }
           final Payload payload = new Payload(bodyStart, payloadEnd, encodedLength,
-              padding, false);
+              padding, false, true);
           final byte[] header = decodeHeader(text, payload);
           if (header == null) {
             return start;
@@ -333,7 +334,7 @@ public final class CursorAssetDetector implements AssetDetector {
     }
     final int signatureStart = claimsEnd + 1;
     final int tokenEnd = urlSegmentEnd(text, signatureStart);
-    if (!tokenBoundaryAfter(text, tokenEnd)) {
+    if (!tokenBoundaryAfter(text, tokenEnd) || (tokenEnd - signatureStart) % 4 == 1) {
       return start;
     }
     if (headerEnd - start > MAX_JWT_SEGMENT_LENGTH
@@ -359,7 +360,7 @@ public final class CursorAssetDetector implements AssetDetector {
       return start;
     }
     final Payload payload = new Payload(claimsStart, claimsEnd,
-        claimsEnd - claimsStart, 0, true);
+        claimsEnd - claimsStart, 0, true, true);
     assets.add(asset(start, tokenEnd, payload, EmbeddedAsset.FORMAT_JWT,
         JWT_MEDIA_TYPE, claims));
     return tokenEnd;
@@ -424,7 +425,8 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param spanStart The asset start, at the URI scheme or the payload.
    * @param spanEnd The exclusive end of the complete asset.
    * @param payload The encoded payload and its accounting.
-   * @param format The decoded format.
+   * @param format The detected format, or {@code null} when only the media type
+   *               identifies the format.
    * @param mediaType The media type.
    * @param header The decoded leading bytes.
    * @return The asset. Never {@code null}.
@@ -434,16 +436,21 @@ public final class CursorAssetDetector implements AssetDetector {
     final long decodedLength = decodedLength(payload.encodedLength(), payload.padding());
     int width = -1;
     int height = -1;
-    if (EmbeddedAsset.FORMAT_PNG.equals(format) && header.length >= 24) {
+    if (EmbeddedAsset.FORMAT_PNG.equals(format) && header.length >= 24
+        && readInt(header, 8) == 13 && carries(header, 12, "IHDR")) {
       width = readInt(header, 16);
       height = readInt(header, 20);
     } else if (EmbeddedAsset.FORMAT_GIF.equals(format) && header.length >= 10) {
       width = (header[6] & 0xFF) | ((header[7] & 0xFF) << 8);
       height = (header[8] & 0xFF) | ((header[9] & 0xFF) << 8);
     }
+    if (width <= 0 || height <= 0) {
+      width = -1;
+      height = -1;
+    }
     return new EmbeddedAsset(new Span(spanStart, spanEnd),
-        new Span(payload.start(), payload.end()), format, mediaType, decodedLength,
-        width, height);
+        new Span(payload.start(), payload.end()),
+        format != null ? format : subtype(mediaType), mediaType, decodedLength, width, height);
   }
 
   /**
@@ -463,10 +470,12 @@ public final class CursorAssetDetector implements AssetDetector {
     int wrapWidth = 0;
     int padding = 0;
     boolean urlSafe = false;
+    boolean standardOnly = false;
     while (i < length) {
       final char c = text.charAt(i);
       if (isAnyBase64Char(c) && padding == 0) {
         urlSafe |= c == '-' || c == '_';
+        standardOnly |= c == '+' || c == '/';
         encodedLength++;
         lineLength++;
         i++;
@@ -495,7 +504,11 @@ public final class CursorAssetDetector implements AssetDetector {
       i--;
       encodedLength--;
     }
-    return new Payload(start, i, encodedLength, padding, urlSafe);
+    final boolean valid = encodedLength >= 2
+        && !(urlSafe && (standardOnly || wrapWidth > 0))
+        && (padding == 0 || encodedLength % 4 == 0)
+        && (i == length || text.charAt(i) != '=');
+    return new Payload(start, i, encodedLength, padding, urlSafe, valid);
   }
 
   /**
@@ -503,14 +516,13 @@ public final class CursorAssetDetector implements AssetDetector {
    *
    * @param text The text.
    * @param payload The scanned payload.
-   * @return The decoded leading bytes, or {@code null} when fewer than four whole
-   *         payload characters are available.
+   * @return The decoded leading bytes, or {@code null} for an invalid or empty payload.
    */
   private byte[] decodeHeader(CharSequence text, Payload payload) {
-    final int usable = Math.min(payload.encodedLength() - payload.padding(), 32) & ~3;
-    if (usable < 4) {
+    if (!payload.valid()) {
       return null;
     }
+    final int usable = Math.min(payload.encodedLength() - payload.padding(), 32);
     final StringBuilder head = new StringBuilder(usable);
     for (int i = payload.start(); i < payload.end() && head.length() < usable; i++) {
       final char c = text.charAt(i);
@@ -580,8 +592,9 @@ public final class CursorAssetDetector implements AssetDetector {
    */
   private String subtype(String mediaType) {
     final int slash = mediaType.indexOf('/');
-    return slash >= 0 && slash + 1 < mediaType.length()
-        ? mediaType.substring(slash + 1) : mediaType;
+    final int parameter = mediaType.indexOf(';', slash + 1);
+    final int end = parameter >= 0 ? parameter : mediaType.length();
+    return slash >= 0 && slash + 1 < end ? mediaType.substring(slash + 1, end) : mediaType;
   }
 
   /**
@@ -701,10 +714,11 @@ public final class CursorAssetDetector implements AssetDetector {
    *
    * @param text The source text.
    * @param at The token end.
-   * @return {@code true} when no base64url or segment character follows it.
+   * @return {@code true} when no base64url, segment, or padding character follows it.
    */
   private boolean tokenBoundaryAfter(CharSequence text, int at) {
-    return at == text.length() || (!isBase64UrlChar(text.charAt(at)) && text.charAt(at) != '.');
+    return at == text.length() || (!isBase64UrlChar(text.charAt(at))
+        && text.charAt(at) != '.' && text.charAt(at) != '=');
   }
 
   /**
@@ -809,9 +823,10 @@ public final class CursorAssetDetector implements AssetDetector {
    * @param encodedLength The encoded character count, excluding line separators.
    * @param padding The trailing padding character count.
    * @param urlSafe Whether the payload uses a URL-only alphabet character.
+   * @param valid Whether the scanned alphabet, wrapping, and padding can be decoded together.
    */
   private record Payload(int start, int end, int encodedLength, int padding,
-                         boolean urlSafe) {
+                         boolean urlSafe, boolean valid) {
   }
 
   /**

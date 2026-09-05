@@ -17,10 +17,7 @@
 
 package opennlp.tools.formats.glossary;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -29,19 +26,15 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.glossary.GlossaryEntry;
 import opennlp.tools.util.InvalidFormatException;
 
-/**
- * Pins the CSV term list reader: RFC&#160;4180 quoting, delimiter and header options,
- * BOM tolerance, and loud failures with line numbers for malformed rows.
- */
+import static opennlp.tools.formats.glossary.GlossaryTestSupport.utf8;
+
+/** Tests CSV quoting, configuration, and invalid-record diagnostics. */
 public class CsvGlossaryReaderTest {
 
-  private static InputStream utf8(String content) {
-    return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
-  }
-
   /**
-   * The minimal shape: one row per entry, first column id, second column term,
-   * returned in file order.
+   * Returns identifiers and terms in file order.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testReadsSimpleCommaSeparatedRows() throws IOException {
@@ -56,7 +49,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * With header skipping on, the first row is dropped whatever it contains.
+   * Ignores the first record's values when header skipping is enabled.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testSkipsHeaderWhenConfigured() throws IOException {
@@ -68,8 +63,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * RFC 4180 quoting: a quoted field may contain the delimiter, an escaped quote
-   * (doubled), and even a line break.
+   * Preserves delimiters, escaped quotes, and line breaks in quoted fields.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testQuotedFieldsCarryDelimitersQuotesAndNewlines() throws IOException {
@@ -83,7 +79,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * Tab is a first-class delimiter for TSV term lists.
+   * Supports tab-separated input.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testTabDelimiter() throws IOException {
@@ -95,8 +93,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * CRLF line ends read like LF, blank lines anywhere are skipped, and a missing
-   * final newline is fine.
+   * Accepts CRLF, blank lines, and a record without a final newline.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testCrlfBlankLinesAndMissingFinalNewline() throws IOException {
@@ -108,8 +107,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * A UTF-8 byte order mark (the Excel export signature) is stripped rather than
-   * glued onto the first id.
+   * Removes a leading UTF-8 byte order mark.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testUtf8ByteOrderMarkIsStripped() throws IOException {
@@ -121,8 +121,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * Columns beyond the second are ignored, leaving room for metadata columns the
-   * reader does not model.
+   * Ignores metadata column values after the identifier and term.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testExtraColumnsAreIgnored() throws IOException {
@@ -134,9 +135,7 @@ public class CsvGlossaryReaderTest {
     Assertions.assertEquals("hot dog", entries.get(0).term());
   }
 
-  /**
-   * A row with fewer than two columns fails loud with its line number.
-   */
+  /** Reports a missing term column with the record's line number. */
   @Test
   void testTooFewColumnsFailsWithLineNumber() {
     final InvalidFormatException ex = Assertions.assertThrows(InvalidFormatException.class,
@@ -144,10 +143,7 @@ public class CsvGlossaryReaderTest {
     Assertions.assertTrue(ex.getMessage().contains("line 2"), ex.getMessage());
   }
 
-  /**
-   * Blank ids and blank terms fail loud with the offending line number instead of
-   * surfacing as a bare IllegalArgumentException from {@link GlossaryEntry}.
-   */
+  /** Reports blank identifiers and terms with the record's line number. */
   @Test
   void testBlankIdOrTermFailsWithLineNumber() {
     final InvalidFormatException blankId = Assertions.assertThrows(InvalidFormatException.class,
@@ -159,10 +155,7 @@ public class CsvGlossaryReaderTest {
     Assertions.assertTrue(blankTerm.getMessage().contains("line 2"), blankTerm.getMessage());
   }
 
-  /**
-   * A quote opened and never closed fails loud instead of silently swallowing the
-   * rest of the file into one field.
-   */
+  /** Rejects an unclosed quoted field. */
   @Test
   void testUnclosedQuoteFailsLoud() {
     Assertions.assertThrows(InvalidFormatException.class,
@@ -170,8 +163,9 @@ public class CsvGlossaryReaderTest {
   }
 
   /**
-   * Empty input reads as an empty list; the matcher constructors reject an empty
-   * glossary downstream, so nothing silently matches nothing.
+   * Returns no entries for empty input or a header without data.
+   *
+   * @throws IOException If reading fails.
    */
   @Test
   void testEmptyInputYieldsEmptyList() throws IOException {
@@ -179,10 +173,7 @@ public class CsvGlossaryReaderTest {
     Assertions.assertTrue(new CsvGlossaryReader(',', true).read(utf8("id,term\n")).isEmpty());
   }
 
-  /**
-   * Constructor and read-side argument validation: the delimiter may not be the
-   * quote or a line-break character, and the stream must not be {@code null}.
-   */
+  /** Rejects invalid delimiters and a null input stream. */
   @Test
   void testInvalidArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

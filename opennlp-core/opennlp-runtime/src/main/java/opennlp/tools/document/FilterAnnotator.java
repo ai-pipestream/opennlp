@@ -20,12 +20,13 @@ package opennlp.tools.document;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
 /**
- * Writes the annotations of one layer that pass a predicate to a second layer. The
- * source layer stays untouched, so a pipeline keeps both the raw and the filtered view
- * and every consumer states which one it reads.
+ * Writes the annotations of one layer that pass a predicate to a second layer. A
+ * predicate may inspect an annotation, or both the annotation and its document. The
+ * source layer is unchanged.
  *
  * <p>This annotator is safe for concurrent use when its predicate is.</p>
  *
@@ -35,27 +36,40 @@ import java.util.function.Predicate;
  */
 public final class FilterAnnotator<T> implements DocumentAnnotator {
 
-  /** The message prefix of every absent-required-layer rejection in this wrapper. */
-  private static final String MISSING_LAYER = "document lacks the required layer ";
-
   private final LayerKey<T> source;
   private final LayerKey<T> target;
-  private final Predicate<Annotation<T>> keep;
+  private final BiPredicate<Document, Annotation<T>> keep;
 
   /**
-   * Initializes a {@link FilterAnnotator}.
+   * Creates a filter with a predicate that inspects each annotation.
    *
    * @param source The layer to read. Must not be {@code null}.
-   * @param target The layer to write survivors to. Must not be {@code null} and must
+   * @param target The layer to write matching annotations to. Must not be {@code null} and must
    *               differ from {@code source}, because a document rejects a duplicate
    *               layer.
-   * @param keep The predicate an annotation must pass to survive. Must not be
+   * @param keep The predicate an annotation must pass. Must not be
    *             {@code null}.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the two
    *         layers are equal.
    */
   public FilterAnnotator(LayerKey<T> source, LayerKey<T> target,
       Predicate<Annotation<T>> keep) {
+    this(source, target, documentAware(keep));
+  }
+
+  /**
+   * Creates a filter with a predicate that can inspect the document and each annotation.
+   *
+   * @param source The layer to read. Must not be {@code null}.
+   * @param target The layer to write matching annotations to. Must not be {@code null} and must
+   *               differ from {@code source}.
+   * @param keep The predicate an annotation must pass. Must not be
+   *             {@code null}.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the two
+   *         layers are equal.
+   */
+  public FilterAnnotator(LayerKey<T> source, LayerKey<T> target,
+      BiPredicate<Document, Annotation<T>> keep) {
     if (source == null) {
       throw new IllegalArgumentException("source must not be null");
     }
@@ -74,11 +88,27 @@ public final class FilterAnnotator<T> implements DocumentAnnotator {
   }
 
   /**
-   * Reads the source layer and adds the target layer holding the annotations that pass
-   * the predicate, in their source order. The source layer must be present, but it may
-   * be empty: an empty source yields a present-but-empty target.
+   * Adapts the annotation-only constructor argument.
    *
-   * @param document The document to annotate. Must not be {@code null} and must carry
+   * @param keep The annotation filter.
+   * @param <T> The annotation value type.
+   * @return A filter that ignores the document argument.
+   * @throws IllegalArgumentException If {@code keep} is {@code null}.
+   */
+  private static <T> BiPredicate<Document, Annotation<T>> documentAware(
+      Predicate<Annotation<T>> keep) {
+    if (keep == null) {
+      throw new IllegalArgumentException("keep must not be null");
+    }
+    return (document, annotation) -> keep.test(annotation);
+  }
+
+  /**
+   * Reads the source layer and adds the target layer containing the annotations that pass
+   * the predicate, in their source order. The source layer must be present, but it may
+   * be empty: an empty source produces a present-but-empty target.
+   *
+   * @param document The document to annotate. Must not be {@code null} and must contain
    *                 the source layer.
    * @return A new {@link Document} with the target layer added. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
@@ -86,26 +116,23 @@ public final class FilterAnnotator<T> implements DocumentAnnotator {
    */
   @Override
   public Document annotate(Document document) {
-    if (document == null) {
-      throw new IllegalArgumentException("document must not be null");
-    }
-    if (!document.layers().contains(source)) {
-      throw new IllegalArgumentException(MISSING_LAYER + source);
-    }
-    final List<Annotation<T>> survivors = new ArrayList<>();
+    DocumentAnnotators.requireLayers(document, source);
+    final List<Annotation<T>> matches = new ArrayList<>();
     for (final Annotation<T> annotation : document.get(source)) {
-      if (keep.test(annotation)) {
-        survivors.add(annotation);
+      if (keep.test(document, annotation)) {
+        matches.add(annotation);
       }
     }
-    return document.with(target, survivors);
+    return document.with(target, matches);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> requires() {
     return Set.of(source);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(target);

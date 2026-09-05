@@ -23,33 +23,20 @@ import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
-import opennlp.tools.stemmer.snowball.SnowballStemmer;
-import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
 import opennlp.tools.util.Span;
-import opennlp.tools.util.normalizer.TermAnalyzer;
+
+import static opennlp.tools.glossary.GlossaryTestSupport.englishStemmingAnalyzer;
 
 /**
- * Pins composite priority merging: earlier matchers win on span overlap, touching
- * spans both survive, and accepted hits are reported in text order.
+ * Tests delegate priority, overlap selection, and source ordering.
  */
 public class CompositeGlossaryMatcherTest {
 
   /**
-   * Builds the analyzer shared by the English inflection cases.
-   *
-   * @return A case-folding English stemming analyzer.
-   */
-  private TermAnalyzer englishStemmingAnalyzer() {
-    return TermAnalyzer.builder()
-        .caseFold()
-        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
-        .build();
-  }
-
-  /**
-   * Exact matcher first: when both paths hit the same stretch, the exact hit
-   * survives and the inflected hit is dropped.
+   * Prefers exact matches when the exact matcher has higher priority.
    */
   @Test
   void testExactWinsOverInflectedOnSameStretch() {
@@ -70,8 +57,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * The inflected path fills gaps the exact matcher misses, while exact hits
-   * elsewhere still appear in the merged result.
+   * Includes inflected matches where they do not overlap exact matches.
    */
   @Test
   void testInflectedFillsGapsExactMisses() {
@@ -99,8 +85,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * Inflected matcher first: on the same stretch the inflected hit wins and the
-   * exact hit is dropped.
+   * Prefers inflected matches when the inflected matcher has higher priority.
    */
   @Test
   void testInflectedWinsWhenOrderedFirst() {
@@ -121,8 +106,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * Touching spans (one end equals the next start) do not intersect, so both
-   * hits survive.
+   * Accepts adjacent, non-overlapping matches.
    */
   @Test
   void testTouchingSpansBothSurvive() {
@@ -143,29 +127,58 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * A lower-priority hit that partially overlaps an accepted span, and one that
-   * is contained by it, are both dropped.
+   * Rejects overlapping lower-priority spans and accepts adjacent spans.
+   *
+   * @param start The lower-priority start offset.
+   * @param end The lower-priority end offset.
+   * @param accepted Whether the lower-priority match should be included.
    */
-  @Test
-  void testPartialOverlapAndContainmentDropped() {
-    final GlossaryMatcher high = text -> List.of(
-        new GlossaryMatch(new Span(5, 15), "HIGH", "kept"));
-    final GlossaryMatcher low = text -> List.of(
-        new GlossaryMatch(new Span(10, 20), "PARTIAL", "overlap"),
-        new GlossaryMatch(new Span(7, 12), "INNER", "contained"));
+  @ParameterizedTest
+  @CsvSource({"0,10,false", "10,20,false", "7,12,false", "0,20,false",
+      "5,15,false", "0,5,true", "15,20,true"})
+  void testLowerPriorityOverlap(int start, int end, boolean accepted) {
+    final GlossaryMatch priority = new GlossaryMatch(new Span(5, 15), "HIGH", "kept");
+    final GlossaryMatcher high = text -> List.of(priority);
+    final GlossaryMatch candidate = new GlossaryMatch(new Span(start, end), "LOW", "candidate");
+    final GlossaryMatcher low = text -> List.of(candidate);
     final CompositeGlossaryMatcher composite = new CompositeGlossaryMatcher(
         List.of(high, low));
 
     final List<GlossaryMatch> matches = composite.match("01234567890123456789");
 
-    Assertions.assertEquals(1, matches.size());
-    Assertions.assertEquals("HIGH", matches.get(0).id());
-    Assertions.assertEquals(new Span(5, 15), matches.get(0).span());
+    Assertions.assertEquals(accepted ? 2 : 1, matches.size());
+    Assertions.assertEquals(accepted, matches.contains(candidate));
+    Assertions.assertTrue(matches.contains(priority));
   }
 
   /**
-   * A hit accepted from a later matcher that occurs earlier in the text is
-   * reported first: the merged list is sorted by start offset ascending.
+   * Applies Span intersection rules to zero-length matches from custom delegates.
+   *
+   * @param highStart The higher-priority start offset.
+   * @param highEnd The higher-priority end offset.
+   * @param lowStart The lower-priority start offset.
+   * @param lowEnd The lower-priority end offset.
+   * @param accepted Whether to include the lower-priority match.
+   */
+  @ParameterizedTest
+  @CsvSource({"0,0,0,0,false", "0,0,0,3,false", "0,3,3,3,false", "3,3,3,6,false",
+      "0,3,3,6,true", "2,4,1,1,true", "2,4,5,5,true", "0,0,1,1,true",
+      "2,4,3,3,false", "2,4,2,2,false"})
+  void testZeroLengthIntersections(int highStart, int highEnd, int lowStart, int lowEnd,
+      boolean accepted) {
+    final GlossaryMatch priority = new GlossaryMatch(new Span(highStart, highEnd), "HIGH", "high");
+    final GlossaryMatch candidate = new GlossaryMatch(new Span(lowStart, lowEnd), "LOW", "low");
+    Assertions.assertEquals(!accepted, priority.span().intersects(candidate.span()));
+    final CompositeGlossaryMatcher matcher = new CompositeGlossaryMatcher(List.of(
+        text -> List.of(priority), text -> List.of(candidate)));
+    final List<GlossaryMatch> matches = matcher.match("abcdef");
+    Assertions.assertTrue(matches.contains(priority));
+    Assertions.assertEquals(accepted ? 2 : 1, matches.size());
+    Assertions.assertEquals(accepted, matches.contains(candidate));
+  }
+
+  /**
+   * Orders accepted matches by source offset, independent of delegate priority.
    */
   @Test
   void testResultOrderedByAscendingStartOffset() {
@@ -188,7 +201,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * A single-delegate composite returns the same hits as that delegate alone.
+   * Returns the result of a single delegate.
    */
   @Test
   void testSingleDelegatePassthrough() {
@@ -208,8 +221,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * A composite used as a delegate inside another composite still merges under
-   * the outer priority order.
+   * Applies priority and source ordering to nested composites.
    */
   @Test
   void testNestedCompositeAsDelegate() {
@@ -234,8 +246,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * Registering the same delegate twice adds nothing: the second pass produces
-   * identical spans that intersect the already-accepted hits.
+   * Excludes duplicate matches from a repeated delegate.
    */
   @Test
   void testSameDelegateTwiceAddsNothing() {
@@ -265,7 +276,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * Null text fails loud with {@link IllegalArgumentException}.
+   * Rejects null input.
    */
   @Test
   void testNullTextThrows() {
@@ -276,7 +287,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * No registered hits and empty text both yield an empty, non-null list.
+   * Returns an empty list when no delegate finds matches.
    */
   @Test
   void testNoHitsAndEmptyTextYieldEmptyList() {
@@ -291,8 +302,7 @@ public class CompositeGlossaryMatcherTest {
   }
 
   /**
-   * The constructor copies the delegate list, so clearing the caller's list
-   * after construction does not break matching.
+   * Copies the delegate list at construction.
    */
   @Test
   void testConstructorDefensivelyCopiesDelegateList() {

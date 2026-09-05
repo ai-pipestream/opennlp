@@ -17,26 +17,35 @@
 
 package opennlp.tools.util.normalizer;
 
+import java.io.Serial;
+import java.util.Arrays;
+
+import opennlp.tools.tokenize.uax29.WordSegmenter;
+import opennlp.tools.util.StringUtil;
+
 /**
  * Expands unambiguous English contractions into whitespace-separated words while
  * retaining an alignment to the source text. For example, {@code can't} becomes
  * {@code can not}, and {@code we're} becomes {@code we are}. ASCII, typographic,
  * modifier-letter, and fullwidth apostrophes are accepted.
  *
- * <p>The ambiguous suffixes {@code 's} and {@code 'd}, and the ambiguous contraction
- * {@code ain't}, pass through unchanged. This normalizer is therefore conservative and
- * does not guess between meanings such as {@code is} versus {@code has}, or
- * {@code would} versus {@code had}. It is English-specific and is never part of the
- * locale-neutral default normalization chain.</p>
+ * <p>A contraction must occupy a complete word under the default
+ * <a href="https://www.unicode.org/reports/tr29/#Word_Boundaries">UAX #29 word
+ * boundaries</a>. Quotation marks around a word are preserved. Portions of longer
+ * words, identifiers, and apostrophe-linked forms such as {@code can't've} are not
+ * expanded.</p>
  *
- * <p>The expansion is a derived matching view. {@link #normalizeAligned(CharSequence)}
- * maps a match over the expanded words back to the untouched contraction, including
- * its original apostrophe.</p>
+ * <p>Ambiguous {@code 's}, {@code 'd}, and {@code ain't} forms remain unchanged.
+ * This English-specific step is not included in the default normalization chain.</p>
+ *
+ * <p>With {@link #normalizeAligned(CharSequence)}, a span covering all expanded words
+ * maps back to the complete original contraction, including its apostrophe.</p>
  *
  * @since 3.0.0
  */
 public final class EnglishContractionCharSequenceNormalizer implements OffsetAwareNormalizer {
 
+  @Serial
   private static final long serialVersionUID = 5698236849033803551L;
 
   /** Replacement suffix for an unambiguous negative contraction. */
@@ -90,17 +99,22 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
     if (first == null) {
       return text;
     }
-    final StringBuilder normalized = new StringBuilder(text.length() + 8);
+    final int[] boundaries = WordSegmenter.boundaries(text);
+    StringBuilder normalized = null;
     int cursor = 0;
     Contraction contraction = first;
     while (contraction != null) {
-      normalized.append(text, cursor, contraction.start());
-      appendContraction(normalized, text, contraction);
-      cursor = contraction.end();
-      contraction = nextContraction(text, cursor);
+      if (isCompleteWord(contraction, boundaries)) {
+        if (normalized == null) {
+          normalized = new StringBuilder(text.length() + 8);
+        }
+        normalized.append(text, cursor, contraction.start());
+        appendContraction(normalized, text, contraction);
+        cursor = contraction.end();
+      }
+      contraction = nextContraction(text, contraction.end());
     }
-    normalized.append(text, cursor, text.length());
-    return normalized.toString();
+    return normalized == null ? text : normalized.append(text, cursor, text.length()).toString();
   }
 
   /** {@inheritDoc} */
@@ -114,14 +128,29 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
     final Alignment.Builder alignment = new Alignment.Builder(original.length());
     int cursor = 0;
     Contraction contraction = nextContraction(original, cursor);
+    final int[] boundaries = contraction == null ? null : WordSegmenter.boundaries(original);
     while (contraction != null) {
-      appendEqual(normalized, alignment, original, cursor, contraction.start());
-      appendContraction(normalized, alignment, original, contraction);
-      cursor = contraction.end();
-      contraction = nextContraction(original, cursor);
+      if (isCompleteWord(contraction, boundaries)) {
+        appendEqual(normalized, alignment, original, cursor, contraction.start());
+        appendContraction(normalized, alignment, original, contraction);
+        cursor = contraction.end();
+      }
+      contraction = nextContraction(original, contraction.end());
     }
     appendEqual(normalized, alignment, original, cursor, original.length());
     return new AlignedText(original, normalized.toString(), alignment.build(original.length()));
+  }
+
+  /**
+   * Checks the candidate's start and end against the source word boundaries.
+   *
+   * @param contraction The candidate expansion.
+   * @param boundaries The sorted source word boundaries.
+   * @return Whether the candidate covers a complete word.
+   */
+  private boolean isCompleteWord(Contraction contraction, int[] boundaries) {
+    return Arrays.binarySearch(boundaries, contraction.start()) >= 0
+        && Arrays.binarySearch(boundaries, contraction.end()) >= 0;
   }
 
   /**
@@ -153,9 +182,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
   private Contraction contractionAt(CharSequence text, int apostrophe) {
     final int start = asciiWordStart(text, apostrophe);
     final int end = asciiWordEnd(text, apostrophe + 1);
-    if (start == apostrophe || end == apostrophe + 1
-        || start > 0 && isApostrophe(text.charAt(start - 1))
-        || end < text.length() && isApostrophe(text.charAt(end))) {
+    if (start == apostrophe || end == apostrophe + 1) {
       return null;
     }
     final boolean upper = isAllUpperAscii(text, start, end);
@@ -328,7 +355,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
    * @return The replacement in the source word's casing.
    */
   private String caseReplacement(String lower, boolean upper) {
-    return upper ? asciiUpperCase(lower) : lower;
+    return upper ? StringUtil.toUpperCase(lower) : lower;
   }
 
   /**
@@ -342,28 +369,12 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
    */
   private String caseWord(String lower, CharSequence text, int start, int end) {
     if (isAllUpperAscii(text, start, end)) {
-      return asciiUpperCase(lower);
+      return StringUtil.toUpperCase(lower);
     }
     if (text.charAt(start) >= 'A' && text.charAt(start) <= 'Z') {
       return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
     return lower;
-  }
-
-  /**
-   * Uppercases the ASCII letters in a replacement.
-   *
-   * @param lower The lowercase replacement.
-   * @return The ASCII-uppercase replacement.
-   */
-  private String asciiUpperCase(String lower) {
-    final char[] upper = lower.toCharArray();
-    for (int i = 0; i < upper.length; i++) {
-      if (upper[i] >= 'a' && upper[i] <= 'z') {
-        upper[i] = (char) (upper[i] - ('a' - 'A'));
-      }
-    }
-    return new String(upper);
   }
 
   /**
@@ -463,6 +474,7 @@ public final class EnglishContractionCharSequenceNormalizer implements OffsetAwa
   }
 
   /** {@return the shared instance after Java deserialization} */
+  @Serial
   private Object readResolve() {
     return INSTANCE;
   }

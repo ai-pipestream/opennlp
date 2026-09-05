@@ -36,8 +36,9 @@ public interface GlossaryMatcher {
    * Finds all glossary hits in a text.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @return The hits in text order, non-overlapping. Never {@code null}; empty when no
-   *         registered term occurs in the text.
+   * @return The hits in text order, non-overlapping according to
+   *         {@link opennlp.tools.util.Span#intersects(opennlp.tools.util.Span)}.
+   *         Never {@code null}; empty when no registered term occurs in the text.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   List<GlossaryMatch> match(CharSequence text);

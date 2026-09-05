@@ -27,19 +27,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Pins the construction contract of the {@link TextArtifact} record: the compact
- * constructor rejects a {@code null} span and a {@code null} or blank type with an
- * {@link IllegalArgumentException} carrying the exact stated message, and a valid
- * instance hands back its components unchanged.
- */
+/** Tests artifact validation and component access. */
 public class TextArtifactTest {
 
-  /**
-   * Verifies that a {@code null} span is rejected with an
-   * {@link IllegalArgumentException}, not a {@link NullPointerException}, and the exact
-   * message the record states.
-   */
+  /** Rejects a null span with the documented exception and message. */
   @Test
   void testNullSpanIsRejected() {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
@@ -47,11 +38,7 @@ public class TextArtifactTest {
     assertEquals("span must not be null", e.getMessage());
   }
 
-  /**
-   * Verifies that a {@code null} type is rejected with an
-   * {@link IllegalArgumentException}, not a {@link NullPointerException}, and the exact
-   * message the record states.
-   */
+  /** Rejects a null type with the documented exception and message. */
   @Test
   void testNullTypeIsRejected() {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
@@ -60,8 +47,9 @@ public class TextArtifactTest {
   }
 
   /**
-   * Verifies that blank types are rejected under the toolkit whitespace definition,
-   * which includes the no-break space, with the same message as a {@code null} type.
+   * Rejects blank types, including the no-break space.
+   *
+   * @param type The blank type.
    */
   @ParameterizedTest
   @ValueSource(strings = {"", " ", "\t", "\n", "\u00A0"})
@@ -71,11 +59,7 @@ public class TextArtifactTest {
     assertEquals("type must not be null or blank", e.getMessage());
   }
 
-  /**
-   * Verifies that a valid instance returns exactly the span and type it was built
-   * from, and that an open type beyond the declared constants is accepted as the
-   * javadoc promises.
-   */
+  /** Returns the supplied components and accepts custom types. */
   @Test
   void testAccessorsReturnTheComponents() {
     final Span span = new Span(3, 5);

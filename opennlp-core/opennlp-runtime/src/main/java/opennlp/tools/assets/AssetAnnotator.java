@@ -28,14 +28,11 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
 /**
- * Adapts an {@link AssetDetector} to the document pipeline: scans the document text and
- * provides {@link #ASSETS}, one annotation per embedded binary carrying its
- * {@link EmbeddedAsset}.
+ * Adds an {@link #ASSETS} layer by scanning the document text with an
+ * {@link AssetDetector}.
  *
- * <p>The detector works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline. Detection never modifies the text: use
- * {@link AssetFolder} to produce a copy with the payloads replaced by text while every
- * offset stays mapped to the original.</p>
+ * <p>No input layer is required. The text is unchanged; {@link AssetFolder} can
+ * replace payloads with text while preserving their original offsets.</p>
  *
  * @since 3.0.0
  */
@@ -69,16 +66,7 @@ public class AssetAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Detects the embedded assets of the document text and adds the {@link #ASSETS}
-   * layer.
-   *
-   * <p>The layer is always added; a text without an embedded asset yields a
-   * present-but-empty layer.</p>
-   *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #ASSETS} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   * {@inheritDoc} Adds the {@link #ASSETS} layer even when no assets are detected.
    */
   @Override
   public Document annotate(Document document) {
@@ -92,6 +80,7 @@ public class AssetAnnotator implements DocumentAnnotator {
     return document.with(ASSETS, found);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(ASSETS);

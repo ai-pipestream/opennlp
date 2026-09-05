@@ -21,11 +21,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import ai.onnxruntime.OrtException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+
+import opennlp.dl.InferenceOptions;
 
 public class TokenVectorsDLTest {
 
@@ -36,7 +39,7 @@ public class TokenVectorsDLTest {
       "the", 3, "play", 4, "##ing", 5, "##s", 6, ".", 7);
 
   /** An encoder over the tiny vocabulary with no session. */
-  private static TokenVectorsDL tokenizerOnly() {
+  private TokenVectorsDL tokenizerOnly() {
     return new TokenVectorsDL(null, null, VOCAB, true);
   }
 
@@ -64,10 +67,69 @@ public class TokenVectorsDLTest {
   }
 
   @Test
-  void testRejectsEmptyInput() {
+  void testRejectsInvalidInput() {
     final TokenVectorsDL encoder = tokenizerOnly();
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TokenVectorsDL(null, null, null, true));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TokenVectorsDL(null, null, VOCAB, true, null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new TokenVectorsDL(null, null, VOCAB, true, new InferenceOptions(), 0));
     Assertions.assertThrows(IllegalArgumentException.class, () -> encoder.vectors(null));
     Assertions.assertThrows(IllegalArgumentException.class, () -> encoder.vectors(new String[0]));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> encoder.vectors(new String[] {"the", null}));
+  }
+
+  @Test
+  void testInferenceOptionsSelectModelInputsAndAreSnapshotted() {
+    final InferenceOptions options = new InferenceOptions();
+    options.setIncludeAttentionMask(false);
+    options.setIncludeTokenTypeIds(false);
+    final TokenVectorsDL encoder = new TokenVectorsDL(null, null, VOCAB, true, options);
+
+    final long[] ids = {0, 3, 1};
+    final long[] mask = {1, 1, 1};
+    final long[] types = {0, 0, 0};
+    Assertions.assertEquals(Set.of("input_ids"),
+        encoder.inputValues(ids, mask, types).keySet());
+
+    options.setIncludeAttentionMask(true);
+    options.setIncludeTokenTypeIds(true);
+    Assertions.assertEquals(Set.of("input_ids"),
+        encoder.inputValues(ids, mask, types).keySet());
+    Assertions.assertEquals(Set.of("input_ids", "attention_mask", "token_type_ids"),
+        tokenizerOnly().inputValues(ids, mask, types).keySet());
+  }
+
+  @Test
+  void testRejectsInvalidEncoderOutput() {
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(null, 3));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(new float[0][][], 3));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(new float[][][] {{{1}, {2}}}, 3));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(new float[][][] {{{1}, {2, 3}, {4}}}, 3));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(new float[][][] {{{}, {}, {}}}, 3));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> TokenVectorsDL.hiddenFromOutput(
+            new float[][][] {{{1}, {Float.NaN}, {3}}}, 3));
+
+    final float[][] expected = {{1, 2}, {3, 4}, {5, 6}};
+    Assertions.assertSame(expected,
+        TokenVectorsDL.hiddenFromOutput(new float[][][] {expected}, 3));
+  }
+
+  @Test
+  void testMeanDoesNotOverflowForFiniteHiddenValues() {
+    final float[] mean = TokenVectorsDL.mean(
+        new float[][] {{Float.MAX_VALUE}, {Float.MAX_VALUE}}, 0, 2);
+
+    Assertions.assertEquals(Float.MAX_VALUE, mean[0]);
+    Assertions.assertTrue(Float.isFinite(mean[0]));
   }
 
   @Test
@@ -79,6 +141,7 @@ public class TokenVectorsDLTest {
       final float[][] vectors = encoder.vectors(
           new String[] {"The", "bank", "approved", "the", "loan", "."});
       Assertions.assertEquals(6, vectors.length);
+      Assertions.assertEquals(vectors[0].length, encoder.dimension());
       for (final float[] vector : vectors) {
         Assertions.assertEquals(vectors[0].length, vector.length);
       }
@@ -94,7 +157,7 @@ public class TokenVectorsDLTest {
     }
   }
 
-  private static double cosine(float[] u, float[] v) {
+  private double cosine(float[] u, float[] v) {
     double dot = 0;
     double uu = 0;
     double vv = 0;

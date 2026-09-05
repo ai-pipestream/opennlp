@@ -34,36 +34,32 @@ import opennlp.tools.util.normalizer.AlignedText;
 import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
 
 /**
- * A deterministic {@link GlossaryMatcher} backed by an Aho-Corasick automaton: one
- * forward pass over the text finds every registered term regardless of how many terms
- * the glossary holds.
+ * Finds glossary terms with an Aho-Corasick automaton and returns non-overlapping
+ * spans in the original text.
  *
  * <p>By default, terms match literally, character for character, so a multiword term
  * matches only with the exact separator characters it was registered with. An optional
  * {@link OffsetAwareNormalizer} folds terms and text before the automaton runs (for
  * example German umlaut expansion, full case folding, whitespace collapse, or dash
  * folding). Hits found in the normalized form are mapped back to original-text spans
- * through the normalizer's {@link AlignedText}, so consumers still read identifiers
- * against the source characters. Hits are constrained to the default word boundaries
- * of UAX&#160;#29 on the original text, so {@code cat} never matches inside
- * {@code concatenate} and {@code can} never matches inside {@code can't}. Han
+ * through the normalizer's {@link AlignedText}. Hits are constrained to the default
+ * word boundaries of UAX&#160;#29 on the original text: {@code cat} does not match
+ * inside {@code concatenate}, nor {@code can} inside {@code can't}. Han
  * ideographs and hiragana receive character-granularity boundaries, while katakana
  * and Hangul runs stay joined. The default Unicode rules are locale-neutral and do
  * not perform the dictionary or morphological segmentation some scripts require.
  * Overlapping hits are resolved leftmost first, then longest, then by registration
- * order, and the reported hits never overlap.</p>
+ * order.</p>
  *
  * <p>When the matcher ignores case, terms and text are compared through the
  * per-code-point UnicodeData lowercase mapping, the same mapping
  * {@link opennlp.tools.util.StringUtil#toLowerCase(CharSequence)} applies, which keeps
- * spans exact but does not apply locale or multi-character case folding. Length-changing
- * folds such as sharp s to {@code ss} belong on the {@link OffsetAwareNormalizer} hook
- * instead. Word boundaries and case comparison both work in code points, so supplementary
- * letters neighbor and fold like any others.</p>
+ * source offsets unchanged but does not apply locale or multi-character case folding.
+ * Use an {@link OffsetAwareNormalizer} for expansions such as sharp s to {@code ss}.
+ * Word boundaries and case comparison operate on Unicode code points.</p>
  *
- * <p>The automaton is built once in the constructor; matching holds no per-call state
- * and is safe to share between threads when the supplied normalizer is also safe to
- * share.</p>
+ * <p>The automaton is built at construction. Calls share no mutable matching state.
+ * Concurrent use requires a thread-safe normalizer, if configured.</p>
  *
  * @see <a href="https://doi.org/10.1145/360825.360855">Aho, Corasick (1975): Efficient
  *      string matching: An aid to bibliographic search</a>
@@ -97,7 +93,7 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
 
   /**
    * The goto function: per state, the sorted code points with an outgoing edge; the
-   * target of each edge sits in {@link #edgeTargets} at the same index.
+   * target of each edge is in {@link #edgeTargets} at the same index.
    */
   private final int[][] edgeCodePoints;
 
@@ -248,14 +244,7 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * {@inheritDoc}
-   *
-   * <p>One automaton pass collects every candidate, then hits that sit inside a word are
-   * dropped and the remaining overlaps are resolved leftmost first, then longest, then
-   * by registration order. Unambiguous ASCII edges use constant-time boundary checks; the
-   * complete UAX&#160;#29 segmenter runs lazily only when a candidate has an ambiguous edge.
-   * When a normalizer is configured, the automaton scans normalized text and maps candidate
-   * spans back to the original before the boundary check.</p>
+   * {@inheritDoc} Word boundaries are checked in the original text after offset mapping.
    */
   @Override
   public List<GlossaryMatch> match(CharSequence text) {
@@ -366,10 +355,7 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Builds an O(1) membership index over the UAX&#160;#29 boundaries in the original
-   * text. The segmenter streams offsets into the packed bit set without allocating per
-   * character. Callers build the index lazily, only after a candidate has an edge that the
-   * constant-time ASCII checks cannot decide.
+   * Indexes UAX&#160;#29 boundaries when the ASCII checks cannot determine a match boundary.
    *
    * @param text The original text being scanned.
    * @return The boundary offsets, including zero and the text length.
@@ -382,15 +368,17 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Recognizes the dominant prose case with four direct character checks: an ASCII word whose
-   * edges are the text limits or ASCII spaces. The complete checks below handle every other case.
+   * Checks for ASCII word characters bounded by spaces or the text limits.
    *
    * @param text The original text being scanned.
    * @param start The candidate start, inclusive.
    * @param end The candidate end, exclusive.
-   * @return {@code true} if both edges are unconditional UAX&#160;#29 boundaries.
+   * @return {@code true} if both edges are confirmed UAX&#160;#29 boundaries.
    */
   private boolean isAsciiSpaceDelimited(CharSequence text, int start, int end) {
+    if (start == end) {
+      return false;
+    }
     final boolean startBoundary = start == 0
         || (text.charAt(start - 1) == ' ' && isAsciiWordCharacter(text.charAt(start)));
     final boolean endBoundary = end == text.length()
@@ -399,13 +387,12 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Recognizes the common boundary between an ASCII word character and an ASCII space without
-   * invoking the full segmenter. These pairs are unconditional breaks under UAX&#160;#29. All
-   * other pairs fall back to the complete algorithm.
+   * Checks text limits and ASCII word boundaries at spaces or terminal punctuation.
+   * Unrecognized combinations require the complete segmenter.
    *
    * @param text The original text being scanned.
    * @param offset The candidate boundary offset.
-   * @return {@code true} if the offset is unconditionally a word boundary.
+   * @return {@code true} if the offset is a confirmed word boundary.
    */
   private boolean isObviousWordBoundary(CharSequence text, int offset) {
     if (offset == 0 || offset == text.length()) {
@@ -459,12 +446,11 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Recognizes adjacent ASCII word characters, which UAX&#160;#29 unconditionally keeps in the
-   * same word. Candidates with either edge in such a pair can be rejected without segmentation.
+   * Checks for adjacent ASCII word characters joined under UAX&#160;#29.
    *
    * @param text The original text being scanned.
    * @param offset The candidate boundary offset.
-   * @return {@code true} if the offset is unconditionally inside a word.
+   * @return {@code true} if the offset is inside an ASCII word.
    */
   private boolean isObviousWordInterior(CharSequence text, int offset) {
     return offset > 0 && offset < text.length()
@@ -501,7 +487,7 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
    * Resolves overlapping hits leftmost first, then longest, then by registration order.
    *
    * @param hits The raw hits as {@code {start, end, pattern}} triples.
-   * @return The surviving hits in text order. Never {@code null}.
+   * @return The accepted matches in text order.
    */
   private List<GlossaryMatch> resolveOverlaps(List<int[]> hits) {
     hits.sort((a, b) -> {
@@ -513,15 +499,6 @@ public final class AhoCorasickGlossaryMatcher implements GlossaryMatcher {
       }
       return Integer.compare(a[2], b[2]);
     });
-    final List<GlossaryMatch> matches = new ArrayList<>();
-    int lastEnd = 0;
-    for (final int[] hit : hits) {
-      if (hit[0] >= lastEnd) {
-        final GlossaryEntry entry = entries.get(hit[2]);
-        matches.add(new GlossaryMatch(new Span(hit[0], hit[1]), entry.id(), entry.term()));
-        lastEnd = hit[1];
-      }
-    }
-    return matches;
+    return GlossaryMatchSelection.select(hits, entries);
   }
 }

@@ -22,16 +22,25 @@ package opennlp.tools.coref;
  * meaning, so {@code the firm} can find {@code Microsoft}. Any static word embedding
  * serves; a text embedder adapts as {@code word -> embedder.embed(word)}.
  *
+ * <p>Thread safety is implementation specific.</p>
+ *
  * @since 3.0.0
  */
-@FunctionalInterface
 public interface WordVectors {
+
+  /**
+   * Returns the length of every word vector supplied by this provider.
+   *
+   * @return A positive vector dimension.
+   */
+  int dimension();
 
   /**
    * Looks up a word.
    *
    * @param word The lowercased word.
-   * @return The vector, or {@code null} for a word without one.
+   * @return A vector of {@link #dimension()} finite values, or {@code null} for a word
+   *         without one.
    */
   float[] vector(String word);
 }

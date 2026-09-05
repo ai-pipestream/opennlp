@@ -205,13 +205,13 @@
 			</dependency>
 
 			<dependency>
-				<artifactId>opennlp-embeddings</artifactId>
+				<artifactId>opennlp-geo</artifactId>
 				<groupId>${project.groupId}</groupId>
 				<version>${project.version}</version>
 			</dependency>
 
 			<dependency>
-				<artifactId>opennlp-geo</artifactId>
+				<artifactId>opennlp-embeddings</artifactId>
 				<groupId>${project.groupId}</groupId>
 				<version>${project.version}</version>
 			</dependency>
@@ -229,13 +229,13 @@
 			</dependency>
 
 			<dependency>
-				<artifactId>opennlp-subword</artifactId>
+				<artifactId>opennlp-wordnet</artifactId>
 				<groupId>${project.groupId}</groupId>
 				<version>${project.version}</version>
 			</dependency>
 
 			<dependency>
-				<artifactId>opennlp-wordnet</artifactId>
+				<artifactId>opennlp-subword</artifactId>
 				<groupId>${project.groupId}</groupId>
 				<version>${project.version}</version>
 			</dependency>

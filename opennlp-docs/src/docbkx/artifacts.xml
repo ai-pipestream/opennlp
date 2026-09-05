@@ -20,13 +20,10 @@
 	<section xml:id="tools.artifacts.introduction">
 		<title>Introduction</title>
 		<para>
-			Real-world text carries damage: characters a broken decode left behind, control
-			bytes from binary spillage, invisible characters hiding or reordering content,
-			and words mangled by reading UTF-8 bytes through a legacy single-byte decoding.
-			The package <code>opennlp.tools.artifacts</code> classifies such stretches as
-			spans over the original, unmodified text. Detection never rewrites anything: a
-			finding states where the problem is and what kind it is, and the caller decides
-			whether to mask, drop, or repair, with the original offsets intact.
+			The package <code>opennlp.tools.artifacts</code> identifies possible decoding
+			errors, control characters, and hidden Unicode characters. Each finding has a
+			type and UTF-16 offsets into the original text. Detection does not change the
+			text. Callers can inspect, mask, or repair the reported spans.
 		</para>
 		<para>
 			The built-in detector reports these types, each a constant on
@@ -34,14 +31,34 @@
 			<code>control</code> (control characters that are not whitespace),
 			<code>noncharacter</code>, <code>unpaired-surrogate</code>,
 			<code>private-use</code>, <code>bidi-control</code> (explicit directional
-			overrides and isolates), <code>zero-width</code> (zero-width characters outside
-			their orthographic uses; joiners in emoji sequences and single occurrences
-			between letters are kept), <code>unicode-tag</code> (hidden characters from the
+			overrides and isolates), <code>zero-width</code>, <code>unicode-tag</code>
+			(characters from the
 			<link xlink:href="https://www.unicode.org/charts/PDF/UE0000.pdf">Unicode Tags
-			block</link>, except a well-formed subdivision flag from
-			<link xlink:href="https://www.unicode.org/reports/tr51/">UTS #51</link>), and
-			<code>mojibake</code> (a stretch whose
-			single-byte image is valid multi-byte UTF-8, the signature of a double decode).
+			block</link> outside the flag syntax described below), and
+			<code>mojibake</code> (a stretch for which the
+			reverse single-byte mapping produces valid multibyte UTF-8).
+		</para>
+		<para>
+			A single zero-width character between letters is left unreported, even when
+			combining marks intervene. This includes joining controls in words from scripts
+			such as Malayalam and Sinhala. A single joiner next to a pictograph or emoji
+			variation selector is also left unreported. Runs of two or more zero-width
+			characters are reported.
+		</para>
+		<para>
+			The Unicode-tag exception requires U+1F3F4 BLACK FLAG, a region or subdivision
+			code, and U+E007F CANCEL TAG. The code syntax follows
+			<ulink url="https://www.unicode.org/reports/tr51/#flag-emoji-tag-sequences">UTS #51</ulink>
+			and <ulink url="https://www.unicode.org/reports/tr35/#unicode_subdivision_id">UTS #35</ulink>:
+			two lowercase region letters followed by one to four lowercase letters or digits,
+			or three region digits with an optional suffix of one to four lowercase letters
+			or digits. Longer tag runs are reported. The detector does not check whether
+			CLDR assigns the code.
+		</para>
+		<para>
+			These are detection heuristics, not language or security validation. Bidi
+			controls, private-use characters, and other reported characters can be intentional.
+			Inspect findings before deleting or replacing text.
 		</para>
 	</section>
 
@@ -50,11 +67,11 @@
 		<para>
 			The detector works on any character sequence. In the text below,
 			<code>cafÃ©</code> is what <code>café</code> becomes when its UTF-8
-			bytes are read through the Windows-1252 decoding, and <code>�</code> is a
+			bytes are read through the Windows-1252 decoding, and <code>U+FFFD</code> is a
 			replacement character left by a failed decode:
 			<programlisting language="java"><![CDATA[
 ArtifactDetector detector = new CursorArtifactDetector();
-String text = "cafÃ© costs �8";
+String text = "cafÃ© costs \uFFFD8";
 
 for (TextArtifact artifact : detector.detect(text)) {
     System.out.println(artifact.type() + " " + artifact.span());
@@ -67,11 +84,11 @@ replacement [12..13)]]>
 			</programlisting>
 			The reverse mapping covers both Windows-1252 and ISO-8859-1. The latter preserves
 			bytes 0x80 through 0x9F as C1 controls, so damaged text such as the UTF-8 euro
-			sign read through Latin-1 is still reported as one mojibake span rather than an
-			unrelated control. Ordinary accented words are not mojibake: their single-byte
-			images are not valid UTF-8 sequences, so a text like <code>déjà vu</code> yields
-			no finding at all.
-			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
+			sign read through Latin-1 is reported as one mojibake span, not a separate control.
+			Controls outside the mojibake span remain separate findings.
+			Text such as <code>déjà vu</code> produces no finding because its reverse mapping
+			is not valid UTF-8. This check does not prove which decoder was used.
+			<code>ArtifactsManualExampleTest</code> verifies the behavior shown here.
 		</para>
 		<para>
 			The default constructor reports every built-in type. A caller can limit findings
@@ -83,10 +100,10 @@ ArtifactDetector textDamage = new CursorArtifactDetector(Set.of(
 
 List<TextArtifact> damage = textDamage.detect(text);]]>
 			</programlisting>
-			The set must be non-empty and contain only the constants declared by
-			<code>TextArtifact</code>. It is copied during construction, so later changes to
-			the caller's set do not alter the detector.
-			<code>ArtifactsManualExampleTest</code> mirrors the configuration shown here.
+			The set must be non-empty, contain no null elements, and contain only the constants
+			in <code>TextArtifact</code>. It is copied during construction, so later changes to
+			the supplied set do not alter the detector.
+			<code>ArtifactsManualExampleTest</code> verifies this configuration.
 		</para>
 	</section>
 
@@ -95,20 +112,18 @@ List<TextArtifact> damage = textDamage.detect(text);]]>
 		<para>
 			<code>ArtifactAnnotator</code> adapts the detector to the document pipeline. It
 			requires no other layer and provides <code>opennlp:artifacts</code>, one
-			annotation per finding carrying its <code>TextArtifact</code>:
+			annotation per finding with a <code>TextArtifact</code> value:
 			<programlisting language="java"><![CDATA[
 Document document = new ArtifactAnnotator()
-    .annotate(Document.of("cafÃ© costs �8"));
+    .annotate(Document.of("cafÃ© costs \uFFFD8"));
 
 List<Annotation<TextArtifact>> artifacts = document.get(ArtifactAnnotator.ARTIFACTS);
-// two annotations; the first covers "Ã©" and carries type "mojibake"]]>
+// Two annotations; the first covers "Ã©" with type "mojibake".]]>
 			</programlisting>
-			Because findings are exact spans on a layer, any layer consumer composes with
-			them: masking replaces the covered characters, filtering drops annotations by
-			type, and a cleanup step can rewrite the flagged stretches while recording its
-			edits. Masking, for example, overwrites every covered character in place:
+			The offsets can be used to mask reported characters without changing the text
+			length:
 			<programlisting language="java"><![CDATA[
-StringBuilder masked = new StringBuilder("cafÃ© costs �8");
+StringBuilder masked = new StringBuilder("cafÃ© costs \uFFFD8");
 for (Annotation<TextArtifact> artifact : artifacts) {
     for (int i = artifact.span().getStart(); i < artifact.span().getEnd(); i++) {
         masked.setCharAt(i, '#');
@@ -116,7 +131,20 @@ for (Annotation<TextArtifact> artifact : artifacts) {
 }
 // masked.toString(): "caf## costs #8"]]>
 			</programlisting>
-			<code>ArtifactsManualExampleTest</code> asserts the behavior shown here.
+			<code>ArtifactsManualExampleTest</code> verifies the behavior shown here.
+		</para>
+		<para>
+			Adjacent findings keep separate spans. Here, mojibake occupies offsets 6 to 8
+			and the following NUL occupies offsets 8 to 9:
+			<programlisting language="java"><![CDATA[
+String text = "value " + new String(new int[] {0x00C2, 0x0080, 0x0000}, 0, 3);
+Document document = new ArtifactAnnotator().annotate(Document.of(text));
+List<Annotation<TextArtifact>> artifacts = document.get(ArtifactAnnotator.ARTIFACTS);
+// artifacts.get(0): mojibake [6..8)
+// artifacts.get(1): control [8..9)]]>
+			</programlisting>
+			The original text remains unchanged. <code>ArtifactsManualExampleTest</code>
+			verifies these spans through the document layer.
 		</para>
 	</section>
 </chapter>

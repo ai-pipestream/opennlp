@@ -17,38 +17,39 @@
 
 package opennlp.geo;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Compares places by the cosine of their standardized metric profiles. Each place carries
- * one numeric value per metric, for example population density or median income, taken
- * from a user-supplied table; two places are similar when their measured values are,
- * independent of their names or of any text they occur in.
+ * Compares places by cosine similarity of standardized numeric metrics, such as
+ * population density and median income. Place names and surrounding text are not used.
  *
  * <p>The table is tab-separated: a header line with {@code id} followed by metric
- * names, then one place per line with its identifier and one value per metric. The
- * user assembles and supplies the table and thereby accepts the licenses of the
- * sources it was derived from; nothing is bundled. Columns are standardized to mean
- * zero and unit variance at load, so heterogeneous units contribute comparably; a
- * constant column contributes nothing.</p>
+ * names, then one place per line with an identifier and one value per metric.
+ * Identifiers and metric names must be unique. No metric data is bundled; users
+ * are responsible for the licenses of their sources. Columns are standardized to
+ * mean zero and unit population variance at load. Constant columns contribute zero.</p>
  *
- * <p>Every value must be a finite number. Column statistics are computed in scaled form,
- * so columns anywhere in the double range standardize to their correct values instead of
- * overflowing or collapsing to zeros. A column whose spread exceeds the range of a double,
- * or whose deviation is too small for one to hold, is rejected at load naming the metric,
- * so a score is always a real number.</p>
+ * <p>Values are parsed as finite doubles. Load-time calculations use decimal arithmetic
+ * over those double values, with exact centering and 34-digit division and square roots.
+ * Profiles are rescaled before conversion to doubles for queries. This supports columns
+ * spanning the finite double range without overflowing their statistics.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -57,12 +58,27 @@ import opennlp.tools.util.StringUtil;
 public final class PlaceProfiles {
 
   /**
-   * One similarity result: a place paired with its score against the query place.
+   * A place identifier and similarity score for a query.
    *
-   * @param id The identifier of the neighboring place, as listed in the table.
-   * @param similarity The cosine similarity of the neighbor against the query place.
+   * @param id The place identifier. Must not be {@code null} or empty.
+   * @param similarity The finite cosine similarity in {@code [-1, 1]}.
    */
   public record Neighbor(String id, double similarity) {
+
+    /**
+     * Validates a similarity result.
+     *
+     * @throws IllegalArgumentException Thrown if the identifier is missing or the score
+     *         is non-finite or outside {@code [-1, 1]}.
+     */
+    public Neighbor {
+      if (id == null || id.isEmpty()) {
+        throw new IllegalArgumentException("id must not be null or empty");
+      }
+      if (!Double.isFinite(similarity) || similarity < -1.0 || similarity > 1.0) {
+        throw new IllegalArgumentException("similarity must be finite and in [-1, 1]");
+      }
+    }
   }
 
   /** The header cell naming the identifier column. */
@@ -71,9 +87,18 @@ public final class PlaceProfiles {
   /** The prefix of the failure naming a cell that is not usable table data. */
   private static final String MALFORMED_VALUE = "malformed value in row ";
 
+  /** Precision for load-time division and square roots. */
+  private static final MathContext STATISTICS_PRECISION = MathContext.DECIMAL128;
+
   private final Map<String, double[]> profiles;
   private final List<String> metrics;
 
+  /**
+   * Stores privately owned profile arrays and immutable metric names.
+   *
+   * @param profiles The normalized profile arrays.
+   * @param metrics The ordered metric names.
+   */
   private PlaceProfiles(Map<String, double[]> profiles, List<String> metrics) {
     this.profiles = profiles;
     this.metrics = metrics;
@@ -84,11 +109,10 @@ public final class PlaceProfiles {
    *
    * @param table The tab-separated table, UTF-8: a header with {@code id} and metric
    *              names, then one place per line. Must not be {@code null}.
-   * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails, the table has no header, a metric
-   *         name or an identifier is empty, a row does not list exactly one value per
-   *         metric, a value is not a finite number, or a metric column's spread
-   *         overflows a double or its deviation underflows one.
+   * @return The loaded profiles.
+   * @throws IOException Thrown if reading fails.
+   * @throws InvalidFormatException Thrown if the content is not a valid profile table
+   *         as described by {@link #load(InputStream)}.
    * @throws IllegalArgumentException Thrown if {@code table} is {@code null}.
    */
   public static PlaceProfiles load(Path table) throws IOException {
@@ -101,119 +125,134 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Loads a profile table from a stream. Lines may end with LF or CRLF. A line is
-   * ignored wherever it appears, ahead of the header as readily as between rows, when
-   * it is blank or when its first non-blank character is {@code #}, so a table may
-   * carry an attribution comment above its header. The header is the first line that is
-   * not ignored. Identifiers and values are stripped of surrounding whitespace. If an
-   * identifier appears on more than one row, the last row wins.
+   * Loads a UTF-8 table from a stream. Lines may end with LF, CRLF, or CR. Blank lines
+   * and lines starting with {@code #} after surrounding whitespace is removed are
+   * ignored, including before the header. The first data line must contain {@code id}
+   * and at least one metric name, separated by tabs.
    *
-   * <p>Columns are standardized once every row has been read, so a column that
-   * overflows a double is reported by metric name rather than by row: no single row is
-   * at fault when every cell in the column is finite.</p>
+   * <p>Cells are stripped of surrounding toolkit-defined whitespace. Place identifiers
+   * and metric names must be non-empty and unique. Data lines must contain one finite
+   * decimal value per metric; exponent notation is accepted, but hexadecimal numbers
+   * and Java type suffixes are not.</p>
    *
    * @param tableStream The table content. Must not be {@code null}. Not closed.
-   * @return The loaded profiles. Never {@code null}.
-   * @throws IOException Thrown if reading fails, the table has no header, a metric
-   *         name or an identifier is empty, a row does not list exactly one value per
-   *         metric, a value is not a finite number, or a metric column's spread
-   *         overflows a double or its deviation underflows one.
+   * @return The loaded profiles.
+   * @throws IOException Thrown if reading fails.
+   * @throws InvalidFormatException Thrown if UTF-8 decoding fails, the header or a data
+   *         line is invalid, or the table has no places.
    * @throws IllegalArgumentException Thrown if {@code tableStream} is {@code null}.
    */
   public static PlaceProfiles load(InputStream tableStream) throws IOException {
     if (tableStream == null) {
       throw new IllegalArgumentException("tableStream must not be null");
     }
-    final List<String> lines =
-        splitLines(new String(tableStream.readAllBytes(), StandardCharsets.UTF_8));
-    int headerLine = -1;
-    for (int i = 0; i < lines.size(); i++) {
-      if (!isIgnored(lines.get(i))) {
-        headerLine = i;
-        break;
+    try {
+      return readTable(GazetteerIndex.utf8Reader(tableStream));
+    } catch (CharacterCodingException e) {
+      throw new InvalidFormatException("profile table is not valid UTF-8", e);
+    }
+  }
+
+  /**
+   * Parses a table without closing the reader.
+   *
+   * @param reader The UTF-8 reader.
+   * @return Standardized profiles.
+   * @throws IOException Thrown if reading fails.
+   * @throws InvalidFormatException Thrown if the table is malformed.
+   */
+  private static PlaceProfiles readTable(BufferedReader reader) throws IOException {
+    String line;
+    int row = 0;
+    do {
+      line = reader.readLine();
+      row++;
+      if (line == null) {
+        throw new InvalidFormatException("the profile table has no header");
       }
+    } while (isIgnored(line));
+    final String[] header = GazetteerIndex.split(line, '\t');
+    if (header.length < 2 || !ID_COLUMN.equals(strip(header[0]))) {
+      throw new InvalidFormatException("the header must be: id, then at least one metric");
     }
-    if (headerLine < 0) {
-      throw new IOException("the profile table has no header");
-    }
-    final List<String> header = splitTabs(lines.get(headerLine));
-    if (header.size() < 2 || !ID_COLUMN.equals(strip(header.get(0)))) {
-      throw new IOException("the header must be: id, then at least one metric");
-    }
-    final int width = header.size() - 1;
+    final int width = header.length - 1;
     final List<String> strippedNames = new ArrayList<>(width);
-    for (int m = 1; m < header.size(); m++) {
-      final String name = strip(header.get(m));
+    final Set<String> uniqueNames = new HashSet<>();
+    for (int m = 1; m < header.length; m++) {
+      final String name = strip(header[m]);
       if (name.isEmpty()) {
-        throw new IOException("empty metric name in header column " + (m + 1));
+        throw new InvalidFormatException("empty metric name in header column " + (m + 1));
+      }
+      if (!uniqueNames.add(name)) {
+        throw new InvalidFormatException(
+            "duplicate metric name in header column " + (m + 1) + ": " + name);
       }
       strippedNames.add(name);
     }
     final List<String> metricNames = List.copyOf(strippedNames);
     final Map<String, double[]> raw = new HashMap<>();
-    for (int i = headerLine + 1; i < lines.size(); i++) {
-      final String line = lines.get(i);
+    while ((line = reader.readLine()) != null) {
+      row++;
       if (isIgnored(line)) {
         continue;
       }
-      final List<String> fields = splitTabs(line);
-      if (fields.size() != header.size()) {
-        throw new IOException("row " + (i + 1) + " has " + fields.size()
-            + " fields, expected " + header.size());
+      final String[] fields = GazetteerIndex.split(line, '\t');
+      if (fields.length != header.length) {
+        throw new InvalidFormatException("row " + row + " has " + fields.length
+            + " fields, expected " + header.length);
       }
-      final String id = strip(fields.get(0));
+      final String id = strip(fields[0]);
       if (id.isEmpty()) {
-        throw new IOException("empty id in row " + (i + 1));
+        throw new InvalidFormatException("empty id in row " + row);
+      }
+      if (raw.containsKey(id)) {
+        throw new InvalidFormatException("duplicate id in row " + row + ": " + id);
       }
       final double[] profile = new double[width];
       for (int m = 0; m < width; m++) {
-        profile[m] = metricValue(strip(fields.get(m + 1)), i + 1);
+        final String value = strip(fields[m + 1]);
+        if (value.isEmpty()) {
+          throw new InvalidFormatException("empty value in row " + row + ", column "
+              + (m + 2) + " (" + metricNames.get(m) + ")");
+        }
+        profile[m] = metricValue(value, row);
       }
       raw.put(id, profile);
     }
     if (raw.isEmpty()) {
-      throw new IOException("the profile table lists no places");
+      throw new InvalidFormatException("the profile table lists no places");
     }
-    standardize(raw, metricNames);
+    standardize(raw, width);
     return new PlaceProfiles(Map.copyOf(raw), metricNames);
   }
 
   /**
    * Parses one metric cell, accepting only finite numbers.
    *
-   * <p>{@link Double#parseDouble} alone is not enough. It accepts {@code NaN} and both
-   * infinities, and one such cell does not stay in its own row: the column mean carries it
-   * into every profile in the table, past the downstream guards that compare against
-   * {@code 0.0}. It also accepts the Java {@code f} and {@code d} literal suffixes and
-   * hexadecimal floating-point notation, which are source syntax rather than table data.
-   * Both are rejected here, the only point where the offending row is still known.</p>
-   *
    * @param text The cell content, already stripped of surrounding whitespace.
    * @param row The one-based line number of the row, for the failure message.
    * @return The parsed value, always finite.
-   * @throws IOException Thrown if the cell is not a number, carries a Java literal
+   * @throws InvalidFormatException Thrown if the cell is not a number, has a Java literal
    *         suffix, or is not finite.
    */
-  private static double metricValue(String text, int row) throws IOException {
+  private static double metricValue(String text, int row) throws InvalidFormatException {
     if (hasJavaLiteralSuffix(text) || hasHexMarker(text)) {
-      throw new IOException(MALFORMED_VALUE + row + ": " + text);
+      throw new InvalidFormatException(MALFORMED_VALUE + row + ": " + text);
     }
     final double value;
     try {
       value = Double.parseDouble(text);
     } catch (NumberFormatException e) {
-      throw new IOException(MALFORMED_VALUE + row + ": " + text, e);
+      throw new InvalidFormatException(MALFORMED_VALUE + row + ": " + text, e);
     }
     if (!Double.isFinite(value)) {
-      throw new IOException("non-finite value in row " + row + ": " + text);
+      throw new InvalidFormatException("non-finite value in row " + row + ": " + text);
     }
     return value;
   }
 
   /**
-   * Checks whether a cell ends in a Java float or double literal suffix. No decimal or
-   * hexadecimal number written as data ends in one of these letters, so testing the
-   * final character is enough and no grammar has to be restated here.
+   * Checks for a Java float or double type suffix.
    *
    * @param text The cell content, already stripped of surrounding whitespace.
    * @return {@code true} if the final character is {@code f}, {@code F}, {@code d} or
@@ -228,9 +267,7 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Checks whether a cell uses Java's hexadecimal floating-point syntax, which like
-   * the literal suffixes is Java source syntax rather than table data: no decimal
-   * number contains an {@code x}, so its presence alone marks the cell.
+   * Checks for a hexadecimal number marker.
    *
    * @param text The cell content, already stripped of surrounding whitespace.
    * @return {@code true} if the cell contains {@code x} or {@code X}.
@@ -240,8 +277,7 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Checks whether a line carries no data: one that is blank or whose first non-blank
-   * character opens a comment.
+   * Checks for a blank line or comment.
    *
    * @param line The raw line, without its line ending.
    * @return {@code true} if the line must be skipped.
@@ -252,9 +288,7 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Removes leading and trailing whitespace, using the toolkit's whitespace definition
-   * rather than {@link String#trim()}, which leaves the no-break spaces that tables
-   * copied out of a PDF or a rendered web table routinely carry.
+   * Removes leading and trailing whitespace using the toolkit's definition.
    *
    * @param text The text to strip.
    * @return The text without surrounding whitespace. Never {@code null}.
@@ -272,109 +306,51 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Rescales every column to mean zero and unit variance, in place, using the
-   * population standard deviation over the listed places.
-   *
-   * <p>A constant column, recognized by its smallest and largest value being equal, has
-   * zero deviation and standardizes to all zeros instead of dividing by zero, so it
-   * contributes nothing to any similarity: a metric that never varies distinguishes no two
-   * places. Recognizing it by range rather than by arithmetic keeps constant columns of any
-   * magnitude clear of anything that could overflow.</p>
-   *
-   * <p>A varying column's statistics are computed in scaled form: the mean sums per-place
-   * contributions already divided by the place count, and the deviation is taken over each
-   * centered distance divided by the column's largest centered distance, so the summed
-   * squares lie between one and the place count whatever the column's magnitude. No
-   * intermediate value can cross the double range, so acceptance never depends on the
-   * iteration order of the map, and standardized values stay bounded by the square root of
-   * the place count.</p>
-   *
-   * <p>Only inexpressible columns are rejected, naming the metric: one whose centered
-   * distances exceed the largest double, which needs a spread beyond
-   * {@code Double.MAX_VALUE}, and one that varies but whose deviation is smaller than the
-   * smallest subnormal double. Both describe a table the caller can rescale, and the
-   * failure says so rather than answering from a zeroed metric.</p>
+   * Standardizes metric columns and rescales each profile for double-precision cosine.
+   * Centering uses {@code count * value - sum} to avoid rounding the column mean.
+   * Constant columns become zero. Per-profile rescaling does not change cosine.
    *
    * @param profiles The raw profiles, keyed by place identifier; mutated in place.
-   * @param metrics The metric names in column order, used to name a rejected column.
-   * @throws IOException Thrown if a column's spread overflows a double or a varying
-   *         column's deviation underflows one.
+   * @param width The number of metric columns.
    */
-  private static void standardize(Map<String, double[]> profiles, List<String> metrics)
-      throws IOException {
-    final int width = metrics.size();
-    final int count = profiles.size();
-    final double[] min = new double[width];
-    final double[] max = new double[width];
-    Arrays.fill(min, Double.POSITIVE_INFINITY);
-    Arrays.fill(max, Double.NEGATIVE_INFINITY);
-    for (final double[] profile : profiles.values()) {
-      for (int m = 0; m < width; m++) {
-        min[m] = Math.min(min[m], profile[m]);
-        max[m] = Math.max(max[m], profile[m]);
-      }
-    }
-    final double[] mean = new double[width];
-    for (final double[] profile : profiles.values()) {
-      for (int m = 0; m < width; m++) {
-        mean[m] += profile[m] / count;
-      }
-    }
-    final double[] scale = new double[width];
-    for (final double[] profile : profiles.values()) {
-      for (int m = 0; m < width; m++) {
-        if (min[m] != max[m]) {
-          final double centered = profile[m] - mean[m];
-          checkColumnFinite(centered, metrics.get(m));
-          scale[m] = Math.max(scale[m], Math.abs(centered));
-        }
-      }
-    }
-    final double[] squares = new double[width];
-    for (final double[] profile : profiles.values()) {
-      for (int m = 0; m < width; m++) {
-        if (scale[m] > 0.0) {
-          final double ratio = (profile[m] - mean[m]) / scale[m];
-          squares[m] += ratio * ratio;
-        }
-      }
-    }
-    final double[] deviation = new double[width];
+  private static void standardize(Map<String, double[]> profiles, int width) {
+    final List<double[]> rows = new ArrayList<>(profiles.values());
+    final BigDecimal count = BigDecimal.valueOf(rows.size());
+    final BigDecimal[][] standardized = new BigDecimal[rows.size()][width];
     for (int m = 0; m < width; m++) {
-      deviation[m] = scale[m] == 0.0 ? 0.0 : scale[m] * Math.sqrt(squares[m] / count);
-      if (min[m] != max[m] && deviation[m] == 0.0) {
-        throw new IOException("metric column underflows a double: " + metrics.get(m));
+      BigDecimal sum = BigDecimal.ZERO;
+      for (int row = 0; row < rows.size(); row++) {
+        standardized[row][m] = new BigDecimal(rows.get(row)[m]);
+        sum = sum.add(standardized[row][m]);
+      }
+      BigDecimal squares = BigDecimal.ZERO;
+      for (final BigDecimal[] profile : standardized) {
+        profile[m] = profile[m].multiply(count).subtract(sum);
+        squares = squares.add(profile[m].multiply(profile[m]));
+      }
+      final BigDecimal deviation = squares.divide(count, STATISTICS_PRECISION)
+          .sqrt(STATISTICS_PRECISION);
+      for (final BigDecimal[] profile : standardized) {
+        profile[m] = deviation.signum() == 0 ? BigDecimal.ZERO
+            : profile[m].divide(deviation, STATISTICS_PRECISION);
       }
     }
-    for (final double[] profile : profiles.values()) {
+    for (int row = 0; row < rows.size(); row++) {
+      BigDecimal scale = BigDecimal.ZERO;
+      for (final BigDecimal value : standardized[row]) {
+        scale = scale.max(value.abs());
+      }
       for (int m = 0; m < width; m++) {
-        profile[m] = deviation[m] == 0.0 ? 0.0 : (profile[m] - mean[m]) / deviation[m];
+        rows.get(row)[m] = scale.signum() == 0 ? 0.0
+            : standardized[row][m].divide(scale, STATISTICS_PRECISION).doubleValue();
       }
     }
   }
 
   /**
-   * Checks one computed column quantity, a centered distance from the column mean,
-   * for finiteness.
+   * Lists metric names in column order.
    *
-   * @param statistic The computed quantity.
-   * @param metric The name of the column the quantity was computed over, for the
-   *               failure message.
-   * @throws IOException Thrown if the quantity is not finite, which means the column's
-   *         spread overflows a double.
-   */
-  private static void checkColumnFinite(double statistic, String metric)
-      throws IOException {
-    if (!Double.isFinite(statistic)) {
-      throw new IOException("metric column overflows a double: " + metric);
-    }
-  }
-
-  /**
-   * Lists the metrics the table declared, in the order its columns carry them.
-   *
-   * @return The metric names in column order, as an immutable list. Never
-   *         {@code null}.
+   * @return The immutable list of metric names in column order.
    */
   public List<String> metrics() {
     return metrics;
@@ -397,17 +373,11 @@ public final class PlaceProfiles {
   /**
    * Compares two places by the cosine of their standardized profiles.
    *
-   * <p>The score is always a real number. Standardized profiles are finite and bounded,
-   * because {@link #load(InputStream)} rejects both non-finite cells and columns that
-   * overflow a double, so neither the profiles nor the sums taken over them here can
-   * reach an infinity or a {@code NaN}.</p>
-   *
    * @param id The first place identifier. Must not be {@code null} and must be listed.
    * @param otherId The second place identifier. Must not be {@code null} and must be
    *                listed.
-   * @return The cosine similarity, never {@code NaN}, nominally in {@code [-1, 1]}
-   *         although rounding can place it up to one ulp outside; {@code 0} when either
-   *         profile has no variance at all.
+   * @return The finite cosine similarity in {@code [-1, 1]}, or zero when either
+   *         profile equals the column means for all metrics.
    * @throws IllegalArgumentException Thrown if an identifier is {@code null} or not
    *         listed.
    */
@@ -424,17 +394,12 @@ public final class PlaceProfiles {
   /**
    * Finds the places most similar to one place.
    *
-   * <p>Places with equal scores are ordered by ascending identifier. The tie-break is
-   * part of the contract rather than an implementation detail: it decides which places
-   * survive the {@code count} cut when more of them tie than there is room for, so the
-   * same query against the same table always answers with the same places in the same
-   * order.</p>
+   * <p>Equal scores are ordered by ascending identifier, including at the result limit.</p>
    *
    * @param id The query place identifier. Must not be {@code null} and must be listed.
    * @param count The maximum number of neighbors. Must be positive.
-   * @return The other places ordered by descending similarity and, among equal scores,
-   *         by ascending identifier, at most {@code count}; the query place itself is
-   *         never included. Never {@code null}.
+   * @return At most {@code count} results, excluding the query place, ordered by
+   *         descending similarity and then ascending identifier. The list is immutable.
    * @throws IllegalArgumentException Thrown if {@code id} is {@code null} or not
    *         listed, or {@code count} is not positive.
    */
@@ -459,11 +424,10 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Resolves a place identifier to its standardized profile, failing loud on identifiers
-   * absent from the table. Callers validate the identifier is non-{@code null} first.
+   * Looks up a standardized profile for a non-null identifier.
    *
    * @param id The place identifier to resolve.
-   * @return The standardized profile of the place. Never {@code null}.
+   * @return The standardized profile.
    * @throws IllegalArgumentException Thrown if {@code id} is not listed.
    */
   private double[] profile(String id) {
@@ -475,22 +439,14 @@ public final class PlaceProfiles {
   }
 
   /**
-   * Computes the cosine of two equal-length vectors: the dot product divided by the
-   * product of the norms.
-   *
-   * <p>The sums need no overflow guard of their own: standardization bounds what reaches
-   * them. Over {@code n} listed places a standardized column sums its squares to exactly
-   * {@code n}, so no standardized value exceeds {@code sqrt(n)} and each sum below is
-   * bounded by {@code n} times the metric count. Both are sizes of in-memory structures,
-   * so their product cannot approach the range of a double. This holds only because the
-   * load-time cell and column checks keep infinite and {@code NaN} profiles out.</p>
+   * Computes cosine for profiles rescaled to a largest absolute component of one.
+   * Zero profiles return zero. Rounding at either endpoint is limited to [-1, 1].
    *
    * @param a The first vector.
    * @param b The second vector, of the same length as {@code a}.
-   * @return The cosine, or {@code 0.0} when either vector is all zeros, which is the
-   *         standardized form of a profile without any variance.
+   * @return The cosine, or zero when either vector is zero.
    */
-  private static double cosine(double[] a, double[] b) {
+  private double cosine(double[] a, double[] b) {
     double dot = 0.0;
     double normA = 0.0;
     double normB = 0.0;
@@ -502,48 +458,6 @@ public final class PlaceProfiles {
     if (normA == 0.0 || normB == 0.0) {
       return 0.0;
     }
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  /**
-   * Splits text into lines on LF, dropping one trailing CR per line so both LF and
-   * CRLF endings are accepted.
-   *
-   * @param content The full table text.
-   * @return The lines in order, possibly including empty ones. Never {@code null}.
-   */
-  private static List<String> splitLines(String content) {
-    final List<String> lines = new ArrayList<>();
-    int start = 0;
-    for (int i = 0; i <= content.length(); i++) {
-      if (i == content.length() || content.charAt(i) == '\n') {
-        int end = i;
-        if (end > start && content.charAt(end - 1) == '\r') {
-          end--;
-        }
-        lines.add(content.substring(start, end));
-        start = i + 1;
-      }
-    }
-    return lines;
-  }
-
-  /**
-   * Splits one line into fields on tab characters, keeping empty fields so a field
-   * count mismatch is detected rather than silently repaired.
-   *
-   * @param line The line to split.
-   * @return The fields in order. Never {@code null} and never empty.
-   */
-  private static List<String> splitTabs(String line) {
-    final List<String> fields = new ArrayList<>();
-    int start = 0;
-    for (int i = 0; i <= line.length(); i++) {
-      if (i == line.length() || line.charAt(i) == '\t') {
-        fields.add(line.substring(start, i));
-        start = i + 1;
-      }
-    }
-    return fields;
+    return Math.max(-1.0, Math.min(1.0, dot / (Math.sqrt(normA) * Math.sqrt(normB))));
   }
 }

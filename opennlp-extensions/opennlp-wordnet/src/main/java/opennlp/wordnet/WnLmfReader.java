@@ -62,19 +62,16 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * <a href="https://github.com/globalwordnet/english-wordnet">Open English WordNet</a> and many
  * other language wordnets) into a {@link LexicalKnowledgeBase} using the JDK StAX parser.
  *
- * <p>It reads lexical entries, synsets with their definitions, every typed synset relation in
- * WN-LMF 1.4, and sense relations, which are represented at the synset level as documented on
- * {@link WordNetRelation}. Elements outside that subset are skipped. Relations of type
- * {@code other} are also skipped because the format supplies no relation type to retain. Unknown
- * typed relations cause an
- * {@link InvalidFormatException}. Multiple definitions are joined with {@code "; "} in document
- * order.</p>
+ * <p>It reads lexical entries, synsets with their definitions and every typed relation in WN-LMF
+ * 1.4, and sense relations, which are lifted to the synset level as documented on
+ * {@link WordNetRelation}. Elements outside that subset are skipped, as are relations of type
+ * {@code other}, the format's untyped escape hatch. Any other unknown relation type fails loud.</p>
  *
  * <p>The parser is hardened against XXE: DTD processing and external entities are disabled, so a
  * DOCTYPE is skipped but nothing it names is fetched or resolved.</p>
  *
- * <p>Malformed structure causes an {@link InvalidFormatException} naming the resource and, where
- * the parser provides one, the line; I/O failures propagate as {@link IOException}.
+ * <p>Malformed structure fails loud with an {@link InvalidFormatException} naming the resource
+ * and, where the parser provides one, the line; I/O failures propagate as {@link IOException}.
  * Part-of-speech code {@code s} normalizes to {@link WordNetPOS#ADJECTIVE}, and a {@code similar}
  * relation on a verb synset maps to {@link WordNetRelation#VERB_GROUP} rather than
  * {@link WordNetRelation#SIMILAR_TO}. Use {@link #readResource(Path)} when a document contains
@@ -93,9 +90,8 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * overloads without a resolver perform no I/O of their own and reject
  * a {@code LexiconExtension} clearly. {@code ExternalLemma}, {@code Form}, and
  * {@code ExternalForm} stay outside the knowledge-base projection, exactly like the forms,
- * examples, counts, and secondary definitions the ordinary reader already skips; they never
- * affect lookup.</p>
- * @since 3.0.0
+ * examples, and counts the ordinary reader skips. Multiple synset definitions are joined in
+ * document order with {@code "; "}.</p>
  */
 public final class WnLmfReader {
 
@@ -133,7 +129,7 @@ public final class WnLmfReader {
       "property", "secondary_aspect_ip", "secondary_aspect_pi", "simple_aspect_ip",
       "simple_aspect_pi", "state", "undergoer", "uses", "vehicle");
 
-  /** The untyped relation that has no corresponding {@link WordNetRelation}. */
+  /** The format's escape-hatch relation type; carries no type the contract can express. */
   private static final String OTHER_RELATION = "other";
 
   /** The element declaring a lexical entry; opened and closed by the same handlers. */
@@ -479,6 +475,19 @@ public final class WnLmfReader {
     return parser.resource();
   }
 
+  /** Prevents XML reader cleanup from closing a caller-owned stream. */
+  private static final class NonClosingInputStream extends FilterInputStream {
+
+    NonClosingInputStream(InputStream in) {
+      super(in);
+    }
+
+    @Override
+    public void close() {
+      // The caller owns the underlying stream.
+    }
+  }
+
   /**
    * Returns the only knowledge base in a resource.
    *
@@ -499,7 +508,7 @@ public final class WnLmfReader {
 
   /**
    * Builds an XXE-hardened StAX factory: the DTD internal subset is not processed and external
-   * entities and the external DTD subset are denied, so a DOCTYPE is skipped without resolution.
+   * entities and the external DTD subset are denied, so a DOCTYPE is skipped but never resolved.
    *
    * @return The hardened factory.
    */
@@ -510,26 +519,11 @@ public final class WnLmfReader {
     factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
     factory.setProperty(XMLInputFactory.IS_COALESCING, Boolean.TRUE);
     factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> {
-      throw new XMLStreamException("External entity resolution is disabled: " + systemId);
+      throw new XMLStreamException("External entity resolution is disabled, refusing " + systemId);
     });
     return factory;
   }
 
-  /** Prevents a StAX reader from closing the stream owned by its caller. */
-  private static final class NonClosingInputStream extends FilterInputStream {
-
-    /** Wraps the caller-owned stream. */
-    NonClosingInputStream(InputStream in) {
-      super(in);
-    }
-
-    /** Leaves the wrapped stream open. */
-    @Override
-    public void close() {
-    }
-  }
-
-  /** Holds the streaming parse state and performs post-parse resolution. */
   /**
    * Builds a malformed-document exception naming the resource and, when known, the line.
    *
@@ -701,6 +695,10 @@ public final class WnLmfReader {
               reader.getLocation());
         }
         case SENSE_ELEMENT -> {
+          if (currentSenseId != null) {
+            throw malformedAt(reader.getLocation(),
+                "Nested Sense inside " + currentSenseId, null);
+          }
           final String owner;
           if (currentExternalEntry != null) {
             owner = currentExternalEntry.id;
@@ -745,8 +743,8 @@ public final class WnLmfReader {
         case SYNSET_ELEMENT -> {
           requireLexicon(reader, SYNSET_ELEMENT);
           if (currentSynset != null) {
-            throw malformedAt(reader.getLocation(), "Nested Synset inside " + currentSynset.id,
-                null);
+            throw malformedAt(reader.getLocation(),
+                "Nested Synset inside " + currentSynset.id, null);
           }
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final WordNetPOS pos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
@@ -762,10 +760,15 @@ public final class WnLmfReader {
           currentExternalSynset = new ExternalSynsetBuilder(id, line(reader.getLocation()));
         }
         case "Definition" -> {
-          if (currentSynset != null && currentSynset.gloss == null) {
-            currentSynset.gloss = reader.getElementText();
-          } else if (currentExternalSynset != null && currentExternalSynset.definition == null) {
-            currentExternalSynset.definition = reader.getElementText();
+          if (currentSynset != null) {
+            currentSynset.definitions.add(reader.getElementText());
+          } else if (currentExternalSynset != null) {
+            final String definition = reader.getElementText();
+            if (currentExternalSynset.definition == null) {
+              currentExternalSynset.definition = definition;
+            }
+          } else {
+            throw malformedAt(reader.getLocation(), "Definition outside a Synset", null);
           }
         }
         case "SynsetRelation" -> {
@@ -838,7 +841,7 @@ public final class WnLmfReader {
         case SYNSET_ELEMENT -> {
           if (currentSynset != null) {
             synsets.put(currentSynset.id, new RawSynset(currentSynset.id, currentSynset.pos,
-                currentSynset.members, List.of(), currentSynset.gloss,
+                currentSynset.members, List.of(), String.join("; ", currentSynset.definitions),
                 currentSynset.relations, currentSynset.line));
           }
           currentSynset = null;
@@ -1082,7 +1085,7 @@ public final class WnLmfReader {
       private final String members;
       private final int line;
       private final List<RawRelation> relations = new ArrayList<>(4);
-      private String gloss;
+      private final List<String> definitions = new ArrayList<>(1);
 
       SynsetBuilder(String id, WordNetPOS pos, String members, int line) {
         this.id = id;
@@ -1290,6 +1293,10 @@ public final class WnLmfReader {
       final List<String> lemmas = new ArrayList<>(memberIds.size());
       for (final String memberId : memberIds) {
         final RawSense sense = lexicon.senses().get(memberId);
+        if (sense != null && !sense.synsetId().equals(raw.id())) {
+          throw fail("Synset " + raw.id() + " at line " + raw.line()
+              + " lists member sense " + memberId + " assigned to synset " + sense.synsetId());
+        }
         final String entryId = sense == null ? memberId : sense.entryId();
         final RawEntry entry = lexicon.entries().get(entryId);
         if (entry == null) {
@@ -1822,7 +1829,7 @@ public final class WnLmfReader {
     names.put("uses", WordNetRelation.USES);
     names.put("vehicle", WordNetRelation.VEHICLE);
     names.put("young", WordNetRelation.YOUNG);
-    // Additional names used by WN-LMF producers.
+    // Legacy aliases accepted by older WN-LMF producers.
     names.put("domain_usage", WordNetRelation.DOMAIN_USAGE);
     names.put("has_domain_usage", WordNetRelation.MEMBER_OF_DOMAIN_USAGE);
     return Map.copyOf(names);

@@ -272,8 +272,21 @@ final class CorefLexicon {
 
   /** Lazily loads the first-name gender list on first use. */
   private static final class FirstNames {
+
+    /** The bundled first-name genders. */
     static final Map<String, Gender> BY_NAME = load();
 
+    /** Prevents construction of the resource holder. */
+    private FirstNames() {
+    }
+
+    /**
+     * Reads the bundled first-name genders.
+     *
+     * @return The names by lowercase spelling.
+     * @throws IllegalStateException Thrown if the resource is missing or malformed.
+     * @throws UncheckedIOException Thrown if the resource cannot be read.
+     */
     private static Map<String, Gender> load() {
       final Map<String, Gender> names = new HashMap<>();
       try (InputStream in = CorefLexicon.class.getResourceAsStream("first-names-en.txt")) {
@@ -301,8 +314,8 @@ final class CorefLexicon {
     }
   }
 
+  /** Prevents construction of this lookup class. */
   private CorefLexicon() {
-    // Not instantiated; this class provides static lookups only.
   }
 
   /**
@@ -392,37 +405,72 @@ final class CorefLexicon {
     return true;
   }
 
-  /** {@return whether the lowercased word is a verb of speech or thought} */
+  /**
+   * Checks whether a word is a verb of speech or thought.
+   *
+   * @param word The lowercased word.
+   * @return Whether it is a verb of speech or thought.
+   */
   static boolean speechVerb(String word) {
     return SPEECH_VERBS.contains(word);
   }
 
-  /** {@return whether the token opens a quotation} */
+  /**
+   * Checks whether a token opens a quotation.
+   *
+   * @param token The token.
+   * @return Whether it opens a quotation.
+   */
   static boolean opensQuote(String token) {
     return OPENING_QUOTES.contains(token);
   }
 
-  /** {@return whether the token closes a quotation} */
+  /**
+   * Checks whether a token closes a quotation.
+   *
+   * @param token The token.
+   * @return Whether it closes a quotation.
+   */
   static boolean closesQuote(String token) {
     return CLOSING_QUOTES.contains(token);
   }
 
-  /** {@return whether the lowercased word opens an indefinite noun phrase} */
+  /**
+   * Checks whether a word opens an indefinite noun phrase.
+   *
+   * @param word The lowercased word.
+   * @return Whether it opens an indefinite noun phrase.
+   */
   static boolean indefiniteWord(String word) {
     return INDEFINITE_WORDS.contains(word);
   }
 
-  /** {@return whether the lowercased word heads a compound place or institution name} */
+  /**
+   * Checks whether a word heads a compound place or institution name.
+   *
+   * @param word The lowercased word.
+   * @return Whether it heads a compound place or institution name.
+   */
   static boolean compoundNameHead(String word) {
     return COMPOUND_NAME_HEADS.contains(word);
   }
 
-  /** {@return whether the lowercased word is a verb that can make {@code it} pleonastic} */
+  /**
+   * Checks whether a word can head a pleonastic {@code it} construction.
+   *
+   * @param word The lowercased word.
+   * @return Whether it is a verb that can make {@code it} pleonastic.
+   */
   static boolean pleonasticVerb(String word) {
     return PLEONASTIC_VERBS.contains(word);
   }
 
-  /** {@return whether the lowercased word completes a pleonastic {@code it} construction} */
+  /**
+   * Checks whether a word completes a pleonastic {@code it} construction.
+   *
+   * @param word The lowercased word.
+   * @return Whether it completes a pleonastic {@code it} construction.
+   */
   static boolean pleonasticComplement(String word) {
     return PLEONASTIC_COMPLEMENTS.contains(word);
   }

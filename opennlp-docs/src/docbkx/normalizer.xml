@@ -139,10 +139,11 @@
 					</row>
 					<row>
 						<entry><code>SymbolJoinerCharSequenceNormalizer</code></entry>
-						<entry>Spells out a whole-token symbol as its English word
+						<entry>Replaces a supported single-symbol input with a fixed English word
 							(<code>&amp;</code> to <code>and</code>, <code>§</code> to
-							<code>section</code>, <code>™</code> to <code>trademark</code>); a symbol
-							embedded in a larger token is left alone.</entry>
+							<code>section</code>, <code>™</code> to <code>trademark</code>).
+							It does not tokenize or trim text. See
+							<xref linkend="tools.normalizer.symboltokens"/>.</entry>
 					</row>
 					<row>
 						<entry><code>EllipsisCharSequenceNormalizer</code></entry>
@@ -221,8 +222,55 @@
 String clean = ws.normalize("a 　b").toString();   // "a b"
 
 String hyphen = DashCharSequenceNormalizer.getInstance()
-    .normalize("state—of–the‐art").toString(); // "state-of-the-art"]]>
+    .normalize("state\u2014of–the‐art").toString(); // "state-of-the-art"]]>
 		</programlisting>
+	</section>
+
+	<section xml:id="tools.normalizer.symboltokens">
+		<title>Normalizing symbol tokens</title>
+		<para>
+			<code>SymbolJoinerCharSequenceNormalizer</code> maps a supported symbol only when
+			it is the complete input. A phrase such as <code>Dungeons &amp; Dragons</code>,
+			an embedded symbol such as <code>R&amp;D</code>, padded input such as
+			<code>" &amp; "</code>, and ASCII forms such as <code>(TM)</code> are unchanged.
+			The fixed English replacements are matching conventions, not rules for reading
+			symbols in context. Currency symbols and symbols followed by variation selectors
+			are unchanged.
+		</para>
+		<para>
+			For per-token matching, use tokens that retain the symbols. The following example
+			uses whitespace boundaries and stores normalized forms with the original spans:
+		</para>
+		<programlisting language="java">
+<![CDATA[import opennlp.tools.tokenize.WhitespaceTokenizer;
+import opennlp.tools.util.Span;
+import opennlp.tools.util.normalizer.CharSequenceNormalizer;
+import opennlp.tools.util.normalizer.SymbolJoinerCharSequenceNormalizer;
+import opennlp.tools.util.normalizer.TextNormalizer;
+
+String text = "Dungeons & Dragons";
+CharSequenceNormalizer normalizer = TextNormalizer.builder()
+    .with(SymbolJoinerCharSequenceNormalizer.getInstance())
+    .caseFold()
+    .build();
+Span[] spans = WhitespaceTokenizer.INSTANCE.tokenizePos(text);
+String[] forms = new String[spans.length];
+for (int i = 0; i < spans.length; i++) {
+  forms[i] = normalizer.normalize(spans[i].getCoveredText(text)).toString();
+}
+// forms: ["dungeons", "and", "dragons"]
+// spans[1]: [9, 10), covering the original ampersand]]>
+		</programlisting>
+		<para>
+			<code>WordTokenizer</code>, used by default in <code>TermAnalyzer</code>, omits the
+			ampersand; applying a normalizer afterward cannot recover it. Choose a tokenizer
+			that retains the symbols needed for matching, or supply pretokenized input.
+			There is no built-in symbol-expansion term dimension; normalize token forms
+			explicitly as above.
+			This normalizer does not implement <code>OffsetAwareNormalizer</code> and cannot
+			be included in <code>buildAligned()</code>. In the example, the spans refer to the
+			original tokens, not character positions within the expanded words.
+		</para>
 	</section>
 
 	<section xml:id="tools.normalizer.pipeline">
@@ -241,17 +289,22 @@ String hyphen = DashCharSequenceNormalizer.getInstance()
 String term = pipeline.normalize("CAFÉ").toString();   // "cafe"]]>
 		</programlisting>
 		<para>
-			English contraction expansion is language-specific and therefore opt-in. It can
-			participate in an offset-aware pipeline:
+			English contraction expansion is opt-in. A supported contraction must occupy
+			a complete word under the default
+			<ulink url="https://www.unicode.org/reports/tr29/#Word_Boundaries">UAX #29 word boundaries</ulink>.
+			Quoted contractions expand without changing their surrounding quotes.
+			Text such as <code>_can't</code>, <code>can't1</code>, and <code>can't've</code>
+			is not expanded. Use an offset-aware pipeline to report source spans:
 		</para>
 		<programlisting language="java">
 <![CDATA[OffsetAwareNormalizer english = TextNormalizer.builder()
     .englishContractions()
     .buildAligned();
 
-AlignedText expanded = english.normalizeAligned("we can't leave");
-// expanded.normalizedString() is "we can not leave";
-// a normalized hit maps back to the original text containing "can't"]]>
+AlignedText expanded = english.normalizeAligned("we 'can't' leave");
+// expanded.normalizedString() is "we 'can not' leave"
+Span source = expanded.toOriginalSpan(4, 11);
+// source is [4..9), covering "can't" in the original text]]>
 		</programlisting>
 		<para>
 			A conservative search-oriented chain (strip invisibles, NFC, collapse whitespace, fold
@@ -291,11 +344,11 @@ String t = chain.normalize("﻿“CafÉ”").toString();   // "\"cafe\""]]>
     .dashes()
     .buildAligned();
 
-String original = "find   the—match";
+String original = "find   the\u2014match";
 AlignedText aligned = pipeline.normalizeAligned(original);
 // aligned.normalized()                ->  "find the-match"
 Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized text
-// hit.getCoveredText(original)         ->  "the—match"   (back to the source, em dash and all)]]>
+// hit.getCoveredText(original)         ->  "the\u2014match"]]>
 		</programlisting>
 		<para>
 			<code>OffsetAwareNormalizer</code> is a capability interface: it extends
@@ -482,7 +535,7 @@ CharClass dash = CharClass.dashes();      // Unicode Dash (curated) -> U+002D
 ws.collapse("a   b");                      // "a b"          (runs -> one space)
 ws.trim("  hi  ");                         // "hi"
 String[] tokens = ws.split("one two"); // ["one", "two"]  (offset-aware via splitSpans)
-dash.normalize("a—b");                // "a-b"]]>
+dash.normalize("a\u2014b");            // "a-b"]]>
 		</programlisting>
 		<para>
 			A class applies its replacement three ways, which differ in whether they collapse runs and
