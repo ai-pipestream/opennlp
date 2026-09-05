@@ -21,7 +21,6 @@ import java.util.Map;
 import java.util.Optional;
 import javax.xml.namespace.QName;
 
-import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.wordnet.LexicalKnowledgeBase;
 
 /**
@@ -38,8 +37,8 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * from a WN-LMF {@code LexiconExtension}, it carries the exact {@code Extends} reference, the
  * identity components describe the extension itself, and {@link #knowledgeBase()} contains the
  * resolved base plus the extension's additive content. {@code Extends} is never mixed into
- * {@link #dependencies()}. The list, maps, and knowledge base are immutable and safe to share
- * between threads.</p>
+ * {@link #dependencies()}. The list and maps are immutable. Thread safety of the
+ * knowledge base depends on its implementation.</p>
  *
  * @param id            The WN-LMF lexicon id. Must not be {@code null} or empty.
  * @param label         The human-readable label. Must not be {@code null} or empty.
@@ -53,8 +52,9 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * @param extensionOf   The {@code Extends} reference of a composed {@code LexiconExtension}, or
  *                      empty for an ordinary lexicon. Must not be {@code null}.
  * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
+ * @since 3.0.0
  */
-@ThreadSafe
+
 public record WnLmfLexicon(
     String id,
     String label,
@@ -72,38 +72,38 @@ public record WnLmfLexicon(
    */
   public WnLmfLexicon {
     if (id == null || id.isEmpty()) {
-      throw new IllegalArgumentException("Id must not be null or empty");
+      throw new IllegalArgumentException("id must not be null or empty");
     }
     if (label == null || label.isEmpty()) {
-      throw new IllegalArgumentException("Label must not be null or empty");
+      throw new IllegalArgumentException("label must not be null or empty");
     }
     if (language == null || language.isEmpty()) {
-      throw new IllegalArgumentException("Language must not be null or empty");
+      throw new IllegalArgumentException("language must not be null or empty");
     }
     if (version == null || version.isEmpty()) {
-      throw new IllegalArgumentException("Version must not be null or empty");
+      throw new IllegalArgumentException("version must not be null or empty");
     }
     if (metadata == null) {
-      throw new IllegalArgumentException("Metadata must not be null");
+      throw new IllegalArgumentException("metadata must not be null");
     }
     for (final Map.Entry<QName, String> entry : metadata.entrySet()) {
       if (entry.getKey() == null || entry.getValue() == null) {
-        throw new IllegalArgumentException("Metadata must not contain null keys or values");
+        throw new IllegalArgumentException("metadata must not contain null keys or values");
       }
     }
     if (dependencies == null) {
-      throw new IllegalArgumentException("Dependencies must not be null");
+      throw new IllegalArgumentException("dependencies must not be null");
     }
     for (final WnLmfDependency dependency : dependencies) {
       if (dependency == null) {
-        throw new IllegalArgumentException("Dependencies must not contain null");
+        throw new IllegalArgumentException("dependencies must not contain null");
       }
     }
     if (extensionOf == null) {
       throw new IllegalArgumentException("ExtensionOf must not be null; use Optional.empty()");
     }
     if (knowledgeBase == null) {
-      throw new IllegalArgumentException("KnowledgeBase must not be null");
+      throw new IllegalArgumentException("knowledgeBase must not be null");
     }
     metadata = Map.copyOf(metadata);
     dependencies = List.copyOf(dependencies);
@@ -119,6 +119,7 @@ public record WnLmfLexicon(
    * @param metadata      The remaining Lexicon attributes. Must not be {@code null}.
    * @param dependencies  The required lexicons in source order. Must not be {@code null}.
    * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
+ * @since 3.0.0
    * @throws IllegalArgumentException Thrown if a component violates its documented constraint.
    */
   public WnLmfLexicon(String id, String label, String language, String version,

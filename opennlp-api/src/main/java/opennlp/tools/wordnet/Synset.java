@@ -27,7 +27,7 @@ import opennlp.tools.commons.ThreadSafe;
  * One synonym set: a single lexicalized concept with its member lemmas, gloss, and typed
  * relations to other synsets.
  *
- * <p>The {@link #id() id} is an opaque, source-qualified string minted by the reader that
+ * <p>The {@link #id() id} is an opaque, source-qualified string created by the reader that
  * produced the synset; consumers must not parse it, only pass it back to
  * {@link LexicalKnowledgeBase#synset(String)} and compare it for equality. Relations map each
  * {@link WordNetRelation} present on this synset to the target synset ids in source order.</p>
@@ -47,6 +47,7 @@ import opennlp.tools.commons.ThreadSafe;
  * @param relations The typed relations, each mapping to the target synset ids in source order.
  *                  Must not be {@code null}; keys must not be {@code null}; each value must be
  *                  a non-empty list of non-{@code null}, non-empty target ids.
+ * @since 3.0.0
  */
 @ThreadSafe
 public record Synset(
@@ -56,6 +57,8 @@ public record Synset(
     String gloss,
     Map<WordNetRelation, List<String>> relations) {
 
+  private static final String RELATION_PREFIX = "Relation ";
+
   /**
    * Creates a synset.
    *
@@ -63,40 +66,40 @@ public record Synset(
    */
   public Synset {
     if (id == null || id.isEmpty()) {
-      throw new IllegalArgumentException("Id must not be null or empty");
+      throw new IllegalArgumentException("id must not be null or empty");
     }
     if (pos == null) {
-      throw new IllegalArgumentException("Pos must not be null");
+      throw new IllegalArgumentException("pos must not be null");
     }
     if (lemmas == null) {
-      throw new IllegalArgumentException("Lemmas must not be null for synset " + id);
+      throw new IllegalArgumentException("lemmas must not be null for synset " + id);
     }
     for (final String lemma : lemmas) {
       if (lemma == null || lemma.isEmpty()) {
         throw new IllegalArgumentException(
-            "Lemmas must not contain a null or empty element for synset " + id);
+            "lemmas must not contain a null or empty element for synset " + id);
       }
     }
     if (gloss == null) {
-      throw new IllegalArgumentException("Gloss must not be null for synset " + id);
+      throw new IllegalArgumentException("gloss must not be null for synset " + id);
     }
     if (relations == null) {
-      throw new IllegalArgumentException("Relations must not be null for synset " + id);
+      throw new IllegalArgumentException("relations must not be null for synset " + id);
     }
     final Map<WordNetRelation, List<String>> copiedRelations =
         new EnumMap<>(WordNetRelation.class);
     for (final Map.Entry<WordNetRelation, List<String>> relation : relations.entrySet()) {
       if (relation.getKey() == null) {
-        throw new IllegalArgumentException("Relations must not contain a null key for synset " + id);
+        throw new IllegalArgumentException("relations must not contain a null key for synset " + id);
       }
       final List<String> targets = relation.getValue();
       if (targets == null || targets.isEmpty()) {
-        throw new IllegalArgumentException("Relation " + relation.getKey()
+        throw new IllegalArgumentException(RELATION_PREFIX + relation.getKey()
             + " must map to a non-empty target list for synset " + id);
       }
       for (final String target : targets) {
         if (target == null || target.isEmpty()) {
-          throw new IllegalArgumentException("Relation " + relation.getKey()
+          throw new IllegalArgumentException(RELATION_PREFIX + relation.getKey()
               + " must not contain a null or empty target id for synset " + id);
         }
       }
@@ -116,7 +119,7 @@ public record Synset(
    */
   public List<String> related(WordNetRelation relation) {
     if (relation == null) {
-      throw new IllegalArgumentException("Relation must not be null");
+      throw new IllegalArgumentException("relation must not be null");
     }
     final List<String> targets = relations.get(relation);
     return targets == null ? List.of() : targets;

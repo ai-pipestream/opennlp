@@ -21,17 +21,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import opennlp.tools.commons.ThreadSafe;
-
 /**
  * An ordered WN-LMF lexical resource containing one or more independently queryable lexicons.
- * Lexicon boundaries are preserved so equal lemmas in different languages never share a lookup
- * index by accident.
+ * Each lexicon has an independent lookup index.
  *
  * @param lexicons The lexicons in document order. Must not be {@code null} or empty, must not
  *                 contain {@code null}, and ids must be unique.
+ * @since 3.0.0
  */
-@ThreadSafe
 public record WnLmfResource(List<WnLmfLexicon> lexicons) {
 
   /**
@@ -42,12 +39,12 @@ public record WnLmfResource(List<WnLmfLexicon> lexicons) {
    */
   public WnLmfResource {
     if (lexicons == null || lexicons.isEmpty()) {
-      throw new IllegalArgumentException("Lexicons must not be null or empty");
+      throw new IllegalArgumentException("lexicons must not be null or empty");
     }
-    final Set<String> ids = new HashSet<>();
+    final Set<String> ids = HashSet.newHashSet(lexicons.size());
     for (final WnLmfLexicon lexicon : lexicons) {
       if (lexicon == null) {
-        throw new IllegalArgumentException("Lexicons must not contain null");
+        throw new IllegalArgumentException("lexicons must not contain null");
       }
       if (!ids.add(lexicon.id())) {
         throw new IllegalArgumentException("Duplicate lexicon id " + lexicon.id());
@@ -60,12 +57,12 @@ public record WnLmfResource(List<WnLmfLexicon> lexicons) {
    * Finds a lexicon by its WN-LMF id.
    *
    * @param id The exact lexicon id. Must not be {@code null}.
-   * @return The lexicon, or empty when no lexicon carries the id.
+   * @return The lexicon, or empty when no lexicon has the id.
    * @throws IllegalArgumentException Thrown if {@code id} is {@code null}.
    */
   public Optional<WnLmfLexicon> lexicon(String id) {
     if (id == null) {
-      throw new IllegalArgumentException("Id must not be null");
+      throw new IllegalArgumentException("id must not be null");
     }
     for (final WnLmfLexicon lexicon : lexicons) {
       if (lexicon.id().equals(id)) {

@@ -17,6 +17,7 @@
 package opennlp.wordnet;
 
 import java.io.BufferedInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -89,8 +90,8 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * overloads without a resolver perform no I/O of their own and reject
  * a {@code LexiconExtension} clearly. {@code ExternalLemma}, {@code Form}, and
  * {@code ExternalForm} stay outside the knowledge-base projection, exactly like the forms,
- * examples, counts, and secondary definitions the ordinary reader already skips; they never
- * affect lookup.</p>
+ * examples, and counts the ordinary reader skips. Multiple synset definitions are joined in
+ * document order with {@code "; "}.</p>
  */
 public final class WnLmfReader {
 
@@ -455,7 +456,8 @@ public final class WnLmfReader {
       boolean allowExtensions) throws IOException {
     final Parser parser = new Parser(resourceName, allowExtensions);
     try {
-      final XMLStreamReader reader = hardenedFactory().createXMLStreamReader(in);
+      final XMLStreamReader reader =
+          hardenedFactory().createXMLStreamReader(new NonClosingInputStream(in));
       try {
         parser.parse(reader);
       } finally {
@@ -471,6 +473,19 @@ public final class WnLmfReader {
       throw parser.malformedAt(e.getLocation(), "XML error: " + e.getMessage(), e);
     }
     return parser.resource();
+  }
+
+  /** Prevents XML reader cleanup from closing a caller-owned stream. */
+  private static final class NonClosingInputStream extends FilterInputStream {
+
+    NonClosingInputStream(InputStream in) {
+      super(in);
+    }
+
+    @Override
+    public void close() {
+      // The caller owns the underlying stream.
+    }
   }
 
   /**
@@ -651,6 +666,10 @@ public final class WnLmfReader {
         }
         case LEXICAL_ENTRY_ELEMENT -> {
           requireLexicon(reader, LEXICAL_ENTRY_ELEMENT);
+          if (currentEntryId != null) {
+            throw malformedAt(reader.getLocation(),
+                "Nested LexicalEntry inside " + currentEntryId, null);
+          }
           currentEntryId = requireAttribute(reader, ID_ATTRIBUTE);
           claimDocumentId(currentEntryId, "lexical entry", reader.getLocation());
           currentEntryLemma = null;
@@ -667,11 +686,19 @@ public final class WnLmfReader {
           if (currentEntryId == null) {
             throw malformedAt(reader.getLocation(), "Lemma outside a LexicalEntry", null);
           }
+          if (currentEntryLemma != null) {
+            throw malformedAt(reader.getLocation(),
+                "Duplicate Lemma in LexicalEntry " + currentEntryId, null);
+          }
           currentEntryLemma = requireAttribute(reader, "writtenForm");
           currentEntryPos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
         }
         case SENSE_ELEMENT -> {
+          if (currentSenseId != null) {
+            throw malformedAt(reader.getLocation(),
+                "Nested Sense inside " + currentSenseId, null);
+          }
           final String owner;
           if (currentExternalEntry != null) {
             owner = currentExternalEntry.id;
@@ -715,6 +742,10 @@ public final class WnLmfReader {
         }
         case SYNSET_ELEMENT -> {
           requireLexicon(reader, SYNSET_ELEMENT);
+          if (currentSynset != null) {
+            throw malformedAt(reader.getLocation(),
+                "Nested Synset inside " + currentSynset.id, null);
+          }
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final WordNetPOS pos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
@@ -729,10 +760,15 @@ public final class WnLmfReader {
           currentExternalSynset = new ExternalSynsetBuilder(id, line(reader.getLocation()));
         }
         case "Definition" -> {
-          if (currentSynset != null && currentSynset.gloss == null) {
-            currentSynset.gloss = reader.getElementText();
-          } else if (currentExternalSynset != null && currentExternalSynset.definition == null) {
-            currentExternalSynset.definition = reader.getElementText();
+          if (currentSynset != null) {
+            currentSynset.definitions.add(reader.getElementText());
+          } else if (currentExternalSynset != null) {
+            final String definition = reader.getElementText();
+            if (currentExternalSynset.definition == null) {
+              currentExternalSynset.definition = definition;
+            }
+          } else {
+            throw malformedAt(reader.getLocation(), "Definition outside a Synset", null);
           }
         }
         case "SynsetRelation" -> {
@@ -805,7 +841,7 @@ public final class WnLmfReader {
         case SYNSET_ELEMENT -> {
           if (currentSynset != null) {
             synsets.put(currentSynset.id, new RawSynset(currentSynset.id, currentSynset.pos,
-                currentSynset.members, List.of(), currentSynset.gloss,
+                currentSynset.members, List.of(), String.join("; ", currentSynset.definitions),
                 currentSynset.relations, currentSynset.line));
           }
           currentSynset = null;
@@ -1049,7 +1085,7 @@ public final class WnLmfReader {
       private final String members;
       private final int line;
       private final List<RawRelation> relations = new ArrayList<>(4);
-      private String gloss;
+      private final List<String> definitions = new ArrayList<>(1);
 
       SynsetBuilder(String id, WordNetPOS pos, String members, int line) {
         this.id = id;
@@ -1256,6 +1292,10 @@ public final class WnLmfReader {
       final List<String> lemmas = new ArrayList<>(memberIds.size());
       for (final String memberId : memberIds) {
         final RawSense sense = lexicon.senses().get(memberId);
+        if (sense != null && !sense.synsetId().equals(raw.id())) {
+          throw fail("Synset " + raw.id() + " at line " + raw.line()
+              + " lists member sense " + memberId + " assigned to synset " + sense.synsetId());
+        }
         final String entryId = sense == null ? memberId : sense.entryId();
         final RawEntry entry = lexicon.entries().get(entryId);
         if (entry == null) {

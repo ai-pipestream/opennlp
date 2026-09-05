@@ -21,14 +21,16 @@ import java.util.Optional;
 
 /**
  * Lemma and synset lookup over a loaded lexical-semantic resource in the WordNet family. Synset
- * identity is opaque and source-qualified (see {@link Synset#id()}). Lookups return their matches
- * in the source's sense order and never return {@code null}.
+ * identifiers are opaque and source-qualified (see {@link Synset#id()}). Lookups return matches
+ * in the source's sense order. Lookup results are non-{@code null} lists.
  *
  * <p>How a queried lemma is matched against the source's written forms is implementation
  * specific and documented there. Returned {@link Synset#lemmas() lemmas} preserve the source's
  * written forms, with spaces in multiword lemmas.</p>
  *
  * <p>Thread safety is implementation specific.</p>
+ *
+ * @since 3.0.0
  */
 public interface LexicalKnowledgeBase {
 
@@ -47,7 +49,7 @@ public interface LexicalKnowledgeBase {
   /**
    * Finds a synset by its opaque identifier.
    *
-   * @param synsetId The synset identifier, as minted by this lexicon. Must not be {@code null}.
+   * @param synsetId A synset identifier returned by this lexicon. Must not be {@code null}.
    * @return The synset, or empty when this lexicon has no synset with that identifier.
    * @throws IllegalArgumentException Thrown if {@code synsetId} is {@code null}.
    */
@@ -64,8 +66,11 @@ public interface LexicalKnowledgeBase {
    *     {@code null}.
    */
   default List<String> related(String synsetId, WordNetRelation relation) {
+    if (synsetId == null) {
+      throw new IllegalArgumentException("synsetId must not be null");
+    }
     if (relation == null) {
-      throw new IllegalArgumentException("Relation must not be null");
+      throw new IllegalArgumentException("relation must not be null");
     }
     return synset(synsetId).map(s -> s.related(relation)).orElse(List.of());
   }
@@ -80,6 +85,12 @@ public interface LexicalKnowledgeBase {
    * @throws IllegalArgumentException Thrown if {@code lemma} or {@code pos} is {@code null}.
    */
   default boolean contains(String lemma, WordNetPOS pos) {
+    if (lemma == null) {
+      throw new IllegalArgumentException("lemma must not be null");
+    }
+    if (pos == null) {
+      throw new IllegalArgumentException("pos must not be null");
+    }
     return !lookup(lemma, pos).isEmpty();
   }
 }

@@ -29,6 +29,7 @@ import opennlp.tools.commons.ThreadSafe;
  * @param version The referenced lexicon version. Must not be {@code null} or empty.
  * @param url     The optional {@code url} attribute the source declared as a retrieval hint.
  *                Must not be {@code null} and must not contain an empty value.
+ * @since 3.0.0
  */
 @ThreadSafe
 public record WnLmfDependency(String ref, String version, Optional<String> url) {
@@ -40,10 +41,10 @@ public record WnLmfDependency(String ref, String version, Optional<String> url) 
    */
   public WnLmfDependency {
     if (ref == null || ref.isEmpty()) {
-      throw new IllegalArgumentException("Ref must not be null or empty");
+      throw new IllegalArgumentException("ref must not be null or empty");
     }
     if (version == null || version.isEmpty()) {
-      throw new IllegalArgumentException("Version must not be null or empty");
+      throw new IllegalArgumentException("version must not be null or empty");
     }
     if (url == null) {
       throw new IllegalArgumentException("Url must not be null; use Optional.empty()");

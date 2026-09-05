@@ -16,10 +16,13 @@
  */
 package opennlp.wordnet;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.tools.wordnet.Synset;
 import opennlp.tools.wordnet.WordNetPOS;
@@ -29,11 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Exercises the constructor's referential-integrity validation directly, with deliberately
- * inconsistent maps a reader would never produce: any future reader relies on these checks,
- * so they are pinned independently of both existing readers.
- */
+/** Tests referential-integrity validation independently of the file readers. */
 public class InMemoryWordNetLexiconTest {
 
   private static Synset synset(String id, Map<WordNetRelation, List<String>> relations) {
@@ -78,6 +77,62 @@ public class InMemoryWordNetLexiconTest {
         () -> new InMemoryWordNetLexicon(table, senseOrder));
     assertTrue(e.getMessage().contains("missing"));
     assertTrue(e.getMessage().contains("lemma"));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"other,NOUN", "lemma,VERB"})
+  void testRejectsSenseOrderEntryThatDoesNotDescribeSynset(String lemma, WordNetPOS pos) {
+    final Map<String, Synset> table = Map.of("a", synset("a", Map.of()));
+    final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
+        Map.of(InMemoryWordNetLexicon.LemmaKey.of(lemma, pos), List.of("a"));
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new InMemoryWordNetLexicon(table, senseOrder));
+
+    assertTrue(e.getMessage().contains("a"));
+    assertTrue(e.getMessage().contains(lemma));
+  }
+
+  @Test
+  void testRejectsDuplicateSenseOrderEntry() {
+    final Map<String, Synset> table = Map.of("a", synset("a", Map.of()));
+    final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
+        Map.of(InMemoryWordNetLexicon.LemmaKey.of("lemma", WordNetPOS.NOUN), List.of("a", "a"));
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new InMemoryWordNetLexicon(table, senseOrder));
+
+    assertTrue(e.getMessage().contains("duplicate synset a"));
+  }
+
+  @Test
+  void testRejectsNullSenseOrderKey() {
+    final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder = new HashMap<>();
+    senseOrder.put(null, List.of());
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new InMemoryWordNetLexicon(Map.of(), senseOrder));
+
+    assertEquals("senseOrder key must not be null", e.getMessage());
+  }
+
+  @Test
+  void testRejectsNullSenseOrderList() {
+    final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder = new HashMap<>();
+    senseOrder.put(InMemoryWordNetLexicon.LemmaKey.of("lemma", WordNetPOS.NOUN), null);
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new InMemoryWordNetLexicon(Map.of(), senseOrder));
+
+    assertEquals("senseOrder value must not be null", e.getMessage());
+  }
+
+  @Test
+  void testRejectsSenseOrderKeyWithoutPartOfSpeech() {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> InMemoryWordNetLexicon.LemmaKey.of("lemma", null));
+
+    assertEquals("pos must not be null", e.getMessage());
   }
 
   @Test

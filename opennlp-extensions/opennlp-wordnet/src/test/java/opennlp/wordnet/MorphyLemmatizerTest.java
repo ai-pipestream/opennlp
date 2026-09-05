@@ -88,7 +88,7 @@ public class MorphyLemmatizerTest {
       "dog, DT",
       "dog, XYZ",
       "dogs, ''",
-      // Multi-letter closed-class tags that merely begin with a WordNet letter code are not
+      // Multi-letter closed-class tags beginning with a WordNet letter code are not
       // adjective lookups: AUX was must be unknown, and AUX taller must not detach to tall.
       "was, AUX",
       "taller, AUX",
@@ -132,7 +132,7 @@ public class MorphyLemmatizerTest {
   }
 
   @Test
-  void testWorksIdenticallyOverTheWnLmfLexicon() {
+  void testMatchesWnLmfLexicon() {
     final MorphyLemmatizer lmfMorphy =
         new MorphyLemmatizer(WnLmfReaderTest.fixture(), MorphyExceptionsTest.fixture());
     assertArrayEquals(new String[] {"mouse", "box", "walk", "large", "O"},
@@ -155,11 +155,13 @@ public class MorphyLemmatizerTest {
       "DT, none",
       "'', none",
       // The letter codes a and s match only as one-letter tags: multi-letter tags beginning
-      // with those letters are closed-class or symbol tags, never adjectives.
+      // with those letters are closed-class or symbol tags, not adjectives.
       "AUX, none",
       "ADP, none",
       "SCONJ, none",
       "SYM, none",
+      "ß, none",
+      "ſ, none",
   })
   void testPosFromTagMapping(String tag, WordNetPOS pos) {
     assertEquals(pos, MorphyLemmatizer.posFromTag(tag));
@@ -171,7 +173,7 @@ public class MorphyLemmatizerTest {
   }
 
   @Test
-  void testConstructorFailsLoudWithoutInputs() {
+  void testConstructorRejectsMissingInputs() {
     final MorphyExceptions exceptions = MorphyExceptionsTest.fixture();
     assertThrows(IllegalArgumentException.class,
         () -> new MorphyLemmatizer(null, exceptions));
