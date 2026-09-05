@@ -100,6 +100,16 @@
       <artifactId>opennlp-wordnet</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-subword</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-embeddings</artifactId>
+    </dependency>
+
     <!-- OpenNLP Docs - Ensure that "docs" are build before distribution -->
     <dependency>
       <groupId>org.apache.opennlp</groupId>
