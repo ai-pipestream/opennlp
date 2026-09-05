@@ -24,24 +24,21 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.util.Span;
 
+import static opennlp.tools.artifacts.ArtifactTestSupport.cp;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/**
- * Runs the manual's artifact examples (docbkx {@code artifacts.xml}) verbatim: every
- * value the chapter states is asserted here, so a change breaking this test breaks the
- * manual. The example strings are built from code points; they equal the literals the
- * chapter prints.
- */
+/** Verifies the types and offsets in the manual's {@code artifacts.xml} examples. */
 public class ArtifactsManualExampleTest {
 
   /** The chapter's damaged word ending: U+00E9 read back through a single-byte decoding. */
   private static final String DAMAGED_E_ACUTE = new String(new int[] {0x00C3, 0x00A9}, 0, 2);
 
-  /** The replacement character the chapter's example carries. */
+  /** The replacement character in the chapter's example. */
   private static final String REPLACEMENT = new String(new int[] {0xFFFD}, 0, 1);
 
-  /** The chapter's example text, built from code points so the source stays printable. */
+  /** The chapter's example text, constructed with code points. */
   private static final String TEXT = "caf" + DAMAGED_E_ACUTE + " costs " + REPLACEMENT + "8";
 
   /** The detection example: two findings with the printed types and offsets. */
@@ -56,7 +53,7 @@ public class ArtifactsManualExampleTest {
         artifacts.get(1).type() + " " + artifacts.get(1).span());
   }
 
-  /** The chapter's contrast: an ordinarily accented text yields no finding at all. */
+  /** Accented text produces no artifacts. */
   @Test
   void testAccentedTextYieldsNothing() {
     final String dejaVu = "d" + new String(new int[] {0x00E9}, 0, 1) + "j"
@@ -77,7 +74,7 @@ public class ArtifactsManualExampleTest {
     assertEquals(TextArtifact.TYPE_MOJIBAKE, damage.get(0).type());
   }
 
-  /** The masking example: every covered character is overwritten, nothing else moves. */
+  /** Masks reported characters without changing offsets. */
   @Test
   void testMaskingExampleProducesTheStatedString() {
     final Document document = new ArtifactAnnotator().annotate(Document.of(TEXT));
@@ -102,5 +99,19 @@ public class ArtifactsManualExampleTest {
     assertEquals(DAMAGED_E_ACUTE,
         artifacts.get(0).span().getCoveredText(TEXT).toString());
     assertEquals(TextArtifact.TYPE_MOJIBAKE, artifacts.get(0).value().type());
+  }
+
+  /** A mojibake finding does not absorb the following NUL in the document layer. */
+  @Test
+  void testAdjacentControlExample() {
+    final String text = "value " + cp(0x00C2, 0x0080, 0x0000);
+    final Document document = new ArtifactAnnotator().annotate(Document.of(text));
+    final List<Annotation<TextArtifact>> artifacts = document.get(ArtifactAnnotator.ARTIFACTS);
+    assertEquals(2, artifacts.size());
+    assertEquals(new Span(6, 8), artifacts.get(0).span());
+    assertEquals(TextArtifact.TYPE_MOJIBAKE, artifacts.get(0).value().type());
+    assertEquals(new Span(8, 9), artifacts.get(1).span());
+    assertEquals(TextArtifact.TYPE_CONTROL, artifacts.get(1).value().type());
+    assertEquals(text, document.text().toString());
   }
 }

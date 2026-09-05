@@ -28,21 +28,18 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
 /**
- * Adapts an {@link ArtifactDetector} to the document pipeline: scans the document text
- * and provides {@link #ARTIFACTS}, one annotation per finding carrying its
- * {@link TextArtifact}.
+ * Adds an {@link #ARTIFACTS} layer by scanning document text with an
+ * {@link ArtifactDetector}.
  *
- * <p>The detector works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline. Detection never modifies the text: downstream
- * consumers decide whether to mask, drop, or repair the flagged spans.</p>
+ * <p>No input layer is required. The text is unchanged; callers decide whether to
+ * inspect, mask, or repair the reported spans.</p>
  *
  * @since 3.0.0
  */
 public class ArtifactAnnotator implements DocumentAnnotator {
 
   /**
-   * Damaged or suspicious character sequences; each annotation covers one finding and
-   * carries its {@link TextArtifact}.
+   * Character artifacts, with one {@link TextArtifact} per annotation.
    */
   public static final LayerKey<TextArtifact> ARTIFACTS =
       Layers.key("artifacts", TextArtifact.class);
@@ -68,10 +65,7 @@ public class ArtifactAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * {@inheritDoc}
-   *
-   * <p>No layer is required, and the text is left unchanged: a clean document yields a
-   * present but empty {@link #ARTIFACTS} layer.</p>
+   * {@inheritDoc} Adds the {@link #ARTIFACTS} layer even when no artifacts are detected.
    */
   @Override
   public Document annotate(Document document) {
@@ -85,6 +79,7 @@ public class ArtifactAnnotator implements DocumentAnnotator {
     return document.with(ARTIFACTS, found);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(ARTIFACTS);

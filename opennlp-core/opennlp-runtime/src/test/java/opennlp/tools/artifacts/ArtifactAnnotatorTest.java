@@ -24,21 +24,25 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Pins the document adapter around the built-in detector. */
+/** Checks the document adapter with built-in and custom detectors. */
 public class ArtifactAnnotatorTest {
 
+  /** Provides the namespaced artifacts layer without prerequisites. */
   @Test
   void testProvidesTheArtifactsLayer() {
     final ArtifactAnnotator annotator = new ArtifactAnnotator();
     assertEquals(Set.of(ArtifactAnnotator.ARTIFACTS), annotator.provides());
     assertEquals("opennlp:artifacts", ArtifactAnnotator.ARTIFACTS.id());
+    assertTrue(annotator.requires().isEmpty());
   }
 
+  /** Copies detector spans and values into document annotations. */
   @Test
   void testAnnotatesFindingsWithExactSpans() {
     final String mojibake = new String(new int[] {0x00C3, 0x00A9}, 0, 2);
@@ -52,16 +56,32 @@ public class ArtifactAnnotatorTest {
         artifacts.get(0).span().getCoveredText(document.text()).toString());
   }
 
+  /** Adds an empty layer when no artifacts are detected. */
   @Test
   void testCleanDocumentGetsAnEmptyLayer() {
     final Document document = new ArtifactAnnotator().annotate(Document.of("all clean"));
     assertTrue(document.get(ArtifactAnnotator.ARTIFACTS).isEmpty());
   }
 
+  /** Rejects null detector and document arguments. */
   @Test
   void testRejectsContractViolations() {
     assertThrows(IllegalArgumentException.class, () -> new ArtifactAnnotator(null));
     assertThrows(IllegalArgumentException.class,
         () -> new ArtifactAnnotator().annotate(null));
+  }
+
+  /** Supports application-defined detectors and artifact types. */
+  @Test
+  void testCustomDetector() {
+    final ArtifactDetector detector = text -> List.of(
+        new TextArtifact(new Span(4, 11), "custom-detector-type"));
+    final Document original = Document.of("one example.");
+    final Document annotated = new ArtifactAnnotator(detector).annotate(original);
+
+    assertEquals(original.text(), annotated.text());
+    assertEquals(List.of(new Annotation<>(new Span(4, 11),
+        new TextArtifact(new Span(4, 11), "custom-detector-type"))),
+        annotated.get(ArtifactAnnotator.ARTIFACTS));
   }
 }

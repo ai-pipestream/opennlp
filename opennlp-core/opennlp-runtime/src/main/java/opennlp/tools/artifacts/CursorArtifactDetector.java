@@ -26,29 +26,27 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * The built-in {@link ArtifactDetector}: single cursor passes over the code points with
- * no regular expression, reporting maximal runs per artifact type.
+ * Detects character artifacts with code-point scans and reports source spans.
  *
- * <p>Zero-width characters are only artifacts outside their orthographic uses, so they
- * are reported with context: a single joiner adjacent to an emoji or variation selector
- * (emoji sequences), or a single zero-width character between two letters (joining
- * scripts and scripts that mark line-break opportunities invisibly), is not reported.
- * Runs of two or more zero-width characters and occurrences without such context
- * are.</p>
+ * <p>A single zero-width character between letters is left unreported, including when
+ * combining marks intervene. A single joiner adjacent to a pictograph or emoji
+ * variation selector is also left unreported. Other occurrences and runs of two or
+ * more zero-width characters are reported. These rules do not validate orthography.</p>
  *
- * <p>Mojibake is reported when a maximal run of non-ASCII characters that Windows-1252
- * or ISO-8859-1 can encode maps to a byte sequence that is entirely valid UTF-8 encoding
- * at least one non-ASCII character. Text damaged by reading UTF-8 through either decoding
- * satisfies this by construction, while ordinarily accented words do not: their bytes are
- * not valid UTF-8 sequences.</p>
+ * <p>Mojibake candidates are maximal non-ASCII runs for which Windows-1252 or ISO-8859-1
+ * reverse mappings form valid UTF-8. This is a heuristic, not proof of an encoding
+ * error. A mojibake finding takes precedence over overlapping character classes;
+ * portions of those classes outside the finding remain reported.</p>
  *
- * <p>Unicode tag characters are reported as hidden text unless they form a well-formed
- * subdivision flag after U+1F3F4 WAVING BLACK FLAG.</p>
+ * <p>Unicode tag characters are reported unless they follow U+1F3F4 BLACK FLAG and
+ * match the region or subdivision syntax described in
+ * <a href="https://www.unicode.org/reports/tr51/#flag-emoji-tag-sequences">UTS #51</a>.
+ * The detector checks syntax, not whether CLDR assigns the code.</p>
  *
  * <p>All types are reported by default; the {@link #CursorArtifactDetector(Set)}
  * constructor limits detection to a subset.</p>
  *
- * <p>The detector holds immutable configuration and no per-call state, and is safe for
+ * <p>The detector has immutable configuration and no per-call state, and is safe for
  * concurrent use by multiple threads.</p>
  *
  * @since 3.0.0
@@ -76,6 +74,9 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   private static final int WAVING_BLACK_FLAG = 0x1F3F4;
   private static final int TAG_OFFSET = 0xE0000;
   private static final int CANCEL_TAG = 0xE007F;
+  private static final int ALPHA_REGION_LENGTH = 2;
+  private static final int NUMERIC_REGION_LENGTH = 3;
+  private static final int MAX_SUBDIVISION_SUFFIX = 4;
 
   private final Set<String> types;
   private final boolean classesEnabled;
@@ -83,7 +84,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   /**
    * The characters <a href="https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/WINDOWS/CP1252.TXT">
    * Windows-1252</a> places at 0x80-0x9F, indexed by byte value minus 0x80; -1 marks the
-   * five bytes it leaves undefined. Characters in the C1 range also fall back to their
+   * undefined bytes. Characters in the C1 range also fall back to their
    * identity byte so the detector covers text damaged through ISO-8859-1.
    */
   private static final int[] SINGLE_BYTE_SPECIALS = {
@@ -104,9 +105,9 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    *
    * @param types The types to report, drawn from the {@code TYPE_*} constants on
    *              {@link TextArtifact}. Must not be {@code null} or empty and must not
-   *              contain a type this detector does not recognize.
+   *              contain {@code null} or a type this detector does not recognize.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty,
-   *         or contains an unrecognized type.
+   *         or contains {@code null} or an unrecognized type.
    */
   public CursorArtifactDetector(Set<String> types) {
     if (types == null || types.isEmpty()) {
@@ -114,6 +115,9 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     }
     boolean hasClassType = false;
     for (final String type : types) {
+      if (type == null) {
+        throw new IllegalArgumentException("types must not contain null");
+      }
       if (!ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
@@ -126,10 +130,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * {@inheritDoc}
-   *
-   * <p>The reported spans never overlap, so a caller can apply them to the text in one
-   * pass.</p>
+   * {@inheritDoc} The reported spans do not overlap.
    */
   @Override
   public List<TextArtifact> detect(CharSequence text) {
@@ -267,8 +268,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * Resolves a maximal Unicode tag run. A well-formed subdivision flag is
-   * orthographic; every other use is reported as hidden tag text.
+   * Resolves a maximal Unicode tag run, omitting runs with flag syntax.
    *
    * @param text The text.
    * @param start The first tag character.
@@ -292,14 +292,14 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * Tests one tag run against the
-   * <a href="https://www.unicode.org/reports/tr51/">UTS #51</a> subdivision-flag shape.
+   * Tests a terminated black-flag tag run against region and subdivision syntax from
+   * <a href="https://www.unicode.org/reports/tr51/#flag-emoji-tag-sequences">UTS #51</a>
+   * and <a href="https://www.unicode.org/reports/tr35/#unicode_subdivision_id">UTS #35</a>.
    *
    * @param text The source text.
    * @param start The first tag character.
    * @param end The first index after the tag run.
-   * @return {@code true} for a terminated black-flag tag sequence with a two-letter
-   *         region and a non-empty subdivision suffix.
+   * @return {@code true} for matching syntax. Assigned CLDR codes are not checked.
    */
   private boolean isEmojiTagFlag(CharSequence text, int start, int end) {
     if (before(text, start) != WAVING_BLACK_FLAG) {
@@ -307,27 +307,42 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     }
     int i = start;
     int count = 0;
+    boolean alphaRegion = true;
+    boolean numericRegion = true;
     while (i < end) {
       final int codePoint = Character.codePointAt(text, i);
       i += Character.charCount(codePoint);
       if (codePoint == CANCEL_TAG) {
-        return i == end && count >= 3;
+        return i == end
+            && ((alphaRegion && count > ALPHA_REGION_LENGTH
+                && count <= ALPHA_REGION_LENGTH + MAX_SUBDIVISION_SUFFIX)
+            || (numericRegion && count >= NUMERIC_REGION_LENGTH
+                && count <= NUMERIC_REGION_LENGTH + MAX_SUBDIVISION_SUFFIX));
       }
       final int ascii = codePoint - TAG_OFFSET;
       final boolean letter = ascii >= 'a' && ascii <= 'z';
-      if ((!letter && (ascii < '0' || ascii > '9')) || (count < 2 && !letter)) {
+      final boolean digit = ascii >= '0' && ascii <= '9';
+      if (!letter && !digit) {
         return false;
       }
+      if (count < ALPHA_REGION_LENGTH) {
+        alphaRegion &= letter;
+      }
+      if (count < NUMERIC_REGION_LENGTH) {
+        numericRegion &= digit;
+      }
       count++;
+      if (count > NUMERIC_REGION_LENGTH + MAX_SUBDIVISION_SUFFIX) {
+        return false;
+      }
     }
     return false;
   }
 
   /**
-   * Resolves the maximal zero-width run starting at {@code start}: a run of two or more
-   * is always an artifact; a single occurrence is orthographic when it is a joiner in an
-   * emoji sequence or any zero-width character between two letters, and an artifact
-   * otherwise.
+   * Resolves a maximal zero-width run. Repeated zero-width characters are reported.
+   * A single occurrence is omitted in a letter context, allowing combining marks,
+   * or when a joiner is adjacent to a pictograph or emoji variation selector.
    *
    * @param text The text.
    * @param start The index of the first zero-width character.
@@ -357,8 +372,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
     if (only == ZERO_WIDTH_JOINER && (isEmojiContext(previous) || isEmojiContext(next))) {
       return end;
     }
-    if (previous >= 0 && next >= 0
-        && Character.isLetter(previous) && Character.isLetter(next)) {
+    if (hasLetterBefore(text, start) && hasLetterAfter(text, end)) {
       return end;
     }
     artifacts.add(new TextArtifact(new Span(start, end), TextArtifact.TYPE_ZERO_WIDTH));
@@ -366,7 +380,57 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * Whether a neighbor code point puts a joiner in an emoji sequence.
+   * Looks for a preceding letter across combining marks.
+   *
+   * @param text The source text.
+   * @param index The exclusive end of the preceding text.
+   * @return {@code true} when the first non-mark code point is a letter.
+   */
+  private boolean hasLetterBefore(CharSequence text, int index) {
+    int i = index;
+    while (i > 0) {
+      final int codePoint = Character.codePointBefore(text, i);
+      if (!isMark(codePoint)) {
+        return Character.isLetter(codePoint);
+      }
+      i -= Character.charCount(codePoint);
+    }
+    return false;
+  }
+
+  /**
+   * Looks for a following letter across combining marks.
+   *
+   * @param text The source text.
+   * @param index The start of the following text.
+   * @return {@code true} when the first non-mark code point is a letter.
+   */
+  private boolean hasLetterAfter(CharSequence text, int index) {
+    int i = index;
+    while (i < text.length()) {
+      final int codePoint = Character.codePointAt(text, i);
+      if (!isMark(codePoint)) {
+        return Character.isLetter(codePoint);
+      }
+      i += Character.charCount(codePoint);
+    }
+    return false;
+  }
+
+  /**
+   * Tests the Unicode general categories for combining marks.
+   *
+   * @param codePoint The code point.
+   * @return {@code true} for a nonspacing, spacing combining, or enclosing mark.
+   */
+  private boolean isMark(int codePoint) {
+    final int type = Character.getType(codePoint);
+    return type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
+        || type == Character.ENCLOSING_MARK;
+  }
+
+  /**
+   * Tests a neighboring code point for the emoji-context exception.
    *
    * @param neighbor The neighboring code point, or a negative value when absent.
    * @return {@code true} if the neighbor is extended pictographic or the emoji
@@ -390,7 +454,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
 
   /**
    * One pass finding mojibake: maximal runs of non-ASCII characters the single-byte
-   * encoding can represent, whose bytes decode as valid UTF-8 with at least one
+   * encoding can represent, with bytes that decode as valid UTF-8 with at least one
    * non-ASCII result.
    *
    * @param text The text to scan.
@@ -448,7 +512,7 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    * @param text The source text.
    * @param start The candidate start.
    * @param end The candidate end.
-   * @return {@code true} if the whole range has a well-formed multi-byte UTF-8 image.
+   * @return {@code true} if the complete range maps to valid multibyte UTF-8.
    */
   private boolean isUtf8(CharSequence text, int start, int end) {
     boolean multiByte = false;
@@ -499,8 +563,8 @@ public final class CursorArtifactDetector implements ArtifactDetector {
   }
 
   /**
-   * Merges ordered class and mojibake findings. Mojibake is the more specific
-   * explanation when its Latin-1 image contains C1 controls.
+   * Merges ordered class and mojibake findings, prioritizing mojibake on overlap.
+   * Class spans extending beyond the mojibake span are retained as separate findings.
    *
    * @param classes The ordered per-code-point class findings.
    * @param mojibake The ordered mojibake findings.
@@ -508,28 +572,52 @@ public final class CursorArtifactDetector implements ArtifactDetector {
    */
   private List<TextArtifact> merge(List<TextArtifact> classes,
       List<TextArtifact> mojibake) {
+    if (mojibake.isEmpty()) {
+      return classes;
+    }
+    if (classes.isEmpty()) {
+      return mojibake;
+    }
     final List<TextArtifact> merged = new ArrayList<>(classes.size() + mojibake.size());
     int c = 0;
     int m = 0;
+    TextArtifact classified = classes.get(c);
     while (c < classes.size() && m < mojibake.size()) {
-      final TextArtifact classified = classes.get(c);
       final TextArtifact damaged = mojibake.get(m);
       if (classified.span().getEnd() <= damaged.span().getStart()) {
         merged.add(classified);
         c++;
+        if (c < classes.size()) {
+          classified = classes.get(c);
+        }
       } else if (damaged.span().getEnd() <= classified.span().getStart()) {
         merged.add(damaged);
         m++;
       } else {
+        if (classified.span().getStart() < damaged.span().getStart()) {
+          merged.add(new TextArtifact(new Span(classified.span().getStart(),
+              damaged.span().getStart()), classified.type()));
+        }
         merged.add(damaged);
         m++;
         final int damageEnd = damaged.span().getEnd();
-        while (c < classes.size() && classes.get(c).span().getStart() < damageEnd) {
+        while (c < classes.size() && classified.span().getStart() < damageEnd) {
+          if (classified.span().getEnd() > damageEnd) {
+            classified = new TextArtifact(new Span(damageEnd, classified.span().getEnd()),
+                classified.type());
+            break;
+          }
           c++;
+          if (c < classes.size()) {
+            classified = classes.get(c);
+          }
         }
       }
     }
-    merged.addAll(classes.subList(c, classes.size()));
+    if (c < classes.size()) {
+      merged.add(classified);
+      merged.addAll(classes.subList(c + 1, classes.size()));
+    }
     merged.addAll(mojibake.subList(m, mojibake.size()));
     return merged;
   }

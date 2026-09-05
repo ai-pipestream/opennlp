@@ -83,19 +83,34 @@ public class CursorArtifactDetectorBenchmark {
     }
   }
 
-  /** Measures the default detector over clean multilingual prose. */
+  /**
+   * Measures the default detector over clean multilingual text.
+   *
+   * @param state The trial inputs and detectors.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void clean(BenchmarkState state, Blackhole blackhole) {
     blackhole.consume(state.all.detect(state.clean));
   }
 
-  /** Measures all classes over dense mixed damage. */
+  /**
+   * Measures all classes over dense mixed damage.
+   *
+   * @param state The trial inputs and detectors.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void allTypes(BenchmarkState state, Blackhole blackhole) {
     blackhole.consume(state.all.detect(state.damaged));
   }
 
-  /** Measures the selective detector over the same dense document. */
+  /**
+   * Measures the selective detector over the same dense document.
+   *
+   * @param state The trial inputs and detectors.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void selectedTypes(BenchmarkState state, Blackhole blackhole) {
     blackhole.consume(state.textDamage.detect(state.damaged));

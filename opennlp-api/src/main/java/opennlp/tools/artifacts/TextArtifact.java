@@ -37,7 +37,7 @@ import opennlp.tools.util.StringUtil;
  */
 public record TextArtifact(Span span, String type) {
 
-  /** A run of U+FFFD replacement characters, left behind by a failed decode. */
+  /** A run of U+FFFD replacement characters. */
   public static final String TYPE_REPLACEMENT = "replacement";
 
   /** A run of C0 or C1 control characters that are not whitespace. */
@@ -49,7 +49,7 @@ public record TextArtifact(Span span, String type) {
   /** A run of unpaired UTF-16 surrogates, impossible in well-formed text. */
   public static final String TYPE_UNPAIRED_SURROGATE = "unpaired-surrogate";
 
-  /** A run of private-use code points, meaningless without an out-of-band agreement. */
+  /** A run of Unicode private-use code points. */
   public static final String TYPE_PRIVATE_USE = "private-use";
 
   /**
@@ -59,21 +59,19 @@ public record TextArtifact(Span span, String type) {
   public static final String TYPE_BIDI_CONTROL = "bidi-control";
 
   /**
-   * Zero-width characters outside the contexts where they are orthographic, such as
-   * runs of them or occurrences with no letter or emoji context.
+   * Zero-width characters reported by a detector's contextual rules.
    */
   public static final String TYPE_ZERO_WIDTH = "zero-width";
 
   /**
    * A run from the
    * <a href="https://www.unicode.org/charts/PDF/UE0000.pdf">Unicode Tags block</a>
-   * outside a well-formed emoji tag flag.
+   * reported by a detector's contextual rules.
    */
   public static final String TYPE_UNICODE_TAG = "unicode-tag";
 
   /**
-   * A sequence that reads as UTF-8 bytes shown through a single-byte decoding, the
-   * classic double-decode damage.
+   * A possible encoding error from reading UTF-8 bytes through a single-byte decoding.
    */
   public static final String TYPE_MOJIBAKE = "mojibake";
 
