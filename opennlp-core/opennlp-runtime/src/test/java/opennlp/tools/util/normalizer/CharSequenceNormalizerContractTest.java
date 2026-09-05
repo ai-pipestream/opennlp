@@ -55,6 +55,7 @@ class CharSequenceNormalizerContractTest {
         Arguments.of("url", UrlCharSequenceNormalizer.getInstance()),
         Arguments.of("bullet", BulletCharSequenceNormalizer.getInstance()),
         Arguments.of("dash", DashCharSequenceNormalizer.getInstance()),
+        Arguments.of("dehyphenation", DehyphenationCharSequenceNormalizer.getInstance()),
         Arguments.of("digit", DigitCharSequenceNormalizer.getInstance()),
         Arguments.of("ellipsis", EllipsisCharSequenceNormalizer.getInstance()),
         Arguments.of("germanUmlaut", GermanUmlautCharSequenceNormalizer.getInstance()),
