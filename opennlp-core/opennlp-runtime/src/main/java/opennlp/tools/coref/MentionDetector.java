@@ -35,15 +35,11 @@ import opennlp.tools.util.StringUtil;
 /**
  * Collects the candidate mentions of a document and computes their attributes.
  *
- * <p>Entity mentions come from the entity layer, nominal mentions from the noun phrases
- * of the parse layer when one is present or else from the noun phrase chunks of the
- * chunk layer, and pronoun mentions from the tokens tagged as pronouns whose form is a
- * personal pronoun. Nested and duplicate candidates are reconciled the way
- * OntoNotes annotates them: of the parse phrases sharing a head token only the largest
- * remains, a phrase headed by an entity widens that entity's mention to the full noun
- * phrase, a phrase coinciding with an entity or a lone pronoun adds nothing, and a
- * phrase cut by an entity boundary is dropped. A pleonastic {@code it}, one that
- * anticipates a clause rather than referring, is no mention.</p>
+ * <p>Entities come from the entity layer, noun phrases come from parser phrases and NP
+ * chunks, and pronouns come from tagged tokens. Of parser phrases sharing a head, only
+ * the largest remains. An exact parser and chunk duplicate keeps the parser head. A
+ * phrase headed by an entity extends that entity mention; a phrase cut by an entity
+ * boundary is omitted. Pleonastic {@code it} is omitted.</p>
  */
 final class MentionDetector {
 
@@ -94,6 +90,16 @@ final class MentionDetector {
     /** The head token the parse names, or {@code -1} to find it by rule. */
     int head;
 
+    /**
+     * Creates a mention candidate.
+     *
+     * @param span The source span.
+     * @param kind The mention kind.
+     * @param entity The source entity index.
+     * @param type The entity type, or {@code null}.
+     * @param firstToken The first intersecting token index.
+     * @param lastToken The last intersecting token index.
+     */
     Candidate(Span span, String kind, int entity, String type, int firstToken,
         int lastToken) {
       this.span = span;
@@ -108,8 +114,14 @@ final class MentionDetector {
 
   /**
    * One noun phrase with its token range and head. A merged phrase joins two chunks
-   * across {@code of} or {@code and}; it is a candidate beside its parts and never
-   * widens an entity.
+   * across {@code of} or {@code and}; it is a candidate along with its parts and does
+   * not expand an entity.
+   *
+   * @param span The phrase span.
+   * @param first The first token index.
+   * @param last The last token index.
+   * @param head The head token index.
+   * @param merged Whether this phrase joins two chunks.
    */
   private record NounPhrase(Span span, int first, int last, int head, boolean merged) {
   }
@@ -132,6 +144,16 @@ final class MentionDetector {
   private final int[] sentenceOfToken;
   private final int[] sentenceEndToken;
 
+  /**
+   * Initializes mention detection over aligned document layers.
+   *
+   * @param personTypes The lowercased person entity types.
+   * @param text The document text.
+   * @param sentences The sentence layer.
+   * @param tokens The token layer.
+   * @param tags The token-aligned POS tags.
+   * @param sentenceOfToken The sentence index of each token.
+   */
   private MentionDetector(Set<String> personTypes, CharSequence text,
       List<Annotation<String>> sentences, List<Annotation<String>> tokens,
       List<Annotation<String>> tags, int[] sentenceOfToken) {
@@ -166,8 +188,7 @@ final class MentionDetector {
    * @param sentenceOfToken The sentence index of every token.
    * @param entities The entity layer.
    * @param chunks The chunk layer, or {@code null} when the document carries none.
-   * @param phrases The parse layer, or {@code null} when the document carries none;
-   *                when present it supplies the noun phrases and the chunks are unused.
+   * @param phrases The parse layer, or {@code null} when the document carries none.
    * @return The mentions in text order, wider spans first at a shared start. Never
    *         {@code null}.
    */
@@ -180,6 +201,14 @@ final class MentionDetector {
         .detect(entities, chunks, phrases);
   }
 
+  /**
+   * Collects and orders mentions from the available input layers.
+   *
+   * @param entities The entity layer.
+   * @param chunks The chunk layer, or {@code null}.
+   * @param phrases The parse phrase layer, or {@code null}.
+   * @return The mentions in text order.
+   */
   private List<Mention> detect(List<Annotation<String>> entities,
       List<Annotation<String>> chunks, List<Annotation<Phrase>> phrases) {
     final List<Candidate> candidates = new ArrayList<>();
@@ -194,7 +223,8 @@ final class MentionDetector {
       for (final NounPhrase phrase : maximalNounPhrases(phrases)) {
         addNounPhrase(phrase, candidates, entityCount);
       }
-    } else if (chunks != null) {
+    }
+    if (chunks != null) {
       for (final NounPhrase phrase : chunkNounPhrases(chunks)) {
         addNounPhrase(phrase, candidates, entityCount);
       }
@@ -214,6 +244,9 @@ final class MentionDetector {
    * Reads the noun phrase chunks, joining a chunk that opens with a possessive marker to
    * the noun phrase chunk right before it, since base chunking splits {@code Norton 's
    * capital} into the possessor and the possessed while the mention is the whole phrase.
+   *
+   * @param chunks The chunk layer.
+   * @return The noun phrases represented by the chunks.
    */
   private List<NounPhrase> chunkNounPhrases(List<Annotation<String>> chunks) {
     final List<NounPhrase> phrases = new ArrayList<>();
@@ -246,6 +279,9 @@ final class MentionDetector {
    * both: OntoNotes annotates {@code the law of negligence} and {@code Kim and Lee} as
    * mentions where base chunking stops at the preposition or conjunction. The phrase
    * takes the first chunk's head; its parts stay candidates of their own.
+   *
+   * @param phrases The noun phrases in text order.
+   * @return The original and merged noun phrases.
    */
   private List<NounPhrase> withMergedPhrases(List<NounPhrase> phrases) {
     final List<NounPhrase> all = new ArrayList<>(phrases.size() * 2);
@@ -272,15 +308,24 @@ final class MentionDetector {
     return all;
   }
 
-  /** Builds a noun phrase over a token range, finding its head by rule. */
+  /**
+   * Builds a noun phrase over a token range.
+   *
+   * @param first The first token index.
+   * @param last The last token index.
+   * @return The noun phrase with its inferred head.
+   */
   private NounPhrase nounPhrase(int first, int last) {
     return new NounPhrase(new Span(tokens.get(first).span().getStart(),
         tokens.get(last).span().getEnd()), first, last, headToken(first, last), false);
   }
 
   /**
-   * Reads the noun phrases of the parse layer, keeping of the phrases that share a head
-   * token only the largest, the one OntoNotes annotates.
+   * Reads the noun phrases of the parse layer. When phrases share a head token, only the
+   * largest is retained, matching OntoNotes annotation.
+   *
+   * @param phrases The parse phrase layer.
+   * @return The widest noun phrase for each head token.
    */
   private List<NounPhrase> maximalNounPhrases(List<Annotation<Phrase>> phrases) {
     final List<NounPhrase> nounPhrases = new ArrayList<>();
@@ -319,14 +364,23 @@ final class MentionDetector {
   }
 
   /**
-   * Reconciles one noun phrase with the entity candidates it touches and adds it as a
-   * nominal mention when it stands on its own.
+   * Reconciles one noun phrase with intersecting entity candidates and adds a nominal
+   * mention when no entity supplies it.
+   *
+   * @param phrase The noun phrase.
+   * @param candidates The mention candidates.
+   * @param entityCount The number of entity candidates at the start of the list.
    */
   private void addNounPhrase(NounPhrase phrase, List<Candidate> candidates,
       int entityCount) {
     final Span span = phrase.span();
     final int first = phrase.first();
     final int last = phrase.last();
+    for (int c = entityCount; c < candidates.size(); c++) {
+      if (candidates.get(c).span.equals(span)) {
+        return;
+      }
+    }
     Candidate headedBy = null;
     int touching = 0;
     for (int e = 0; e < entityCount; e++) {
@@ -376,6 +430,11 @@ final class MentionDetector {
    * Adds the possessor inside a noun phrase as a mention of its own, {@code Norton 's}
    * in {@code Norton 's capital}: the tokens up to a possessive marker, widening an
    * entity that ends right before the marker to include it, as OntoNotes annotates.
+   *
+   * @param first The first token index of the noun phrase.
+   * @param last The last token index of the noun phrase.
+   * @param candidates The mention candidates.
+   * @param entityCount The number of entity candidates at the start of the list.
    */
   private void addPossessors(int first, int last, List<Candidate> candidates,
       int entityCount) {
@@ -407,10 +466,16 @@ final class MentionDetector {
     }
   }
 
-  /** {@return whether a token range holds a coordinating {@code and}} */
+  /**
+   * Checks whether a token range contains a coordinating {@code and}.
+   *
+   * @param first The first token index.
+   * @param last The last token index.
+   * @return Whether the range is coordinated.
+   */
   private boolean coordinated(int first, int last) {
     for (int t = first; t <= last; t++) {
-      if ("and".equals(lower[t])) {
+      if (AND.equals(lower[t])) {
         return true;
       }
     }
@@ -419,8 +484,11 @@ final class MentionDetector {
 
   /**
    * Adds every personal pronoun token no entity covers as a pronoun mention, and every
-   * demonstrative determiner that stands alone, {@code That was costly}, rather than
+   * demonstrative determiner that stands alone, {@code That was costly}, instead of
    * opening a noun phrase.
+   *
+   * @param candidates The mention candidates.
+   * @param entityCount The number of entity candidates at the start of the list.
    */
   private void addPronouns(List<Candidate> candidates, int entityCount) {
     for (int t = 0; t < tokens.size(); t++) {
@@ -441,9 +509,10 @@ final class MentionDetector {
   }
 
   /**
-   * {@return whether a token is a demonstrative determiner with no noun phrase to open:
-   * the next token, if any in the sentence, is neither a noun, an adjective, a number,
-   * nor another determiner}
+   * Checks whether a demonstrative determiner has no following noun phrase.
+   *
+   * @param t The token index.
+   * @return Whether the token is a standalone demonstrative.
    */
   private boolean standaloneDemonstrative(int t) {
     if (!DETERMINER_TAG.equals(tag[t]) || CorefLexicon.demonstrative(lower[t]) == null) {
@@ -457,6 +526,14 @@ final class MentionDetector {
         || DETERMINER_TAG.equals(next) || "PRP$".equals(next));
   }
 
+  /**
+   * Checks whether an entity candidate covers a span.
+   *
+   * @param span The span.
+   * @param candidates The candidates whose first entries are entities.
+   * @param entityCount The number of entity candidates.
+   * @return Whether an entity covers the span.
+   */
   private boolean coveredByEntity(Span span, List<Candidate> candidates, int entityCount) {
     for (int e = 0; e < entityCount; e++) {
       if (candidates.get(e).span.contains(span)) {
@@ -470,6 +547,9 @@ final class MentionDetector {
    * Recognizes a pleonastic {@code it}: one followed, possibly after an adverb, by a
    * verb such as {@code is} or {@code seems} and within a few tokens by a complement
    * opener such as {@code that} or {@code to}, all inside the sentence.
+   *
+   * @param t The token index.
+   * @return Whether the token is pleonastic.
    */
   private boolean pleonastic(int t) {
     if (!"it".equals(lower[t])) {
@@ -491,7 +571,12 @@ final class MentionDetector {
     return false;
   }
 
-  /** Computes a candidate's attributes. */
+  /**
+   * Computes a candidate's attributes.
+   *
+   * @param candidate The candidate.
+   * @return The mention.
+   */
   private Mention mention(Candidate candidate) {
     final int first = candidate.firstToken;
     final int last = candidate.lastToken;
@@ -511,9 +596,8 @@ final class MentionDetector {
     final boolean pronoun = CorefMention.KIND_PRONOUN.equals(candidate.kind);
     final boolean entity = candidate.entity != CorefMention.NO_ENTITY;
     final boolean proper = entity || PROPER_TAGS.contains(tag[headToken]);
-    // An entity of the unknown type gives no attribute evidence: it is neither a person
-    // nor a thing, and its name is not read for a gender, so every pronoun class may
-    // still reach it.
+    // An unknown entity type supplies no type evidence, but its proper name can still
+    // supply gender and animacy evidence.
     final String type = NameFinderAnnotator.UNTYPED.equals(candidate.type)
         ? null : candidate.type;
     final boolean person = type != null && personTypes.contains(type);
@@ -545,11 +629,9 @@ final class MentionDetector {
       } else if (type != null) {
         gender = Gender.NEUTRAL;
         animacy = Animacy.INANIMATE;
-      } else if (proper && !entity) {
+      } else if (proper) {
         gender = nameGender(first, last);
-        if (gender != Gender.UNKNOWN) {
-          animacy = Animacy.ANIMATE;
-        }
+        animacy = Animacy.ANIMATE;
       } else if (!entity) {
         gender = CorefLexicon.nounGender(head);
         if (CorefLexicon.animateNoun(head)) {
@@ -567,6 +649,9 @@ final class MentionDetector {
    * Builds the mention of an entity whose span aligns with no token, from the
    * whitespace-delimited words of its text; it has no tag evidence, so its attributes
    * beyond the entity type stay unknown.
+   *
+   * @param candidate The unaligned entity candidate.
+   * @return The mention.
    */
   private Mention unaligned(Candidate candidate) {
     final Span span = candidate.span;
@@ -605,6 +690,10 @@ final class MentionDetector {
    * Finds the head token of a token range: the last noun before the first {@code of}
    * or comma past the first token, leaving out a trailing possessive marker, and
    * falling back to the last token of that prefix.
+   *
+   * @param first The first token index.
+   * @param last The last token index.
+   * @return The head token index.
    */
   private int headToken(int first, int last) {
     int stop = last;
@@ -625,7 +714,13 @@ final class MentionDetector {
     return stop;
   }
 
-  /** Reads the gender a person name implies from its title or first name. */
+  /**
+   * Reads the gender a person name implies from its title or first name.
+   *
+   * @param first The first token index.
+   * @param last The last token index.
+   * @return The inferred gender.
+   */
   private Gender nameGender(int first, int last) {
     int t = first;
     if (CorefLexicon.title(lower[t])) {
@@ -641,6 +736,10 @@ final class MentionDetector {
   /**
    * Checks whether a nominal mention is indefinite or generic: opened by an indefinite
    * word, or a bare common noun, plural or singular, without a definite opener.
+   *
+   * @param first The first token index.
+   * @param headToken The head token index.
+   * @return Whether the mention is indefinite or generic.
    */
   private boolean indefinite(int first, int headToken) {
     if (CorefLexicon.indefiniteWord(lower[first])) {
@@ -652,6 +751,14 @@ final class MentionDetector {
         && !"the".equals(lower[first]);
   }
 
+  /**
+   * Joins a word range with spaces.
+   *
+   * @param words The words.
+   * @param from The first included index.
+   * @param to The first excluded index.
+   * @return The joined text.
+   */
   private String join(List<String> words, int from, int to) {
     final StringBuilder joined = new StringBuilder();
     for (int i = from; i < to && i < words.size(); i++) {
@@ -663,7 +770,12 @@ final class MentionDetector {
     return joined.toString();
   }
 
-  /** {@return the index of the first token a span intersects, or {@code -1}} */
+  /**
+   * Finds the first token intersecting a span.
+   *
+   * @param span The span.
+   * @return The first intersecting token index, or {@code -1}.
+   */
   private int firstToken(Span span) {
     int low = 0;
     int high = tokens.size();
@@ -679,7 +791,12 @@ final class MentionDetector {
         ? low : -1;
   }
 
-  /** {@return the index of the last token a span intersects, or {@code -1}} */
+  /**
+   * Finds the last token intersecting a span.
+   *
+   * @param span The span.
+   * @return The last intersecting token index, or {@code -1}.
+   */
   private int lastToken(Span span) {
     int low = 0;
     int high = tokens.size();
@@ -694,7 +811,12 @@ final class MentionDetector {
     return low > 0 && tokens.get(low - 1).span().getEnd() > span.getStart() ? low - 1 : -1;
   }
 
-  /** {@return the index of the sentence a span starts in} */
+  /**
+   * Finds the sentence containing a span's start.
+   *
+   * @param span The span.
+   * @return The index of the sentence containing its start.
+   */
   private int sentenceOf(Span span) {
     for (int s = 0; s < sentences.size(); s++) {
       if (span.getStart() < sentences.get(s).span().getEnd()) {

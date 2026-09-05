@@ -11,11 +11,6 @@
   <packaging>jar</packaging>
   <name>Apache OpenNLP :: Core :: Formats</name>
 
-  <properties>
-    <!-- Surefire heap; the coreference evaluation harness needs more with an encoder. -->
-    <opennlp.test.heap>2048m</opennlp.test.heap>
-  </properties>
-
   <dependencies>
     <!-- Internal dependencies -->
     <dependency>
@@ -103,7 +98,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <argLine>-Xmx${opennlp.test.heap} -DOPENNLP_DOWNLOAD_HOME=${opennlp.download.home} -javaagent:${settings.localRepository}/com/ginsberg/junit5-system-exit/${junit5-system-exit.version}/junit5-system-exit-${junit5-system-exit.version}.jar</argLine>
+          <argLine>-Xmx2048m -DOPENNLP_DOWNLOAD_HOME=${opennlp.download.home} -javaagent:${settings.localRepository}/com/ginsberg/junit5-system-exit/${junit5-system-exit.version}/junit5-system-exit-${junit5-system-exit.version}.jar</argLine>
           <forkCount>${opennlp.forkCount}</forkCount>
           <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
           <excludes>

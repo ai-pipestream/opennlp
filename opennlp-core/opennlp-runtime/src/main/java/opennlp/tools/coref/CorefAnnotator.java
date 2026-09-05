@@ -30,57 +30,28 @@ import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
-import opennlp.tools.namefind.NameFinderAnnotator;
 import opennlp.tools.parser.ParserAnnotator;
 import opennlp.tools.parser.ParserAnnotator.Phrase;
+import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Deterministic coreference resolution over the document graph: entity mentions, noun
- * phrase mentions, and third-person pronouns are linked by precision-ordered sieves and
- * provided as {@link #CHAINS}, one annotation per mention carrying its
- * {@link CorefMention}.
+ * Resolves entity, noun phrase, and pronoun mentions into the {@link #CHAINS} document
+ * layer. Each annotation contains the original-text span and a {@link CorefMention}.
  *
- * <p>The resolver follows the entity-centric, precision-ranked design of
+ * <p>Without a model, the annotator applies the entity-centric sieves of
  * <a href="https://aclanthology.org/J13-4004/">Lee et al. (Computational Linguistics
  * 2013), "Deterministic Coreference Resolution Based on Entity-Centric, Precision-Ranked
- * Rules"</a>. Mentions are the entity annotations, the noun phrases of a
- * {@link ParserAnnotator#PHRASES} layer or, without one, the noun phrase chunks of a
- * {@link ChunkerAnnotator#CHUNKS} layer when the document carries either, and the
- * tokens tagged as third-person pronouns; of parse phrases sharing a head only the
- * largest counts, a phrase headed by an entity widens that entity's mention to the full
- * noun phrase, and a pleonastic {@code it} is no mention. Each
- * mention carries the number, gender, animacy, and person the text supports: pronoun
- * forms, plural tags, name titles, a bundled first-name list, and a list of gendered and
- * animate nouns. First and second person pronouns refer to the speaker and the
- * addressee rather than to an antecedent in the text: they chain per speaker, read from
- * an optional {@link #SPEAKERS} layer or, without one, from quotation marks, and a quoted
- * first person joins the person a verb of speech attributes the quotation to.</p>
+ * Rules"</a>. A {@link CorefModel} replaces the head and pronoun sieves with antecedent
+ * ranking. Optional {@link WordVectors} and {@link TokenVectors} providers add similarity
+ * features to that ranker.</p>
  *
- * <p>Nine sieves run in order of decreasing precision, each linking an anaphor to the
- * first candidate antecedent, in salience order, whose whole cluster passes: exact
- * string match; relaxed string match on the text up to the head; the precise constructs
- * acronym and person-name containment, so a surname finds its full name while a place
- * name never absorbs a compound such as {@code Kansas City}; strict head match with
- * cluster head match, word inclusion, and compatible modifiers, then its two relaxations
- * dropping one condition each; proper head word match; relaxed head match between
- * entities of one type; and pronoun resolution within three sentences under number,
- * gender, animacy, person, and entity type agreement, gendered pronouns to the person
- * types, neutral pronouns to the non-person types, plural pronouns to either.
- * Indefinite noun phrases are antecedents only, no sieve links a mention to one that
- * contains it, and clusters whose known entity types differ never merge; an entity of
- * the unknown type {@link NameFinderAnnotator#UNTYPED} joins a cluster of any type and
- * adopts it without ever bridging two types.</p>
+ * <p>First and second person pronouns use the optional {@link #SPEAKERS} layer or quoted
+ * speech attribution. All detected mentions are returned, including singleton chains,
+ * and chain identifiers follow first-mention order.</p>
  *
- * <p>Every mention is reported, including those that found no partner, as singleton
- * chains; consumers interested only in links filter by chain size. Chains are numbered
- * in order of first mention. The resolution is rule-based and needs no model or
- * training data; given a {@link CorefModel}, the sieves after the speaker sieve are
- * replaced by a ranking of each anaphor's candidates with the sieve tests among the
- * features, which trades the rules' fixed precision order for what the training corpus
- * shows.</p>
- *
- * <p>The annotator holds no per-call state and is safe to share between threads.</p>
+ * <p>Without vector providers, the annotator stores no per-call state and is safe to share
+ * between threads. With word or token vectors, thread safety follows those providers.</p>
  *
  * @since 3.0.0
  */
@@ -132,9 +103,8 @@ public class CorefAnnotator implements DocumentAnnotator {
 
   /**
    * The link probability threshold of the model constructors. Pair classifiers see far
-   * more unlinked than linked pairs, so their link probabilities run low; this floor
-   * was chosen on the OntoGUM development split for models {@link CorefTrainer}
-   * produces.
+   * more unlinked than linked pairs, so their link probabilities run low. This value was
+   * selected on the OntoGUM development split for models {@link CorefTrainer} produces.
    */
   public static final double DEFAULT_THRESHOLD = 0.1;
 
@@ -205,7 +175,8 @@ public class CorefAnnotator implements DocumentAnnotator {
    *                  {@code [0, 1]}.
    * @param vectors The word vectors, or {@code null} for none.
    * @throws IllegalArgumentException Thrown if a set is {@code null}, empty, or
-   *         contains a blank entry, or {@code threshold} lies outside {@code [0, 1]}.
+   *         contains a blank entry, {@code threshold} lies outside {@code [0, 1]}, or
+   *         the vector dimension is invalid.
    */
   public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
       double threshold, WordVectors vectors) {
@@ -225,7 +196,8 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @param vectors The word vectors, or {@code null} for none.
    * @param encoder The token encoder, or {@code null} for none.
    * @throws IllegalArgumentException Thrown if a set is {@code null}, empty, or
-   *         contains a blank entry, or {@code threshold} lies outside {@code [0, 1]}.
+   *         contains a blank entry, {@code threshold} lies outside {@code [0, 1]}, a
+   *         vector dimension is invalid, or the encoder does not match the model.
    */
   public CorefAnnotator(Set<String> personTypes, Set<String> neutralTypes, CorefModel model,
       double threshold, WordVectors vectors, TokenVectors encoder) {
@@ -238,8 +210,48 @@ public class CorefAnnotator implements DocumentAnnotator {
     this.threshold = threshold;
     this.vectors = vectors;
     this.encoder = encoder;
+    validateVectorDimensions();
   }
 
+  /**
+   * Validates provider dimensions and the model's contextual-vector requirement.
+   *
+   * @throws IllegalArgumentException Thrown if a provider dimension is invalid or the
+   *         encoder does not match the model.
+   */
+  private void validateVectorDimensions() {
+    if (vectors != null && vectors.dimension() <= 0) {
+      throw new IllegalArgumentException(
+          "vectors dimension must be positive: " + vectors.dimension());
+    }
+    if (encoder != null && encoder.dimension() <= 0) {
+      throw new IllegalArgumentException(
+          "encoder dimension must be positive: " + encoder.dimension());
+    }
+    if (model == null) {
+      return;
+    }
+    final int expected = model.getTokenVectorDimension();
+    if (expected == 0 && encoder != null) {
+      throw new IllegalArgumentException("model was trained without a token encoder");
+    }
+    if (expected > 0 && encoder == null) {
+      throw new IllegalArgumentException(
+          "model requires a token encoder of dimension " + expected);
+    }
+    if (encoder != null && encoder.dimension() != expected) {
+      throw new IllegalArgumentException("encoder dimension " + encoder.dimension()
+          + " does not match model dimension " + expected);
+    }
+  }
+
+  /**
+   * Validates the model-only constructor argument.
+   *
+   * @param model The model.
+   * @return The validated model.
+   * @throws IllegalArgumentException Thrown if {@code model} is {@code null}.
+   */
   private static CorefModel requireModel(CorefModel model) {
     if (model == null) {
       throw new IllegalArgumentException("model must not be null");
@@ -256,7 +268,7 @@ public class CorefAnnotator implements DocumentAnnotator {
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null}, empty, or
    *         contains a {@code null} or blank entry.
    */
-  private static Set<String> lowered(Set<String> types, String name) {
+  private Set<String> lowered(Set<String> types, String name) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException(name + " must not be null or empty");
     }
@@ -273,21 +285,29 @@ public class CorefAnnotator implements DocumentAnnotator {
   /**
    * Resolves coreference over the document and adds the {@link #CHAINS} layer.
    *
-   * <p>The required layers must be present, but they may be empty, and the token and POS
-   * tag layers must be aligned one to one. A document without tokens then yields a
-   * present-but-empty chains layer; a document that has tokens needs a non-empty sentence
-   * layer to place its mentions in. A {@link ParserAnnotator#PHRASES} or
-   * {@link ChunkerAnnotator#CHUNKS} layer is optional: with either, noun phrases become
-   * mentions, the parse taking precedence; without both, only entities and pronouns
-   * do. A {@link #SPEAKERS} layer is optional as well.</p>
+   * <p>The required layers must be present, but they may be empty. The token and POS tag
+   * layers must have the same size and matching spans. Sentence and token spans must be
+   * in text order and must not overlap, and each token and entity mention must fall
+   * within one sentence. Chunk and phrase spans must align with tokens and remain in one
+   * sentence; phrase heads must align with one token. Speaker spans must be ordered,
+   * disjoint, and carry non-blank labels. A document without tokens then yields a
+   * present-but-empty chains layer; a document that has tokens needs a non-empty
+   * sentence layer. {@link ParserAnnotator#PHRASES} and
+   * {@link ChunkerAnnotator#CHUNKS} layers are optional. Noun phrases from every present
+   * layer become mentions; an exact duplicate keeps the parser head. Without either
+   * layer, only entities and pronouns do. A {@link #SPEAKERS} layer is optional as
+   * well.</p>
    *
    * @param document The document to annotate. Must not be {@code null} and must carry the
    *                 {@link Layers#SENTENCES}, {@link Layers#TOKENS},
    *                 {@link Layers#POS_TAGS}, and {@link Layers#ENTITIES} layers.
    * @return A new {@link Document} carrying the {@link #CHAINS} layer. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, a
-   *         required layer is absent, the token and POS tag layers differ in size, or
-   *         tokens are present but the sentence layer is empty.
+   *         required layer is absent, the token and POS tag layers do not align, token
+   *         sentence, token, or speaker spans overlap or are out of order, an input span
+   *         is malformed, or tokens are present but the sentence layer is empty.
+   * @throws IllegalStateException Thrown if a vector provider violates its return
+   *         contract.
    */
   @Override
   public Document annotate(Document document) {
@@ -323,8 +343,8 @@ public class CorefAnnotator implements DocumentAnnotator {
    *         layer is empty.
    * @throws IllegalArgumentException Thrown if the document is invalid, as
    *         {@link #annotate(Document)} documents.
-   * @throws IllegalStateException Thrown if the token encoder returns a vector count
-   *         that differs from the sentence's token count.
+   * @throws IllegalStateException Thrown if the token encoder violates the
+   *         {@link TokenVectors} return contract.
    */
   SieveResolver resolver(Document document) {
     if (document == null) {
@@ -351,40 +371,182 @@ public class CorefAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("document needs aligned "
           + Layers.TOKENS + " and " + Layers.POS_TAGS + " layers");
     }
+    for (int s = 1; s < sentences.size(); s++) {
+      if (sentences.get(s - 1).span().getEnd() > sentences.get(s).span().getStart()) {
+        throw new IllegalArgumentException(
+            "sentence spans overlap or are out of order at index " + s);
+      }
+    }
+    for (int e = 0; e < entities.size(); e++) {
+      final Annotation<String> annotation = entities.get(e);
+      final Span entity = annotation.span();
+      if (entity.length() == 0
+          || StringUtil.isBlank(document.text().subSequence(
+              entity.getStart(), entity.getEnd()))) {
+        throw new IllegalArgumentException(
+            "entity at index " + e + " must cover non-blank text");
+      }
+      if (StringUtil.isBlank(annotation.value())) {
+        throw new IllegalArgumentException(
+            "entity at index " + e + " must have a non-blank type");
+      }
+      boolean contained = false;
+      for (final Annotation<String> sentence : sentences) {
+        if (sentence.span().contains(entity)) {
+          contained = true;
+          break;
+        }
+      }
+      if (!contained) {
+        throw new IllegalArgumentException(
+            "entity at index " + e + " falls outside the sentence layer");
+      }
+    }
+    final List<Annotation<String>> chunks = present.contains(ChunkerAnnotator.CHUNKS)
+        ? document.get(ChunkerAnnotator.CHUNKS) : null;
+    final List<Annotation<Phrase>> phrases = present.contains(ParserAnnotator.PHRASES)
+        ? document.get(ParserAnnotator.PHRASES) : null;
+    final List<Annotation<String>> speakers = present.contains(SPEAKERS)
+        ? document.get(SPEAKERS) : null;
     if (tokens.isEmpty()) {
+      validateChunks(chunks, Map.of(), Map.of(), new int[0]);
+      validatePhrases(phrases, Map.of(), Map.of(), new int[0]);
+      validateSpeakers(speakers);
       return null;
     }
     if (sentences.isEmpty()) {
       throw new IllegalArgumentException(
           "document needs a non-empty " + Layers.SENTENCES + " layer");
     }
-    final List<Annotation<String>> chunks = present.contains(ChunkerAnnotator.CHUNKS)
-        ? document.get(ChunkerAnnotator.CHUNKS) : null;
-    final List<Annotation<Phrase>> phrases = present.contains(ParserAnnotator.PHRASES)
-        ? document.get(ParserAnnotator.PHRASES) : null;
     final String[] forms = new String[tokens.size()];
     final int[] sentenceOfToken = new int[tokens.size()];
+    final Map<Integer, Integer> tokenStarts = new HashMap<>(tokens.size());
+    final Map<Integer, Integer> tokenEnds = new HashMap<>(tokens.size());
     for (int t = 0, sentence = 0; t < forms.length; t++) {
-      forms[t] = tokens.get(t).value();
+      final Annotation<String> token = tokens.get(t);
+      final Span tokenSpan = token.span();
+      final Span tagSpan = tags.get(t).span();
+      if (tokenSpan.getStart() != tagSpan.getStart()
+          || tokenSpan.getEnd() != tagSpan.getEnd()) {
+        throw new IllegalArgumentException("token and POS tag spans differ at index " + t);
+      }
+      if (t > 0 && tokens.get(t - 1).span().getEnd() > tokenSpan.getStart()) {
+        throw new IllegalArgumentException(
+            "token spans overlap or are out of order at index " + t);
+      }
+      forms[t] = token.value();
       while (sentence < sentences.size() - 1
-          && tokens.get(t).span().getStart() >= sentences.get(sentence).span().getEnd()) {
+          && tokenSpan.getStart() >= sentences.get(sentence).span().getEnd()) {
         sentence++;
       }
+      if (!sentences.get(sentence).span().contains(tokenSpan)) {
+        throw new IllegalArgumentException("token at index " + t
+            + " falls outside the sentence layer");
+      }
       sentenceOfToken[t] = sentence;
+      tokenStarts.put(tokenSpan.getStart(), t);
+      tokenEnds.put(tokenSpan.getEnd(), t);
     }
+    validateChunks(chunks, tokenStarts, tokenEnds, sentenceOfToken);
+    validatePhrases(phrases, tokenStarts, tokenEnds, sentenceOfToken);
+    validateSpeakers(speakers);
     final List<Mention> mentions = MentionDetector.detect(personTypes, document.text(),
         sentences, tokens, tags, sentenceOfToken, entities, chunks, phrases);
-    final List<Annotation<String>> speakers = present.contains(SPEAKERS)
-        ? document.get(SPEAKERS) : null;
     return new SieveResolver(mentions, new Clusters(mentions), forms, sentenceOfToken,
         speakers, personTypes, neutralTypes, vectors,
         encoder == null ? null : encode(forms, sentenceOfToken));
   }
 
-  /** Runs the encoder over each sentence and lines the vectors up with the tokens. */
+  /** Validates the optional chunk layer consumed by mention detection. */
+  private void validateChunks(List<Annotation<String>> chunks,
+      Map<Integer, Integer> tokenStarts, Map<Integer, Integer> tokenEnds,
+      int[] sentenceOfToken) {
+    if (chunks == null) {
+      return;
+    }
+    for (int c = 0; c < chunks.size(); c++) {
+      final Annotation<String> chunk = chunks.get(c);
+      if (StringUtil.isBlank(chunk.value())) {
+        throw new IllegalArgumentException(
+            "chunk at index " + c + " must have a non-blank type");
+      }
+      validateTokenSpan("chunk", c, chunk.span(), tokenStarts, tokenEnds,
+          sentenceOfToken);
+      if (c > 0 && chunks.get(c - 1).span().getEnd() > chunk.span().getStart()) {
+        throw new IllegalArgumentException(
+            "chunk spans overlap or are out of order at index " + c);
+      }
+    }
+  }
+
+  /** Validates the optional parser phrase layer consumed by mention detection. */
+  private void validatePhrases(List<Annotation<Phrase>> phrases,
+      Map<Integer, Integer> tokenStarts, Map<Integer, Integer> tokenEnds,
+      int[] sentenceOfToken) {
+    if (phrases == null) {
+      return;
+    }
+    for (int p = 0; p < phrases.size(); p++) {
+      final Annotation<Phrase> phrase = phrases.get(p);
+      validateTokenSpan("phrase", p, phrase.span(), tokenStarts, tokenEnds,
+          sentenceOfToken);
+      final Span head = phrase.value().head();
+      final Integer headStart = tokenStarts.get(head.getStart());
+      final Integer headEnd = tokenEnds.get(head.getEnd());
+      if (headStart == null || !headStart.equals(headEnd)
+          || !phrase.span().contains(head)) {
+        throw new IllegalArgumentException(
+            "phrase at index " + p + " must name one of its tokens as its head");
+      }
+    }
+  }
+
+  /** Validates an annotation span that must cover complete tokens in one sentence. */
+  private void validateTokenSpan(String layer, int index, Span span,
+      Map<Integer, Integer> tokenStarts, Map<Integer, Integer> tokenEnds,
+      int[] sentenceOfToken) {
+    final Integer first = tokenStarts.get(span.getStart());
+    final Integer last = tokenEnds.get(span.getEnd());
+    if (first == null || last == null || first > last) {
+      throw new IllegalArgumentException(
+          layer + " at index " + index + " must align with token boundaries");
+    }
+    if (sentenceOfToken[first] != sentenceOfToken[last]) {
+      throw new IllegalArgumentException(
+          layer + " at index " + index + " crosses a sentence boundary");
+    }
+  }
+
+  /** Validates the optional speaker turns used by the speaker sieve. */
+  private void validateSpeakers(List<Annotation<String>> speakers) {
+    if (speakers == null) {
+      return;
+    }
+    for (int s = 0; s < speakers.size(); s++) {
+      final Annotation<String> speaker = speakers.get(s);
+      if (speaker.span().length() == 0 || StringUtil.isBlank(speaker.value())) {
+        throw new IllegalArgumentException(
+            "speaker at index " + s + " must cover text and have a non-blank label");
+      }
+      if (s > 0 && speakers.get(s - 1).span().getEnd() > speaker.span().getStart()) {
+        throw new IllegalArgumentException(
+            "speaker spans overlap or are out of order at index " + s);
+      }
+    }
+  }
+
+  /**
+   * Runs the encoder for each sentence and aligns the vectors with the token array.
+   *
+   * @param forms The token forms.
+   * @param sentenceOfToken The sentence index of each token.
+   * @return One vector per token.
+   * @throws IllegalStateException Thrown if the encoder violates its return contract.
+   */
   private float[][] encode(String[] forms, int[] sentenceOfToken) {
     final float[][] tokenVectors = new float[forms.length][];
     int start = 0;
+    final int dimension = encoder.dimension();
     while (start < forms.length) {
       int end = start + 1;
       while (end < forms.length && sentenceOfToken[end] == sentenceOfToken[start]) {
@@ -398,10 +560,36 @@ public class CorefAnnotator implements DocumentAnnotator {
             + (vectors == null ? "null" : vectors.length + " vectors") + " for "
             + sentence.length + " tokens");
       }
+      for (int t = 0; t < vectors.length; t++) {
+        if (vectors[t] == null || vectors[t].length == 0) {
+          throw new IllegalStateException("token encoder returned a null or empty vector"
+              + " for token " + (start + t));
+        }
+        if (vectors[t].length != dimension) {
+          throw new IllegalStateException("token encoder returned dimension "
+              + vectors[t].length + " for token " + (start + t)
+              + ", expected " + dimension);
+        }
+        for (int d = 0; d < vectors[t].length; d++) {
+          if (!Float.isFinite(vectors[t][d])) {
+            throw new IllegalStateException("token encoder returned a non-finite value"
+                + " for token " + (start + t) + " at dimension " + d);
+          }
+        }
+      }
       System.arraycopy(vectors, 0, tokenVectors, start, sentence.length);
       start = end;
     }
     return tokenVectors;
+  }
+
+  /**
+   * Returns the contextual token-vector dimension used by this configuration.
+   *
+   * @return The provider dimension, or zero without a token encoder.
+   */
+  int tokenVectorDimension() {
+    return encoder == null ? 0 : encoder.dimension();
   }
 
   /** {@inheritDoc} */

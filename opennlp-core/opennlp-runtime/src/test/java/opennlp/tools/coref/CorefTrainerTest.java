@@ -19,10 +19,15 @@ package opennlp.tools.coref;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -31,7 +36,11 @@ import opennlp.tools.chunker.ChunkerAnnotator;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.Layers;
+import opennlp.tools.ml.maxent.GISModel;
+import opennlp.tools.ml.model.AbstractModel;
+import opennlp.tools.ml.model.Context;
 import opennlp.tools.ml.model.Event;
+import opennlp.tools.util.InsufficientTrainingDataException;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Span;
 import opennlp.tools.util.TrainingParameters;
@@ -44,7 +53,7 @@ import opennlp.tools.util.TrainingParameters;
 public class CorefTrainerTest {
 
   /** Builds a two-sentence document: an entity, a verb, then a pronoun sentence. */
-  private static Document document(String name, String type, String verb, String pronoun,
+  private Document document(String name, String type, String verb, String pronoun,
       int goldChainOfPronoun) {
     final String text = name + " " + verb + ". " + pronoun + " grew.";
     final List<Annotation<String>> tokens = new ArrayList<>();
@@ -75,7 +84,7 @@ public class CorefTrainerTest {
   }
 
   /** A corpus where "It" always follows an organization and "He" always a person. */
-  private static List<Document> corpus() {
+  private List<Document> corpus() {
     final List<Document> corpus = new ArrayList<>();
     final String[] organizations = {"Acme", "Globex", "Initech", "Umbrella", "Hooli", "Vandelay"};
     final String[] people = {"Kowalczyk", "Nowak", "Okafor", "Tanaka", "Ivanov", "Schmidt"};
@@ -89,11 +98,76 @@ public class CorefTrainerTest {
     return corpus;
   }
 
-  private static TrainingParameters parameters() {
+  private TrainingParameters parameters() {
     final TrainingParameters parameters = TrainingParameters.defaultParams();
     parameters.put(TrainingParameters.ITERATIONS_PARAM, 50);
     parameters.put(TrainingParameters.CUTOFF_PARAM, 1);
     return parameters;
+  }
+
+  /**
+   * Builds one rankable mention after three pronouns. The first and third pronouns share
+   * its gold chain, so their common pair feature cancels to zero and then reappears.
+   */
+  private Document interleavedGoldOptions() {
+    final String text = "I you we Acme operate.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    final List<Annotation<String>> tags = new ArrayList<>();
+    int cursor = 0;
+    for (final String[] token : new String[][] {{"I", "PRP"}, {"you", "PRP"},
+        {"we", "PRP"}, {"Acme", "NNP"}, {"operate", "VBP"}, {".", "."}}) {
+      final int start = text.indexOf(token[0], cursor);
+      final Span span = new Span(start, start + token[0].length());
+      tokens.add(new Annotation<>(span, token[0]));
+      tags.add(new Annotation<>(span, token[1]));
+      cursor = span.getEnd();
+    }
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(new Annotation<>(new Span(0, text.length()), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, tags)
+        .with(Layers.ENTITIES, List.of(new Annotation<>(tokens.get(3).span(), "organization")))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(tokens.get(0).span(),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(tokens.get(1).span(),
+                new CorefMention(1, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(tokens.get(2).span(),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(tokens.get(3).span(),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY))));
+  }
+
+  /** Builds a document whose detected antecedent is not the anaphor's gold antecedent. */
+  private Document missingGoldAntecedent() {
+    final String text = "Absent arrived. Zephyr spoke. He left.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    final List<Annotation<String>> tags = new ArrayList<>();
+    int cursor = 0;
+    for (final String[] token : new String[][] {{"Absent", "NNP"}, {"arrived", "VBD"},
+        {".", "."}, {"Zephyr", "NNP"}, {"spoke", "VBD"}, {".", "."},
+        {"He", "PRP"}, {"left", "VBD"}, {".", "."}}) {
+      final int start = text.indexOf(token[0], cursor);
+      final Span span = new Span(start, start + token[0].length());
+      tokens.add(new Annotation<>(span, token[0]));
+      tags.add(new Annotation<>(span, token[1]));
+      cursor = span.getEnd();
+    }
+    return Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 15), "s"),
+            new Annotation<>(new Span(16, 29), "s"),
+            new Annotation<>(new Span(30, text.length()), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, tags)
+        .with(Layers.ENTITIES, List.of(new Annotation<>(tokens.get(3).span(), "person")))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(tokens.get(0).span(),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(tokens.get(3).span(),
+                new CorefMention(1, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(tokens.get(6).span(),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY))));
   }
 
   @Test
@@ -120,6 +194,48 @@ public class CorefTrainerTest {
         .with(Layers.ENTITIES, plain.get(Layers.ENTITIES));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> CorefTrainer.pairs(withoutGold, new CorefAnnotator()));
+  }
+
+  /** A gold mention span belongs to one chain. */
+  @Test
+  void testPairsRejectDuplicateGoldMentionSpans() {
+    final Document base = document("Acme", "organization", "expanded", "It", 0);
+    final Span repeated = base.get(CorefAnnotator.GOLD_CHAINS).get(0).span();
+    final Document duplicate = Document.of(base.text())
+        .with(Layers.SENTENCES, base.get(Layers.SENTENCES))
+        .with(Layers.TOKENS, base.get(Layers.TOKENS))
+        .with(Layers.POS_TAGS, base.get(Layers.POS_TAGS))
+        .with(Layers.ENTITIES, base.get(Layers.ENTITIES))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(repeated,
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(repeated,
+                new CorefMention(1, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY))));
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.pairs(duplicate, new CorefAnnotator()));
+  }
+
+  /** Gold chain identifiers follow first-mention order without gaps. */
+  @Test
+  void testPairsRejectNoncanonicalGoldChainIds() {
+    final Document base = document("Acme", "organization", "expanded", "It", 0);
+    final List<Annotation<CorefMention>> original = base.get(CorefAnnotator.GOLD_CHAINS);
+    final Document sparse = Document.of(base.text())
+        .with(Layers.SENTENCES, base.get(Layers.SENTENCES))
+        .with(Layers.TOKENS, base.get(Layers.TOKENS))
+        .with(Layers.POS_TAGS, base.get(Layers.POS_TAGS))
+        .with(Layers.ENTITIES, base.get(Layers.ENTITIES))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(original.get(0).span(),
+                new CorefMention(7, CorefMention.KIND_GOLD,
+                    CorefMention.NO_ENTITY)),
+            new Annotation<>(original.get(1).span(),
+                new CorefMention(7, CorefMention.KIND_GOLD,
+                    CorefMention.NO_ENTITY))));
+
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.pairs(sparse, new CorefAnnotator()));
   }
 
   @Test
@@ -169,19 +285,65 @@ public class CorefTrainerTest {
     Assertions.assertNotEquals(apart.get(0).value().chain(), apart.get(1).value().chain());
   }
 
+  /** A pair-classifier score equal to the configured threshold is accepted. */
   @Test
-  void testPairwiseModelIsNotRanking() throws IOException {
+  void testPairClassifierLinksAtThreshold() {
+    final GISModel scoresOneHalf = new GISModel(new Context[0], new String[0],
+        new String[] {SieveResolver.LINK, SieveResolver.APART});
+    final CorefModel model = new CorefModel("eng", scoresOneHalf, Map.of());
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), model, 0.5);
+
+    final List<Annotation<CorefMention>> chains = annotator.annotate(
+        document("Cyberdyne", "organization", "expanded", "It", 0))
+        .get(CorefAnnotator.CHAINS);
+    Assertions.assertEquals(chains.get(0).value().chain(), chains.get(1).value().chain());
+  }
+
+  @Test
+  void testRankingUpdatesAFeatureOnceWhenItsGradientReturnsToZero() throws IOException {
+    final CorefModel model = CorefTrainer.trainRanking("eng",
+        ObjectStreamUtils.createObjectStream(List.of(interleavedGoldOptions())),
+        1, 0.1, 1.0, new CorefAnnotator());
+    final int link = model.getPairModel().getIndex(SieveResolver.LINK);
+    final double probability = model.getPairModel()
+        .eval(new String[] {"kinds=entity>pronoun"})[link];
+    final double weight = 0.1 * 0.25 / (0.25 + 1e-8);
+    final double expected = Math.exp(weight) / (Math.exp(weight) + 1.0);
+
+    Assertions.assertEquals(expected, probability, 1e-8);
+  }
+
+  @Test
+  void testRankingOmitsFeaturesFromUnlearnableAnaphors() throws IOException {
+    final CorefModel model = CorefTrainer.trainRanking("eng",
+        ObjectStreamUtils.createObjectStream(List.of(
+            document("Acme", "organization", "expanded", "It", 0),
+            missingGoldAntecedent())),
+        1, 0.1, 0.0, new CorefAnnotator());
+    final Map<?, ?> predicates = (Map<?, ?>)
+        ((AbstractModel) model.getPairModel()).getDataStructures()[1];
+
+    Assertions.assertFalse(predicates.containsKey("antHead=zephyr"));
+  }
+
+  @Test
+  void testPairwiseModelPreservesEncoderDimension() throws IOException {
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        null, ENCODER);
     final CorefModel model = CorefTrainer.train("eng",
-        ObjectStreamUtils.createObjectStream(corpus()), parameters());
+        ObjectStreamUtils.createObjectStream(corpus()), parameters(), annotator);
     Assertions.assertFalse(model.isRanking());
+    Assertions.assertEquals(ENCODER.dimension(), model.getTokenVectorDimension());
   }
 
   @Test
   void testWordVectorsFeedSimilarityFeaturesForNominalAnaphors() {
-    final WordVectors vectors = word -> switch (word) {
+    final WordVectors vectors = wordVectors(2, word -> switch (word) {
       case "acme", "firm" -> new float[] {1f, 0.1f};
       default -> null;
-    };
+    });
     final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
         Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, vectors);
     final String text = "Acme expanded. The firm grew.";
@@ -218,8 +380,106 @@ public class CorefTrainerTest {
     Assertions.assertFalse(plain.stream().anyMatch(f -> f.startsWith("sim=")), plain.toString());
   }
 
+  @Test
+  void testWordVectorsMustReturnValidConsistentVectors() {
+    final WordVectors empty = wordVectors(1, word -> new float[0]);
+    final CorefAnnotator emptyAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, empty);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.pairs(firmDocument(), emptyAnnotator));
+
+    final WordVectors nonfinite = wordVectors(1, word -> new float[] {Float.NaN});
+    final CorefAnnotator nonfiniteAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        nonfinite);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.pairs(firmDocument(), nonfiniteAnnotator));
+
+    final WordVectors inconsistent = wordVectors(2, word -> word.equals("firm")
+        ? new float[] {1f, 0f}
+        : new float[] {1f});
+    final CorefAnnotator inconsistentAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        inconsistent);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.pairs(firmDocument(), inconsistentAnnotator));
+  }
+
+  @Test
+  void testMissingWordVectorIsLookedUpOncePerDocument() {
+    final int[] firmLookups = {0};
+    final WordVectors vectors = wordVectors(1, word -> {
+      if ("firm".equals(word)) {
+        firmLookups[0]++;
+      }
+      return null;
+    });
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        vectors);
+
+    CorefTrainer.pairs(firmDocument(), annotator);
+
+    Assertions.assertEquals(1, firmLookups[0]);
+  }
+
+  @Test
+  void testSimilarityHandlesLargeFiniteVectorComponents() {
+    final WordVectors words = wordVectors(1, word -> switch (word) {
+      case "acme" -> new float[] {-Float.MAX_VALUE};
+      case "firm" -> new float[] {Float.MAX_VALUE};
+      default -> null;
+    });
+    final CorefAnnotator wordAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        words);
+    final List<String> wordFeatures = List.of(
+        CorefTrainer.pairs(firmDocument(), wordAnnotator).get(0).getContext());
+    Assertions.assertTrue(wordFeatures.contains("sim=low"), wordFeatures.toString());
+
+    final TokenVectors tokens = tokenVectors(1, forms -> {
+      final float[][] vectors = new float[forms.length][1];
+      for (int t = 0; t < forms.length; t++) {
+        if ("Acme".equals(forms[t])) {
+          vectors[t][0] = -Float.MIN_NORMAL;
+        } else if ("The".equals(forms[t]) || "firm".equals(forms[t])) {
+          vectors[t][0] = Float.MAX_VALUE;
+        }
+      }
+      return vectors;
+    });
+    final CorefAnnotator tokenAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        null, tokens);
+    final List<String> tokenFeatures = List.of(
+        CorefTrainer.pairs(firmDocument(), tokenAnnotator).get(0).getContext());
+    Assertions.assertTrue(tokenFeatures.contains("ctx=neg"), tokenFeatures.toString());
+  }
+
+  @Test
+  void testDenseFeaturesRejectArithmeticOverflow() {
+    final TokenVectors tokens = tokenVectors(1, forms -> {
+      final float[][] encoded = new float[forms.length][1];
+      for (int t = 0; t < forms.length; t++) {
+        encoded[t][0] = "Acme".equals(forms[t])
+            ? Float.MAX_VALUE : -Float.MAX_VALUE;
+      }
+      return encoded;
+    });
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD,
+        null, tokens);
+
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.pairs(firmDocument(), annotator));
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.trainRanking("eng",
+            ObjectStreamUtils.createObjectStream(List.of(firmDocument())),
+            1, 0.05, 0.0, annotator));
+  }
+
   /** Builds the two-sentence "Acme expanded. The firm grew." document with chunks and gold. */
-  private static Document firmDocument() {
+  private Document firmDocument() {
     final String text = "Acme expanded. The firm grew.";
     final List<Annotation<String>> tokens = new ArrayList<>();
     final List<Annotation<String>> tags = new ArrayList<>();
@@ -246,10 +506,10 @@ public class CorefTrainerTest {
   }
 
   /**
-   * A two-dimensional stand-in for a contextual encoder: organization names and the
+   * A two-dimensional test encoder: organization names and the
    * neutral pronoun point one way, person names and the male pronoun the other.
    */
-  private static final TokenVectors ENCODER = tokens -> {
+  private static final TokenVectors ENCODER = tokenVectors(2, tokens -> {
     final float[][] vectors = new float[tokens.length][];
     for (int t = 0; t < tokens.length; t++) {
       final String word = tokens[t];
@@ -264,7 +524,7 @@ public class CorefTrainerTest {
       }
     }
     return vectors;
-  };
+  });
 
   @Test
   void testTokenVectorsAddSpanFeaturesWithValues() {
@@ -294,15 +554,18 @@ public class CorefTrainerTest {
 
   @Test
   void testRankingModelTrainsAndDecodesWithTokenVectors() throws IOException {
+    Assertions.assertEquals(2, ENCODER.dimension());
     final CorefAnnotator rules = new CorefAnnotator(Set.of("person"),
         Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
         ENCODER);
     final CorefModel trained = CorefTrainer.trainRanking("eng",
         ObjectStreamUtils.createObjectStream(corpus()), rules);
+    Assertions.assertEquals(2, trained.getTokenVectorDimension());
     final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     trained.serialize(bytes);
     final CorefModel model = new CorefModel(new ByteArrayInputStream(bytes.toByteArray()));
     Assertions.assertTrue(model.isRanking());
+    Assertions.assertEquals(2, model.getTokenVectorDimension());
     Assertions.assertTrue(model.getPairModel().eval(new String[] {"vp0"}, new float[] {1f})
         [model.getPairModel().getIndex(SieveResolver.LINK)] > 0.5,
         "a shared direction should favor linking");
@@ -319,21 +582,160 @@ public class CorefTrainerTest {
   }
 
   @Test
+  void testVectorDimensionsAreValidatedAtConstruction() {
+    final GISModel pairModel = new GISModel(new Context[0], new String[0],
+        new String[] {SieveResolver.LINK, SieveResolver.APART});
+    final CorefModel contextual = new CorefModel("eng", pairModel, true, 2, Map.of());
+    final CorefModel plain = new CorefModel("eng", pairModel, true, 0, Map.of());
+    final TokenVectors wrongDimension = tokenVectors(1,
+        tokens -> new float[tokens.length][1]);
+
+    Assertions.assertDoesNotThrow(() -> new CorefAnnotator(Set.of("person"),
+        Set.of("organization"), contextual, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ENCODER));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(contextual));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(Set.of("person"), Set.of("organization"), contextual,
+            CorefAnnotator.DEFAULT_THRESHOLD, null, wrongDimension));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(Set.of("person"), Set.of("organization"), plain,
+            CorefAnnotator.DEFAULT_THRESHOLD, null, ENCODER));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(Set.of("person"), Set.of("organization"), null,
+            CorefAnnotator.DEFAULT_THRESHOLD, wordVectors(0, word -> null), null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefAnnotator(Set.of("person"), Set.of("organization"), null,
+            CorefAnnotator.DEFAULT_THRESHOLD, null,
+            tokenVectors(0, tokens -> new float[tokens.length][0])));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel("eng", pairModel, true, -1, Map.of()));
+  }
+
+  @Test
   void testEncoderMustReturnOneVectorPerToken() {
-    final TokenVectors short1 = tokens -> new float[][] {{1f}};
+    final TokenVectors short1 = tokenVectors(1, tokens -> new float[][] {{1f}});
     final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
         Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null, short1);
     Assertions.assertThrows(IllegalStateException.class,
         () -> annotator.annotate(firmDocument()));
-    final TokenVectors none = tokens -> null;
+    final TokenVectors none = tokenVectors(1, tokens -> null);
     final CorefAnnotator nullAnnotator = new CorefAnnotator(Set.of("person"),
         Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null, none);
     Assertions.assertThrows(IllegalStateException.class,
         () -> nullAnnotator.annotate(firmDocument()));
   }
 
+  @Test
+  void testEncoderMustReturnNonemptyVectorsOfOneDimension() {
+    final TokenVectors missing = tokenVectors(2, tokens -> {
+      final float[][] vectors = new float[tokens.length][];
+      for (int t = 0; t < vectors.length; t++) {
+        vectors[t] = new float[] {1f, 0f};
+      }
+      vectors[1] = null;
+      return vectors;
+    });
+    final CorefAnnotator missingAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        missing);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> missingAnnotator.annotate(firmDocument()));
+
+    final TokenVectors empty = tokenVectors(2, tokens -> new float[tokens.length][0]);
+    final CorefAnnotator emptyAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        empty);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> emptyAnnotator.annotate(firmDocument()));
+
+    final TokenVectors ragged = tokenVectors(2, tokens -> {
+      final float[][] vectors = new float[tokens.length][];
+      for (int t = 0; t < vectors.length; t++) {
+        vectors[t] = new float[] {1f, 0f};
+      }
+      vectors[1] = new float[] {1f};
+      return vectors;
+    });
+    final CorefAnnotator raggedAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ragged);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> raggedAnnotator.annotate(firmDocument()));
+
+    final TokenVectors nonfinite = tokenVectors(2, tokens -> {
+      final float[][] vectors = new float[tokens.length][2];
+      vectors[0][0] = Float.POSITIVE_INFINITY;
+      return vectors;
+    });
+    final CorefAnnotator nonfiniteAnnotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        nonfinite);
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> nonfiniteAnnotator.annotate(firmDocument()));
+  }
+
+  @Test
+  void testRankingRejectsEncoderThatChangesDimensionBetweenDocuments() {
+    final TokenVectors changing = tokenVectors(2, tokens -> {
+      final int dimension = tokens[0].equals("Acme") || tokens[0].equals("It") ? 2 : 3;
+      final float[][] vectors = new float[tokens.length][dimension];
+      for (final float[] vector : vectors) {
+        vector[0] = 1f;
+      }
+      return vectors;
+    });
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        changing);
+    final List<Document> documents = List.of(
+        document("Acme", "organization", "expanded", "It", 0),
+        document("Kowalczyk", "person", "arrived", "He", 0));
+
+    Assertions.assertThrows(IllegalStateException.class,
+        () -> CorefTrainer.trainRanking("eng",
+            ObjectStreamUtils.createObjectStream(documents), annotator));
+  }
+
+  @Test
+  void testTokenVectorsHandleEntityWithoutAlignedToken() {
+    final String text = "Ada spoke. She left.";
+    final List<Annotation<String>> tokens = new ArrayList<>();
+    int cursor = 0;
+    for (final String form : new String[] {"spoke", ".", "She", "left", "."}) {
+      final int start = text.indexOf(form, cursor);
+      final Span span = new Span(start, start + form.length());
+      tokens.add(new Annotation<>(span, form));
+      cursor = span.getEnd();
+    }
+    final CorefAnnotator annotator = new CorefAnnotator(Set.of("person"),
+        Set.of("organization", "location"), null, CorefAnnotator.DEFAULT_THRESHOLD, null,
+        ENCODER);
+    final Document document = Document.of(text)
+        .with(Layers.SENTENCES, List.of(
+            new Annotation<>(new Span(0, 10), "s"),
+            new Annotation<>(new Span(11, 20), "s")))
+        .with(Layers.TOKENS, tokens)
+        .with(Layers.POS_TAGS, List.of(
+            new Annotation<>(tokens.get(0).span(), "VBD"),
+            new Annotation<>(tokens.get(1).span(), "."),
+            new Annotation<>(tokens.get(2).span(), "PRP"),
+            new Annotation<>(tokens.get(3).span(), "VBD"),
+            new Annotation<>(tokens.get(4).span(), ".")))
+        .with(Layers.ENTITIES, List.of(new Annotation<>(new Span(0, 3), "person")))
+        .with(CorefAnnotator.GOLD_CHAINS, List.of(
+            new Annotation<>(new Span(0, 3),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY)),
+            new Annotation<>(new Span(11, 14),
+                new CorefMention(0, CorefMention.KIND_GOLD, CorefMention.NO_ENTITY))));
+
+    final List<Event> events = CorefTrainer.pairs(document, annotator);
+    Assertions.assertEquals(1, events.size());
+    Assertions.assertNotNull(events.get(0).getValues());
+  }
+
   /** Three sentences: an entity, a definite phrase, and a second definite phrase. */
-  private static Document threeMentions(List<Annotation<CorefMention>> gold) {
+  private Document threeMentions(List<Annotation<CorefMention>> gold) {
     final String text = "Acme expanded. The firm grew. The company hired.";
     final List<Annotation<String>> tokens = new ArrayList<>();
     final List<Annotation<String>> tags = new ArrayList<>();
@@ -386,7 +788,27 @@ public class CorefTrainerTest {
         () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
             1, 0.1, -1.0, new CorefAnnotator()));
     Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
+            1, Double.POSITIVE_INFINITY, 0.0, new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng", ObjectStreamUtils.createObjectStream(corpus()),
+            1, 0.1, Double.POSITIVE_INFINITY, new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
         () -> CorefTrainer.trainRanking("eng", null, new CorefAnnotator()));
+  }
+
+  @Test
+  void testRankingRequiresTrainingInstances() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking("eng",
+            ObjectStreamUtils.createObjectStream(List.of()), new CorefAnnotator()));
+  }
+
+  @Test
+  void testPairwiseRequiresTrainingEvents() {
+    Assertions.assertThrows(InsufficientTrainingDataException.class,
+        () -> CorefTrainer.train("eng",
+            ObjectStreamUtils.createObjectStream(List.of()), parameters()));
   }
 
   @Test
@@ -400,6 +822,31 @@ public class CorefTrainerTest {
             parameters(), null));
   }
 
+  /** Model construction and both trainers reject a missing language code. */
+  @Test
+  void testModelAndTrainingRejectMissingLanguageCode() {
+    final GISModel pairModel = new GISModel(new Context[0], new String[0],
+        new String[] {SieveResolver.LINK, SieveResolver.APART});
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel(null, pairModel, null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefModel.requireLanguageCode(" "));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel(" ", pairModel, null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.train(null,
+            ObjectStreamUtils.createObjectStream(corpus()), parameters()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.train(" ",
+            ObjectStreamUtils.createObjectStream(corpus()), parameters()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking(null,
+            ObjectStreamUtils.createObjectStream(corpus()), new CorefAnnotator()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> CorefTrainer.trainRanking(" ",
+            ObjectStreamUtils.createObjectStream(corpus()), new CorefAnnotator()));
+  }
+
   @Test
   void testAnnotatorRejectsNullModelAndBadThreshold() throws IOException {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -410,5 +857,63 @@ public class CorefTrainerTest {
         () -> new CorefAnnotator(Set.of("person"), Set.of("organization"), model, 1.5));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> new CorefModel("eng", null, null));
+  }
+
+  @Test
+  void testModelRequiresExactlyTheCoreferenceOutcomes() {
+    final Context[] parameters = new Context[0];
+    final String[] predicates = new String[0];
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel("eng",
+            new GISModel(parameters, predicates, new String[] {SieveResolver.LINK, "other"}),
+            null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel("eng", new GISModel(parameters, predicates,
+            new String[] {SieveResolver.LINK, SieveResolver.APART, "other"}), null));
+  }
+
+  @Test
+  void testModelReadersRejectNullSources() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel((InputStream) null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel((File) null));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new CorefModel((Path) null));
+  }
+
+  /** Builds a word-vector provider with an explicit dimension. */
+  private static WordVectors wordVectors(int dimension, Function<String, float[]> lookup) {
+    return new WordVectors() {
+      /** {@inheritDoc} */
+      @Override
+      public int dimension() {
+        return dimension;
+      }
+
+      /** {@inheritDoc} */
+      @Override
+      public float[] vector(String word) {
+        return lookup.apply(word);
+      }
+    };
+  }
+
+  /** Builds a token-vector provider with an explicit dimension. */
+  private static TokenVectors tokenVectors(int dimension,
+      Function<String[], float[][]> encoder) {
+    return new TokenVectors() {
+      /** {@inheritDoc} */
+      @Override
+      public int dimension() {
+        return dimension;
+      }
+
+      /** {@inheritDoc} */
+      @Override
+      public float[][] vectors(String[] tokens) {
+        return encoder.apply(tokens);
+      }
+    };
   }
 }

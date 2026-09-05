@@ -63,6 +63,7 @@ import opennlp.tools.parser.ParserFactory;
 import opennlp.tools.parser.ParserModel;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 import opennlp.tools.util.TrainingParameters;
 
 /**
@@ -331,6 +332,7 @@ public class OntoGumCorefEvalTest {
    */
   private static WordVectors loadVectors(Path file) throws IOException {
     final Map<String, float[]> table = new HashMap<>();
+    int dimension = -1;
     try (java.io.BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
       String line;
       while ((line = reader.readLine()) != null) {
@@ -338,16 +340,38 @@ public class OntoGumCorefEvalTest {
         if (space <= 0) {
           continue;
         }
-        final String[] parts = line.substring(space + 1).trim().split(" ");
+        final String[] parts = StringUtil.splitOnUnicodeWhitespace(line.substring(space + 1));
         final float[] vector = new float[parts.length];
         for (int d = 0; d < parts.length; d++) {
           vector[d] = Float.parseFloat(parts[d]);
         }
+        if (dimension < 0) {
+          dimension = vector.length;
+        } else if (vector.length != dimension) {
+          throw new IOException("word-vector dimension changed from " + dimension
+              + " to " + vector.length + " in " + file);
+        }
         table.put(line.substring(0, space), vector);
       }
     }
+    if (dimension <= 0) {
+      throw new IOException("word-vector file contains no vectors: " + file);
+    }
     LOG.info("loaded {} word vectors from {}", table.size(), file);
-    return table::get;
+    final int loadedDimension = dimension;
+    return new WordVectors() {
+      /** {@inheritDoc} */
+      @Override
+      public int dimension() {
+        return loadedDimension;
+      }
+
+      /** {@inheritDoc} */
+      @Override
+      public float[] vector(String word) {
+        return table.get(word);
+      }
+    };
   }
 
   /** Turns a key partition into a gold chains layer in text order. */
@@ -526,7 +550,7 @@ public class OntoGumCorefEvalTest {
   /** Reads every document of the comma separated CoNLL-U files. */
   private static List<GoldDocument> readFiles(String files) throws IOException {
     final List<GoldDocument> golds = new ArrayList<>();
-    for (final String file : files.split(",")) {
+    for (final String file : CorefEvalSupport.splitOn(files, ',')) {
       if (!file.isBlank()) {
         golds.addAll(readAll(Path.of(file.trim())));
       }

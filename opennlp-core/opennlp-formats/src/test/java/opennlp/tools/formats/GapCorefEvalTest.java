@@ -51,6 +51,7 @@ import opennlp.tools.sentdetect.SentenceModel;
 import opennlp.tools.tokenize.TokenizerME;
 import opennlp.tools.tokenize.TokenizerModel;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Scores pronoun resolution on GAP (Webster et al., TACL 2018), 8,908 Wikipedia
@@ -129,7 +130,7 @@ public class GapCorefEvalTest {
     int examples = 0;
     final StringBuilder dump = new StringBuilder();
     for (final String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-      final String[] fields = line.split("\t");
+      final String[] fields = CorefEvalSupport.splitOn(line, '\t');
       if (fields.length < 10 || "ID".equals(fields[0])) {
         continue;
       }
@@ -153,7 +154,7 @@ public class GapCorefEvalTest {
       final boolean bPredicted = linked(chains, chain, b);
       final boolean aGold = Boolean.parseBoolean(fields[6]);
       final boolean bGold = Boolean.parseBoolean(fields[9]);
-      final Counts gender = MASCULINE.contains(fields[2].toLowerCase(Locale.ROOT))
+      final Counts gender = MASCULINE.contains(StringUtil.toLowerCase(fields[2]))
           ? masculine : feminine;
       for (final Counts counts : new Counts[] {all, gender}) {
         counts.add(aGold, aPredicted);

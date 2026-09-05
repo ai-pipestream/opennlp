@@ -33,36 +33,20 @@ import opennlp.tools.ml.model.MaxentModel;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Runs the precision-ranked sieves of
+ * Resolves the mentions of one document with the precision-ranked sieves of
  * <a href="https://aclanthology.org/J13-4004/">Lee et al. (Computational Linguistics
  * 2013), "Deterministic Coreference Resolution Based on Entity-Centric, Precision-Ranked
- * Rules"</a> over the mentions of one document.
+ * Rules"</a>.
  *
- * <p>Every sieve visits the mentions in text order and considers only a mention that is
- * still the first of its cluster as an anaphor, so a mention linked by an earlier, more
- * precise sieve is never re-resolved. Candidate antecedents are ordered by salience:
- * earlier mentions of the same sentence left to right, then the preceding sentences
- * nearest first, each read left to right for a nominal anaphor and right to left for a
- * pronoun, which favors proximity. The first candidate whose cluster passes the sieve's
- * test is linked, comparing the accumulated attributes of both clusters rather than the
- * two mentions alone. No sieve links a mention to one that contains it, and no sieve
- * merges clusters whose known entity types differ.</p>
+ * <p>Each sieve visits unresolved mentions in text order and tests candidates in salience
+ * order. Tests compare accumulated cluster attributes and reject nested mentions or
+ * conflicting entity types.</p>
  *
- * <p>Before the string sieves, the speaker sieve resolves first and second person
- * pronouns, which refer to the speaker and the addressee rather than to an antecedent
- * in the text. Each mention is assigned a speaker: the value of the speakers layer
- * covering it when the document carries one, otherwise the narrator outside quotation
- * marks and one anonymous speaker per quotation inside them. A quotation attributed by
- * an adjacent verb of speech to a person mention takes that person as its speaker.
- * All first person singular mentions of one speaker form one chain, joined to the
- * speaker's own mention when known, and so do the first person plural and the second
- * person mentions of one speaker.</p>
+ * <p>The speaker sieve handles first and second person pronouns before the string sieves.
+ * It uses the speakers layer when present and quoted-speech attribution otherwise.</p>
  *
- * <p>With a {@link MaxentModel} the resolver ranks instead: after the speaker and
- * string sieves, each remaining anaphor takes the candidate whose pair scores the
- * highest link probability above a threshold, with the sieve tests among the features
- * of {@link CorefContextGenerator}. Training reads the same candidates and
- * features.</p>
+ * <p>With a {@link MaxentModel}, the resolver applies the speaker and string sieves and
+ * then ranks the remaining candidate antecedents with {@link CorefContextGenerator}.</p>
  */
 final class SieveResolver {
 
@@ -163,7 +147,8 @@ final class SieveResolver {
       }
       int best = -1;
       double bestScore = ranking
-          ? score(model, features, features.newChainFeatures(j), link) : threshold;
+          ? score(model, features, features.newChainFeatures(j), link)
+          : Double.NEGATIVE_INFINITY;
       for (final int i : rankerCandidates(j)) {
         final double score = score(model, features, features.features(i, j), link);
         if (score > bestScore) {
@@ -171,14 +156,22 @@ final class SieveResolver {
           best = i;
         }
       }
-      if (best >= 0) {
+      if (best >= 0 && (ranking || bestScore >= threshold)) {
         clusters.union(best, j);
       }
     }
   }
 
-  /** {@return the link probability of one option under the model} */
-  private static double score(MaxentModel model, CorefContextGenerator features,
+  /**
+   * Scores one antecedent or new-chain option.
+   *
+   * @param model The pair model.
+   * @param features The feature generator.
+   * @param option The option features.
+   * @param link The link outcome index.
+   * @return The option's link probability.
+   */
+  private double score(MaxentModel model, CorefContextGenerator features,
       CorefContextGenerator.Features option, int link) {
     return model.eval(features.names(option), features.values(option))[link];
   }
@@ -196,13 +189,22 @@ final class SieveResolver {
     pass(nominal(), UNLIMITED, (i, j) -> acronym(i, j) || personName(i, j));
   }
 
-  /** {@return the anaphor test of the nominal sieves: a non-pronoun, non-indefinite mention with a head} */
+  /**
+   * Builds the predicate used by nominal sieves.
+   *
+   * @return The nominal-sieve anaphor predicate.
+   */
   private IntPredicate nominal() {
     return j -> !mentions.get(j).pronoun() && !mentions.get(j).indefinite()
         && mentions.get(j).head() != null;
   }
 
-  /** {@return whether the ranker resolves a mention: anything but a first or second person pronoun} */
+  /**
+   * Checks whether the ranker may resolve a mention.
+   *
+   * @param j The mention index.
+   * @return Whether the ranker may resolve the mention.
+   */
   boolean rankable(int j) {
     final Mention mention = mentions.get(j);
     return mention.head() != null && !(mention.pronoun() && mention.person() != Person.THIRD);
@@ -212,6 +214,9 @@ final class SieveResolver {
    * Lists the candidates the ranker scores for an anaphor: in salience order, within
    * the pronoun window for a pronoun and capped for other mentions, skipping the
    * anaphor's own cluster, containing mentions, and type-incompatible clusters.
+   *
+   * @param j The anaphor index.
+   * @return The candidate mention indexes in salience order.
    */
   List<Integer> rankerCandidates(int j) {
     final Mention mention = mentions.get(j);
@@ -229,7 +234,12 @@ final class SieveResolver {
     return admissible;
   }
 
-  /** {@return the speaker of a mention, computed once for the ranker's features} */
+  /**
+   * Reads the speaker assigned to a mention.
+   *
+   * @param j The mention index.
+   * @return Its speaker, computed once.
+   */
   String speakerOf(int j) {
     if (speakerOf == null) {
       speakerOf = speakerOfMentions();
@@ -237,22 +247,38 @@ final class SieveResolver {
     return speakerOf[j];
   }
 
-  /** {@return the mentions in text order} */
+  /**
+   * Reads the detected mentions.
+   *
+   * @return The mentions in text order.
+   */
   List<Mention> mentions() {
     return mentions;
   }
 
-  /** {@return the clusters over the mentions} */
+  /**
+   * Reads the current mention clusters.
+   *
+   * @return The mention clusters.
+   */
   Clusters clusters() {
     return clusters;
   }
 
-  /** {@return the word vectors for similarity features, or {@code null}} */
+  /**
+   * Reads the configured word vectors.
+   *
+   * @return The word vectors for similarity features, or {@code null}.
+   */
   WordVectors vectors() {
     return vectors;
   }
 
-  /** {@return one contextual vector per token, or {@code null}} */
+  /**
+   * Reads the contextual token vectors.
+   *
+   * @return One contextual vector per token, or {@code null}.
+   */
   float[][] tokenVectors() {
     return tokenVectors;
   }
@@ -302,6 +328,8 @@ final class SieveResolver {
    * attributed to or an anonymous speaker unique to that quotation. A quotation
    * attributed to a person mention is keyed by that mention, so the quoted first person
    * singular chain forms around it.
+   *
+   * @return The speaker identifier of each mention.
    */
   private String[] speakerOfMentions() {
     final String[] speakerOf = new String[mentions.size()];
@@ -365,6 +393,9 @@ final class SieveResolver {
    * quotation, in the sentence of its opening or closing mark, within a couple of
    * tokens of a verb of speech.
    *
+   * @param quoteStart The opening quote token index.
+   * @param quoteEnd The closing quote token index.
+   * @param quoteOf The quote index of each token, or zero outside quotations.
    * @return The mention index, or {@code -1} when no attribution is found.
    */
   private int attribute(int quoteStart, int quoteEnd, int[] quoteOf) {
@@ -387,7 +418,14 @@ final class SieveResolver {
     return -1;
   }
 
-  /** Looks a few tokens in one direction, outside quotations, for a verb of speech. */
+  /**
+   * Looks near a person mention for a speech verb outside a quotation.
+   *
+   * @param from The first token index.
+   * @param step The search direction, {@code -1} or {@code 1}.
+   * @param quoteOf The quote index of each token.
+   * @return Whether a speech verb is found.
+   */
   private boolean speechVerbNear(int from, int step, int[] quoteOf) {
     for (int t = from, seen = 0; t >= 0 && t < forms.length && seen < ATTRIBUTION_DISTANCE;
         t += step, seen++) {
@@ -404,6 +442,10 @@ final class SieveResolver {
   /**
    * Runs one sieve: for each anaphor that heads its own cluster, links the first
    * candidate antecedent in salience order that passes the link test.
+   *
+   * @param anaphor The anaphor predicate.
+   * @param window The preceding-sentence limit.
+   * @param link The pair predicate.
    */
   private void pass(IntPredicate anaphor, int window, Link link) {
     for (int j = 0; j < mentions.size(); j++) {
@@ -424,7 +466,12 @@ final class SieveResolver {
     }
   }
 
-  /** {@return whether a pronoun is reflexive, so its antecedent shares its sentence} */
+  /**
+   * Checks whether a mention is a reflexive pronoun.
+   *
+   * @param mention The mention.
+   * @return Whether it is a reflexive pronoun.
+   */
   private boolean reflexive(Mention mention) {
     return mention.pronoun()
         && (mention.head().endsWith("self") || mention.head().endsWith("selves"));
@@ -434,6 +481,11 @@ final class SieveResolver {
    * Orders the candidate antecedents of an anaphor: the same sentence left to right,
    * then each preceding sentence within the window, nearest first, read right to left
    * for a pronoun and left to right otherwise.
+   *
+   * @param j The anaphor index.
+   * @param mention The anaphor.
+   * @param window The preceding-sentence limit.
+   * @return The candidate indexes in salience order.
    */
   private List<Integer> candidates(int j, Mention mention, int window) {
     final List<Integer> ordered = new ArrayList<>();
@@ -457,7 +509,13 @@ final class SieveResolver {
     return ordered;
   }
 
-  /** Links mentions whose normalized text is identical. */
+  /**
+   * Checks whether two mentions have identical normalized text.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether their normalized text is identical.
+   */
   boolean exactMatch(int i, int j) {
     final Mention antecedent = mentions.get(i);
     return !antecedent.pronoun()
@@ -465,7 +523,13 @@ final class SieveResolver {
         && antecedent.normalized().equals(mentions.get(j).normalized());
   }
 
-  /** Links mentions whose text up to and including the head is identical. */
+  /**
+   * Checks whether two mentions have identical text through their heads.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether their text through the head is identical.
+   */
   boolean relaxedStringMatch(int i, int j) {
     final Mention antecedent = mentions.get(i);
     return !antecedent.pronoun()
@@ -473,7 +537,13 @@ final class SieveResolver {
         && antecedent.headPrefix().equals(mentions.get(j).headPrefix());
   }
 
-  /** Links a proper name to its acronym in either direction. */
+  /**
+   * Checks whether one proper name is the acronym of another.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether one proper name is the other's acronym.
+   */
   boolean acronym(int i, int j) {
     final Mention antecedent = mentions.get(i);
     final Mention anaphor = mentions.get(j);
@@ -484,6 +554,10 @@ final class SieveResolver {
   /**
    * Checks whether a one-token uppercase mention spells the initials of the capitalized
    * words of a multi-word mention.
+   *
+   * @param candidate The possible acronym.
+   * @param name The possible expanded name.
+   * @return Whether the candidate spells the name's initials.
    */
   private boolean acronymOf(Mention candidate, Mention name) {
     if (candidate.firstToken() < 0 || candidate.firstToken() != candidate.lastToken()
@@ -491,22 +565,28 @@ final class SieveResolver {
       return false;
     }
     final String acronym = forms[candidate.firstToken()];
-    if (acronym.length() < 2) {
+    if (acronym.codePointCount(0, acronym.length()) < 2) {
       return false;
     }
-    for (int c = 0; c < acronym.length(); c++) {
-      if (!Character.isUpperCase(acronym.charAt(c))) {
+    for (int c = 0; c < acronym.length();) {
+      final int codePoint = acronym.codePointAt(c);
+      if (!Character.isUpperCase(codePoint)) {
         return false;
       }
+      c += Character.charCount(codePoint);
     }
     final StringBuilder initials = new StringBuilder();
     for (int t = name.firstToken(); t <= name.lastToken(); t++) {
       final String form = forms[t];
-      if (!form.isEmpty() && Character.isUpperCase(form.charAt(0))) {
-        initials.append(form.charAt(0));
+      if (!form.isEmpty()) {
+        final int codePoint = form.codePointAt(0);
+        if (Character.isUpperCase(codePoint)) {
+          initials.appendCodePoint(codePoint);
+        }
       }
     }
-    return initials.length() >= 2 && initials.toString().equals(acronym);
+    return initials.codePointCount(0, initials.length()) >= 2
+        && initials.toString().equals(acronym);
   }
 
   /**
@@ -514,6 +594,10 @@ final class SieveResolver {
    * or ends with it, so a surname or first name finds the full name. Both mentions must
    * be typed as people; place and organization names, where a shared word need not mean
    * a shared referent, never take this link.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether the two person names are compatible short and long forms.
    */
   boolean personName(int i, int j) {
     final Mention antecedent = mentions.get(i);
@@ -532,11 +616,22 @@ final class SieveResolver {
             || longer.get(longer.size() - 1).equals(shorter.get(0)));
   }
 
+  /**
+   * Checks whether an entity type is configured as a person type.
+   *
+   * @param type The entity type, or {@code null}.
+   * @return Whether it is configured as a person type.
+   */
   private boolean personType(String type) {
     return type != null && personTypes.contains(type);
   }
 
-  /** {@return a name's words without leading titles} */
+  /**
+   * Reads the words of a name after any leading title.
+   *
+   * @param mention The name mention.
+   * @return Its words without leading titles.
+   */
   private List<String> nameWords(Mention mention) {
     final List<String> words = mention.words();
     int start = 0;
@@ -551,6 +646,12 @@ final class SieveResolver {
    * requiring that every content word of the anaphor's cluster appears in the
    * candidate's cluster and that every modifier of the anaphor appears in the candidate
    * mention.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @param wordInclusion Whether to require cluster word inclusion.
+   * @param compatibleModifiers Whether to require anaphor modifier inclusion.
+   * @return Whether the mentions satisfy the requested head test.
    */
   boolean strictHeadMatch(int i, int j, boolean wordInclusion,
       boolean compatibleModifiers) {
@@ -565,7 +666,13 @@ final class SieveResolver {
     return !compatibleModifiers || modifiersAppearIn(anaphor, antecedent);
   }
 
-  /** Checks whether every non-stop word before the anaphor's head is in the antecedent. */
+  /**
+   * Checks whether all content modifiers of an anaphor occur in an antecedent.
+   *
+   * @param anaphor The anaphor.
+   * @param antecedent The antecedent.
+   * @return Whether every content modifier before the anaphor's head occurs in the antecedent.
+   */
   private boolean modifiersAppearIn(Mention anaphor, Mention antecedent) {
     final List<String> words = anaphor.words();
     final Set<String> candidateWords = new HashSet<>(antecedent.words());
@@ -586,6 +693,10 @@ final class SieveResolver {
    * that names a kind of place or institution, such as {@code University}, is shared by
    * many distinct names, so there the modifiers of one side must appear in the other:
    * {@code Harvard University} never finds {@code Stanford University}.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether the proper names satisfy the head and modifier checks.
    */
   boolean properHeadMatch(int i, int j) {
     final Mention antecedent = mentions.get(i);
@@ -601,16 +712,29 @@ final class SieveResolver {
         || modifiersAppearIn(antecedent, anaphor);
   }
 
+  /**
+   * Checks whether two mentions contain different numeric modifiers.
+   *
+   * @param a The first mention.
+   * @param b The second mention.
+   * @return Whether both contain different numeric modifiers.
+   */
   private boolean numbersDiffer(Mention a, Mention b) {
     final Set<String> numbersA = numerals(a);
     final Set<String> numbersB = numerals(b);
     return !numbersA.isEmpty() && !numbersB.isEmpty() && !numbersA.equals(numbersB);
   }
 
+  /**
+   * Reads the numeric modifiers of a mention.
+   *
+   * @param mention The mention.
+   * @return Its words that begin with a Unicode digit.
+   */
   private Set<String> numerals(Mention mention) {
     final Set<String> numerals = new HashSet<>();
     for (final String word : mention.words()) {
-      if (!word.isEmpty() && Character.isDigit(word.charAt(0))) {
+      if (!word.isEmpty() && Character.isDigit(word.codePointAt(0))) {
         numerals.add(word);
       }
     }
@@ -622,6 +746,10 @@ final class SieveResolver {
    * in the candidate's cluster and the cluster words include the anaphor's, unless the
    * two names differ by a compound head such as {@code city}, which tells
    * {@code Kansas City} apart from {@code Kansas}.
+   *
+   * @param i The antecedent index.
+   * @param j The anaphor index.
+   * @return Whether the entity mentions satisfy the relaxed head checks.
    */
   boolean relaxedHeadMatch(int i, int j) {
     final Mention antecedent = mentions.get(i);
@@ -635,7 +763,13 @@ final class SieveResolver {
     return !compoundDiffers(antecedent, anaphor) && !compoundDiffers(anaphor, antecedent);
   }
 
-  /** Checks whether one name ends in a compound head the other name lacks. */
+  /**
+   * Checks whether a compound head distinguishes two names.
+   *
+   * @param compound The possible compound name.
+   * @param other The other name.
+   * @return Whether the first name has a compound head absent from the other.
+   */
   private boolean compoundDiffers(Mention compound, Mention other) {
     return CorefLexicon.compoundNameHead(compound.head())
         && !other.words().contains(compound.head());
@@ -644,6 +778,10 @@ final class SieveResolver {
   /**
    * Links a pronoun to the nearest candidate whose cluster agrees in number, gender,
    * animacy, and person and whose entity type the pronoun class accepts.
+   *
+   * @param i The antecedent index.
+   * @param j The pronoun index.
+   * @return Whether the pronoun may refer to the antecedent cluster.
    */
   boolean pronounMatch(int i, int j) {
     if (!clusters.attributesAgree(i, j)) {

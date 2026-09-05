@@ -37,11 +37,14 @@ package opennlp.tools.coref;
 public record CorefScores(Score muc, Score bCubed, Score ceafM, Score ceafE,
     Score mentions, double conll) {
 
+  private static final double DERIVED_TOLERANCE = 1e-12;
+
   /**
    * Validates the scores.
    *
-   * @throws IllegalArgumentException Thrown if a score is {@code null} or {@code conll}
-   *         lies outside {@code [0, 1]}.
+   * @throws IllegalArgumentException Thrown if a score is {@code null}, {@code conll}
+   *         lies outside {@code [0, 1]}, or it is not the mean of the MUC, B-cubed,
+   *         and entity-based CEAF F1 scores.
    */
   public CorefScores {
     if (muc == null || bCubed == null || ceafM == null || ceafE == null
@@ -50,6 +53,11 @@ public record CorefScores(Score muc, Score bCubed, Score ceafM, Score ceafE,
     }
     if (!(conll >= 0.0 && conll <= 1.0)) {
       throw new IllegalArgumentException("conll must lie in [0, 1]: " + conll);
+    }
+    final double expected = (muc.f1() + bCubed.f1() + ceafE.f1()) / 3.0;
+    if (Math.abs(conll - expected) > DERIVED_TOLERANCE) {
+      throw new IllegalArgumentException(
+          "conll must equal the coreference F1 average: " + expected);
     }
   }
 
@@ -67,12 +75,18 @@ public record CorefScores(Score muc, Score bCubed, Score ceafM, Score ceafE,
     /**
      * Validates the triple.
      *
-     * @throws IllegalArgumentException Thrown if a value lies outside {@code [0, 1]}.
+     * @throws IllegalArgumentException Thrown if a value lies outside {@code [0, 1]} or
+     *         {@code f1} is not the harmonic mean of precision and recall.
      */
     public Score {
       requireUnit(precision, "precision");
       requireUnit(recall, "recall");
       requireUnit(f1, "f1");
+      final double expected = harmonicMean(precision, recall);
+      if (Math.abs(f1 - expected) > DERIVED_TOLERANCE) {
+        throw new IllegalArgumentException(
+            "f1 must equal the harmonic mean of precision and recall: " + expected);
+      }
     }
 
     /**
@@ -89,17 +103,34 @@ public record CorefScores(Score muc, Score bCubed, Score ceafM, Score ceafE,
         double recallNumerator, double recallDenominator) {
       final double precision = ratio(precisionNumerator, precisionDenominator);
       final double recall = ratio(recallNumerator, recallDenominator);
-      final double f1 = precision + recall == 0.0
-          ? 0.0 : 2.0 * precision * recall / (precision + recall);
+      final double f1 = harmonicMean(precision, recall);
       return new Score(precision, recall, f1);
     }
 
-    /** Divides, mapping an empty denominator to zero. */
+    /** Returns the harmonic mean of precision and recall. */
+    private static double harmonicMean(double precision, double recall) {
+      return precision + recall == 0.0
+          ? 0.0 : 2.0 * precision * recall / (precision + recall);
+    }
+
+    /**
+     * Divides a numerator by its denominator.
+     *
+     * @param numerator The numerator.
+     * @param denominator The denominator.
+     * @return The quotient, or zero for a zero denominator.
+     */
     private static double ratio(double numerator, double denominator) {
       return denominator == 0.0 ? 0.0 : numerator / denominator;
     }
 
-    /** Rejects a value outside the unit interval, NaN included. */
+    /**
+     * Validates a score in the unit interval.
+     *
+     * @param value The score.
+     * @param name The score name.
+     * @throws IllegalArgumentException Thrown if the value is outside the unit interval.
+     */
     private static void requireUnit(double value, String name) {
       if (!(value >= 0.0 && value <= 1.0)) {
         throw new IllegalArgumentException(name + " must lie in [0, 1]: " + value);

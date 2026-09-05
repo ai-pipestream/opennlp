@@ -37,11 +37,10 @@ import opennlp.tools.util.StringUtil;
 
 /**
  * Demonstrates the {@link CorefAnnotator} as the last step of a {@link DocumentAnalyzer}
- * pipeline, with small deterministic stand-ins for the upstream analysis steps. The text
- * repeats a person name and refers back with a gendered and a neutral pronoun, so every
- * sieve participates: name containment links the bare surname to the full name, and the
- * pronoun sieve attaches {@code She} to the person chain and {@code its} to the
- * organization chain.
+ * pipeline, with deterministic upstream annotations. The text repeats a person name and
+ * refers back with a gendered and a neutral pronoun. Name containment links the bare
+ * surname to the full name, and pronoun resolution attaches {@code She} to the person
+ * chain and {@code its} to the organization chain.
  */
 public class CorefPipelineExampleTest {
 
@@ -49,7 +48,7 @@ public class CorefPipelineExampleTest {
   private static final String TEXT =
       "Ada Lovelace advised Orion Labs. Lovelace saw its potential. She was right.";
 
-  /** The lowercased token forms the stub tagger labels with the {@code PRON} tag. */
+  /** The lowercased token forms the test tagger labels with the {@code PRON} tag. */
   private static final Set<String> PRONOUN_FORMS = Set.of("she", "her", "it", "its", "they");
 
   /**
@@ -140,8 +139,7 @@ public class CorefPipelineExampleTest {
   }
 
   /**
-   * Provides {@link Layers#ENTITIES} from a fixed list, standing in for a name finder
-   * whose output is known up front.
+   * Provides {@link Layers#ENTITIES} from a fixed list.
    */
   private static final class FixedEntityAnnotator implements DocumentAnnotator {
 
@@ -182,9 +180,8 @@ public class CorefPipelineExampleTest {
   }
 
   /**
-   * A {@link TokenNameFinder} standing in for a single-type model: it locates fixed
-   * token sequences and returns their spans without a type, the way an untyped model
-   * reports its findings.
+   * A deterministic {@link TokenNameFinder} for a single entity type. It locates fixed
+   * token sequences and returns the untyped spans reported by such a model.
    */
   private static final class UntypedLexiconNameFinder implements TokenNameFinder {
 
@@ -274,7 +271,7 @@ public class CorefPipelineExampleTest {
    * @throws IllegalStateException Thrown if the surface form does not occur at or after
    *         {@code from}.
    */
-  private static Annotation<String> entity(String text, String surface, int from, String type) {
+  private Annotation<String> entity(String text, String surface, int from, String type) {
     final int start = text.indexOf(surface, from);
     if (start < 0) {
       throw new IllegalStateException("surface form not found: " + surface);
@@ -289,7 +286,7 @@ public class CorefPipelineExampleTest {
    * @param mention The annotation to read.
    * @return The covered text. Never {@code null}.
    */
-  private static String surface(Document document, Annotation<CorefMention> mention) {
+  private String surface(Document document, Annotation<CorefMention> mention) {
     return document.text().subSequence(
         mention.span().getStart(), mention.span().getEnd()).toString();
   }
@@ -301,7 +298,7 @@ public class CorefPipelineExampleTest {
    * @param chains The chains layer of that document.
    * @return The covered texts in layer order. Never {@code null}.
    */
-  private static List<String> surfaces(Document document, List<Annotation<CorefMention>> chains) {
+  private List<String> surfaces(Document document, List<Annotation<CorefMention>> chains) {
     final List<String> surfaces = new ArrayList<>(chains.size());
     for (final Annotation<CorefMention> mention : chains) {
       surfaces.add(surface(document, mention));
@@ -317,7 +314,7 @@ public class CorefPipelineExampleTest {
    * @param chain The chain identifier to collect.
    * @return The covered texts of that chain's mentions. Never {@code null}.
    */
-  private static List<String> chainSurfaces(Document document,
+  private List<String> chainSurfaces(Document document,
       List<Annotation<CorefMention>> chains, int chain) {
     final List<String> surfaces = new ArrayList<>();
     for (final Annotation<CorefMention> mention : chains) {
@@ -368,15 +365,7 @@ public class CorefPipelineExampleTest {
         chainSurfaces(document, chains, 1));
   }
 
-  /**
-   * Runs the pipeline with an untyped name finder behind a {@link NameFinderAnnotator},
-   * so every entity carries {@link NameFinderAnnotator#UNTYPED}. The coreference
-   * annotator treats that label as an unknown type: the recurring name still chains
-   * through head match, and the neutral pronoun links to the nearest preceding entity
-   * mention. That marks its chain as neutral, so the gendered pronoun passes it over for
-   * the other untyped entity instead of staying a singleton; no name is read for a
-   * gender when its type is unknown.
-   */
+  /** Resolves a feminine pronoun when the name finder supplies no entity types. */
   @Test
   void testUntypedEntitiesResolvePronouns() {
     final String text =
@@ -396,12 +385,13 @@ public class CorefPipelineExampleTest {
     Assertions.assertEquals(5, chains.size());
     Assertions.assertEquals(List.of("Ada Lovelace", "Orion Labs", "Lovelace", "its", "She"),
         surfaces(document, chains));
-    Assertions.assertArrayEquals(new int[] {0, 1, 0, 0, 1},
+    Assertions.assertArrayEquals(new int[] {0, 1, 0, 2, 0},
         chains.stream().mapToInt(a -> a.value().chain()).toArray());
-    Assertions.assertEquals(List.of("Ada Lovelace", "Lovelace", "its"),
+    Assertions.assertEquals(List.of("Ada Lovelace", "Lovelace", "She"),
         chainSurfaces(document, chains, 0));
-    Assertions.assertEquals(List.of("Orion Labs", "She"),
+    Assertions.assertEquals(List.of("Orion Labs"),
         chainSurfaces(document, chains, 1));
+    Assertions.assertEquals(List.of("its"), chainSurfaces(document, chains, 2));
   }
 
   /**

@@ -20,16 +20,12 @@ package opennlp.tools.coref;
 import opennlp.tools.util.StringUtil;
 
 /**
- * One mention in a coreference chain: the chain it belongs to, what kind of mention it
- * is, and, for mentions lifted from the entity layer, the index of the entity it came
- * from.
+ * One mention in a coreference chain, including its kind and optional source entity.
  *
- * <p>Chains are numbered from zero in order of their first mention in the text. A chain
- * of size one is a mention that found no coreferent partner; it is kept so no mention is
- * lost, and consumers interested only in links filter by chain size. The kind is an open
- * string so resolvers can introduce new mention kinds without an API change; the
- * constants on this record name the kinds the built-in resolver reports. Entities are
- * referenced by their index in the entity layer, never by object identity.</p>
+ * <p>Chain identifiers start at zero in first-mention order. Singleton chains preserve
+ * mentions without a coreferent partner. The kind is an open string; the constants on
+ * this record name the kinds produced by {@code CorefAnnotator}. An entity-backed
+ * mention refers to its entity by layer index.</p>
  *
  * @param chain The chain identifier. Must not be negative.
  * @param kind The mention kind, for example {@link #KIND_ENTITY}. Must not be
@@ -53,7 +49,7 @@ public record CorefMention(int chain, String kind, int entity) {
   /** A pronoun mention. */
   public static final String KIND_PRONOUN = "pronoun";
 
-  /** A mention read from a corpus annotation rather than detected. */
+  /** A mention read from a corpus annotation instead of detected from text. */
   public static final String KIND_GOLD = "gold";
 
   /** The entity index of a mention that is not backed by an entity. */

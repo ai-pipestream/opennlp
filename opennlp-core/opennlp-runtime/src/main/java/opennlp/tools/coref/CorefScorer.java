@@ -37,13 +37,13 @@ import opennlp.tools.coref.CorefScores.Score;
  * <p>A partition is a collection of entities, each a set of mentions; mentions are
  * matched between key and response by {@link Object#equals(Object)}, so any value that
  * identifies a mention, typically its span, can serve. No mention is added to or removed
- * from either side: a response mention with no key twin costs precision and a key
- * mention with no response twin costs recall, exactly as the original metrics define.
+ * from either side: an unmatched response mention costs precision and an unmatched key
+ * mention costs recall, as the original metrics define.
  * Singleton entities are scored when present and should be dropped by the caller when
  * the key convention excludes them, as OntoNotes does.</p>
  *
  * <p>Each document adds its numerators and denominators to running sums, so the scores
- * over a corpus are the reference scorer's corpus-level figures rather than an average
+ * over a corpus are the reference scorer's corpus-level figures, not an average
  * of per-document scores. The scorer is not thread-safe.</p>
  *
  * @since 3.0.0
@@ -63,6 +63,10 @@ public final class CorefScorer {
   private long keyMentions;
   private long responseMentions;
   private long matchedMentions;
+
+  /** Creates an empty scorer. */
+  public CorefScorer() {
+  }
 
   /**
    * Adds one document's partitions.
@@ -169,21 +173,27 @@ public final class CorefScorer {
     double numerator = 0.0;
     for (final Set<M> entity : entities) {
       final Set<Integer> parts = new HashSet<>();
-      int twinless = 0;
+      int unmatched = 0;
       for (final M mention : entity) {
         final Integer other = otherEntityOf.get(mention);
         if (other == null) {
-          twinless++;
+          unmatched++;
         } else {
           parts.add(other);
         }
       }
-      numerator += entity.size() - parts.size() - twinless;
+      numerator += entity.size() - parts.size() - unmatched;
     }
     return numerator;
   }
 
-  /** Sums the entity sizes minus one, the number of links each entity carries. */
+  /**
+   * Computes the MUC denominator of a partition.
+   *
+   * @param entities The partition entities.
+   * @param <M> The mention type.
+   * @return The sum of each entity size minus one.
+   */
   private <M> double mucDenominator(List<Set<M>> entities) {
     double denominator = 0.0;
     for (final Set<M> entity : entities) {
@@ -192,7 +202,14 @@ public final class CorefScorer {
     return denominator;
   }
 
-  /** Builds the matrix of mention overlaps between key and response entities. */
+  /**
+   * Counts the mentions shared by each key and response entity pair.
+   *
+   * @param keys The key entities.
+   * @param responses The response entities.
+   * @param <M> The mention type.
+   * @return The mention overlap of every key and response entity pair.
+   */
   private <M> double[][] overlaps(List<Set<M>> keys, List<Set<M>> responses) {
     final double[][] overlap = new double[keys.size()][responses.size()];
     for (int i = 0; i < keys.size(); i++) {

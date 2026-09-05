@@ -24,6 +24,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.coref.CorefAnnotator;
 import opennlp.tools.coref.CorefMention;
@@ -59,7 +61,7 @@ public class ConlluCorefDocumentStreamTest {
       3\t.\t.\tPUNCT\t.\t_\t2\tpunct\t_\t_
       """;
 
-  private static ConlluCorefDocumentStream stream(String conllu, ConlluTagset tagset)
+  private ConlluCorefDocumentStream stream(String conllu, ConlluTagset tagset)
       throws IOException {
     return new ConlluCorefDocumentStream(
         () -> new ByteArrayInputStream(conllu.getBytes(StandardCharsets.UTF_8)), tagset);
@@ -116,6 +118,36 @@ public class ConlluCorefDocumentStreamTest {
   }
 
   @Test
+  void testSpaceAfterRequiresTheExactMiscKey() throws IOException {
+    final String conllu = "1\tAcme\tAcme\tPROPN\tNNP\t_\t2\tnsubj\t_\tNotSpaceAfter=No\n"
+        + "2\tgrew\tgrow\tVERB\tVBD\t_\t0\troot\t_\t_\n";
+    try (ConlluCorefDocumentStream stream = stream(conllu, ConlluTagset.X)) {
+      Assertions.assertEquals("Acme grew", stream.read().text());
+    }
+  }
+
+  @Test
+  void testRejectsEmptyEntityAttribute() throws IOException {
+    final String conllu = "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=\n";
+    try (ConlluCorefDocumentStream stream = stream(conllu, ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, stream::read);
+    }
+  }
+
+  @Test
+  void testSkipsEmptyNodeRows() throws IOException {
+    final String emptyNode = "0.1\thad\thave\tAUX\tVBD\t_\t_\t_\t_\t_\n"
+        + "1\tspoke\tspeak\tVERB\tVBD\t_\t0\troot\t_\t_\n"
+        + "1.1\thad\thave\tAUX\tVBD\t_\t_\t_\t_\t_\n";
+    try (ConlluCorefDocumentStream stream = stream(emptyNode, ConlluTagset.X)) {
+      final Document document = stream.read();
+      Assertions.assertEquals("spoke", document.text());
+      Assertions.assertEquals(List.of("spoke"),
+          document.get(Layers.TOKENS).stream().map(Annotation::value).toList());
+    }
+  }
+
+  @Test
   void testDiscontinuousMentionPartsJoinTheirEntity() throws IOException {
     final String parts = "1\tKim\tKim\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(e5[1/2]-person-1)\n"
         + "2\tand\tand\tCCONJ\tCC\t_\t3\tcc\t_\t_\n"
@@ -129,6 +161,33 @@ public class ConlluCorefDocumentStreamTest {
   }
 
   @Test
+  void testNestedEntitiesAreNumberedByFirstMentionStart() throws IOException {
+    final String nested = "1\tThe\tthe\tDET\tDT\t_\t2\tdet\t_\tEntity=(outer\n"
+        + "2\tcompany\tcompany\tNOUN\tNN\t_\t3\tnsubj\t_\tEntity=(inner)\n"
+        + "3\tgrew\tgrow\tVERB\tVBD\t_\t0\troot\t_\tEntity=outer)\n";
+    try (ConlluCorefDocumentStream stream = stream(nested, ConlluTagset.X)) {
+      final List<Annotation<CorefMention>> chains =
+          stream.read().get(CorefAnnotator.GOLD_CHAINS);
+      Assertions.assertEquals(new Span(0, 16), chains.get(0).span());
+      Assertions.assertEquals(0, chains.get(0).value().chain());
+      Assertions.assertEquals(new Span(4, 11), chains.get(1).span());
+      Assertions.assertEquals(1, chains.get(1).value().chain());
+    }
+  }
+
+  @Test
+  void testSkipsDocumentBlockWithoutTokens() throws IOException {
+    final String withEmptyBlock = "# newdoc id = metadata-only\n"
+        + "# text = no token rows follow\n"
+        + "# newdoc id = actual\n"
+        + "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(3)\n";
+    try (ConlluCorefDocumentStream stream = stream(withEmptyBlock, ConlluTagset.X)) {
+      Assertions.assertEquals("Acme", stream.read().text());
+      Assertions.assertNull(stream.read());
+    }
+  }
+
+  @Test
   void testRejectsUnbalancedBracketsAndShortLines() throws IOException {
     try (ConlluCorefDocumentStream open = stream(
         "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(3\n", ConlluTagset.X)) {
@@ -138,8 +197,71 @@ public class ConlluCorefDocumentStreamTest {
         "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=3)\n", ConlluTagset.X)) {
       Assertions.assertThrows(InvalidFormatException.class, closed::read);
     }
+    try (ConlluCorefDocumentStream missingClose = stream(
+        "1\tAcme\tAcme\tPROPN\tNNP\t_\t2\tnsubj\t_\tEntity=(3\n"
+            + "2\tgrew\tgrow\tVERB\tVBD\t_\t0\troot\t_\tEntity=3\n",
+        ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, missingClose::read);
+    }
+    try (ConlluCorefDocumentStream acrossSentences = stream(
+        "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=(3\n\n"
+            + "1\tIt\tit\tPRON\tPRP\t_\t0\troot\t_\tEntity=3)\n",
+        ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, acrossSentences::read);
+    }
     try (ConlluCorefDocumentStream shortLine = stream("1\tAcme\n", ConlluTagset.X)) {
       Assertions.assertThrows(InvalidFormatException.class, shortLine::read);
+    }
+    try (ConlluCorefDocumentStream longLine = stream(
+        "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\t_\textra\n", ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, longLine::read);
+    }
+    try (ConlluCorefDocumentStream emptyId = stream(
+        "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\tEntity=()\n", ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, emptyId::read);
+    }
+  }
+
+  @Test
+  void testRejectsEmptyColumnsAndSpeakerLabels() throws IOException {
+    try (ConlluCorefDocumentStream emptyForm = stream(
+        "1\t\t_\tPROPN\tNNP\t_\t0\troot\t_\t_\n", ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, emptyForm::read);
+    }
+    try (ConlluCorefDocumentStream emptyTag = stream(
+        "1\tAcme\t_\tPROPN\t\t_\t0\troot\t_\t_\n", ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, emptyTag::read);
+    }
+    try (ConlluCorefDocumentStream emptySpeaker = stream(
+        "# speaker =   \n1\tAcme\t_\tPROPN\tNNP\t_\t0\troot\t_\t_\n",
+        ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, emptySpeaker::read);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "word", "0", "01", "1.0", "01.1", "1.01", "1.1.1",
+      "1-1", "2-1", "0-1", "1-0", "1--2"
+  })
+  void testRejectsMalformedWordIds(String id) throws IOException {
+    try (ConlluCorefDocumentStream stream = stream(
+        id + "\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\t_\n", ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, stream::read);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "2\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\t_\n",
+      "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\t_\n"
+          + "1\tgrew\tgrow\tVERB\tVBD\t_\t0\troot\t_\t_\n",
+      "1\tAcme\tAcme\tPROPN\tNNP\t_\t0\troot\t_\t_\n"
+          + "3\tgrew\tgrow\tVERB\tVBD\t_\t0\troot\t_\t_\n"
+  })
+  void testRejectsNonconsecutiveWordIds(String conllu) throws IOException {
+    try (ConlluCorefDocumentStream stream = stream(conllu, ConlluTagset.X)) {
+      Assertions.assertThrows(InvalidFormatException.class, stream::read);
     }
   }
 
