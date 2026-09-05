@@ -47,10 +47,10 @@ public record WnLmfDependency(String ref, String version, Optional<String> url) 
       throw new IllegalArgumentException("version must not be null or empty");
     }
     if (url == null) {
-      throw new IllegalArgumentException("Url must not be null; use Optional.empty()");
+      throw new IllegalArgumentException("url must not be null; use Optional.empty()");
     }
     if (url.isPresent() && url.get().isEmpty()) {
-      throw new IllegalArgumentException("Url must not contain an empty value");
+      throw new IllegalArgumentException("url must not contain an empty value");
     }
   }
 
