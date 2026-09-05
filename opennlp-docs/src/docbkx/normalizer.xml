@@ -170,6 +170,13 @@
 							eszett to <code>ss</code>; DIN 5007-2).</entry>
 					</row>
 					<row>
+						<entry><code>EnglishContractionCharSequenceNormalizer</code></entry>
+						<entry>Expands unambiguous English contractions into words while preserving
+							source offsets: <code>can't</code> becomes <code>can not</code> and
+							<code>we're</code> becomes <code>we are</code>. Ambiguous <code>'s</code>,
+							<code>'d</code>, and <code>ain't</code> forms remain unchanged.</entry>
+					</row>
+					<row>
 						<entry><code>ConfusableSkeletonCharSequenceNormalizer</code></entry>
 						<entry>Reduces lookalike characters to a confusable skeleton for matching
 							(UTS #39); see below.</entry>
@@ -199,7 +206,7 @@
 String clean = ws.normalize("a 　b").toString();   // "a b"
 
 String hyphen = DashCharSequenceNormalizer.getInstance()
-    .normalize("state—of–the‐art").toString(); // "state-of-the-art"]]>
+    .normalize("state\u2014of–the‐art").toString(); // "state-of-the-art"]]>
 		</programlisting>
 	</section>
 
@@ -217,6 +224,24 @@ String hyphen = DashCharSequenceNormalizer.getInstance()
     .build();
 
 String term = pipeline.normalize("CAFÉ").toString();   // "cafe"]]>
+		</programlisting>
+		<para>
+			English contraction expansion is opt-in. A supported contraction must occupy
+			a complete word under the default
+			<ulink url="https://www.unicode.org/reports/tr29/#Word_Boundaries">UAX #29 word boundaries</ulink>.
+			Quoted contractions expand without changing their surrounding quotes.
+			Text such as <code>_can't</code>, <code>can't1</code>, and <code>can't've</code>
+			is not expanded. Use an offset-aware pipeline to report source spans:
+		</para>
+		<programlisting language="java">
+<![CDATA[OffsetAwareNormalizer english = TextNormalizer.builder()
+    .englishContractions()
+    .buildAligned();
+
+AlignedText expanded = english.normalizeAligned("we 'can't' leave");
+// expanded.normalizedString() is "we 'can not' leave"
+Span source = expanded.toOriginalSpan(4, 11);
+// source is [4..9), covering "can't" in the original text]]>
 		</programlisting>
 		<para>
 			A conservative search-oriented chain (strip invisibles, NFC, collapse whitespace, fold
@@ -256,11 +281,11 @@ String t = chain.normalize("﻿“CafÉ”").toString();   // "\"cafe\""]]>
     .dashes()
     .buildAligned();
 
-String original = "find   the—match";
+String original = "find   the\u2014match";
 AlignedText aligned = pipeline.normalizeAligned(original);
 // aligned.normalized()                ->  "find the-match"
 Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized text
-// hit.getCoveredText(original)         ->  "the—match"   (back to the source, em dash and all)]]>
+// hit.getCoveredText(original)         ->  "the\u2014match"]]>
 		</programlisting>
 		<para>
 			<code>OffsetAwareNormalizer</code> is a capability interface: it extends
@@ -400,7 +425,7 @@ CharClass dash = CharClass.dashes();      // Unicode Dash (curated) -> U+002D
 ws.collapse("a   b");                      // "a b"          (runs -> one space)
 ws.trim("  hi  ");                         // "hi"
 String[] tokens = ws.split("one two"); // ["one", "two"]  (offset-aware via splitSpans)
-dash.normalize("a—b");                // "a-b"]]>
+dash.normalize("a\u2014b");            // "a-b"]]>
 		</programlisting>
 		<para>
 			A class applies its replacement three ways, which differ in whether they collapse runs and
