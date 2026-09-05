@@ -34,28 +34,15 @@ import opennlp.tools.util.normalizer.Dimension;
 import opennlp.tools.util.normalizer.EnglishContractionCharSequenceNormalizer;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
+import static opennlp.tools.glossary.GlossaryTestSupport.englishStemmingAnalyzer;
+
 /**
- * Pins token-normalized glossary matching: inflected surfaces hit dictionary forms
- * while spans stay on the original text.
+ * Tests token-normalized glossary matching and source offsets.
  */
 public class TermAnalyzingGlossaryMatcherTest {
 
   /**
-   * Builds the analyzer shared by the English inflection cases.
-   *
-   * @return A case-folding English stemming analyzer.
-   */
-  private TermAnalyzer englishStemmingAnalyzer() {
-    return TermAnalyzer.builder()
-        .caseFold()
-        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
-        .build();
-  }
-
-  /**
-   * Exact reproduction for issue #2: a glossary term {@code hot dog} must match source
-   * text {@code hot dogs} and return the original {@code hot dogs} span. The character
-   * Aho-Corasick matcher cannot do this; stemming through {@link TermAnalyzer} can.
+   * Matches the plural form of a registered phrase using English stemming.
    */
   @Test
   void testHotDogMatchesHotDogsWithOriginalPluralSpan() {
@@ -74,8 +61,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * The same reproduction embedded in a sentence: the span covers only the inflected
-   * multiword mention, not the surrounding tokens.
+   * Excludes surrounding words from an inflected phrase match.
    */
   @Test
   void testHotDogMatchesHotDogsInsideSentence() {
@@ -92,8 +78,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Pins that the exact character matcher still misses the plural, so the inflection
-   * path is not accidental overlap with literal matching.
+   * Confirms that character matching does not perform stemming.
    */
   @Test
   void testExactMatcherStillMissesInflectedHotDogs() {
@@ -104,8 +89,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Mixed-case inflected surfaces still match when the analyzer case-folds before
-   * stemming, and the span covers the original casing.
+   * Returns the mixed-case source span after case normalization and stemming.
    */
   @Test
   void testMixedCaseInflectedSurfaceKeepsOriginalSpan() {
@@ -120,8 +104,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * A plural registration matches a singular surface through the same stem, with the
-   * singular original span.
+   * Matches a singular source phrase registered in plural form.
    */
   @Test
   void testPluralGlossaryTermMatchesSingularSurface() {
@@ -137,7 +120,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Longer stemmed phrases win over shorter overlapping ones, leftmost first.
+   * Selects the longest stemmed phrase at a shared start offset.
    */
   @Test
   void testLongestStemmedPhraseWins() {
@@ -154,7 +137,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Two non-overlapping stemmed hits keep text order.
+   * Reports separate stemmed phrases in source order.
    */
   @Test
   void testMultipleStemmedHitsPreserveOrder() {
@@ -174,7 +157,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Empty text and a miss return empty lists; null text fails loud.
+   * Accepts empty input and rejects null input.
    */
   @Test
   void testEmptyMissAndNullText() {
@@ -203,10 +186,9 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Pins the separator semantics: the UAX #29 word tokenizer drops punctuation, so a
-   * hyphenated compound, a comma-separated pair, a slash, parentheses, and even a
-   * sentence-crossing spelling all present the token sequence {@code hot dog}, and the
-   * reported span covers the separators between the matched tokens.
+   * Includes separators between matching word tokens in the source span.
+   *
+   * @param surface The phrase with punctuation between words.
    */
   @ParameterizedTest
   @ValueSource(strings = {"hot-dogs", "hot, dogs", "hot/dogs", "hot (dogs)", "hot. Dogs"})
@@ -221,14 +203,12 @@ public class TermAnalyzingGlossaryMatcherTest {
     final Span span = matches.get(0).span();
     final String covered = text.substring(span.getStart(), span.getEnd());
     Assertions.assertTrue(covered.startsWith("hot"), covered);
-    // The span ends at the last matched token's end, so a trailing parenthesis
-    // stays outside while every separator between the tokens is covered.
+    // A trailing parenthesis is outside the final word token.
     Assertions.assertTrue(covered.endsWith("dogs") || covered.endsWith("Dogs"), covered);
   }
 
   /**
-   * Two entries that analyze to the same token sequence keep first-wins registration
-   * order, mirroring the exact matcher's duplicate rule.
+   * Uses registration order when stemming makes phrases equal.
    */
   @Test
   void testFirstWinsForDuplicateAnalyzedPatterns() {
@@ -243,20 +223,20 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * An analyzer configured with {@link Dimension#LEMMA} is rejected at construction:
-   * lemmas need part-of-speech tags, which {@code analyze(CharSequence)} cannot supply,
-   * so the failure surfaces immediately instead of on the first match call.
+   * Rejects lemmatizing analyzers because plain-text analysis supplies no POS tags.
    */
   @Test
   void testLemmatizingAnalyzerFailsFastAtConstruction() {
     final TermAnalyzer lemmatizing = TermAnalyzer.builder()
         .caseFold()
         .lemmatize(new Lemmatizer() {
+          /** {@inheritDoc} */
           @Override
           public String[] lemmatize(String[] toks, String[] tags) {
             return toks;
           }
 
+          /** {@inheritDoc} */
           @Override
           public List<List<String>> lemmatize(List<String> toks, List<String> tags) {
             throw new UnsupportedOperationException();
@@ -272,9 +252,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * A glossary term with a token that normalizes to blank is rejected at construction,
-   * while a blank-normalizing text token vanishes for matching: its neighbors become
-   * adjacent and a hit spanning the gap covers the vanished surface.
+   * Rejects blank-normalized registration tokens and omits them from input matching.
    */
   @Test
   void testBlankNormalizedTokensRejectInTermsAndVanishInText() {
@@ -303,10 +281,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Pins CJK behavior on the token path: the UAX&#160;#29 tokenizer yields one token per
-   * Han ideograph, so an unspaced Japanese sentence presents Tokyo as two adjacent
-   * tokens and the registered term matches with its exact original span. No stemmer is
-   * involved; case folding alone is enough.
+   * Finds Tokyo using adjacent Han character tokens.
    */
   @Test
   void testUnspacedHanTextMatchesThroughTokenPath() {
@@ -324,10 +299,7 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Pins the katakana limitation on the token path: a katakana run is a single
-   * UAX&#160;#29 token, so a term embedded inside a longer run never matches, while the
-   * same term bounded by other scripts is its own token and does. Splitting inside
-   * katakana runs needs dictionary segmentation, which is out of scope here.
+   * Rejects a partial katakana token and accepts a complete token after Han text.
    */
   @Test
   void testKatakanaRunHidesEmbeddedTermOnTokenPath() {
@@ -346,20 +318,19 @@ public class TermAnalyzingGlossaryMatcherTest {
   }
 
   /**
-   * Pre-tokenization contraction expansion composes with stemming while the reported
-   * span remains on the original contracted and inflected source text.
+   * Maps a match through contraction expansion and stemming to the original phrase.
    */
   @Test
   void testContractionExpansionComposesWithTokenStemming() {
     final TermAnalyzingGlossaryMatcher matcher = new TermAnalyzingGlossaryMatcher(
-        List.of(new GlossaryEntry("ACTION", "can not dog")), englishStemmingAnalyzer(),
+        List.of(new GlossaryEntry("ACTION", "can not ship order")), englishStemmingAnalyzer(),
         EnglishContractionCharSequenceNormalizer.getInstance());
 
-    final String text = "can't dogs";
+    final String text = "can't ship orders";
     final List<GlossaryMatch> matches = matcher.match(text);
 
     Assertions.assertEquals(1, matches.size());
-    Assertions.assertEquals(new Span(0, 10), matches.get(0).span());
+    Assertions.assertEquals(new Span(0, 17), matches.get(0).span());
     Assertions.assertEquals(text,
         text.substring(matches.get(0).span().getStart(), matches.get(0).span().getEnd()));
   }

@@ -17,29 +17,26 @@
 
 package opennlp.tools.glossary;
 
-import java.util.List;
+import opennlp.tools.stemmer.snowball.SnowballStemmer;
+import opennlp.tools.stemmer.snowball.SnowballStemmerFactory;
+import opennlp.tools.util.normalizer.TermAnalyzer;
 
-/**
- * The interface for glossary matchers, which find registered terms, including multiword
- * terms, in a text and report each hit as a {@link GlossaryMatch} with its span in the
- * original text.
- *
- * <p>Thread safety is implementation specific.</p>
- *
- * @see GlossaryEntry
- * @see GlossaryMatch
- * @since 3.0.0
- */
-public interface GlossaryMatcher {
+/** Shared analyzer setup for glossary tests. */
+final class GlossaryTestSupport {
+
+  /** Prevents construction of this test utility. */
+  private GlossaryTestSupport() {
+  }
 
   /**
-   * Finds all glossary hits in a text.
+   * Builds an English stemming analyzer with case normalization.
    *
-   * @param text The text to scan. Must not be {@code null}.
-   * @return The hits in text order, non-overlapping according to
-   *         {@link opennlp.tools.util.Span#intersects(opennlp.tools.util.Span)}.
-   *         Never {@code null}; empty when no registered term occurs in the text.
-   * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
+   * @return The analyzer.
    */
-  List<GlossaryMatch> match(CharSequence text);
+  static TermAnalyzer englishStemmingAnalyzer() {
+    return TermAnalyzer.builder()
+        .caseFold()
+        .stem(new SnowballStemmerFactory(SnowballStemmer.ALGORITHM.ENGLISH))
+        .build();
+  }
 }

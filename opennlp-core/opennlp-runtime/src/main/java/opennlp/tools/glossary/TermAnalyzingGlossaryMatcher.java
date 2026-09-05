@@ -34,49 +34,34 @@ import opennlp.tools.util.normalizer.Term;
 import opennlp.tools.util.normalizer.TermAnalyzer;
 
 /**
- * A {@link GlossaryMatcher} that matches glossary terms after
- * {@link TermAnalyzer} token normalization, so inflected surfaces can hit a
- * dictionary form while reported spans stay on the original text.
+ * Matches glossary terms after {@link TermAnalyzer} token normalization and returns
+ * spans in the original text.
  *
- * <p>Each glossary term and each input text are segmented and normalized by the
- * supplied analyzer (typically case fold plus stem). Matching runs an
- * Aho-Corasick automaton over the sequence of normalized tokens, not over raw
- * characters. A hit covering tokens {@code i} through {@code j} reports the
- * character span from the start of token {@code i} to the end of token {@code j}
- * in the original text, so a registered {@code hot dog} can match {@code hot dogs}
- * and still cover the plural surface.</p>
+ * <p>The analyzer processes both registered terms and input text. An Aho-Corasick
+ * automaton compares normalized tokens. With English stemming, {@code hot dog}
+ * matches {@code hot dogs}; the result covers the plural source phrase.</p>
  *
- * <p>An optional {@link OffsetAwareNormalizer} can expand or fold the whole input
- * before tokenization. The same transform runs over registered terms, and matched token
- * spans map back through its {@link AlignedText}. This supports pre-tokenization edits
- * such as English contraction expansion while preserving original source offsets.</p>
+ * <p>An optional {@link OffsetAwareNormalizer} processes registered terms and input
+ * text before tokenization. The resulting {@link AlignedText} maps matches to source
+ * offsets, including after English contraction expansion.</p>
  *
- * <p>Because the UAX&#160;#29 word tokenizer yields word tokens only, the characters
- * between consecutive tokens do not take part in matching: {@code hot-dogs},
- * {@code hot, dogs}, and even the sentence-crossing {@code hot. Dogs} all present
- * the token sequence {@code hot dog} to the automaton, and the reported span
- * covers the separators between the first and last matched token. Matching
- * hyphenated compounds is intentional; a hit that crosses a sentence boundary is the
- * documented cost, so run sentence-sized inputs when that matters. A text token
- * whose normalized form is blank vanishes for matching, exactly like characters a
- * normalizer deletes on the character path: its neighbors become adjacent, and a
- * hit spanning the gap covers the vanished surface.</p>
+ * <p>Separators between word tokens are ignored during matching. With case normalization
+ * and stemming, {@code hot-dogs}, {@code hot, dogs}, and {@code hot. Dogs} all match
+ * {@code hot dog}. The result includes the separators. Process individual sentences
+ * when matches must not span sentence boundaries. Tokens that normalize to blank are
+ * omitted from input matching but rejected in registered terms.</p>
  *
- * <p>This path is for inflection and other token-level folds that
- * {@link opennlp.tools.util.normalizer.OffsetAwareNormalizer} cannot express.
- * Character-exact and orthographic matching stay on
- * {@link AhoCorasickGlossaryMatcher}, which remains the fast path when no
- * tokenizer or stemmer is required. {@link Dimension#LEMMA} is rejected at
- * construction: lemmas need part-of-speech tags, which
- * {@link TermAnalyzer#analyze(CharSequence)} cannot supply.</p>
+ * <p>Use {@link AhoCorasickGlossaryMatcher} for character matching without tokenization.
+ * {@link Dimension#LEMMA} is rejected at construction: lemmas need part-of-speech tags,
+ * which {@link TermAnalyzer#analyze(CharSequence)} cannot supply.</p>
  *
- * <p>The automaton is built once in the constructor. Each {@link #match(CharSequence)}
- * call re-analyzes the text, allocating one {@link Term} per token plus the hit
- * lists; the matcher itself holds no per-call state and is safe to share across
- * threads when the analyzer and pre-tokenization normalizer are.</p>
+ * <p>The automaton is built at construction. Calls share no mutable matching state.
+ * Concurrent use requires a thread-safe analyzer and pre-tokenization normalizer.</p>
  *
  * @see <a href="https://doi.org/10.1145/360825.360855">Aho, Corasick (1975): Efficient
  *      string matching: An aid to bibliographic search</a>
+ * @see <a href="https://www.unicode.org/reports/tr29/">Unicode Standard Annex #29:
+ *      Unicode Text Segmentation</a>
  * @since 3.0.0
  */
 public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
@@ -233,12 +218,7 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * {@inheritDoc}
-   *
-   * <p>The text is analyzed into tokens, tokens whose normalized form is blank are
-   * dropped, the automaton runs over the remaining normalized forms, and each
-   * surviving hit spans from the first matched token's original start to the last
-   * matched token's original end.</p>
+   * {@inheritDoc} Matches include the source separators between the first and last tokens.
    */
   @Override
   public List<GlossaryMatch> match(CharSequence text) {
@@ -280,9 +260,7 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
    *
    * @param term The registered surface form.
    * @return The normalized tokens in order. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if a token normalizes to blank: an
-   *         invisible pattern element cannot be matched deliberately, so it fails
-   *         loud instead of silently vanishing from the registered phrase.
+   * @throws IllegalArgumentException Thrown if a registered token normalizes to blank.
    */
   private List<String> normalizedTokens(String term) {
     final CharSequence analysisText = preTokenizerNormalizer == null
@@ -321,11 +299,11 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
   }
 
   /**
-   * Resolves overlapping hits leftmost first, then longest token span, then
-   * registration order.
+   * Selects matches by earliest start, longest source span, greatest token count,
+   * then registration order.
    *
    * @param hits The raw hits as {@code {start, end, pattern, tokenLength}} tuples.
-   * @return The surviving hits in text order. Never {@code null}.
+   * @return The accepted matches in text order.
    */
   private List<GlossaryMatch> resolveOverlaps(List<int[]> hits) {
     hits.sort((a, b) -> {
@@ -340,15 +318,6 @@ public final class TermAnalyzingGlossaryMatcher implements GlossaryMatcher {
       }
       return Integer.compare(a[2], b[2]);
     });
-    final List<GlossaryMatch> matches = new ArrayList<>();
-    int lastEnd = 0;
-    for (final int[] hit : hits) {
-      if (hit[0] >= lastEnd) {
-        final GlossaryEntry entry = entries.get(hit[2]);
-        matches.add(new GlossaryMatch(new Span(hit[0], hit[1]), entry.id(), entry.term()));
-        lastEnd = hit[1];
-      }
-    }
-    return matches;
+    return GlossaryMatchSelection.select(hits, entries);
   }
 }

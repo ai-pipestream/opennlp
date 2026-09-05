@@ -24,8 +24,9 @@ import opennlp.tools.util.StringUtil;
  * One glossary hit in a text: the {@link Span} it covers in the original text, the
  * identifier of the matched entry, and the glossary term that matched.
  *
- * <p>The term is the surface form as registered in the glossary; the text covered by the
- * span may differ from it in case when the matcher ignores case.</p>
+ * <p>The term is the registered form. Normalization or case-insensitive matching may
+ * associate it with different source characters. Text inserted by an aligned normalizer
+ * can produce a zero-length source span.</p>
  *
  * @param span The location of the hit in the original text. Must not be {@code null}.
  * @param id The identifier of the matched {@link GlossaryEntry}. Must not be

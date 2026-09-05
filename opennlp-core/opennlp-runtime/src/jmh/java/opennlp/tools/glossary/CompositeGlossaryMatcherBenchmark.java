@@ -78,7 +78,12 @@ public class CompositeGlossaryMatcherBenchmark {
     }
   }
 
-  /** Measures merging two interleaved, disjoint result lists. */
+  /**
+   * Measures merging ordered, non-overlapping result lists.
+   *
+   * @param state The prebuilt delegate results and composite.
+   * @param blackhole The result consumer.
+   */
   @Benchmark
   public void mergeDisjointHits(MatcherState state, Blackhole blackhole) {
     blackhole.consume(state.composite.match(state.text));
