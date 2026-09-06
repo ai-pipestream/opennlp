@@ -38,13 +38,18 @@ import opennlp.tools.geo.PlaceAncestor;
 import opennlp.tools.util.Span;
 
 /**
- * Tests the containment annotator over pre-built locations layers: expandable mentions
- * get their chains on the mention spans, and mentions without a join identifier, an
- * unknown identifier, or an empty chain get no annotation.
+ * Tests containment chains from pre-built location layers.
  */
 public class HierarchyAnnotatorTest {
 
-  private static GazetteerEntry entry(String name, String wofId) {
+  /**
+   * Creates a place record with an optional join identifier.
+   *
+   * @param name The place name.
+   * @param wofId The join identifier, or null to omit the attribute.
+   * @return The place record.
+   */
+  private GazetteerEntry entry(String name, String wofId) {
     final Map<String, AttributeValue> attributes = wofId == null ? Map.of()
         : Map.of(GazetteerEntry.ATTRIBUTE_KEY_WHOSONFIRST,
             new AttributeValue(wofId, "test", "fixture"));
@@ -52,7 +57,8 @@ public class HierarchyAnnotatorTest {
         "US", List.of(), 1000, GazetteerEntry.FEATURE_CLASS_CITY, attributes);
   }
 
-  private static ContainmentSpine spine() {
+  /** @return The neighbourhood, borough and city used by the tests. */
+  private ContainmentSpine spine() {
     return ContainmentSpine.builder()
         .add("85865587", "421205765", "Park Slope", "neighbourhood")
         .add("421205765", "85977539", "Brooklyn", "borough")
@@ -60,6 +66,7 @@ public class HierarchyAnnotatorTest {
         .build();
   }
 
+  /** A resolved mention receives parent places on the original span. */
   @Test
   void testResolvedMentionsExpandIntoTheirChains() {
     final String text = "A stroll through Park Slope.";
@@ -78,6 +85,7 @@ public class HierarchyAnnotatorTest {
         chains.get(0).value().ancestors().stream().map(PlaceAncestor::name).toList());
   }
 
+  /** Missing attributes and unknown identifiers produce no chain. */
   @Test
   void testMentionsWithoutJoinIdOrChainAreOmitted() {
     final String text = "Atlantis and Brooklyn";
@@ -93,11 +101,7 @@ public class HierarchyAnnotatorTest {
     Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
   }
 
-  /**
-   * Asserts that a mention resolving to the top of the hierarchy produces no
-   * containment annotation: the root has zero ancestors, and a chain of zero ancestors
-   * is never emitted, so the containment layer is provided but stays empty.
-   */
+  /** A root place produces a present but empty containment layer. */
   @Test
   void testRootPlaceMentionGetsNoChain() {
     final String text = "New York in one line";
@@ -112,11 +116,7 @@ public class HierarchyAnnotatorTest {
     Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
   }
 
-  /**
-   * Asserts that two mentions of the same place each get their own containment
-   * annotation on their own span, and that the two chains are equal, ancestor for
-   * ancestor.
-   */
+  /** Repeated mentions receive equal chains on distinct spans. */
   @Test
   void testTwoMentionsOfSamePlaceGetTwoIdenticalChains() {
     final String text = "From Park Slope to Park Slope.";
@@ -143,13 +143,7 @@ public class HierarchyAnnotatorTest {
         chains.get(0).value());
   }
 
-  /**
-   * Asserts the one-chain-per-mention contract against the several annotations a
-   * multi-candidate mention carries in the locations layer: the mention gets exactly one
-   * containment annotation, built from the first candidate of the layer, which is the
-   * geocoder's best, and the contradicting chain of a lower-ranked candidate is not
-   * emitted.
-   */
+  /** The first candidate determines the chain for a mention. */
   @Test
   void testMultiCandidateMentionGetsOneChainFromTheBestCandidate() {
     final String text = "A week in Paris.";
@@ -178,12 +172,7 @@ public class HierarchyAnnotatorTest {
         chains.get(0).value());
   }
 
-  /**
-   * Asserts that the best candidate alone decides a mention's chain: when the first
-   * candidate of a multi-candidate mention cannot be expanded, the mention gets no
-   * containment annotation rather than the chain of a lower-ranked candidate that
-   * resolves elsewhere.
-   */
+  /** A missing attribute on the first candidate prevents expansion of later candidates. */
   @Test
   void testUnexpandableBestCandidateSuppressesTheMentionsChain() {
     final String text = "A week in Paris.";
@@ -200,6 +189,7 @@ public class HierarchyAnnotatorTest {
     Assertions.assertTrue(annotated.get(HierarchyAnnotator.CONTAINMENT).isEmpty());
   }
 
+  /** Null hierarchy and document arguments are rejected. */
   @Test
   void testNullHierarchyAndNullDocumentAreRejected() {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -209,9 +199,9 @@ public class HierarchyAnnotatorTest {
   }
 
   /**
-   * Asserts the reject side of the join key check. U+00A0, the no-break space, is blank
-   * under the project whitespace definition even though the JDK's own blank check does
-   * not cover it.
+   * Blank keys, including no-break spaces, are rejected.
+   *
+   * @param attributeKey The invalid key.
    */
   @ParameterizedTest
   @NullAndEmptySource
@@ -221,11 +211,7 @@ public class HierarchyAnnotatorTest {
         () -> new HierarchyAnnotator(spine(), attributeKey));
   }
 
-  /**
-   * Asserts the accept side of the join key check: a hierarchy keyed by a non-default
-   * gazetteer attribute expands the mention through that attribute, and the default
-   * Who's On First attribute is then not consulted even when the entry also carries it.
-   */
+  /** A custom join key overrides the default key. */
   @Test
   void testCustomAttributeKeyJoinsOnThatAttribute() {
     final String text = "A stroll through Park Slope.";
@@ -252,12 +238,7 @@ public class HierarchyAnnotatorTest {
         .annotate(document).get(HierarchyAnnotator.CONTAINMENT).isEmpty());
   }
 
-  /**
-   * Verifies that a document without a locations layer is rejected with a message
-   * naming the missing layer, matching the sibling annotators: an absent required
-   * layer is a pipeline error, not a location-free document, so a missing geocode
-   * stage cannot silence every containment chain of every document.
-   */
+  /** The error names the missing input layer. */
   @Test
   void testAbsentLocationsLayerThrowsWithExactMessage() {
     final IllegalArgumentException e = Assertions.assertThrows(
@@ -267,11 +248,7 @@ public class HierarchyAnnotatorTest {
         "document lacks the required layer opennlp:locations<GeoResolution>", e.getMessage());
   }
 
-  /**
-   * Verifies that mention identity is judged by character offsets alone: a typed and
-   * an untyped span over the same text are one mention, so the second annotation is
-   * the mention's lower-ranked candidate and contributes no second chain.
-   */
+  /** Typed and untyped spans with matching offsets identify one mention. */
   @Test
   void testTypedAndUntypedSpansOverSameOffsetsAreOneMention() {
     final String text = "A stroll through Park Slope.";
