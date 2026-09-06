@@ -17,24 +17,32 @@
 
 package opennlp.tools.assets;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the invariants the magic table promises: the precomputed base64 prefixes really
- * are the images of their magic bytes, lookups favor the longest magic, and the format
- * constants of {@link EmbeddedAsset} resolve through the table.
+ * Tests file signatures, base64 prefixes, media types, and longest-match selection.
  */
 public class KnownMagicsTest {
+
+  /** DXB's 19-byte header, including CR, LF, SUB, and NUL. */
+  private static final String DXB_HEADER = "AutoCAD DXB 1.0\r\n\u001a\u0000";
 
   /** Every prefix is the base64 image of its magic, floored to whole characters. */
   @Test
@@ -91,6 +99,170 @@ public class KnownMagicsTest {
     assertEquals("dxf", asset.format());
     assertEquals("image/vnd.dxf", asset.mediaType());
     assertEquals(content.length, asset.decode(encoded).length);
+  }
+
+  /**
+   * Encodes a DXB point at (10, 20).
+   *
+   * @see <a href="https://forums.autodesk.com/autodesk/attachments/autodesk/autocad-lt-forum-en/25135/1/DXF%20Reference.pdf">
+   *     Autodesk DXF reference, DXB file format</a>
+   */
+  @Test
+  void testDxbPointDrawing() {
+    final byte[] header = DXB_HEADER.getBytes(StandardCharsets.US_ASCII);
+    assertEquals(19, header.length);
+    assertEquals("dxb", KnownMagics.formatOf(header));
+    final byte[] drawing = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN)
+        .put(header).put((byte) 2).putShort((short) 10).putShort((short) 20)
+        .put((byte) 0).array();
+    final String encoded = Base64.getEncoder().encodeToString(drawing);
+    final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
+    assertEquals(1, assets.size());
+    assertEquals("dxb", assets.get(0).format());
+    assertEquals("image/vnd.dxb", assets.get(0).mediaType());
+    assertArrayEquals(drawing, assets.get(0).decode(encoded));
+  }
+
+  /**
+   * The complete DXB sentinel is required, including the final NUL.
+   *
+   * @param length The number of header bytes retained.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {0, 14, 15, 16, 17, 18})
+  void testTruncatedDxbSentinelIsRejected(int length) {
+    assertNull(KnownMagics.formatOf(Arrays.copyOf(
+        DXB_HEADER.getBytes(StandardCharsets.US_ASCII), length)));
+  }
+
+  /**
+   * Textual hexadecimal notation and changed control bytes are not DXB headers.
+   *
+   * @param sentinel The incorrect header.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"AutoCAD DXB 1.0\r\n0x1A00", "AutoCAD DXB 1.0\r\n^Z\u0000",
+      "AutoCAD DXB 1.0\n\r\u001a\u0000", "AutoCAD DXB 1.0\r\n\u001a!"})
+  void testInvalidDxbSentinelIsRejected(String sentinel) {
+    final byte[] content = Arrays.copyOf(sentinel.getBytes(StandardCharsets.US_ASCII), 30);
+    assertNull(KnownMagics.formatOf(content));
+    assertTrue(new CursorAssetDetector().detect(
+        Base64.getEncoder().encodeToString(content)).isEmpty());
+  }
+
+  /**
+   * OpenEXR storage flags do not change the format or establish ACES conformance.
+   *
+   * @param flags The storage flags in the version field.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {0, 0x200, 0x400, 0x600, 0x800, 0xc00, 0x1000, 0x1400, 0x1800, 0x1c00})
+  void testOpenExrHeaderFlags(int flags) {
+    final byte[] header = openExrHeader(flags);
+    assertEquals("exr", KnownMagics.formatOf(header));
+    final String encoded = Base64.getEncoder().encodeToString(header);
+    final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
+    assertEquals(1, assets.size());
+    assertEquals("exr", assets.get(0).format());
+    assertEquals("image/x-exr", assets.get(0).mediaType());
+    assertArrayEquals(header, assets.get(0).decode(encoded));
+  }
+
+  /** A URI's media type is retained, not inferred from the OpenEXR magic. */
+  @Test
+  void testDeclaredAcesTypeIsPreserved() {
+    final byte[] header = openExrHeader(0);
+    final String uri = "data:image/aces;base64," + Base64.getEncoder().encodeToString(header);
+    final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(uri);
+    assertEquals(1, assets.size());
+    assertEquals("exr", assets.get(0).format());
+    assertEquals("image/aces", assets.get(0).mediaType());
+    assertArrayEquals(header, assets.get(0).decode(uri));
+  }
+
+  /**
+   * OpenEXR's magic is little-endian and must be present in full.
+   *
+   * @param length The number of bytes retained from the 4-byte magic.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1, 2, 3})
+  void testTruncatedOpenExrMagicIsRejected(int length) {
+    assertNull(KnownMagics.formatOf(Arrays.copyOf(openExrHeader(0), length)));
+  }
+
+  /** An OpenEXR magic number stored in big-endian order is not recognized. */
+  @Test
+  void testBigEndianOpenExrMagicIsRejected() {
+    final byte[] header = ByteBuffer.allocate(32).order(ByteOrder.BIG_ENDIAN)
+        .putInt(20000630).putInt(2).array();
+    assertNull(KnownMagics.formatOf(header));
+    assertTrue(new CursorAssetDetector().detect(
+        Base64.getEncoder().encodeToString(header)).isEmpty());
+  }
+
+  /** A Snappy identifier chunk followed by padding identifies a compressed stream. */
+  @Test
+  void testSnappyFramedStream() {
+    final byte[] stream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(0x000006ff).put("sNaPpY".getBytes(StandardCharsets.US_ASCII))
+        .putInt(0x000012fe).array();
+    assertEquals("sz", KnownMagics.formatOf(stream));
+    final String encoded = Base64.getEncoder().encodeToString(stream);
+    final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
+    assertEquals(1, assets.size());
+    assertEquals("sz", assets.get(0).format());
+    assertEquals("application/x-snappy-framed", assets.get(0).mediaType());
+    assertArrayEquals(stream, assets.get(0).decode(encoded));
+  }
+
+  /** A Snappy identifier without the chunk header is not recognized. */
+  @Test
+  void testSnappyIdentifierWithoutChunkHeaderIsRejected() {
+    final byte[] text = "sNaPpY is the identifier, not the complete chunk"
+        .getBytes(StandardCharsets.US_ASCII);
+    assertNull(KnownMagics.formatOf(text));
+    assertTrue(new CursorAssetDetector().detect(
+        Base64.getEncoder().encodeToString(text)).isEmpty());
+  }
+
+  /**
+   * TIFF and BigTIFF header fixtures cover both byte orders without image data.
+   *
+   * @param littleEndian Whether the header uses little-endian values.
+   * @param version The TIFF version number, 42 or 43.
+   */
+  @ParameterizedTest
+  @CsvSource({"true, 42", "false, 42", "true, 43", "false, 43"})
+  void testTiffByteOrders(boolean littleEndian, int version) {
+    final ByteBuffer buffer = ByteBuffer.allocate(32).order(
+        littleEndian ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN);
+    final byte marker = (byte) (littleEndian ? 'I' : 'M');
+    buffer.put(marker).put(marker).putShort((short) version);
+    if (version == 43) {
+      buffer.putShort((short) 8).putShort((short) 0).putLong(16);
+    } else {
+      buffer.putInt(8);
+    }
+    final byte[] header = buffer.array();
+    assertEquals(EmbeddedAsset.FORMAT_TIFF, KnownMagics.formatOf(header));
+    final String encoded = Base64.getEncoder().encodeToString(header);
+    final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
+    assertEquals(1, assets.size());
+    assertEquals(EmbeddedAsset.FORMAT_TIFF, assets.get(0).format());
+    assertEquals("image/tiff", assets.get(0).mediaType());
+    assertArrayEquals(header, assets.get(0).decode(encoded));
+  }
+
+  /**
+   * Builds a header fixture with no image body or ACES attributes.
+   *
+   * @param flags The storage flags in the version field.
+   * @return A 32-byte fixture with the OpenEXR magic and version fields.
+   */
+  private byte[] openExrHeader(int flags) {
+    return ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(20000630).putInt(2 | flags).array();
   }
 
   /** XAR archives are not Xara vector graphics despite sharing an extension. */

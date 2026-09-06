@@ -97,6 +97,7 @@ final class KnownMagics {
       e("504b0708", EmbeddedAsset.FORMAT_ZIP, "application/zip"), // spanned archive
       e("49492a00", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // II*\0
       e("4d4d002a", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // MM\0*
+      e("49492b00", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // II+\0, BigTIFF
       e("4d4d002b", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // MM\0+, BigTIFF
       e("1f8b08", EmbeddedAsset.FORMAT_GZIP, "application/gzip"),
       e("377abcaf271c", EmbeddedAsset.FORMAT_SEVEN_ZIP, "application/x-7z-compressed"),
@@ -146,8 +147,8 @@ final class KnownMagics {
       e("2d2d2d2d2d424547494e20445341204b45592d2d2d2d2d", "pem-key", "application/x-x509-key"),
       // -----BEGIN RSA KEY-----
       e("2d2d2d2d2d424547494e20525341204b45592d2d2d2d2d", "pem-key", "application/x-x509-key"),
-      // AutoCAD DXB 1.0..0x1A00
-      e("4175746f4341442044584220312e300d0a307831413030", "dxb", "image/vnd.dxb"),
+      // The 19-byte DXB 1.0 header includes CR, LF, SUB, and NUL.
+      e("4175746f4341442044584220312e300d0a1a00", "dxb", "image/vnd.dxb"),
       // !<arch>.debian-binary
       e("213c617263683e0a64656269616e2d62696e617279", "deb", "application/x-debian-package"),
       // !<arch>.debian-split
@@ -218,8 +219,8 @@ final class KnownMagics {
       e("576f726450726f00", "lwp", "application/vnd.lotus-wordpro"), // WordPro.
       e("5a5854617065211a", "tzx", "application/x-spectrum-tzx"), // ZXTape!.
       e("636f6e6563746978", "vhd", "application/x-vhd"), // conectix
-      e("762f310102000000", "exr", "image/aces"), // v/1.....
-      e("762f310102040000", "exr", "image/aces"), // v/1.....
+      // The OpenEXR magic does not establish ACES conformance.
+      e("762f3101", "exr", "image/x-exr"),
       e("974a42320d0a1a0a", "jb2", "image/x-jbig2"), // .JB2....
       e("efbbbf255044462d", EmbeddedAsset.FORMAT_PDF, "application/pdf"), // ...%PDF-
       e("efbbbf3c3f786d6c", "xml", "application/xml"), // ...<?xml
@@ -256,7 +257,8 @@ final class KnownMagics {
       e("636166660002", "caf", "audio/x-caf"), // caff..
       e("636166664000", "caf", "audio/x-caf"), // caff@.
       e("636166668000", "caf", "audio/x-caf"), // caff..
-      e("734e61507059", "sz", "application/x-snappy-framed"), // sNaPpY
+      // The Snappy stream identifier includes the chunk type and length.
+      e("ff060000734e61507059", "sz", "application/x-snappy-framed"),
       e("d7cdc69a0000", "wmf", "image/wmf"),
       e("dba52d000000", "doc", "application/msword"),
       e("fd377a585a00", "xz", "application/x-xz"), // .7zXZ.

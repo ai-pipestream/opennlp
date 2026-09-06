@@ -43,12 +43,24 @@
 			XAR archives are reported as <code>xar</code> with media type
 			<code>application/x-xar</code>, not Xara graphics. Encoded XPM images are
 			reported as <code>xpm</code> with media type <code>image/x-xpixmap</code>.
+			OpenEXR headers are reported as <code>exr</code> with media type
+			<code>image/x-exr</code>. The signature does not establish
+			<ulink url="https://www.iana.org/assignments/media-types/image/aces">ACES
+			conformance</ulink>. TIFF and BigTIFF headers are recognized in both byte orders.
+		</para>
+		<para>
+			DXB detection requires the complete 19-byte header, including the control bytes.
+			Snappy streams are recognized by the
+			<ulink url="https://github.com/google/snappy/blob/main/framing_format.txt">stream
+			identifier chunk</ulink>, not just the <code>sNaPpY</code> text.
 		</para>
 		<para>
 			Explicitly typed, base64 <code>data:</code> URIs accept non-empty payloads,
 			including one- and two-byte values. The media type retains parameters such as
 			<code>charset=UTF-8</code>; the format name excludes them. Non-base64 data URIs
 			and percent-encoded payload characters are not supported.
+			A media type supplied in the URI takes precedence over the detected format;
+			it does not establish that the payload conforms to that type.
 		</para>
 		<para>
 			Malformed padding, mixed standard and URL-safe alphabets, and line-wrapped
