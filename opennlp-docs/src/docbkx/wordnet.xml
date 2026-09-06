@@ -100,25 +100,38 @@ dog.id();  // "omw-es-02084071-n"]]>
 		</para>
 		<para>
 			The application supplies the base through a <code>WnLmfResolver</code>,
-			typically a small catalog keyed by id and version. The reader never opens
-			a file or fetches a URL itself: without a resolver an extension is
-			rejected with a clear error and no I/O happens at all. A resolver returns
+			typically a catalog of lexicon IDs and versions. The resolver controls
+			dependency retrieval; the reader does not fetch URLs in the XML.
+			Without a resolver, extensions are rejected. The <code>Path</code>
+			overloads open and close the specified file. Stream overloads leave the
+			supplied top-level stream open.
+		</para>
+		<para>
+			A resolver returns
 			a freshly opened <code>WnLmfSource</code> per call, or throws
-			<code>IOException</code> when it cannot supply the document, and the
-			reader closes every source it receives, whether composition succeeds or
-			fails. <code>WordNetUsageExampleTest</code> mirrors this example:
+			<code>IOException</code> when it cannot supply the document. The reader
+			closes resolved sources on success or failure. A consumed or closed source
+			cannot be reused. Repeated close calls have no effect, including after a
+			close failure. A close error is propagated, or suppressed on a parse error
+			when both occur.
+		</para>
+		<para>
+			The example uses files in a <code>wordnets</code> directory.
+			<code>WordNetUsageExampleTest</code> runs it using the original
+			test documents, with no model or downloaded dictionary.
 			<programlisting language="java"><![CDATA[
+Path directory = Path.of("wordnets");
 WnLmfResolver resolver = reference -> {
   if ("ewn".equals(reference.ref()) && "2020".equals(reference.version())) {
     return new WnLmfSource("extension-base.xml",
-        Files.newInputStream(Path.of("extension-base.xml")));
+        Files.newInputStream(directory.resolve("extension-base.xml")));
   }
   throw new IOException(
       "No lexicon " + reference.ref() + " " + reference.version());
 };
 
 WnLmfResource resource = WnLmfReader.readResource(
-    inputStream, "extension-computer-science.xml", resolver);
+    directory.resolve("extension-computer-science.xml"), resolver);
 WnLmfLexicon composed = resource.lexicons().get(0);
 
 WnLmfDependency base = composed.extensionOf().orElseThrow();
@@ -146,9 +159,12 @@ lexicon.synset(hypernymId).orElseThrow().lemmas();  // ["software"], a base syns
 			metadata and are never loaded automatically. Sibling extensions in one
 			document compose independently against their own bases and are never
 			merged with each other. When a resolved base is itself an extension, the
-			chain composes up to 16 levels,
-			with cycles detected by exact id and version. Resolutions are cached per
-			id and version for one read, so a shared base is fetched once.
+			chain can contain up to 16 extension levels, excluding the plain base lexicon.
+			Cycles are detected by exact id and version. Resolutions are cached per
+			id and version for one read, so a shared base is fetched once. Cached paths
+			still count toward the depth limit and cycle checks, regardless of extension
+			order. Each read call has a separate cache, including concurrent calls with
+			a thread-safe resolver.
 		</para>
 		<para>
 			The projection limits of the ordinary reader apply unchanged: forms,

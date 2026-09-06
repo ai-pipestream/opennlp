@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import javax.xml.XMLConstants;
 import javax.xml.namespace.QName;
 import javax.xml.stream.Location;
@@ -86,9 +87,9 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * as {@code ExternalLexicalEntry}, {@code ExternalSense}, and {@code ExternalSynset} attach
  * additive content to base entities, and the composed result is an ordinary {@link WnLmfLexicon}
  * whose {@link WnLmfLexicon#extensionOf() extensionOf} carries the {@code Extends} reference.
- * Extension chains compose up to 16 levels, with cycles detected by exact id and version. The
- * overloads without a resolver perform no I/O of their own and reject
- * a {@code LexiconExtension} clearly. {@code ExternalLemma}, {@code Form}, and
+ * Extension chains compose up to 16 levels, with cycles detected by exact id and version.
+ * These checks include cached dependencies. Overloads without a resolver reject
+ * a {@code LexiconExtension}. {@code ExternalLemma}, {@code Form}, and
  * {@code ExternalForm} stay outside the knowledge-base projection, exactly like the forms,
  * examples, and counts the ordinary reader skips. Multiple synset definitions are joined in
  * document order with {@code "; "}.</p>
@@ -96,10 +97,7 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
 public final class WnLmfReader {
 
   /**
-   * The maximum number of {@code LexiconExtension} levels one composition may stack: a document
-   * whose base is itself an extension counts one level per extension. The bound exists so a
-   * malicious or broken extension chain cannot recurse without limit; deeper chains fail loud
-   * with an {@link InvalidFormatException} naming this bound.
+   * Maximum extension levels in a dependency chain, excluding the plain base lexicon.
    */
   private static final int MAX_EXTENSION_DEPTH = 16;
 
@@ -224,6 +222,7 @@ public final class WnLmfReader {
    * @throws InvalidFormatException Thrown if a document is malformed, composition is invalid,
    *     or the file contains more than one lexicon.
    * @throws IOException Thrown if reading the file fails or the resolver cannot supply a base.
+   * @throws IllegalStateException If the resolver returns null or a consumed or closed source.
    */
   public static LexicalKnowledgeBase read(Path file, WnLmfResolver resolver) throws IOException {
     final WnLmfResource resource = readResource(file, resolver);
@@ -256,6 +255,7 @@ public final class WnLmfReader {
    *     {@code resolver} is {@code null}.
    * @throws InvalidFormatException Thrown if a document is malformed or composition is invalid.
    * @throws IOException Thrown if reading the file fails or the resolver cannot supply a base.
+   * @throws IllegalStateException If the resolver returns null or a consumed or closed source.
    */
   public static WnLmfResource readResource(Path file, WnLmfResolver resolver) throws IOException {
     if (resolver == null) {
@@ -294,6 +294,7 @@ public final class WnLmfReader {
    * @throws InvalidFormatException Thrown if a document is malformed, composition is invalid,
    *     or the document contains more than one lexicon.
    * @throws IOException Thrown if reading a stream fails or the resolver cannot supply a base.
+   * @throws IllegalStateException If the resolver returns null or a consumed or closed source.
    */
   public static LexicalKnowledgeBase read(InputStream in, String resourceName,
       WnLmfResolver resolver) throws IOException {
@@ -332,6 +333,7 @@ public final class WnLmfReader {
    * @throws IllegalArgumentException Thrown if an argument is {@code null}.
    * @throws InvalidFormatException Thrown if a document is malformed or composition is invalid.
    * @throws IOException Thrown if reading a stream fails or the resolver cannot supply a base.
+   * @throws IllegalStateException If the resolver returns null or a consumed or closed source.
    */
   public static WnLmfResource readResource(InputStream in, String resourceName,
       WnLmfResolver resolver) throws IOException {
@@ -391,9 +393,8 @@ public final class WnLmfReader {
       if (lexicon.kind() == Kind.LEXICON) {
         lexicons.add(descriptor(lexicon, resourceName));
       } else {
-        // A null composition cannot reach here: without a resolver the parser rejects a
-        // LexiconExtension, so no raw lexicon of that kind exists.
-        lexicons.add(descriptor(composition.compose(lexicon), resourceName));
+        // Without a resolver, parsing rejects extensions.
+        lexicons.add(descriptor(composition.compose(lexicon).lexicon(), resourceName));
       }
     }
     return new WnLmfResource(lexicons);
@@ -475,16 +476,21 @@ public final class WnLmfReader {
     return parser.resource();
   }
 
-  /** Prevents XML reader cleanup from closing a caller-owned stream. */
+  /** Prevents XML reader cleanup from closing the supplied stream. */
   private static final class NonClosingInputStream extends FilterInputStream {
 
-    NonClosingInputStream(InputStream in) {
+    /**
+     * Wraps a stream without taking ownership.
+     *
+     * @param in The document stream.
+     */
+    private NonClosingInputStream(InputStream in) {
       super(in);
     }
 
+    /** {@inheritDoc} Does not close the underlying stream. */
     @Override
     public void close() {
-      // The caller owns the underlying stream.
     }
   }
 
@@ -1365,24 +1371,21 @@ public final class WnLmfReader {
     }
   }
 
-  /**
-   * One top-level read's composition state: the resolver, its per-(id, version) cache, and the
-   * resolution stack that bounds chains and detects cycles.
-   */
+  /** Dependency cache and active extension path for one top-level read. */
   private static final class Composition {
 
     private final WnLmfResolver resolver;
     private final String resourceName;
-    private final Map<ResolutionKey, RawLexicon> cache = new HashMap<>();
+    private final Map<ResolutionKey, ResolvedLexicon> cache = new HashMap<>();
     private final LinkedHashSet<ResolutionKey> stack = new LinkedHashSet<>();
 
     /**
      * Creates the composition state for one top-level read.
      *
-     * @param resolver     The caller-supplied resolver.
+     * @param resolver     The dependency resolver.
      * @param resourceName The top-level resource name used in error messages.
      */
-    Composition(WnLmfResolver resolver, String resourceName) {
+    private Composition(WnLmfResolver resolver, String resourceName) {
       this.resolver = resolver;
       this.resourceName = resourceName;
     }
@@ -1391,22 +1394,20 @@ public final class WnLmfReader {
      * Composes one extension against its resolved base, recursively composing base chains.
      *
      * @param extension The parsed extension.
-     * @return The composed raw lexicon, carrying no external declarations.
+     * @return The composed lexicon and the extension path.
      * @throws InvalidFormatException Thrown if composition is invalid, cyclic, or too deep.
      * @throws IOException Thrown if the resolver cannot supply a base.
      */
-    RawLexicon compose(RawLexicon extension) throws IOException {
+    private ResolvedLexicon compose(RawLexicon extension) throws IOException {
       final ResolutionKey key = new ResolutionKey(extension.id(), extension.version());
-      if (stack.contains(key)) {
-        throw malformed(resourceName, -1, "Extension dependency cycle: " + path(key), null);
-      }
-      if (stack.size() >= MAX_EXTENSION_DEPTH) {
-        throw malformed(resourceName, -1, "Extension chain at " + key
-            + " exceeds the maximum composition depth of " + MAX_EXTENSION_DEPTH, null);
-      }
+      validatePath(List.of(key));
       stack.add(key);
       try {
-        return merge(base(extension.extendsRef()), extension);
+        final ResolvedLexicon base = base(extension.extendsRef());
+        final List<ResolutionKey> extensionPath = new ArrayList<>(base.extensionPath().size() + 1);
+        extensionPath.add(key);
+        extensionPath.addAll(base.extensionPath());
+        return new ResolvedLexicon(merge(base.lexicon(), extension), extensionPath);
       } finally {
         stack.remove(key);
       }
@@ -1416,18 +1417,18 @@ public final class WnLmfReader {
      * Resolves one base reference to a composed raw lexicon, caching per exact id and version.
      *
      * @param reference The {@code Extends} reference.
-     * @return The base lexicon; if the resolved lexicon is itself an extension, its composed
-     *         form.
+     * @return The base lexicon and the extension path, empty for a plain lexicon.
      * @throws InvalidFormatException Thrown if the resolved document is malformed or lacks an
      *     exact id and version match.
      * @throws IOException Thrown if the resolver cannot supply the document.
      * @throws IllegalStateException Thrown if the resolver violates its contract by returning
-     *     {@code null} or a consumed source.
+     *     {@code null} or a consumed or closed source.
      */
-    private RawLexicon base(WnLmfDependency reference) throws IOException {
+    private ResolvedLexicon base(WnLmfDependency reference) throws IOException {
       final ResolutionKey key = new ResolutionKey(reference.ref(), reference.version());
-      final RawLexicon cached = cache.get(key);
+      final ResolvedLexicon cached = cache.get(key);
       if (cached != null) {
+        validatePath(cached.extensionPath());
         return cached;
       }
       final WnLmfSource source = resolver.resolve(reference);
@@ -1454,9 +1455,29 @@ public final class WnLmfReader {
             + " does not contain lexicon " + reference.ref() + " version "
             + reference.version(), null);
       }
-      final RawLexicon result = match.kind() == Kind.EXTENSION ? compose(match) : match;
+      final ResolvedLexicon result = match.kind() == Kind.EXTENSION
+          ? compose(match) : new ResolvedLexicon(match, List.of());
       cache.put(key, result);
       return result;
+    }
+
+    /**
+     * Checks a path for cycles with active ancestors and excessive depth.
+     *
+     * @param extensionPath The extension identifiers in dependency order.
+     * @throws InvalidFormatException If the combined path is cyclic or too deep.
+     */
+    private void validatePath(List<ResolutionKey> extensionPath) throws InvalidFormatException {
+      for (int i = 0; i < extensionPath.size(); i++) {
+        final ResolutionKey key = extensionPath.get(i);
+        if (stack.contains(key)) {
+          throw fail("Extension dependency cycle: " + path(extensionPath.subList(0, i + 1)));
+        }
+        if (stack.size() + i >= MAX_EXTENSION_DEPTH) {
+          throw fail("Extension chain at " + key
+              + " exceeds the maximum composition depth of " + MAX_EXTENSION_DEPTH);
+        }
+      }
     }
 
     /**
@@ -1687,15 +1708,18 @@ public final class WnLmfReader {
     /**
      * Renders the resolution path for a cycle message.
      *
-     * @param repeated The key that closed the cycle.
+     * @param suffix The remaining path through the key that closes the cycle.
      * @return The path from the outermost extension to the repeated key.
      */
-    private String path(ResolutionKey repeated) {
-      final StringBuilder path = new StringBuilder();
+    private String path(List<ResolutionKey> suffix) {
+      final StringJoiner path = new StringJoiner(" -> ");
       for (final ResolutionKey key : stack) {
-        path.append(key).append(" -> ");
+        path.add(key.toString());
       }
-      return path.append(repeated).toString();
+      for (final ResolutionKey key : suffix) {
+        path.add(key.toString());
+      }
+      return path.toString();
     }
 
     /**
@@ -1708,9 +1732,19 @@ public final class WnLmfReader {
       return malformed(resourceName, -1, message, null);
     }
 
-    /** One exact base identity: the caching and cycle-detection unit. */
+    /** Composed content and ordered extension identifiers, excluding the plain base. */
+    private record ResolvedLexicon(RawLexicon lexicon, List<ResolutionKey> extensionPath) {
+
+      /** Makes an immutable copy of the extension path. */
+      private ResolvedLexicon {
+        extensionPath = List.copyOf(extensionPath);
+      }
+    }
+
+    /** Exact lexicon identifier and version for caching and cycle detection. */
     private record ResolutionKey(String ref, String version) {
 
+      /** {@inheritDoc} */
       @Override
       public String toString() {
         return ref + " " + version;

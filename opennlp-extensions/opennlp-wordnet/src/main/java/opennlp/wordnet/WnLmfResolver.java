@@ -19,17 +19,14 @@ package opennlp.wordnet;
 import java.io.IOException;
 
 /**
- * Supplies the base lexicon documents a WN-LMF {@code LexiconExtension} composes against. The
- * application controls all I/O: {@link WnLmfReader} never opens a file or fetches a URL itself,
- * it only asks a caller-supplied resolver for the {@code Extends} reference of each extension it
- * encounters, including the bases of extension chains.
+ * Supplies documents referenced by WN-LMF {@code Extends} declarations.
  *
  * <p>A resolver must return a fresh {@link WnLmfSource} per call and must never return
- * {@code null}; when it cannot obtain the referenced document it must throw an
- * {@link IOException} naming the requested id and version. The reader owns a successfully
- * returned source and closes it exactly once, whether reading succeeds or fails. During one
- * top-level read the reader caches resolutions per exact {@code (ref, version)} pair, so a
- * resolver is consulted at most once per referenced base.</p>
+ * {@code null}. If the document cannot be obtained, it must throw an {@link IOException}
+ * naming the requested id and version. Ownership of a returned source transfers to
+ * the requesting code.</p>
+ *
+ * <p>Thread safety is implementation specific.</p>
  *
  * @since 3.0.0
  */

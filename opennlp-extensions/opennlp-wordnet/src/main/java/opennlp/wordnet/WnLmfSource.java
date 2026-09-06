@@ -20,14 +20,12 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * One resolved WN-LMF document: a diagnostic resource name plus a freshly opened stream. A
- * {@link WnLmfResolver} constructs one per {@link WnLmfResolver#resolve(WnLmfDependency)
- * resolve} call; the requesting {@link WnLmfReader} then owns the source and closes it exactly
- * once, whether reading succeeds or fails.
+ * A resolved WN-LMF document with a diagnostic name and a single-use stream.
+ * {@link WnLmfReader} closes sources returned by a {@link WnLmfResolver} on
+ * success or failure.
  *
- * <p>The stream is single-use: the reader consumes it once, and handing the same source out for
- * a second resolution fails loud, because the stream position would be undefined. Instances are
- * not thread safe; a source belongs to the single read that requested it.</p>
+ * <p>A consumed or closed source cannot be read again. Repeated close calls have
+ * no effect, including after a close failure. Instances are not thread safe.</p>
  *
  * @since 3.0.0
  */
@@ -36,6 +34,7 @@ public final class WnLmfSource implements AutoCloseable {
   private final String name;
   private final InputStream stream;
   private boolean consumed;
+  private boolean closed;
 
   /**
    * Creates a source over a freshly opened stream.
@@ -48,10 +47,10 @@ public final class WnLmfSource implements AutoCloseable {
    */
   public WnLmfSource(String name, InputStream stream) {
     if (name == null || name.isEmpty()) {
-      throw new IllegalArgumentException("Name must not be null or empty");
+      throw new IllegalArgumentException("name must not be null or empty");
     }
     if (stream == null) {
-      throw new IllegalArgumentException("Stream must not be null");
+      throw new IllegalArgumentException("stream must not be null");
     }
     this.name = name;
     this.stream = stream;
@@ -66,12 +65,11 @@ public final class WnLmfSource implements AutoCloseable {
    * Hands the stream to the reader, at most once.
    *
    * @return The document stream.
-   * @throws IllegalStateException Thrown if the source was already consumed, which means a
-   *         resolver returned the same source for more than one resolution.
+   * @throws IllegalStateException If the source was consumed or closed.
    */
   InputStream consume() {
-    if (consumed) {
-      throw new IllegalStateException("Source " + name + " was already consumed; a resolver"
+    if (consumed || closed) {
+      throw new IllegalStateException("Source " + name + " was already consumed or closed; a resolver"
           + " must return a freshly opened source per resolve call");
     }
     consumed = true;
@@ -79,12 +77,16 @@ public final class WnLmfSource implements AutoCloseable {
   }
 
   /**
-   * Closes the underlying stream.
+   * {@inheritDoc}
+   * Attempts to close the underlying stream at most once, including on failure.
    *
    * @throws IOException Thrown if closing the stream fails.
    */
   @Override
   public void close() throws IOException {
-    stream.close();
+    if (!closed) {
+      closed = true;
+      stream.close();
+    }
   }
 }
