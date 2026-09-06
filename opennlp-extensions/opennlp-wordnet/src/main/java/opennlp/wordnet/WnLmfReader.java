@@ -76,6 +76,11 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * content cannot add entries, senses, definitions, relations, or dependencies.
  * The reader does not perform full DTD validation.</p>
  *
+ * <p>A sense must point to a synset with the same part of speech and a member
+ * lemma matching after case and underscore normalization. Missing targets or members
+ * and mismatched parts of speech raise {@link InvalidFormatException} with the source
+ * name and line.</p>
+ *
  * <p>The parser is hardened against XXE: DTD processing and external entities are disabled, so a
  * DOCTYPE is skipped but nothing it names is fetched or resolved.</p>
  *
@@ -95,6 +100,8 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * as {@code ExternalLexicalEntry}, {@code ExternalSense}, and {@code ExternalSynset} attach
  * additive content to base entities, and the composed result is an ordinary {@link WnLmfLexicon}
  * whose {@link WnLmfLexicon#extensionOf() extensionOf} carries the {@code Extends} reference.
+ * Each selected base must have valid senses, members and relations before an extension
+ * is added, including intermediate extensions. These checks report the base source and line.
  * Extension chains compose up to 16 levels, with cycles detected by exact id and version.
  * These checks include cached dependencies. Overloads without a resolver reject
  * a {@code LexiconExtension}. {@code ExternalLemma}, {@code Form}, and
@@ -1263,7 +1270,7 @@ public final class WnLmfReader {
      * @param lexicon      The raw lexicon; for an extension, already composed.
      * @param resourceName The name used in error messages.
      */
-    Materializer(RawLexicon lexicon, String resourceName) {
+    private Materializer(RawLexicon lexicon, String resourceName) {
       this.lexicon = lexicon;
       this.resourceName = resourceName;
     }
@@ -1272,41 +1279,14 @@ public final class WnLmfReader {
      * Resolves the raw lexicon into an immutable knowledge base.
      *
      * @return The loaded lexicon.
-     * @throws InvalidFormatException Thrown if a sense or relation references an undeclared
-     *     target or a declared member is invalid.
+     * @throws InvalidFormatException If a reference, member or part of speech is invalid.
      */
-    LexicalKnowledgeBase materialize() throws InvalidFormatException {
-      // Every sense must point to a declared synset; part-of-speech consistency between a
-      // synset and its member entries is checked in memberLemmas.
-      for (final RawSense sense : lexicon.senses().values()) {
-        if (!lexicon.synsets().containsKey(sense.synsetId())) {
-          throw fail("Sense " + sense.id() + " references undeclared synset "
-              + sense.synsetId());
-        }
-      }
-      // Lift sense relations to the synset level and index membership and sense order, all in
-      // one pass over the senses in their materialization order.
-      final Map<String, List<LiftableRelation>> liftedBySynset = new HashMap<>();
+    private LexicalKnowledgeBase materialize() throws InvalidFormatException {
+      final Map<String, List<RawSense>> sensesBySynset = sensesBySynset();
       final Map<InMemoryWordNetLexicon.LemmaKey, List<String>> senseOrder =
           new LinkedHashMap<>();
-      final Map<String, List<String>> entryIdsBySynset = new HashMap<>();
       for (final RawSense sense : lexicon.senses().values()) {
-        for (final RawSenseRelation relation : sense.relations()) {
-          if (OTHER_RELATION.equals(relation.relType())) {
-            continue;
-          }
-          final RawSense target = lexicon.senses().get(relation.target());
-          if (target == null) {
-            throw fail("SenseRelation at line " + relation.line() + " from sense "
-                + sense.id() + " references undeclared sense " + relation.target());
-          }
-          liftedBySynset.computeIfAbsent(sense.synsetId(), unused -> new ArrayList<>(2))
-              .add(new LiftableRelation(relation.relType(), target.synsetId(),
-                  relation.line(), true));
-        }
         final RawEntry entry = entry(sense);
-        entryIdsBySynset.computeIfAbsent(sense.synsetId(), unused -> new ArrayList<>(2))
-            .add(entry.id());
         final List<String> order = senseOrder.computeIfAbsent(
             InMemoryWordNetLexicon.LemmaKey.of(entry.lemma(), entry.pos()),
             unused -> new ArrayList<>(2));
@@ -1314,16 +1294,54 @@ public final class WnLmfReader {
           order.add(sense.synsetId());
         }
       }
-      // Resolve raw synsets into contract synsets.
       final Map<String, Synset> synsetsById = new LinkedHashMap<>(lexicon.synsets().size() * 2);
       for (final RawSynset raw : lexicon.synsets().values()) {
-        final Map<WordNetRelation, List<String>> relations = resolveRelations(raw,
-            liftedBySynset.getOrDefault(raw.id(), List.of()));
+        final List<RawSense> senses = sensesBySynset.getOrDefault(raw.id(), List.of());
+        final Map<WordNetRelation, List<String>> relations = resolveRelations(raw, senses);
         synsetsById.put(raw.id(),
-            new Synset(raw.id(), raw.pos(), memberLemmas(raw, entryIdsBySynset),
+            new Synset(raw.id(), raw.pos(), memberLemmas(raw, senses),
                 raw.gloss() == null ? "" : raw.gloss(), relations));
       }
       return new InMemoryWordNetLexicon(synsetsById, senseOrder);
+    }
+
+    /**
+     * Checks a base before composition without building an immutable knowledge base.
+     *
+     * @throws InvalidFormatException If a reference, member or part of speech is invalid.
+     */
+    private void validate() throws InvalidFormatException {
+      final Map<String, List<RawSense>> sensesBySynset = sensesBySynset();
+      for (final RawSynset raw : lexicon.synsets().values()) {
+        final List<RawSense> senses = sensesBySynset.getOrDefault(raw.id(), List.of());
+        resolveRelations(raw, senses);
+        memberLemmas(raw, senses);
+      }
+    }
+
+    /**
+     * Groups senses by target after checking references and parts of speech.
+     *
+     * @return The senses for each synset, in source order.
+     * @throws InvalidFormatException If a sense has no target or mismatched part of speech.
+     */
+    private Map<String, List<RawSense>> sensesBySynset() throws InvalidFormatException {
+      final Map<String, List<RawSense>> sensesBySynset = new HashMap<>();
+      for (final RawSense sense : lexicon.senses().values()) {
+        final RawSynset synset = lexicon.synsets().get(sense.synsetId());
+        if (synset == null) {
+          throw fail("Sense " + sense.id() + " at line " + sense.line()
+              + " references undeclared synset " + sense.synsetId());
+        }
+        final RawEntry entry = entry(sense);
+        if (entry.pos() != synset.pos()) {
+          throw fail("Sense " + sense.id() + " at line " + sense.line()
+              + " has part of speech " + entry.pos() + " but synset " + synset.id()
+              + " has " + synset.pos());
+        }
+        sensesBySynset.computeIfAbsent(synset.id(), unused -> new ArrayList<>(2)).add(sense);
+      }
+      return sensesBySynset;
     }
 
     /**
@@ -1348,20 +1366,32 @@ public final class WnLmfReader {
      * in source order.
      *
      * @param raw    The raw synset.
-     * @param lifted The sense relations lifted onto this synset, in sense order.
+     * @param senses The senses pointing to this synset, in source order.
      * @return The typed relations for the contract synset.
      * @throws InvalidFormatException Thrown if a relation type is unknown or its target is
      *     undeclared.
      */
     private Map<WordNetRelation, List<String>> resolveRelations(RawSynset raw,
-        List<LiftableRelation> lifted) throws InvalidFormatException {
-      final List<LiftableRelation> combined =
-          new ArrayList<>(raw.relations().size() + lifted.size());
+        List<RawSense> senses) throws InvalidFormatException {
+      final List<LiftableRelation> combined = new ArrayList<>(raw.relations().size());
       for (final RawRelation relation : raw.relations()) {
         combined.add(new LiftableRelation(relation.relType(), relation.target(),
             relation.line(), false));
       }
-      combined.addAll(lifted);
+      for (final RawSense sense : senses) {
+        for (final RawSenseRelation relation : sense.relations()) {
+          if (OTHER_RELATION.equals(relation.relType())) {
+            continue;
+          }
+          final RawSense target = lexicon.senses().get(relation.target());
+          if (target == null) {
+            throw fail("SenseRelation at line " + relation.line() + " from sense "
+                + sense.id() + " references undeclared sense " + relation.target());
+          }
+          combined.add(new LiftableRelation(relation.relType(), target.synsetId(),
+              relation.line(), true));
+        }
+      }
       final Map<WordNetRelation, LinkedHashSet<String>> typed = new LinkedHashMap<>();
       for (final LiftableRelation relation : combined) {
         final WordNetRelation type = parseRelation(
@@ -1389,22 +1419,25 @@ public final class WnLmfReader {
      * appends the entry ids composition added. Legacy documents that put lexical-entry ids in
      * {@code members} remain accepted.
      *
-     * @param raw               The raw synset.
-     * @param entryIdsBySynset  The fallback membership index built from the senses.
+     * @param raw The raw synset.
+     * @param senses The senses pointing to this synset, in source order.
      * @return The member lemmas in source order, deduplicated.
      * @throws InvalidFormatException Thrown if the synset names an undeclared member or a
-     *     member's part of speech disagrees with the synset's.
+     *     member has a different part of speech, or a sense's lemma is missing.
      */
-    private List<String> memberLemmas(RawSynset raw, Map<String, List<String>> entryIdsBySynset)
+    private List<String> memberLemmas(RawSynset raw, List<RawSense> senses)
         throws InvalidFormatException {
       final List<String> memberIds = new ArrayList<>();
       if (raw.members() != null && !raw.members().isEmpty()) {
         memberIds.addAll(LemmaFolding.splitOnSpaces(raw.members()));
       } else {
-        memberIds.addAll(entryIdsBySynset.getOrDefault(raw.id(), List.of()));
+        for (final RawSense sense : senses) {
+          memberIds.add(sense.entryId());
+        }
       }
       memberIds.addAll(raw.extraMembers());
       final List<String> lemmas = new ArrayList<>(memberIds.size());
+      final Set<String> foldedLemmas = new HashSet<>();
       for (final String memberId : memberIds) {
         final RawSense sense = lexicon.senses().get(memberId);
         if (sense != null && !sense.synsetId().equals(raw.id())) {
@@ -1424,6 +1457,14 @@ public final class WnLmfReader {
         }
         if (!lemmas.contains(entry.lemma())) {
           lemmas.add(entry.lemma());
+          foldedLemmas.add(LemmaFolding.fold(entry.lemma()));
+        }
+      }
+      for (final RawSense sense : senses) {
+        final RawEntry entry = entry(sense);
+        if (!foldedLemmas.contains(LemmaFolding.fold(entry.lemma()))) {
+          throw fail("Sense " + sense.id() + " at line " + sense.line() + " has lemma "
+              + entry.lemma() + " missing from members of synset " + raw.id());
         }
       }
       return lemmas;
@@ -1565,6 +1606,7 @@ public final class WnLmfReader {
       }
       final ResolvedLexicon result = match.kind() == Kind.EXTENSION
           ? compose(match) : new ResolvedLexicon(match, List.of());
+      new Materializer(result.lexicon(), sourceName).validate();
       cache.put(key, result);
       return result;
     }

@@ -38,6 +38,13 @@
 			content or dependencies. Skipped XML must still be well formed. The
 			reader does not perform full DTD validation.
 		</para>
+		<para>
+			A sense must point to a synset with the same part of speech and a
+			member lemma matching after case and underscore normalization. Missing
+			targets or members and mismatched parts of speech raise <code>InvalidFormatException</code>
+			with the source name and line. An explicit <code>members</code> list
+			orders the lemmas; it cannot exclude a sense's lemma from the synset.
+		</para>
 	</section>
 
 	<section xml:id="tools.wordnet.load">
@@ -108,6 +115,12 @@ dog.id();  // "omw-es-02084071-n"]]>
 			<code>ExternalLexicalEntry</code>, <code>ExternalSense</code>, and
 			<code>ExternalSynset</code>. Composition is additive: base content is
 			never deleted or replaced, and new ids must not collide with base ids.
+		</para>
+		<para>
+			Each selected base must have valid senses, members and relations before
+			an extension is added, including intermediate extensions. These checks
+			report the base source and line. Extension content cannot repair an
+			invalid base.
 		</para>
 		<para>
 			The application supplies the base through a <code>WnLmfResolver</code>,
