@@ -100,6 +100,8 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * as {@code ExternalLexicalEntry}, {@code ExternalSense}, and {@code ExternalSynset} attach
  * additive content to base entities, and the composed result is an ordinary {@link WnLmfLexicon}
  * whose {@link WnLmfLexicon#extensionOf() extensionOf} carries the {@code Extends} reference.
+ * References in extension member lists require new content or explicit external declarations,
+ * including legacy entry identifiers. Invalid declarations name the document containing them.
  * Each selected base must have valid senses, members and relations before an extension
  * is added, including intermediate extensions. These checks report the base source and line.
  * Extension chains compose up to 16 levels, with cycles detected by exact id and version.
@@ -405,14 +407,14 @@ public final class WnLmfReader {
     final RawResource raw = parseRaw(in, resourceName, resolver != null);
     rejectSameDocumentBase(raw, resourceName);
     final Composition composition =
-        resolver == null ? null : new Composition(resolver, resourceName);
+        resolver == null ? null : new Composition(resolver);
     final List<WnLmfLexicon> lexicons = new ArrayList<>(raw.lexicons().size());
     for (final RawLexicon lexicon : raw.lexicons()) {
       if (lexicon.kind() == Kind.LEXICON) {
         lexicons.add(descriptor(lexicon, resourceName));
       } else {
         // Without a resolver, parsing rejects extensions.
-        lexicons.add(descriptor(composition.compose(lexicon).lexicon(), resourceName));
+        lexicons.add(descriptor(composition.compose(lexicon, resourceName).lexicon(), resourceName));
       }
     }
     return new WnLmfResource(lexicons);
@@ -1419,6 +1421,10 @@ public final class WnLmfReader {
      * appends the entry ids composition added. Legacy documents that put lexical-entry ids in
      * {@code members} remain accepted.
      *
+     * <p>The XML parser normalizes tabs and line breaks written directly in the attribute to spaces.
+     * Character references retain their characters, per
+     * <a href="https://www.w3.org/TR/xml/#AVNormalize">XML attribute normalization</a>.</p>
+     *
      * @param raw The raw synset.
      * @param senses The senses pointing to this synset, in source order.
      * @return The member lemmas in source order, deduplicated.
@@ -1524,39 +1530,37 @@ public final class WnLmfReader {
   private static final class Composition {
 
     private final WnLmfResolver resolver;
-    private final String resourceName;
     private final Map<ResolutionKey, ResolvedLexicon> cache = new HashMap<>();
     private final LinkedHashSet<ResolutionKey> stack = new LinkedHashSet<>();
 
     /**
      * Creates the composition state for one top-level read.
      *
-     * @param resolver     The dependency resolver.
-     * @param resourceName The top-level resource name used in error messages.
+     * @param resolver The dependency resolver.
      */
-    private Composition(WnLmfResolver resolver, String resourceName) {
+    private Composition(WnLmfResolver resolver) {
       this.resolver = resolver;
-      this.resourceName = resourceName;
     }
 
     /**
      * Composes one extension against its resolved base, recursively composing base chains.
      *
      * @param extension The parsed extension.
+     * @param resourceName The extension's source name.
      * @return The composed lexicon and the extension path.
      * @throws InvalidFormatException Thrown if composition is invalid, cyclic, or too deep.
      * @throws IOException Thrown if the resolver cannot supply a base.
      */
-    private ResolvedLexicon compose(RawLexicon extension) throws IOException {
+    private ResolvedLexicon compose(RawLexicon extension, String resourceName) throws IOException {
       final ResolutionKey key = new ResolutionKey(extension.id(), extension.version());
-      validatePath(List.of(key));
+      validatePath(List.of(key), resourceName);
       stack.add(key);
       try {
-        final ResolvedLexicon base = base(extension.extendsRef());
+        final ResolvedLexicon base = base(extension.extendsRef(), resourceName);
         final List<ResolutionKey> extensionPath = new ArrayList<>(base.extensionPath().size() + 1);
         extensionPath.add(key);
         extensionPath.addAll(base.extensionPath());
-        return new ResolvedLexicon(merge(base.lexicon(), extension), extensionPath);
+        return new ResolvedLexicon(merge(base.lexicon(), extension, resourceName), extensionPath);
       } finally {
         stack.remove(key);
       }
@@ -1566,6 +1570,7 @@ public final class WnLmfReader {
      * Resolves one base reference to a composed raw lexicon, caching per exact id and version.
      *
      * @param reference The {@code Extends} reference.
+     * @param resourceName The referring extension's source name.
      * @return The base lexicon and the extension path, empty for a plain lexicon.
      * @throws InvalidFormatException Thrown if the resolved document is malformed or lacks an
      *     exact id and version match.
@@ -1573,11 +1578,11 @@ public final class WnLmfReader {
      * @throws IllegalStateException Thrown if the resolver violates its contract by returning
      *     {@code null} or a consumed or closed source.
      */
-    private ResolvedLexicon base(WnLmfDependency reference) throws IOException {
+    private ResolvedLexicon base(WnLmfDependency reference, String resourceName) throws IOException {
       final ResolutionKey key = new ResolutionKey(reference.ref(), reference.version());
       final ResolvedLexicon cached = cache.get(key);
       if (cached != null) {
-        validatePath(cached.extensionPath());
+        validatePath(cached.extensionPath(), resourceName);
         return cached;
       }
       final WnLmfSource source = resolver.resolve(reference);
@@ -1605,7 +1610,7 @@ public final class WnLmfReader {
             + reference.version(), null);
       }
       final ResolvedLexicon result = match.kind() == Kind.EXTENSION
-          ? compose(match) : new ResolvedLexicon(match, List.of());
+          ? compose(match, sourceName) : new ResolvedLexicon(match, List.of());
       new Materializer(result.lexicon(), sourceName).validate();
       cache.put(key, result);
       return result;
@@ -1615,16 +1620,19 @@ public final class WnLmfReader {
      * Checks a path for cycles with active ancestors and excessive depth.
      *
      * @param extensionPath The extension identifiers in dependency order.
+     * @param resourceName The referring extension's source name.
      * @throws InvalidFormatException If the combined path is cyclic or too deep.
      */
-    private void validatePath(List<ResolutionKey> extensionPath) throws InvalidFormatException {
+    private void validatePath(List<ResolutionKey> extensionPath, String resourceName)
+        throws InvalidFormatException {
       for (int i = 0; i < extensionPath.size(); i++) {
         final ResolutionKey key = extensionPath.get(i);
         if (stack.contains(key)) {
-          throw fail("Extension dependency cycle: " + path(extensionPath.subList(0, i + 1)));
+          throw fail(resourceName,
+              "Extension dependency cycle: " + path(extensionPath.subList(0, i + 1)));
         }
         if (stack.size() + i >= MAX_EXTENSION_DEPTH) {
-          throw fail("Extension chain at " + key
+          throw fail(resourceName, "Extension chain at " + key
               + " exceeds the maximum composition depth of " + MAX_EXTENSION_DEPTH);
         }
       }
@@ -1636,26 +1644,27 @@ public final class WnLmfReader {
      *
      * @param base      The composed base lexicon.
      * @param extension The parsed extension.
+     * @param resourceName The extension's source name.
      * @return The composed raw lexicon carrying the extension's identity.
      * @throws InvalidFormatException Thrown if a validation rule fails.
      */
-    private RawLexicon merge(RawLexicon base, RawLexicon extension)
+    private RawLexicon merge(RawLexicon base, RawLexicon extension, String resourceName)
         throws InvalidFormatException {
-      for (final String id : extension.entries().keySet()) {
-        requireNewId(base, extension, id, "lexical entry");
+      for (final RawEntry entry : extension.entries().values()) {
+        requireNewId(base, extension, entry.id(), "lexical entry", entry.line(), resourceName);
       }
-      for (final String id : extension.senses().keySet()) {
-        requireNewId(base, extension, id, "sense");
+      for (final RawSense sense : extension.senses().values()) {
+        requireNewId(base, extension, sense.id(), "sense", sense.line(), resourceName);
       }
-      for (final String id : extension.synsets().keySet()) {
-        requireNewId(base, extension, id, "synset");
+      for (final RawSynset synset : extension.synsets().values()) {
+        requireNewId(base, extension, synset.id(), "synset", synset.line(), resourceName);
       }
 
       // Resolve the declared external synsets against the base.
       final Map<String, RawExternalSynset> externalSynsets = new LinkedHashMap<>();
       for (final RawExternalSynset external : extension.externalSynsets()) {
         if (!base.synsets().containsKey(external.id())) {
-          throw fail("ExternalSynset " + external.id() + " at line " + external.line()
+          throw fail(resourceName, "ExternalSynset " + external.id() + " at line " + external.line()
               + " does not resolve to a synset in base " + base.id() + " version "
               + base.version() + kindHint(base, external.id()));
         }
@@ -1663,23 +1672,26 @@ public final class WnLmfReader {
       }
 
       // Resolve the declared external entries and senses against the base.
+      final Set<String> declaredExternalEntries = new HashSet<>();
       final Set<String> declaredExternalSenses = new HashSet<>();
       final Map<String, List<RawSenseRelation>> addedSenseRelations = new LinkedHashMap<>();
       for (final RawExternalEntry external : extension.externalEntries()) {
         if (!base.entries().containsKey(external.id())) {
-          throw fail("ExternalLexicalEntry " + external.id() + " at line " + external.line()
+          throw fail(resourceName, "ExternalLexicalEntry " + external.id() + " at line "
+              + external.line()
               + " does not resolve to a lexical entry in base " + base.id() + " version "
               + base.version() + kindHint(base, external.id()));
         }
+        declaredExternalEntries.add(external.id());
         for (final RawExternalSense externalSense : external.externalSenses()) {
           final RawSense baseSense = base.senses().get(externalSense.id());
           if (baseSense == null) {
-            throw fail("ExternalSense " + externalSense.id() + " at line "
+            throw fail(resourceName, "ExternalSense " + externalSense.id() + " at line "
                 + externalSense.line() + " does not resolve to a sense in base " + base.id()
                 + " version " + base.version() + kindHint(base, externalSense.id()));
           }
           if (!baseSense.entryId().equals(external.id())) {
-            throw fail("ExternalSense " + externalSense.id() + " at line "
+            throw fail(resourceName, "ExternalSense " + externalSense.id() + " at line "
                 + externalSense.line() + " is not a sense of lexical entry " + external.id()
                 + "; it belongs to " + baseSense.entryId());
           }
@@ -1694,27 +1706,30 @@ public final class WnLmfReader {
       // content; silently reaching into the base would hide missing declarations.
       for (final RawSense sense : extension.senses().values()) {
         requireSynsetTarget(extension, externalSynsets, sense.synsetId(),
-            "Sense " + sense.id(), sense.line());
-        requireSenseTargets(extension, declaredExternalSenses, sense.id(), sense.relations());
+            "Sense " + sense.id(), sense.line(), resourceName);
+        requireSenseTargets(extension, declaredExternalSenses, sense.id(), sense.relations(),
+            resourceName);
       }
       for (final RawSynset synset : extension.synsets().values()) {
+        requireMemberTargets(extension, synset, declaredExternalEntries, declaredExternalSenses,
+            resourceName);
         for (final RawRelation relation : synset.relations()) {
           requireSynsetTarget(extension, externalSynsets, relation.target(),
               "Relation " + relation.relType() + " on synset " + synset.id(),
-              relation.line());
+              relation.line(), resourceName);
         }
       }
       for (final RawExternalSynset external : extension.externalSynsets()) {
         for (final RawRelation relation : external.relations()) {
           requireSynsetTarget(extension, externalSynsets, relation.target(),
               "Relation " + relation.relType() + " on ExternalSynset " + external.id(),
-              relation.line());
+              relation.line(), resourceName);
         }
       }
       for (final Map.Entry<String, List<RawSenseRelation>> added
           : addedSenseRelations.entrySet()) {
         requireSenseTargets(extension, declaredExternalSenses, added.getKey(),
-            added.getValue());
+            added.getValue(), resourceName);
       }
 
       // Merge entries: base first, new entries after, in extension source order.
@@ -1778,13 +1793,17 @@ public final class WnLmfReader {
      * @param extension The extension introducing the id.
      * @param id        The new id.
      * @param kind      The element kind used in the rejection message.
+     * @param line The new declaration's source line.
+     * @param resourceName The extension's source name.
      * @throws InvalidFormatException Thrown on a collision.
      */
-    private void requireNewId(RawLexicon base, RawLexicon extension, String id, String kind)
+    private void requireNewId(RawLexicon base, RawLexicon extension, String id, String kind,
+        int line, String resourceName)
         throws InvalidFormatException {
       if (base.entries().containsKey(id) || base.senses().containsKey(id)
           || base.synsets().containsKey(id)) {
-        throw fail("New " + kind + " id " + id + " in extension " + extension.id()
+        throw fail(resourceName, "New " + kind + " id " + id + " at line " + line
+            + " in extension " + extension.id()
             + " collides with content of base " + base.id() + " version " + base.version());
       }
     }
@@ -1797,13 +1816,15 @@ public final class WnLmfReader {
      * @param target          The referenced synset id.
      * @param what            The referencing construct, for the rejection message.
      * @param line            The referencing line.
+     * @param resourceName The extension's source name.
      * @throws InvalidFormatException Thrown if the target is neither.
      */
     private void requireSynsetTarget(RawLexicon extension,
-        Map<String, RawExternalSynset> externalSynsets, String target, String what, int line)
+        Map<String, RawExternalSynset> externalSynsets, String target, String what, int line,
+        String resourceName)
         throws InvalidFormatException {
       if (!extension.synsets().containsKey(target) && !externalSynsets.containsKey(target)) {
-        throw fail(what + " at line " + line + " references synset " + target
+        throw fail(resourceName, what + " at line " + line + " references synset " + target
             + ", which is neither declared in the extension nor as an ExternalSynset");
       }
     }
@@ -1817,19 +1838,48 @@ public final class WnLmfReader {
      * @param declaredExternalSenses The declared external sense ids.
      * @param sourceId               The relation source, for the rejection message.
      * @param relations              The relations to check.
+     * @param resourceName The extension's source name.
      * @throws InvalidFormatException Thrown if a target is neither.
      */
     private void requireSenseTargets(RawLexicon extension, Set<String> declaredExternalSenses,
-        String sourceId, List<RawSenseRelation> relations) throws InvalidFormatException {
+        String sourceId, List<RawSenseRelation> relations, String resourceName)
+        throws InvalidFormatException {
       for (final RawSenseRelation relation : relations) {
         if (OTHER_RELATION.equals(relation.relType())) {
           continue;
         }
         if (!extension.senses().containsKey(relation.target())
             && !declaredExternalSenses.contains(relation.target())) {
-          throw fail("SenseRelation " + relation.relType() + " at line " + relation.line()
+          throw fail(resourceName, "SenseRelation " + relation.relType() + " at line "
+              + relation.line()
               + " from sense " + sourceId + " references sense " + relation.target()
               + ", which is neither declared in the extension nor as an ExternalSense");
+        }
+      }
+    }
+
+    /**
+     * Checks that member identifiers belong to new or explicitly external content.
+     *
+     * @param extension The extension under composition.
+     * @param synset The new synset listing members.
+     * @param externalEntries The external entry identifiers.
+     * @param externalSenses The external sense identifiers.
+     * @param resourceName The extension's source name.
+     * @throws InvalidFormatException If a member lacks a declaration in the extension.
+     */
+    private void requireMemberTargets(RawLexicon extension, RawSynset synset,
+        Set<String> externalEntries, Set<String> externalSenses, String resourceName)
+        throws InvalidFormatException {
+      if (synset.members() == null) {
+        return;
+      }
+      for (final String member : LemmaFolding.splitOnSpaces(synset.members())) {
+        if (!extension.entries().containsKey(member) && !extension.senses().containsKey(member)
+            && !externalEntries.contains(member) && !externalSenses.contains(member)) {
+          throw fail(resourceName, "Synset " + synset.id() + " at line " + synset.line()
+              + " lists member " + member + ", which needs a sense or entry declaration"
+              + " in the extension, or an ExternalSense or ExternalLexicalEntry");
         }
       }
     }
@@ -1873,12 +1923,13 @@ public final class WnLmfReader {
     }
 
     /**
-     * Builds a composition failure naming the top-level resource.
+     * Builds a composition failure naming the source document.
      *
+     * @param resourceName The document containing the invalid content or reference.
      * @param message The failure detail.
      * @return The exception to throw.
      */
-    private InvalidFormatException fail(String message) {
+    private InvalidFormatException fail(String resourceName, String message) {
       return malformed(resourceName, -1, message, null);
     }
 

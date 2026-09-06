@@ -54,6 +54,12 @@ class WnLmfCompositionValidationTest {
         <Sense id="base-sense" synset="base-synset"/>
       </LexicalEntry>
       """;
+  private static final String DOG_ENTRY = """
+      <LexicalEntry id="dog-entry">
+        <Lemma writtenForm="dog" partOfSpeech="n"/>
+        <Sense id="dog-sense" synset="base-synset"/>
+      </LexicalEntry>
+      """;
   private static final String BASE_SYNSET_ELEMENT =
       "<Synset id=\"base-synset\" partOfSpeech=\"n\"/>";
 
@@ -114,11 +120,7 @@ class WnLmfCompositionValidationTest {
             </ExternalLexicalEntry>
             <ExternalSynset id="base-synset"/>
             """, "missing-sense"),
-        Arguments.of(Named.of("omitted sense lemma", BASE_ENTRY + """
-            <LexicalEntry id="dog-entry">
-              <Lemma writtenForm="dog" partOfSpeech="n"/>
-              <Sense id="dog-sense" synset="base-synset"/>
-            </LexicalEntry>
+        Arguments.of(Named.of("omitted sense lemma", BASE_ENTRY + DOG_ENTRY + """
             <Synset id="base-synset" partOfSpeech="n" members="base-sense"/>
             """), """
             <ExternalLexicalEntry id="dog-entry">
@@ -257,6 +259,234 @@ class WnLmfCompositionValidationTest {
     final LexicalKnowledgeBase result = compose(extension("ext", "base", ""), resolved);
     assertEquals(List.of(BASE_SYNSET), result.lookup("cat", WordNetPOS.NOUN).stream()
         .map(Synset::id).toList());
+  }
+
+  /**
+   * Requires base members to have an external declaration in the extension.
+   *
+   * @param declarations Missing or unrelated declarations.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"", "<ExternalSynset id=\"base-synset\"/>",
+      "<Ignored><ExternalLexicalEntry id=\"base-entry\"/></Ignored>"})
+  void testUndeclaredBaseMemberIsRejected(String declarations) {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String document = extension("ext", "base", declarations
+        + "<Synset id=\"new-synset\" partOfSpeech=\"n\" members=\"base-entry\"/>");
+    assertFailure(assertThrows(InvalidFormatException.class,
+        () -> compose(document, base)), TOP_SOURCE, "base-entry");
+  }
+
+  /**
+   * Accepts new senses and legacy entry identifiers on an explicit external entry.
+   *
+   * @param member The member identifier form.
+   * @throws IOException If parsing fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"new-sense", "base-entry"})
+  void testDeclaredBaseMemberIsAccepted(String member) throws IOException {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String document = extension("ext", "base", """
+        <ExternalLexicalEntry id="base-entry">
+          <Sense id="new-sense" synset="new-synset"/>
+        </ExternalLexicalEntry>
+        """ + "<Synset id=\"new-synset\" partOfSpeech=\"n\" members=\"" + member + "\"/>");
+    final LexicalKnowledgeBase result = compose(document, base);
+    assertEquals(List.of("cat"), result.synset("new-synset").orElseThrow().lemmas());
+    assertEquals(List.of(BASE_SYNSET, "new-synset"), result.lookup("cat", WordNetPOS.NOUN)
+        .stream().map(Synset::id).toList());
+  }
+
+  /**
+   * Preserves legacy member entries without adding senses.
+   *
+   * @throws IOException If parsing fails.
+   */
+  @Test
+  void testDeclaredLegacyMemberWithoutNewSenseIsAccepted() throws IOException {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String document = extension("ext", "base", """
+        <ExternalLexicalEntry id="base-entry"/>
+        <Synset id="new-synset" partOfSpeech="n" members="base-entry"/>
+        """);
+    final LexicalKnowledgeBase result = compose(document, base);
+    assertEquals(List.of("cat"), result.synset("new-synset").orElseThrow().lemmas());
+    assertEquals(List.of(BASE_SYNSET), result.lookup("cat", WordNetPOS.NOUN)
+        .stream().map(Synset::id).toList());
+  }
+
+  /**
+   * Accepts member identifiers from new entries and senses.
+   *
+   * @param member The new member identifier form.
+   * @throws IOException If parsing fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"new-entry", "new-sense"})
+  void testNewMemberDeclarationsAreAccepted(String member) throws IOException {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String document = extension("ext", "base", """
+        <LexicalEntry id="new-entry">
+          <Lemma writtenForm="dog" partOfSpeech="n"/>
+          <Sense id="new-sense" synset="new-synset"/>
+        </LexicalEntry>
+        """ + "<Synset id=\"new-synset\" partOfSpeech=\"n\" members=\"" + member + "\"/>");
+    final LexicalKnowledgeBase result = compose(document, base);
+    assertEquals(List.of("dog"), result.synset("new-synset").orElseThrow().lemmas());
+    assertEquals(List.of("new-synset"), result.lookup("dog", WordNetPOS.NOUN)
+        .stream().map(Synset::id).toList());
+  }
+
+  /** Does not move a base sense to another synset through a member declaration. */
+  @Test
+  void testDeclaredExternalSenseStillRequiresMatchingSynset() {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String document = extension("ext", "base", """
+        <ExternalLexicalEntry id="base-entry">
+          <ExternalSense id="base-sense"/>
+        </ExternalLexicalEntry>
+        <Synset id="new-synset" partOfSpeech="n" members="base-sense"/>
+        """);
+    final InvalidFormatException error = assertThrows(InvalidFormatException.class,
+        () -> compose(document, base));
+    assertFailure(error, TOP_SOURCE, "base-sense");
+    assertTrue(error.getMessage().contains("assigned to synset"), error::getMessage);
+  }
+
+  /** Does not share external declarations between extensions in one resource. */
+  @Test
+  void testSiblingDeclarationCannotSupplyAMember() {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String first = extension("first", "base", "<ExternalLexicalEntry id=\"base-entry\"/>");
+    final String next = extension("next", "base", """
+        <Synset id="new-synset" partOfSpeech="n" members="base-entry"/>
+        """);
+    final String siblings = first.replace("</LexicalResource>", "")
+        + next.replace("<LexicalResource>", "");
+    assertFailure(assertThrows(InvalidFormatException.class,
+        () -> WnLmfReader.readResource(bytes(siblings), TOP_SOURCE,
+            dependency -> new WnLmfSource(BASE_SOURCE, bytes(base)))), TOP_SOURCE, "base-entry");
+  }
+
+  /**
+   * Checks XML's normalized spaces and member ordering through both load paths.
+   *
+   * @param separator The whitespace or space reference in the XML attribute.
+   * @throws IOException If parsing fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {" ", "\t", "\n", "\r", "\r\n", "\t \r\n", "&#32;", "&#x20;"})
+  void testNormalizedMemberSeparators(String separator) throws IOException {
+    final String document = lexiconWithMembers(separator + "dog-sense" + separator
+        + separator + "base-sense" + separator);
+    final LexicalKnowledgeBase direct = WnLmfReader.read(bytes(document), BASE_SOURCE);
+    assertEquals(List.of("dog", "cat"), direct.synset(BASE_SYNSET).orElseThrow().lemmas());
+    final LexicalKnowledgeBase composed = compose(extension("ext", "base", ""), document);
+    assertEquals(direct.synset(BASE_SYNSET), composed.synset(BASE_SYNSET));
+  }
+
+  /**
+   * Does not treat referenced control characters or Unicode spaces as list separators.
+   *
+   * @param separator The character reference between identifiers.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"&#9;", "&#x9;", "&#10;", "&#xA;", "&#13;", "&#xD;",
+      "&#xA0;", "&#x2003;"})
+  void testOtherMemberSeparatorsAreRejected(String separator) {
+    final String document = lexiconWithMembers("dog-sense" + separator + "base-sense");
+    assertAll(
+        () -> assertFailure(assertThrows(InvalidFormatException.class,
+            () -> WnLmfReader.read(bytes(document), BASE_SOURCE)), BASE_SOURCE, "dog-sense"),
+        () -> assertFailure(assertThrows(InvalidFormatException.class,
+            () -> compose(extension("ext", "base", ""), document)), BASE_SOURCE, "dog-sense"));
+  }
+
+  /**
+   * Accepts an XML name containing an ideographic space without splitting the identifier.
+   *
+   * @throws IOException If parsing fails.
+   */
+  @Test
+  void testIdeographicSpaceInsideIdentifierIsPreserved() throws IOException {
+    final String document = lexiconWithMembers("dog-sense base-sense")
+        .replace("dog-sense", "dog\u3000sense");
+    final LexicalKnowledgeBase direct = WnLmfReader.read(bytes(document), BASE_SOURCE);
+    assertEquals(List.of("dog", "cat"), direct.synset(BASE_SYNSET).orElseThrow().lemmas());
+    final LexicalKnowledgeBase composed = compose(extension("ext", "base", ""), document);
+    assertEquals(direct.synset(BASE_SYNSET), composed.synset(BASE_SYNSET));
+  }
+
+  /**
+   * Reports an invalid intermediate declaration in the document containing it.
+   *
+   * @param content The invalid intermediate content.
+   * @param reference The identifier expected in the error.
+   */
+  @ParameterizedTest
+  @MethodSource("invalidIntermediateDeclarations")
+  void testIntermediateDeclarationNamesItsSource(String content, String reference) {
+    final String base = lexicon("base", BASE_ENTRY + BASE_SYNSET_ELEMENT);
+    final String middle = extension("middle", "base", content);
+    final String outer = extension("outer", "middle", "");
+    final InvalidFormatException error = assertThrows(InvalidFormatException.class,
+        () -> WnLmfReader.read(bytes(outer), TOP_SOURCE, dependency -> {
+          if (dependency.ref().equals("middle")) {
+            return new WnLmfSource(MIDDLE_SOURCE, bytes(middle));
+          }
+          assertEquals("base", dependency.ref());
+          return new WnLmfSource(BASE_SOURCE, bytes(base));
+        }));
+    assertFailure(error, MIDDLE_SOURCE, reference);
+  }
+
+  /**
+   * Supplies invalid declarations in an intermediate extension.
+   *
+   * @return The invalid content and expected identifiers.
+   */
+  private static Stream<Arguments> invalidIntermediateDeclarations() {
+    return Stream.of(
+        Arguments.of(Named.of("missing external entry", "<ExternalLexicalEntry id=\"missing\"/>"),
+            "missing"),
+        Arguments.of(Named.of("external type mismatch", "<ExternalSynset id=\"base-entry\"/>"),
+            "base-entry"),
+        Arguments.of(Named.of("id collision", BASE_ENTRY), "base-entry"),
+        Arguments.of(Named.of("sense id collision", """
+            <ExternalLexicalEntry id="base-entry">
+              <Sense id="base-sense" synset="new-synset"/>
+            </ExternalLexicalEntry>
+            <Synset id="new-synset" partOfSpeech="n"/>
+            """), "base-sense"),
+        Arguments.of(Named.of("synset id collision", BASE_SYNSET_ELEMENT), BASE_SYNSET),
+        Arguments.of(Named.of("undeclared relation target", """
+            <Synset id="new-synset" partOfSpeech="n">
+              <SynsetRelation relType="hypernym" target="base-synset"/>
+            </Synset>
+            """), "base-synset"),
+        Arguments.of(Named.of("undeclared sense relation target", """
+            <ExternalLexicalEntry id="base-entry">
+              <Sense id="new-sense" synset="new-synset">
+                <SenseRelation relType="also" target="base-sense"/>
+              </Sense>
+            </ExternalLexicalEntry>
+            <Synset id="new-synset" partOfSpeech="n"/>
+            """), "base-sense"),
+        Arguments.of(Named.of("undeclared member", """
+            <Synset id="new-synset" partOfSpeech="n" members="base-entry"/>
+            """), "base-entry"));
+  }
+
+  /**
+   * Builds a cat and dog lexicon with the supplied member order.
+   *
+   * @param members The XML attribute content.
+   * @return The document.
+   */
+  private String lexiconWithMembers(String members) {
+    return lexicon("base", BASE_ENTRY + DOG_ENTRY
+        + "<Synset id=\"base-synset\" partOfSpeech=\"n\" members=\"" + members + "\"/>");
   }
 
   /**

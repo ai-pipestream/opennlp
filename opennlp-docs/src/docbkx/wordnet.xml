@@ -117,6 +117,13 @@ dog.id();  // "omw-es-02084071-n"]]>
 			never deleted or replaced, and new ids must not collide with base ids.
 		</para>
 		<para>
+			References in extension <code>members</code> lists require new content
+			or explicit external declarations. This also applies to legacy
+			lexical-entry identifiers: a base entry needs an
+			<code>ExternalLexicalEntry</code> declaration. An invalid declaration
+			names the document containing it, including intermediate extensions.
+		</para>
+		<para>
 			Each selected base must have valid senses, members and relations before
 			an extension is added, including intermediate extensions. These checks
 			report the base source and line. Extension content cannot repair an

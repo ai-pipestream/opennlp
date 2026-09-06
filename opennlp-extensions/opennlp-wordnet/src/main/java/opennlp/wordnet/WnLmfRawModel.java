@@ -25,18 +25,14 @@ import javax.xml.namespace.QName;
 import opennlp.tools.wordnet.WordNetPOS;
 
 /**
- * The package-private immutable model {@link WnLmfReader} parses a document into, before any
- * lexicon is materialized. Unlike the public {@link opennlp.tools.wordnet.LexicalKnowledgeBase}
- * projection, it retains lexical-entry and sense identities, because WN-LMF
- * {@code ExternalLexicalEntry} and {@code ExternalSense} declarations target exactly those ids
- * during {@code LexiconExtension} composition.
+ * Immutable XML records used by {@link WnLmfReader} while composing lexicon extensions.
+ * Entry and sense identifiers let external declarations refer to base content.
  *
- * <p>Every nested type is a record over defensively copied collections; ordered maps keep the
- * document order their builders inserted. Instances never escape this package.</p>
+ * <p>Collections are copied, and lexical maps retain document order.</p>
  */
 final class WnLmfRawModel {
 
-  /** Not instantiable; a namespace for the raw model types. */
+  /** Not instantiable. */
   private WnLmfRawModel() {
   }
 
@@ -51,21 +47,20 @@ final class WnLmfRawModel {
   }
 
   /**
-   * One parsed document: its lexicons and extensions in document order.
+   * A parsed document with lexicons and extensions in document order.
    *
    * @param lexicons The raw lexicons in document order.
    */
   record RawResource(List<RawLexicon> lexicons) {
 
+    /** Copies the lexicon list. */
     RawResource {
       lexicons = List.copyOf(lexicons);
     }
   }
 
   /**
-   * One parsed {@code Lexicon} or {@code LexiconExtension}, or the composed result of an
-   * extension merged with its base. A composed lexicon carries no external declarations; they
-   * have been applied.
+   * A parsed or composed lexicon. Composition resolves and removes external declarations.
    *
    * @param kind             Whether the source element was a Lexicon or a LexiconExtension.
    * @param id               The lexicon id.
@@ -99,6 +94,7 @@ final class WnLmfRawModel {
       List<RawExternalSynset> externalSynsets,
       int line) {
 
+    /** Copies collections and retains lexical map order. */
     RawLexicon {
       metadata = Map.copyOf(metadata);
       requires = List.copyOf(requires);
@@ -111,8 +107,7 @@ final class WnLmfRawModel {
   }
 
   /**
-   * One parsed {@code LexicalEntry}: the identity the public projection discards but external
-   * declarations target.
+   * A lexical entry and the lemma used for lookup.
    *
    * @param id    The entry id.
    * @param lemma The written form of the entry's lemma.
@@ -135,6 +130,7 @@ final class WnLmfRawModel {
   record RawSense(String id, String entryId, String synsetId,
                   List<RawSenseRelation> relations, int line) {
 
+    /** Copies the relation list. */
     RawSense {
       relations = List.copyOf(relations);
     }
@@ -148,7 +144,7 @@ final class WnLmfRawModel {
    * @param members      The {@code members} attribute value, or {@code null} when absent.
    * @param extraMembers Entry ids composition appended after the base members, empty outside
    *                     composed lexicons.
-   * @param gloss        The first definition, or {@code null} when the source has none.
+   * @param gloss        The definition text, or {@code null} if no definition exists.
    * @param relations    The synset relations in source order; for a composed lexicon, base
    *                     relations first, extension additions after.
    * @param line         The line the element started on.
@@ -156,6 +152,7 @@ final class WnLmfRawModel {
   record RawSynset(String id, WordNetPOS pos, String members, List<String> extraMembers,
                    String gloss, List<RawRelation> relations, int line) {
 
+    /** Copies the added members and relations. */
     RawSynset {
       extraMembers = List.copyOf(extraMembers);
       relations = List.copyOf(relations);
@@ -183,9 +180,8 @@ final class WnLmfRawModel {
   }
 
   /**
-   * One parsed {@code ExternalLexicalEntry}: a reference into the base lexicon carrying
-   * additive content. The new senses it declares live in the extension's sense table under
-   * the external entry's id.
+   * A base entry reference with external senses. New senses are stored in the extension's
+   * sense table, owned by this entry identifier.
    *
    * @param id             The base lexical entry id this declaration targets.
    * @param externalSenses The nested {@code ExternalSense} declarations in source order.
@@ -193,6 +189,7 @@ final class WnLmfRawModel {
    */
   record RawExternalEntry(String id, List<RawExternalSense> externalSenses, int line) {
 
+    /** Copies the external sense list. */
     RawExternalEntry {
       externalSenses = List.copyOf(externalSenses);
     }
@@ -207,6 +204,7 @@ final class WnLmfRawModel {
    */
   record RawExternalSense(String id, List<RawSenseRelation> relations, int line) {
 
+    /** Copies the added relations. */
     RawExternalSense {
       relations = List.copyOf(relations);
     }
@@ -222,6 +220,7 @@ final class WnLmfRawModel {
    */
   record RawExternalSynset(String id, String definition, List<RawRelation> relations, int line) {
 
+    /** Copies the added relations. */
     RawExternalSynset {
       relations = List.copyOf(relations);
     }

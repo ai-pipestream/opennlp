@@ -553,6 +553,16 @@ class WnLmfExtensionTest {
         () -> new WnLmfDependency("base", "1", Optional.of("")));
   }
 
+  /** Reports the constructor parameter name when the extension reference is null. */
+  @Test
+  void testNullExtensionReferenceNamesArgument() {
+    final LexicalKnowledgeBase knowledgeBase = new InMemoryWordNetLexicon(Map.of(), Map.of());
+    final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        () -> new WnLmfLexicon("ext", "ext", "en", "1", Map.of(), List.of(), null,
+            knowledgeBase));
+    assertEquals("extensionOf must not be null; use Optional.empty()", error.getMessage());
+  }
+
   @Test
   void testSourceCloseClosesItsStreamOnce() throws IOException {
     final int[] closes = {0};
