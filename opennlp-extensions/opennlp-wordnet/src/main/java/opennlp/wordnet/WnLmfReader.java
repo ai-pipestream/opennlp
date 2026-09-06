@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -67,6 +69,12 @@ import opennlp.wordnet.WnLmfRawModel.RawSynset;
  * 1.4, and sense relations, which are lifted to the synset level as documented on
  * {@link WordNetRelation}. Elements outside that subset are skipped, as are relations of type
  * {@code other}, the format's untyped escape hatch. Any other unknown relation type fails loud.</p>
+ *
+ * <p>Lexicons must be direct children of the {@code LexicalResource} root. Within
+ * each lexicon, parsed elements must have their WN-LMF parent, and lexical entries
+ * must have a lemma. Skipped elements include their complete subtrees; nested
+ * content cannot add entries, senses, definitions, relations, or dependencies.
+ * The reader does not perform full DTD validation.</p>
  *
  * <p>The parser is hardened against XXE: DTD processing and external entities are disabled, so a
  * DOCTYPE is skipped but nothing it names is fetched or resolved.</p>
@@ -141,6 +149,9 @@ public final class WnLmfReader {
 
   /** The element declaring one independently queryable lexicon. */
   private static final String LEXICON_ELEMENT = "Lexicon";
+
+  /** The document root containing lexicons and extensions. */
+  private static final String LEXICAL_RESOURCE_ELEMENT = "LexicalResource";
 
   /** The element declaring an extension composed against a separately supplied base. */
   private static final String LEXICON_EXTENSION_ELEMENT = "LexiconExtension";
@@ -565,6 +576,7 @@ public final class WnLmfReader {
     private final List<RawLexicon> lexicons = new ArrayList<>();
     private final Set<String> lexiconIds = new HashSet<>();
     private final Set<String> documentIds = new HashSet<>();
+    private final Deque<String> elements = new ArrayDeque<>();
 
     // Current Lexicon or LexiconExtension identity.
     private Kind currentKind;
@@ -606,7 +618,7 @@ public final class WnLmfReader {
      * @param resourceName    The name used in error messages.
      * @param allowExtensions Whether a {@code LexiconExtension} may be parsed.
      */
-    Parser(String resourceName, boolean allowExtensions) {
+    private Parser(String resourceName, boolean allowExtensions) {
       this.resourceName = resourceName;
       this.allowExtensions = allowExtensions;
     }
@@ -618,14 +630,20 @@ public final class WnLmfReader {
      * @throws XMLStreamException Thrown if the stream read fails.
      * @throws InvalidFormatException Thrown if the document is malformed.
      */
-    void parse(XMLStreamReader reader) throws XMLStreamException, InvalidFormatException {
+    private void parse(XMLStreamReader reader) throws XMLStreamException, InvalidFormatException {
       while (reader.hasNext()) {
         final int event = reader.next();
         // A DTD event carries nothing that can affect parsing once the factory is hardened.
         if (event == XMLStreamConstants.START_ELEMENT) {
+          final String name = reader.getLocalName();
           startElement(reader);
+          // Text and skipped subtrees are consumed through their closing element.
+          if (reader.getEventType() == XMLStreamConstants.START_ELEMENT) {
+            elements.push(name);
+          }
         } else if (event == XMLStreamConstants.END_ELEMENT) {
           endElement(reader.getLocalName());
+          elements.pop();
         }
       }
       if (currentLexiconId != null) {
@@ -647,6 +665,11 @@ public final class WnLmfReader {
         throws XMLStreamException, InvalidFormatException {
       final String name = reader.getLocalName();
       switch (name) {
+        case LEXICAL_RESOURCE_ELEMENT -> {
+          if (!elements.isEmpty()) {
+            throw malformedAt(reader.getLocation(), "Nested LexicalResource", null);
+          }
+        }
         case LEXICON_ELEMENT -> openLexicon(reader, Kind.LEXICON);
         case LEXICON_EXTENSION_ELEMENT -> {
           if (!allowExtensions) {
@@ -657,9 +680,7 @@ public final class WnLmfReader {
           openLexicon(reader, Kind.EXTENSION);
         }
         case EXTENDS_ELEMENT -> {
-          if (currentKind != Kind.EXTENSION) {
-            throw malformedAt(reader.getLocation(), "Extends outside a LexiconExtension", null);
-          }
+          requireExtension(reader, EXTENDS_ELEMENT);
           if (currentExtends != null) {
             throw malformedAt(reader.getLocation(),
                 "Repeated Extends in LexiconExtension " + currentLexiconId, null);
@@ -671,11 +692,11 @@ public final class WnLmfReader {
           currentRequires.add(dependency(reader));
         }
         case LEXICAL_ENTRY_ELEMENT -> {
-          requireLexicon(reader, LEXICAL_ENTRY_ELEMENT);
           if (currentEntryId != null) {
             throw malformedAt(reader.getLocation(),
                 "Nested LexicalEntry inside " + currentEntryId, null);
           }
+          requireLexicon(reader, LEXICAL_ENTRY_ELEMENT);
           currentEntryId = requireAttribute(reader, ID_ATTRIBUTE);
           claimDocumentId(currentEntryId, "lexical entry", reader.getLocation());
           currentEntryLemma = null;
@@ -696,6 +717,7 @@ public final class WnLmfReader {
             throw malformedAt(reader.getLocation(),
                 "Duplicate Lemma in LexicalEntry " + currentEntryId, null);
           }
+          requireParent(reader, LEXICAL_ENTRY_ELEMENT);
           currentEntryLemma = requireAttribute(reader, "writtenForm");
           currentEntryPos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
@@ -715,6 +737,7 @@ public final class WnLmfReader {
             }
             owner = currentEntryId;
           }
+          requireParent(reader, LEXICAL_ENTRY_ELEMENT, EXTERNAL_LEXICAL_ENTRY_ELEMENT);
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final String synsetId = requireAttribute(reader, "synset");
           claimDocumentId(id, "sense", reader.getLocation());
@@ -729,6 +752,7 @@ public final class WnLmfReader {
             throw malformedAt(reader.getLocation(),
                 "ExternalSense outside an ExternalLexicalEntry", null);
           }
+          requireParent(reader, EXTERNAL_LEXICAL_ENTRY_ELEMENT);
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           claimDocumentId(id, "external sense", reader.getLocation());
           currentExternalSense = new ExternalSenseBuilder(id, line(reader.getLocation()));
@@ -737,6 +761,7 @@ public final class WnLmfReader {
           if (currentExternalSense == null && currentSenseId == null) {
             throw malformedAt(reader.getLocation(), "SenseRelation outside a Sense", null);
           }
+          requireParent(reader, SENSE_ELEMENT, EXTERNAL_SENSE_ELEMENT);
           final RawSenseRelation relation = new RawSenseRelation(
               requireAttribute(reader, REL_TYPE_ATTRIBUTE),
               requireAttribute(reader, TARGET_ATTRIBUTE), line(reader.getLocation()));
@@ -747,11 +772,11 @@ public final class WnLmfReader {
           }
         }
         case SYNSET_ELEMENT -> {
-          requireLexicon(reader, SYNSET_ELEMENT);
           if (currentSynset != null) {
             throw malformedAt(reader.getLocation(),
                 "Nested Synset inside " + currentSynset.id, null);
           }
+          requireLexicon(reader, SYNSET_ELEMENT);
           final String id = requireAttribute(reader, ID_ATTRIBUTE);
           final WordNetPOS pos = parsePos(requireAttribute(reader, PART_OF_SPEECH_ATTRIBUTE),
               reader.getLocation());
@@ -766,21 +791,24 @@ public final class WnLmfReader {
           currentExternalSynset = new ExternalSynsetBuilder(id, line(reader.getLocation()));
         }
         case "Definition" -> {
+          if (currentSynset == null && currentExternalSynset == null) {
+            throw malformedAt(reader.getLocation(), "Definition outside a Synset", null);
+          }
+          requireParent(reader, SYNSET_ELEMENT, EXTERNAL_SYNSET_ELEMENT);
           if (currentSynset != null) {
             currentSynset.definitions.add(reader.getElementText());
-          } else if (currentExternalSynset != null) {
+          } else {
             final String definition = reader.getElementText();
             if (currentExternalSynset.definition == null) {
               currentExternalSynset.definition = definition;
             }
-          } else {
-            throw malformedAt(reader.getLocation(), "Definition outside a Synset", null);
           }
         }
         case "SynsetRelation" -> {
           if (currentSynset == null && currentExternalSynset == null) {
             throw malformedAt(reader.getLocation(), "SynsetRelation outside a Synset", null);
           }
+          requireParent(reader, SYNSET_ELEMENT, EXTERNAL_SYNSET_ELEMENT);
           final String relType = requireAttribute(reader, REL_TYPE_ATTRIBUTE);
           final String target = requireAttribute(reader, TARGET_ATTRIBUTE);
           // The escape-hatch type is a documented skip, not a rejection.
@@ -794,10 +822,29 @@ public final class WnLmfReader {
             }
           }
         }
-        default -> {
-          // Pronunciation, Form, ExternalForm, ExternalLemma, Example, SyntacticBehaviour,
-          // ILIDefinition, and other elements outside the contract subset are skipped.
+        default -> skipElement(reader);
+      }
+    }
+
+    /**
+     * Skips an element and all descendants without changing parse state.
+     *
+     * @param reader The reader positioned on the start element.
+     * @throws XMLStreamException If the ignored XML cannot be read.
+     */
+    private void skipElement(XMLStreamReader reader) throws XMLStreamException {
+      final String name = reader.getLocalName();
+      int depth = 1;
+      while (depth > 0 && reader.hasNext()) {
+        final int event = reader.next();
+        if (event == XMLStreamConstants.START_ELEMENT) {
+          depth++;
+        } else if (event == XMLStreamConstants.END_ELEMENT) {
+          depth--;
         }
+      }
+      if (depth != 0) {
+        throw new XMLStreamException("Unclosed " + name, reader.getLocation());
       }
     }
 
@@ -805,16 +852,18 @@ public final class WnLmfReader {
      * Builds raw records and clears cursor state when a tracked element closes.
      *
      * @param name The local name of the closing element.
-     * @throws InvalidFormatException Thrown if closing a lexicon exposes invalid content.
+     * @throws InvalidFormatException If an entry has no lemma or a lexicon is invalid.
      */
     private void endElement(String name) throws InvalidFormatException {
       switch (name) {
         case LEXICON_ELEMENT, LEXICON_EXTENSION_ELEMENT -> closeLexicon();
         case LEXICAL_ENTRY_ELEMENT -> {
-          if (currentEntryLemma != null) {
-            entries.put(currentEntryId, new RawEntry(currentEntryId, currentEntryLemma,
-                currentEntryPos, currentEntryLine));
+          if (currentEntryLemma == null) {
+            throw malformed(resourceName, currentEntryLine,
+                "LexicalEntry " + currentEntryId + " has no Lemma", null);
           }
+          entries.put(currentEntryId, new RawEntry(currentEntryId, currentEntryLemma,
+              currentEntryPos, currentEntryLine));
           currentEntryId = null;
           currentEntryLemma = null;
           currentEntryPos = null;
@@ -879,6 +928,7 @@ public final class WnLmfReader {
         throw malformedAt(reader.getLocation(),
             "Nested " + reader.getLocalName() + " inside " + currentLexiconId, null);
       }
+      requireParent(reader, LEXICAL_RESOURCE_ELEMENT);
       final String id = requireAttribute(reader, ID_ATTRIBUTE);
       if (!lexiconIds.add(id)) {
         throw malformedAt(reader.getLocation(), "Duplicate lexicon id " + id, null);
@@ -924,31 +974,63 @@ public final class WnLmfReader {
     }
 
     /**
-     * Requires lexical content to be enclosed by a Lexicon or LexiconExtension element.
+     * Requires lexical content to be directly enclosed by a Lexicon or LexiconExtension.
      *
      * @param reader  The reader positioned on the content element.
      * @param element The element name used in the rejection message.
-     * @throws InvalidFormatException Thrown if no lexicon is open.
+     * @throws InvalidFormatException If the element has no lexicon parent.
      */
     private void requireLexicon(XMLStreamReader reader, String element)
         throws InvalidFormatException {
       if (currentLexiconId == null) {
         throw malformedAt(reader.getLocation(), element + " outside a Lexicon", null);
       }
+      requireParent(reader, LEXICON_ELEMENT, LEXICON_EXTENSION_ELEMENT);
     }
 
     /**
-     * Requires an external declaration to be enclosed by a LexiconExtension.
+     * Requires a declaration to be directly enclosed by a LexiconExtension.
      *
      * @param reader  The reader positioned on the declaration element.
      * @param element The element name used in the rejection message.
-     * @throws InvalidFormatException Thrown if no extension is open.
+     * @throws InvalidFormatException If the element has no extension parent.
      */
     private void requireExtension(XMLStreamReader reader, String element)
         throws InvalidFormatException {
       if (currentKind != Kind.EXTENSION) {
         throw malformedAt(reader.getLocation(),
             element + " outside a LexiconExtension", null);
+      }
+      requireParent(reader, LEXICON_EXTENSION_ELEMENT);
+    }
+
+    /**
+     * Checks the element's direct parent.
+     *
+     * @param reader The reader positioned on the child element.
+     * @param expected The required parent name.
+     * @throws InvalidFormatException If the parent does not match.
+     */
+    private void requireParent(XMLStreamReader reader, String expected)
+        throws InvalidFormatException {
+      requireParent(reader, expected, null);
+    }
+
+    /**
+     * Checks that the element has an accepted direct parent.
+     *
+     * @param reader The reader positioned on the child element.
+     * @param expected The first accepted parent name.
+     * @param alternative Another accepted name, or {@code null} to accept only the first.
+     * @throws InvalidFormatException If no accepted name matches.
+     */
+    private void requireParent(XMLStreamReader reader, String expected, String alternative)
+        throws InvalidFormatException {
+      final String actual = elements.peek();
+      if (!expected.equals(actual) && (alternative == null || !alternative.equals(actual))) {
+        throw malformedAt(reader.getLocation(), reader.getLocalName() + " must be a direct child of "
+            + expected + (alternative == null ? "" : " or " + alternative)
+            + "; found " + (actual == null ? "document root" : actual), null);
       }
     }
 
@@ -1031,7 +1113,7 @@ public final class WnLmfReader {
      *
      * @return The immutable raw resource in document order.
      */
-    RawResource resource() {
+    private RawResource resource() {
       return new RawResource(lexicons);
     }
 
@@ -1080,7 +1162,7 @@ public final class WnLmfReader {
      * @param cause    The underlying cause, or {@code null}.
      * @return The exception to throw.
      */
-    InvalidFormatException malformedAt(Location location, String message, Throwable cause) {
+    private InvalidFormatException malformedAt(Location location, String message, Throwable cause) {
       return malformed(resourceName, line(location), message, cause);
     }
 
@@ -1093,7 +1175,15 @@ public final class WnLmfReader {
       private final List<RawRelation> relations = new ArrayList<>(4);
       private final List<String> definitions = new ArrayList<>(1);
 
-      SynsetBuilder(String id, WordNetPOS pos, String members, int line) {
+      /**
+       * Records synset attributes before reading definitions and relations.
+       *
+       * @param id The synset identifier.
+       * @param pos The part of speech.
+       * @param members The XML member list, or {@code null} if not supplied.
+       * @param line The source line.
+       */
+      private SynsetBuilder(String id, WordNetPOS pos, String members, int line) {
         this.id = id;
         this.pos = pos;
         this.members = members;
@@ -1107,7 +1197,13 @@ public final class WnLmfReader {
       private final int line;
       private final List<RawExternalSense> externalSenses = new ArrayList<>(2);
 
-      ExternalEntryBuilder(String id, int line) {
+      /**
+       * Records an external entry before reading new senses.
+       *
+       * @param id The base entry identifier.
+       * @param line The source line.
+       */
+      private ExternalEntryBuilder(String id, int line) {
         this.id = id;
         this.line = line;
       }
@@ -1119,7 +1215,13 @@ public final class WnLmfReader {
       private final int line;
       private final List<RawSenseRelation> relations = new ArrayList<>(2);
 
-      ExternalSenseBuilder(String id, int line) {
+      /**
+       * Records an external sense before reading added relations.
+       *
+       * @param id The base sense identifier.
+       * @param line The source line.
+       */
+      private ExternalSenseBuilder(String id, int line) {
         this.id = id;
         this.line = line;
       }
@@ -1132,7 +1234,13 @@ public final class WnLmfReader {
       private final List<RawRelation> relations = new ArrayList<>(2);
       private String definition;
 
-      ExternalSynsetBuilder(String id, int line) {
+      /**
+       * Records an external synset before reading added content.
+       *
+       * @param id The base synset identifier.
+       * @param line The source line.
+       */
+      private ExternalSynsetBuilder(String id, int line) {
         this.id = id;
         this.line = line;
       }
