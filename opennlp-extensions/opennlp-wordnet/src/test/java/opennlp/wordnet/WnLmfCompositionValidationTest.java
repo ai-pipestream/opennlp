@@ -404,14 +404,15 @@ class WnLmfCompositionValidationTest {
   }
 
   /**
-   * Accepts an XML name containing an ideographic space without splitting the identifier.
+   * Preserves U+1680 inside an identifier. XML 1.0 permits it in
+   * <a href="https://www.w3.org/TR/xml/#NT-Name">names</a>, not as a list separator.
    *
    * @throws IOException If parsing fails.
    */
   @Test
-  void testIdeographicSpaceInsideIdentifierIsPreserved() throws IOException {
+  void testOghamSpaceInsideIdentifierIsPreserved() throws IOException {
     final String document = lexiconWithMembers("dog-sense base-sense")
-        .replace("dog-sense", "dog\u3000sense");
+        .replace("dog-sense", "dog\u1680sense");
     final LexicalKnowledgeBase direct = WnLmfReader.read(bytes(document), BASE_SOURCE);
     assertEquals(List.of("dog", "cat"), direct.synset(BASE_SYNSET).orElseThrow().lemmas());
     final LexicalKnowledgeBase composed = compose(extension("ext", "base", ""), document);
