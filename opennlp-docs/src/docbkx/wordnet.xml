@@ -189,7 +189,9 @@ lexicon.synset(hypernymId).orElseThrow().lemmas();  // ["software"], a base syns
 			ordered <code>Requires</code> declarations, which stay descriptive
 			metadata and are never loaded automatically. Sibling extensions in one
 			document compose independently against their own bases and are never
-			merged with each other. When a resolved base is itself an extension, the
+			merged with each other. External IDs must be unique within one XML
+			document. Put extensions that repeat an external ID in separate files.
+			When the resolved base is another extension, the
 			chain can contain up to 16 extension levels, excluding the plain base lexicon.
 			Cycles are detected by exact id and version. Resolutions are cached per
 			id and version for one read, so a shared base is fetched once. Cached paths
