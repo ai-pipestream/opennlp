@@ -212,7 +212,6 @@ final class KnownMagics {
       e("0f534942454c495553", "sib", "application/x-sibelius"), // .SIBELIUS
       e("2321414d522d57420a", "amr-wb", "audio/amr-wb"), // #!AMR-WB.
       e("234558544d33550d0a", "m3u", "audio/x-mpegurl"), // #EXTM3U..
-      e("3080060b2a864886f7", "tsd", "application/timestamped-data"), // 0...*.H..
       e("4e49544630312e3130", "ntf", "image/nitf"), // NITF01.10
       e("576f726450726f0dfb", "lwp", "application/vnd.lotus-wordpro"), // WordPro..
       e("67696d702078636620", "xcf", "image/x-xcf"), // gimp xcf

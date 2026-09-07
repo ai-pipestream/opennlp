@@ -22,6 +22,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -67,6 +68,16 @@ public final class CursorAssetDetector implements AssetDetector {
 
   private static final int DEX_VERSION_OFFSET = 4;
   private static final int DEX_MAGIC_LENGTH = 8;
+
+  private static final int BER_SEQUENCE_TAG = 0x30;
+  private static final int BER_OBJECT_IDENTIFIER_TAG = 0x06;
+  private static final int BER_INDEFINITE_LENGTH = 0x80;
+
+  /** Encoded content type 1.2.840.113549.1.9.16.1.31. */
+  private static final byte[] TIMESTAMPED_DATA_OID = {
+      0x2a, (byte) 0x86, 0x48, (byte) 0x86, (byte) 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x01, 0x1f};
+  private static final KnownMagics.Format TIMESTAMPED_DATA_FORMAT =
+      new KnownMagics.Format("tsd", "application/timestamped-data");
 
   /** Base64 encoding of the JPEG 2000 signature box. */
   private static final String JPEG2000_PREFIX = "AAAADGpQICANCocK";
@@ -256,7 +267,8 @@ public final class CursorAssetDetector implements AssetDetector {
     if (payload.encodedLength() < MIN_BARE_PAYLOAD) {
       return;
     }
-    boolean magic = matchesBase64Prefix(text, payload.start(), RIFF_PREFIX);
+    boolean magic = matchesBase64Prefix(text, payload.start(), RIFF_PREFIX)
+        || startsWithSequence(text, payload.start());
     if (!magic) {
       for (final String prefix : KnownMagics.PREFIXES) {
         if (matchesBase64Prefix(text, payload.start(), prefix)) {
@@ -626,7 +638,82 @@ public final class CursorAssetDetector implements AssetDetector {
         return AVI_FORMAT;
       }
     }
-    return null;
+    return hasTimestampedDataType(header) ? TIMESTAMPED_DATA_FORMAT : null;
+  }
+
+  /**
+   * Checks a leading CMS content-type identifier within the decoded header.
+   * BER definite and indefinite sequence lengths are supported. Timestamp evidence
+   * and the remainder of the envelope are not validated.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete timestamped-data identifier is present.
+   * @see <a href="https://www.rfc-editor.org/rfc/rfc5544.html#section-2">TimeStampedData syntax</a>
+   */
+  private boolean hasTimestampedDataType(byte[] header) {
+    if (header.length < 2 || header[0] != BER_SEQUENCE_TAG) {
+      return false;
+    }
+    final int sequenceStart = berContentOffset(header, 1);
+    if (sequenceStart < 0 || sequenceStart >= header.length
+        || header[sequenceStart] != BER_OBJECT_IDENTIFIER_TAG) {
+      return false;
+    }
+    final int oidStart = berContentOffset(header, sequenceStart + 1);
+    if (oidStart < 0 || berLength(header, sequenceStart + 1, oidStart) != TIMESTAMPED_DATA_OID.length
+        || oidStart + TIMESTAMPED_DATA_OID.length > header.length) {
+      return false;
+    }
+    final int sequenceLength = berLength(header, 1, sequenceStart);
+    final int oidEnd = oidStart + TIMESTAMPED_DATA_OID.length;
+    return (sequenceLength < 0 || sequenceLength >= oidEnd - sequenceStart)
+        && Arrays.equals(header, oidStart, oidEnd,
+            TIMESTAMPED_DATA_OID, 0, TIMESTAMPED_DATA_OID.length);
+  }
+
+  /**
+   * Locates the content after a complete BER length field, rejecting the reserved 0xff form.
+   *
+   * @param header The decoded leading bytes.
+   * @param at The length field offset.
+   * @return The content offset, or -1 for an incomplete or reserved length field.
+   */
+  private int berContentOffset(byte[] header, int at) {
+    if (at >= header.length) {
+      return -1;
+    }
+    final int descriptor = header[at] & 0xff;
+    final int lengthBytes = descriptor < BER_INDEFINITE_LENGTH ? 0 : descriptor & 0x7f;
+    if (descriptor == 0xff || lengthBytes > header.length - at - 1) {
+      return -1;
+    }
+    return at + 1 + lengthBytes;
+  }
+
+  /**
+   * Returns a checked BER length, limited to the header size plus one for comparison.
+   * Extra leading zero length bytes are permitted by BER. Capping avoids overflow without
+   * allocating storage for lengths that exceed the decoded header.
+   *
+   * @param header The bounded decoded header.
+   * @param at The length field offset.
+   * @param contentOffset The checked content offset.
+   * @return The limited content length, or -1 for the indefinite form.
+   * @see <a href="https://www.itu.int/rec/T-REC-X.690">X.690, section 8.1.3</a>
+   */
+  private int berLength(byte[] header, int at, int contentOffset) {
+    final int descriptor = header[at] & 0xff;
+    if (descriptor == BER_INDEFINITE_LENGTH) {
+      return -1;
+    }
+    if (descriptor < BER_INDEFINITE_LENGTH) {
+      return Math.min(header.length + 1, descriptor);
+    }
+    int length = 0;
+    for (int i = at + 1; i < contentOffset; i++) {
+      length = Math.min(header.length + 1, (length << Byte.SIZE) | (header[i] & 0xff));
+    }
+    return length;
   }
 
   /**
@@ -806,6 +893,19 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return true;
+  }
+
+  /**
+   * Tests whether the first decoded byte would be the ASN.1 SEQUENCE tag, 0x30.
+   * Both base64 alphabets encode that byte as M followed by A through P.
+   *
+   * @param text The encoded text.
+   * @param at The payload start.
+   * @return Whether the payload is a sequence candidate requiring a full identifier check.
+   */
+  private boolean startsWithSequence(CharSequence text, int at) {
+    return at + 1 < text.length() && text.charAt(at) == 'M'
+        && text.charAt(at + 1) >= 'A' && text.charAt(at + 1) <= 'P';
   }
 
   /**

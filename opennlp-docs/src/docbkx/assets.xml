@@ -93,6 +93,16 @@
 			A leading type field without that signature is not sufficient.
 		</para>
 		<para>
+			Timestamped-data detection requires the complete
+			<ulink url="https://www.rfc-editor.org/rfc/rfc5544.html#section-2">CMS content-type
+			identifier</ulink> <code>1.2.840.113549.1.9.16.1.31</code> at the start of the envelope.
+			BER definite and indefinite sequence lengths are supported, including DER encoding.
+			The identifier must fit within the 24-byte decoded header. A match reports
+			<code>tsd</code> and <code>application/timestamped-data</code>; other CMS identifiers
+			are not timestamped data. Detection does not validate timestamp evidence, signatures
+			or the complete envelope, and does not retrieve external content.
+		</para>
+		<para>
 			Excel 2-4 detection requires a complete
 			<ulink url="https://www.openoffice.org/sc/excelfileformat.pdf#page=135">BOF
 			(Beginning of File) record</ulink> with a supported document type. Worksheets,
