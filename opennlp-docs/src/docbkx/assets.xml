@@ -43,6 +43,14 @@
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
 		</para>
 		<para>
+			AIFF detection requires <code>FORM</code> at byte 0 and an audio form type
+			at byte 8: <code>AIFF</code> or <code>AIFC</code>. Both use format name
+			<code>aiff</code> and media type <code>audio/x-aiff</code>.
+			The <ulink url="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-1.3.pdf#page=5">FORM
+			size field</ulink> does not participate in identification. Other FORM
+			types are not classified as AIFF. Local chunks and audio data are not validated.
+		</para>
+		<para>
 			PNG, MNG, JNG and HDF5 detection requires the complete 8-byte signature
 			at the start of the payload, including the control bytes.
 			<ulink url="https://www.libpng.org/pub/mng/spec/jng.html">JNG</ulink>

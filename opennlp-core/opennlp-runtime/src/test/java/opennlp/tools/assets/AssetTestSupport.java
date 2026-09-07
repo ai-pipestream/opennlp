@@ -25,6 +25,7 @@ import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Header fixtures and encodings for format detection, not complete image files. */
 final class AssetTestSupport {
@@ -108,5 +109,17 @@ final class AssetTestSupport {
     assertEquals(new Span(prefix.length(), text.length() - 1), asset.span());
     assertEquals(new Span(prefix.length() + payloadOffset, text.length() - 1), asset.payload());
     assertArrayEquals(bytes, asset.decode(text));
+  }
+
+  /**
+   * Checks standard base64 and untyped data URIs for an unrecognized header.
+   *
+   * @param detector The detector to exercise.
+   * @param bytes The input bytes.
+   */
+  static void assertUnrecognized(AssetDetector detector, byte[] bytes) {
+    final String encoded = Base64.getEncoder().encodeToString(bytes);
+    assertTrue(detector.detect(encoded).isEmpty());
+    assertTrue(detector.detect(DATA_URI + encoded).isEmpty());
   }
 }

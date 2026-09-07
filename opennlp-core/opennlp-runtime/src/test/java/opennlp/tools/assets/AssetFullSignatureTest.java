@@ -32,7 +32,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Checks complete PNG, MNG, JNG and HDF5 signatures using original header fixtures.
@@ -45,7 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class AssetFullSignatureTest {
 
-  private static final String DATA_URI = "data:;base64,";
   private static final FileSignature JNG =
       new FileSignature("8b4a4e470d0a1a0a", "jng", "image/x-jng");
   private static final List<FileSignature> SIGNATURES = List.of(
@@ -204,8 +202,6 @@ public class AssetFullSignatureTest {
    */
   private void assertUnrecognized(byte[] bytes) {
     assertNull(KnownMagics.formatOf(bytes));
-    final String encoded = Base64.getEncoder().encodeToString(bytes);
-    assertTrue(detector.detect(encoded).isEmpty());
-    assertTrue(detector.detect(DATA_URI + encoded).isEmpty());
+    AssetTestSupport.assertUnrecognized(detector, bytes);
   }
 }

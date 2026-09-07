@@ -67,9 +67,10 @@ import java.util.Set;
  *
  * <p>Lookups prefer the longest matching signature. RIFF form types at offset eight
  * are handled by {@link CursorAssetDetector}; fixed RIFF prefixes, such as CDA,
- * can also appear here. The detector also checks Excel document types after
- * matching a BOF prefix, EMF signatures after matching an EMR_HEADER prefix,
- * and pcapng byte-order magic after matching a Section Header Block prefix.</p>
+ * can also appear here. The detector also checks AIFF form types after matching a
+ * FORM prefix, Excel document types after matching a BOF prefix, EMF signatures
+ * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
+ * matching a Section Header Block prefix.</p>
  *
  * @since 3.0.0
  */
@@ -281,7 +282,7 @@ final class KnownMagics {
       e("3d3c61723e", "ar", "application/x-archive"), // =<ar>
       e("4143312e32", "dwg", "image/vnd.dwg"), // AC1.2
       e("4245474d46", "cgm", "image/cgm"), // BEGMF
-      e("464f524d00", "aiff", "audio/x-aiff"), // FORM.
+      e("464f524d", "aiff", "audio/x-aiff"), // FORM
       e("4d43302e30", "dwg", "image/vnd.dwg"), // MC0.0
       e("4d4f564900", "sgi-movie", "video/x-sgi-movie"), // MOVI.
       e("4d4f564901", "sgi-movie", "video/x-sgi-movie"), // MOVI.

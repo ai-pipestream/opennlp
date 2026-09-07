@@ -31,12 +31,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests pcapng identification with original section headers and no packet data. */
 public class AssetPcapngSignatureTest {
 
-  private static final String DATA_URI = "data:;base64,";
   private static final String FORMAT = "pcapng";
   private static final String MEDIA_TYPE = "application/vnd.tcpdump.pcapng";
   private static final int BLOCK_TYPE = 0x0a0d0d0a;
@@ -169,9 +167,7 @@ public class AssetPcapngSignatureTest {
    * @param bytes The input bytes.
    */
   private void assertUnrecognized(byte[] bytes) {
-    final String encoded = Base64.getEncoder().encodeToString(bytes);
-    assertTrue(detector.detect(encoded).isEmpty());
-    assertTrue(detector.detect(DATA_URI + encoded).isEmpty());
+    AssetTestSupport.assertUnrecognized(detector, bytes);
   }
 
   /**

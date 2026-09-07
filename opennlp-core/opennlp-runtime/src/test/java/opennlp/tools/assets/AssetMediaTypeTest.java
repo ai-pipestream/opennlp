@@ -92,6 +92,10 @@ public class AssetMediaTypeTest {
       // The block type also requires byte-order magic at byte 8.
       ByteBuffer.wrap(bytes).putInt(8, 0x1a2b3c4d);
     }
+    if ("aiff".equals(entry.format().name())) {
+      // FORM requires an AIFF or AIFC type at byte 8.
+      ByteBuffer.wrap(bytes).putInt(8, 0x41494646);
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());

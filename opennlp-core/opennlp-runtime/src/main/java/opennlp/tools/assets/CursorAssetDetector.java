@@ -120,9 +120,11 @@ public final class CursorAssetDetector implements AssetDetector {
    */
   private static final String RIFF_PREFIX = "UklGR";
 
-  /** The RIFF container magic, and the offset its four-character form type sits at. */
+  /** The RIFF container identifier. */
   private static final String RIFF_MAGIC = "RIFF";
-  private static final int RIFF_FORM_TYPE = 8;
+
+  /** Byte offset of the 4-character form type in RIFF and FORM headers. */
+  private static final int FORM_TYPE_OFFSET = 8;
 
   private static final KnownMagics.Format WEBP_FORMAT =
       new KnownMagics.Format(EmbeddedAsset.FORMAT_WEBP, "image/webp");
@@ -584,6 +586,7 @@ public final class CursorAssetDetector implements AssetDetector {
     final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
       return switch (known.name()) {
+        case "aiff" -> hasAiffFormType(header) ? known : null;
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
         case "xls" -> excelFormat(header, known);
@@ -591,17 +594,32 @@ public final class CursorAssetDetector implements AssetDetector {
       };
     }
     if (carries(header, 0, RIFF_MAGIC)) {
-      if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
+      if (carries(header, FORM_TYPE_OFFSET, "WEBP")) {
         return WEBP_FORMAT;
       }
-      if (carries(header, RIFF_FORM_TYPE, "WAVE")) {
+      if (carries(header, FORM_TYPE_OFFSET, "WAVE")) {
         return WAV_FORMAT;
       }
-      if (carries(header, RIFF_FORM_TYPE, "AVI ")) {
+      if (carries(header, FORM_TYPE_OFFSET, "AVI ")) {
         return AVI_FORMAT;
       }
     }
     return null;
+  }
+
+  /**
+   * Checks AIFF and AIFF-C form types.
+   * The signature table checks the leading FORM identifier.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete audio form type appears at byte 8.
+   * @see <a href="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-1.3.pdf#page=5">
+   *     AIFF FORM header</a>
+   * @see <a href="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-C.9.26.91.pdf#page=7">
+   *     AIFF-C FORM header</a>
+   */
+  private boolean hasAiffFormType(byte[] header) {
+    return carries(header, FORM_TYPE_OFFSET, "AIFF") || carries(header, FORM_TYPE_OFFSET, "AIFC");
   }
 
   /**
