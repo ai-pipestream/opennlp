@@ -67,11 +67,25 @@ import java.util.Set;
  *
  * <p>Lookups prefer the longest matching signature. RIFF form types at offset eight
  * are handled by {@link CursorAssetDetector}; fixed RIFF prefixes, such as CDA,
- * can also appear here.</p>
+ * can also appear here. The detector also checks AIFF form types after matching a
+ * FORM prefix, Excel document types after matching a BOF prefix, EMF signatures
+ * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
+ * matching a Section Header Block prefix. JPEG 2000 formats use the brand in the
+ * file-type box after the shared signature box. DEX requires 3 decimal version
+ * digits and a zero terminator after the prefix.</p>
  *
  * @since 3.0.0
  */
 final class KnownMagics {
+
+  /**
+   * The format name and media type identified by a header.
+   *
+   * @param name The format name.
+   * @param mediaType The media type.
+   */
+  record Format(String name, String mediaType) {
+  }
 
   /**
    * One table entry: the magic bytes, their precomputed base64 image, and the tags.
@@ -79,10 +93,9 @@ final class KnownMagics {
    * @param magic The leading bytes a file of the format starts with.
    * @param prefix The base64 image of {@code magic}, floored to the characters the
    *               magic fully determines.
-   * @param format The format tag.
-   * @param mediaType The media type.
+   * @param format The format name and media type.
    */
-  record Entry(byte[] magic, String prefix, String format, String mediaType) {
+  record Entry(byte[] magic, String prefix, Format format) {
   }
 
   /** The formats named by the constants on {@link EmbeddedAsset}. */
@@ -97,6 +110,7 @@ final class KnownMagics {
       e("504b0708", EmbeddedAsset.FORMAT_ZIP, "application/zip"), // spanned archive
       e("49492a00", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // II*\0
       e("4d4d002a", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // MM\0*
+      e("49492b00", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // II+\0, BigTIFF
       e("4d4d002b", EmbeddedAsset.FORMAT_TIFF, "image/tiff"), // MM\0+, BigTIFF
       e("1f8b08", EmbeddedAsset.FORMAT_GZIP, "application/gzip"),
       e("377abcaf271c", EmbeddedAsset.FORMAT_SEVEN_ZIP, "application/x-7z-compressed"),
@@ -146,8 +160,8 @@ final class KnownMagics {
       e("2d2d2d2d2d424547494e20445341204b45592d2d2d2d2d", "pem-key", "application/x-x509-key"),
       // -----BEGIN RSA KEY-----
       e("2d2d2d2d2d424547494e20525341204b45592d2d2d2d2d", "pem-key", "application/x-x509-key"),
-      // AutoCAD DXB 1.0..0x1A00
-      e("4175746f4341442044584220312e300d0a307831413030", "dxb", "image/vnd.dxb"),
+      // The 19-byte DXB 1.0 header includes CR, LF, SUB, and NUL.
+      e("4175746f4341442044584220312e300d0a1a00", "dxb", "image/vnd.dxb"),
       // !<arch>.debian-binary
       e("213c617263683e0a64656269616e2d62696e617279", "deb", "application/x-debian-package"),
       // !<arch>.debian-split
@@ -198,7 +212,6 @@ final class KnownMagics {
       e("0f534942454c495553", "sib", "application/x-sibelius"), // .SIBELIUS
       e("2321414d522d57420a", "amr-wb", "audio/amr-wb"), // #!AMR-WB.
       e("234558544d33550d0a", "m3u", "audio/x-mpegurl"), // #EXTM3U..
-      e("3080060b2a864886f7", "tsd", "application/timestamped-data"), // 0...*.H..
       e("4e49544630312e3130", "ntf", "image/nitf"), // NITF01.10
       e("576f726450726f0dfb", "lwp", "application/vnd.lotus-wordpro"), // WordPro..
       e("67696d702078636620", "xcf", "image/x-xcf"), // gimp xcf
@@ -218,8 +231,8 @@ final class KnownMagics {
       e("576f726450726f00", "lwp", "application/vnd.lotus-wordpro"), // WordPro.
       e("5a5854617065211a", "tzx", "application/x-spectrum-tzx"), // ZXTape!.
       e("636f6e6563746978", "vhd", "application/x-vhd"), // conectix
-      e("762f310102000000", "exr", "image/aces"), // v/1.....
-      e("762f310102040000", "exr", "image/aces"), // v/1.....
+      // The OpenEXR magic does not establish ACES conformance.
+      e("762f3101", "exr", "image/x-exr"),
       e("974a42320d0a1a0a", "jb2", "image/x-jbig2"), // .JB2....
       e("efbbbf255044462d", EmbeddedAsset.FORMAT_PDF, "application/pdf"), // ...%PDF-
       e("efbbbf3c3f786d6c", "xml", "application/xml"), // ...<?xml
@@ -228,7 +241,7 @@ final class KnownMagics {
       e("5745425654540a", "vtt", "text/vtt"), // WEBVTT.
       e("5745425654540d", "vtt", "text/vtt"), // WEBVTT.
       e("57454256545420", "vtt", "text/vtt"), // WEBVTT
-      e("894844460d0a1a", "hdf", "application/x-hdf"), // .HDF...
+      e("894844460d0a1a0a", "hdf", "application/x-hdf"), // .HDF....
       e("000002000110", "wb1", "application/x-quattro-pro"),
       e("000002000210", "wb2", "application/x-quattro-pro"),
       e("000002000404", "wks", "application/vnd.lotus-1-2-3"),
@@ -256,7 +269,8 @@ final class KnownMagics {
       e("636166660002", "caf", "audio/x-caf"), // caff..
       e("636166664000", "caf", "audio/x-caf"), // caff@.
       e("636166668000", "caf", "audio/x-caf"), // caff..
-      e("734e61507059", "sz", "application/x-snappy-framed"), // sNaPpY
+      // The Snappy stream identifier includes the chunk type and length.
+      e("ff060000734e61507059", "sz", "application/x-snappy-framed"),
       e("d7cdc69a0000", "wmf", "image/wmf"),
       e("dba52d000000", "doc", "application/msword"),
       e("fd377a585a00", "xz", "application/x-xz"), // .7zXZ.
@@ -269,7 +283,7 @@ final class KnownMagics {
       e("3d3c61723e", "ar", "application/x-archive"), // =<ar>
       e("4143312e32", "dwg", "image/vnd.dwg"), // AC1.2
       e("4245474d46", "cgm", "image/cgm"), // BEGMF
-      e("464f524d00", "aiff", "audio/x-aiff"), // FORM.
+      e("464f524d", "aiff", "audio/x-aiff"), // FORM
       e("4d43302e30", "dwg", "image/vnd.dwg"), // MC0.0
       e("4d4f564900", "sgi-movie", "video/x-sgi-movie"), // MOVI.
       e("4d4f564901", "sgi-movie", "video/x-sgi-movie"), // MOVI.
@@ -320,11 +334,11 @@ final class KnownMagics {
       e("53445058", "dpx", "image/x-dpx"), // SDPX
       e("5543321a", "uc2", "application/x-uc2-compressed"), // UC2.
       e("58504453", "dpx", "image/x-dpx"), // XPDS
-      e("6465780a", "dex", "application/x-dex"), // dex.
+      e("6465780a", "dex", "application/x-dex"),
       e("69636e73", "icns", "image/icns"), // icns
       e("78617221", "xar", "application/x-xar"), // xar!
-      e("8a4d4e47", "mng", "video/x-mng"), // .MNG
-      e("8b4a4e47", "jng", "video/x-jng"), // .JNG
+      e("8a4d4e470d0a1a0a", "mng", "video/x-mng"), // .MNG....
+      e("8b4a4e470d0a1a0a", "jng", "image/x-jng"), // .JNG....
       e("b168de3a", "dcx", "image/vnd.zbrush.dcx"),
       e("bebafeca", "macho-fat", "application/x-mach-o-universal"),
       e("bfbafeca", "macho-fat", "application/x-mach-o-universal"),
@@ -361,32 +375,16 @@ final class KnownMagics {
   }
 
   /**
-   * Identifies the format of decoded header bytes.
+   * Identifies the format and media type of decoded header bytes.
    *
    * @param header The decoded leading bytes.
-   * @return The format of the longest matching magic, or {@code null} when the bytes
-   *         match no known magic.
+   * @return Both identifiers from the longest matching signature, or {@code null}
+   *         when the bytes match no known signature.
    */
-  static String formatOf(byte[] header) {
+  static Format formatOf(byte[] header) {
     for (final Entry entry : ENTRIES) {
       if (startsWith(header, entry.magic())) {
         return entry.format();
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Maps a format to its media type.
-   *
-   * @param format The format tag.
-   * @return The media type of the format's first entry, or {@code null} for a format
-   *         not in the table.
-   */
-  static String mediaTypeOf(String format) {
-    for (final Entry entry : ENTRIES) {
-      if (entry.format().equals(format)) {
-        return entry.mediaType();
       }
     }
     return null;
@@ -424,6 +422,6 @@ final class KnownMagics {
   private static Entry e(String hex, String format, String mediaType) {
     final byte[] magic = HexFormat.of().parseHex(hex);
     final String encoded = Base64.getEncoder().withoutPadding().encodeToString(magic);
-    return new Entry(magic, encoded.substring(0, magic.length * 8 / 6), format, mediaType);
+    return new Entry(magic, encoded.substring(0, magic.length * 8 / 6), new Format(format, mediaType));
   }
 }

@@ -19,12 +19,34 @@ package opennlp.tools.assets;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Base64;
 
-/** Header fixtures for format detection, not complete image files. */
+import opennlp.tools.util.Span;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Header fixtures and encodings for format detection, not complete files. */
 final class AssetTestSupport {
+
+  private static final String DATA_URI = "data:;base64,";
 
   /** Prevents construction of the fixture utility. */
   private AssetTestSupport() {
+  }
+
+  /**
+   * Builds DEX magic followed by zero-filled bytes, without executable contents.
+   *
+   * @param version The version text to insert, including malformed test values.
+   * @param length The resulting byte count.
+   * @return The complete or truncated header fixture.
+   */
+  static byte[] dex(String version, int length) {
+    return Arrays.copyOf(("dex\n" + version + '\0').getBytes(StandardCharsets.US_ASCII), length);
   }
 
   /**
@@ -54,5 +76,63 @@ final class AssetTestSupport {
     return ByteBuffer.allocate(30).order(ByteOrder.LITTLE_ENDIAN)
         .put(new byte[] {'G', 'I', 'F', '8', '9', 'a'})
         .putShort((short) width).putShort((short) height).array();
+  }
+
+  /**
+   * Encodes a fixture with the selected transport.
+   *
+   * @param bytes The fixture.
+   * @param transport The transport name.
+   * @return The encoded text, including the data-URI prefix when requested.
+   * @throws IllegalArgumentException If the transport is unsupported.
+   */
+  static String encode(byte[] bytes, String transport) {
+    return switch (transport) {
+      case "standard" -> Base64.getEncoder().encodeToString(bytes);
+      case "url" -> Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+      case "mime64" -> Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(bytes);
+      case "mime76" -> Base64.getMimeEncoder(76, new byte[] {'\r', '\n'}).encodeToString(bytes);
+      case "uri" -> DATA_URI + Base64.getEncoder().encodeToString(bytes);
+      default -> throw new IllegalArgumentException("transport is unsupported");
+    };
+  }
+
+  /**
+   * Checks format inference, source spans, decoded length and exact bytes.
+   *
+   * @param detector The detector to exercise.
+   * @param bytes The input bytes.
+   * @param format The expected format name.
+   * @param mediaType The expected media type.
+   * @param transport The encoding to use.
+   * @throws IllegalArgumentException If the transport is unsupported.
+   */
+  static void assertIdentified(AssetDetector detector, byte[] bytes, String format,
+                              String mediaType, String transport) {
+    final String encoded = encode(bytes, transport);
+    final String prefix = "Attachment: [";
+    final int payloadOffset = transport.equals("uri") ? DATA_URI.length() : 0;
+    final String text = prefix + encoded + "]";
+    final var assets = detector.detect(text);
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals(format, asset.format());
+    assertEquals(mediaType, asset.mediaType());
+    assertEquals(bytes.length, asset.decodedLength());
+    assertEquals(new Span(prefix.length(), text.length() - 1), asset.span());
+    assertEquals(new Span(prefix.length() + payloadOffset, text.length() - 1), asset.payload());
+    assertArrayEquals(bytes, asset.decode(text));
+  }
+
+  /**
+   * Checks standard base64 and untyped data URIs for an unrecognized header.
+   *
+   * @param detector The detector to exercise.
+   * @param bytes The input bytes.
+   */
+  static void assertUnrecognized(AssetDetector detector, byte[] bytes) {
+    final String encoded = Base64.getEncoder().encodeToString(bytes);
+    assertTrue(detector.detect(encoded).isEmpty());
+    assertTrue(detector.detect(DATA_URI + encoded).isEmpty());
   }
 }
