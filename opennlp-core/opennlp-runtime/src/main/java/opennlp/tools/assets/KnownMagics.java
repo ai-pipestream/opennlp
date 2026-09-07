@@ -68,7 +68,7 @@ import java.util.Set;
  * <p>Lookups prefer the longest matching signature. RIFF form types at offset eight
  * are handled by {@link CursorAssetDetector}; fixed RIFF prefixes, such as CDA,
  * can also appear here. The detector also checks Excel document types after
- * matching a BOF prefix.</p>
+ * matching a BOF prefix and EMF signatures after matching an EMR_HEADER prefix.</p>
  *
  * @since 3.0.0
  */

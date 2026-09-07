@@ -61,6 +61,15 @@ public final class CursorAssetDetector implements AssetDetector {
   /** Minimum encoded length for bare-payload detection. */
   private static final int MIN_BARE_PAYLOAD = 32;
 
+  private static final int HEADER_ENCODED_LENGTH = 32;
+  private static final int EMF_HEADER_ENCODED_LENGTH = 60;
+
+  /** Base64 prefix of the little-endian EMR_HEADER record type (1). */
+  private static final String EMF_PREFIX = "AQAAA";
+
+  private static final int EMF_SIGNATURE_OFFSET = 40;
+  private static final String EMF_SIGNATURE = " EMF";
+
   private static final String DATA_URI_SCHEME = "data:";
   private static final String BASE64_MARKER = ";base64,";
   private static final String JWT_MEDIA_TYPE = "application/jwt";
@@ -530,6 +539,8 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Decodes the leading payload characters into header bytes.
+   * EMF candidates need up to 60 encoded characters to include the signature
+   * at byte 40; other headers use at most 32 encoded characters.
    *
    * @param text The text.
    * @param payload The scanned payload.
@@ -539,7 +550,9 @@ public final class CursorAssetDetector implements AssetDetector {
     if (!payload.valid()) {
       return null;
     }
-    final int usable = Math.min(payload.encodedLength() - payload.padding(), 32);
+    final int limit = matchesBase64Prefix(text, payload.start(), EMF_PREFIX)
+        ? EMF_HEADER_ENCODED_LENGTH : HEADER_ENCODED_LENGTH;
+    final int usable = Math.min(payload.encodedLength() - payload.padding(), limit);
     final StringBuilder head = new StringBuilder(usable);
     for (int i = payload.start(); i < payload.end() && head.length() < usable; i++) {
       final char c = text.charAt(i);
@@ -557,7 +570,7 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Identifies the format and media type from the longest matching signature,
-   * checking Excel document types and RIFF form types where required.
+   * checking Excel document types, EMF signatures and RIFF form types where required.
    *
    * @param header The decoded leading bytes.
    * @return The format and media type, or {@code null} for an unknown header.
@@ -565,6 +578,9 @@ public final class CursorAssetDetector implements AssetDetector {
   private KnownMagics.Format formatOf(byte[] header) {
     final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
+      if ("emf".equals(known.name()) && !carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE)) {
+        return null;
+      }
       return "xls".equals(known.name()) ? excelFormat(header, known) : known;
     }
     if (carries(header, 0, RIFF_MAGIC)) {

@@ -28,8 +28,9 @@
 			while keeping every offset mapped to the source.
 		</para>
 		<para>
-			<code>CursorAssetDetector</code> checks encoded prefixes, validates the payload
-			alphabet and padding, and decodes up to 24 leading bytes for format detection.
+			<code>CursorAssetDetector</code> checks encoded prefixes and validates the payload
+			alphabet and padding. Format detection uses up to 24 decoded leading bytes,
+			or 45 bytes for EMF candidates.
 			Bare runs need at least 32 encoded characters and a recognized file signature.
 			The signature table is derived from Apache Tika's media-type catalog. Recognized
 			PNG and GIF headers also provide image dimensions. A declared media type alone
@@ -40,6 +41,12 @@
 			A signature match does not establish that a file is complete, valid, or safe to open.
 			Inferred format names and media types come from the same signature. Formats such as
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
+		</para>
+		<para>
+			EMF detection requires the <code>EMR_HEADER</code> type and the
+			<ulink url="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/b55cbd24-612d-47fe-81c9-1da6a682246f">EMF
+			signature</ulink> at byte 40, including the initial space in <code> EMF</code>.
+			A leading type field without that signature is not sufficient.
 		</para>
 		<para>
 			Excel 2-4 detection requires a complete

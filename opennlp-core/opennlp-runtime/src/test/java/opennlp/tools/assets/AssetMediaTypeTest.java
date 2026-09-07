@@ -78,7 +78,12 @@ public class AssetMediaTypeTest {
   @ParameterizedTest
   @MethodSource("signatures")
   void testEverySignatureRetainsItsMediaType(KnownMagics.Entry entry) {
-    final byte[] bytes = Arrays.copyOf(entry.magic(), 32);
+    final boolean emf = "emf".equals(entry.format().name());
+    final byte[] bytes = Arrays.copyOf(entry.magic(), emf ? 44 : 32);
+    if (emf) {
+      // EMR_HEADER requires the additional signature at byte 40.
+      System.arraycopy(" EMF".getBytes(StandardCharsets.US_ASCII), 0, bytes, 40, 4);
+    }
     if ("xls".equals(entry.format().name())) {
       // Excel signatures also require a supported document type: 0x0010 is a worksheet.
       bytes[6] = 0x10;
