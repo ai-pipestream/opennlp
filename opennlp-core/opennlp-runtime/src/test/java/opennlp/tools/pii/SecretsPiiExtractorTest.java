@@ -103,6 +103,36 @@ public class SecretsPiiExtractorTest {
         () -> "read " + text.reads + " characters from an input of " + text.length());
   }
 
+  /**
+   * Checks character reads for repeated URL candidates without relying on timing.
+   *
+   * @param candidate The repeated incomplete or malformed URL.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"s3://", "1http://", "https://u:p%g0@example.invalid "})
+  void testUrlCandidateReadCount(String candidate) {
+    final CountingCharSequence text = new CountingCharSequence(candidate.repeat(1024));
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
+  /**
+   * Checks complete recognition and linear reads for a long scheme name.
+   *
+   * @param length The number of letters before the scheme's final digit.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {64, 1024, 65536})
+  void testLongSchemeReadCount(int length) {
+    final CountingCharSequence text = new CountingCharSequence(
+        "a".repeat(length) + "1://u:pw@example.invalid");
+    Assertions.assertEquals(List.of("u:pw"),
+        extractor.extract(text).stream().map(PiiMention::normalized).toList());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {
       "AKIAIOSFODNN7EXAMPLE",

@@ -168,6 +168,18 @@ String masked = Masker.mask(addresses, PiiAnnotator.PII, '*');
 					GitHub tokens from their current minimum lengths through the
 					255-character scanner limit, JSON Web Tokens whose header decodes to a
 					JWS header, and credentials embedded in a URL.
+					Token boundaries use Unicode letters and digits, and exclude
+					adjoining underscores. URL schemes start with an ASCII letter and
+					may include digits, plus signs, hyphens and dots. Usernames and
+					passwords must be non-empty; percent escapes require two hexadecimal
+					digits and remain encoded in the normalized value. Host validity and
+					scheme-specific rules are not checked.
+					<programlisting language="java"><![CDATA[
+Document credentials = new PiiAnnotator(PiiPacks.secrets()).annotate(Document.of(
+    "Fetch s3://user:demo%40pass@example.invalid/model.bin"));
+String masked = Masker.mask(credentials, PiiAnnotator.PII, '*');
+// "Fetch s3://****************@example.invalid/model.bin"]]>
+					</programlisting>
 				</para>
 			</listitem>
 			<listitem>

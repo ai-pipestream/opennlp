@@ -23,11 +23,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for credentials that leak into text: forward scans
- * over the text, no regular expressions, recognizing AWS access key identifiers, GitHub
- * access tokens, JSON Web Tokens, and credentials embedded in a URL. Every form is
- * anchored by a fixed prefix or by a structure that must parse, so no candidate rests on
- * length alone. This extractor is opt-in.
+ * Extracts AWS access key identifiers, GitHub tokens, JWT candidates and URL credentials.
+ * This detector is opt-in.
  *
  * <p>Recognized forms:</p>
  * <ul>
@@ -52,22 +49,24 @@ import java.util.Set;
  *   dotted run of base64url characters is not enough.</li>
  *   <li>URL credential: the userinfo component of a URL, as
  *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1">RFC 3986</a>
- *   defines it, when it carries a password: a user name, a colon, and a non-empty
- *   password before the {@code @}. Only the credential is reported, not the whole URL, so
- *   masking it leaves the scheme and host readable. A userinfo without a password is not
- *   reported, since a bare user name in a URL is not a secret.</li>
+ *   defines it: a non-empty username, a colon and a non-empty password before {@code @}.
+ *   Schemes start with an ASCII letter and may include letters, digits, {@code +},
+ *   {@code -} and {@code .}. Percent escapes must contain two hexadecimal digits.
+ *   Only userinfo is reported; masking preserves the scheme, host and path. The scanner
+ *   does not validate the host or scheme-specific rules.</li>
  * </ul>
  *
- * <p>Normalized forms: every type keeps the credential exactly as written, since a
- * credential has no formatting to remove and comparing two occurrences character by
- * character is what a caller needs. A mention therefore carries the secret; use
- * {@link HmacTokenizer} or {@link PiiAuditReport} rather than the normalized form when
- * building an artifact that must not hold the secret itself.</p>
+ * <p>Normalized values preserve the original text, including URL percent escapes.
+ * These values can contain credentials. Use {@link HmacTokenizer} or
+ * {@link PiiAuditReport} when output must exclude the credential text.</p>
+
+ * <p>AWS, GitHub and JWT candidates cannot start or end within a run of Unicode
+ * letters, digits or underscores. A hyphen also prevents a JWT candidate start.</p>
  *
  * <p>All four types are reported by default; the {@link #SecretsPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -116,6 +115,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final String JWT_ALGORITHM_PARAMETER = "\"alg\"";
 
   private static final String SCHEME_SEPARATOR = "://";
+  private static final int PERCENT_ESCAPE_LENGTH = 3;
 
   private final Set<String> types;
 
@@ -184,7 +184,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    */
   private void scanAwsKeys(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
-      if (text.charAt(i) != 'A' || !Boundaries.onWordStart(text, i)) {
+      if (text.charAt(i) != 'A' || !onTokenStart(text, i, false)) {
         continue;
       }
       for (final String prefix : AWS_KEY_PREFIXES) {
@@ -406,14 +406,23 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private void scanUrlCredentials(CharSequence text, List<Hits.Hit> hits) {
     // A scheme is at least one letter long, so no credential can start before offset 1.
     for (int i = 1; i + SCHEME_SEPARATOR.length() < text.length(); i++) {
-      if (!startsWith(text, i, SCHEME_SEPARATOR) || !Ascii.isLetter(text.charAt(i - 1))) {
+      if (!startsWith(text, i, SCHEME_SEPARATOR) || !hasScheme(text, i)) {
         continue;
       }
       final int start = i + SCHEME_SEPARATOR.length();
       int p = start;
       int colon = -1;
       while (p < text.length() && isUserinfoChar(text.charAt(p))) {
-        if (text.charAt(p) == ':' && colon < 0) {
+        final char c = text.charAt(p);
+        if (c == '%') {
+          if (text.length() - p < PERCENT_ESCAPE_LENGTH || !Ascii.isHexDigit(text.charAt(p + 1))
+              || !Ascii.isHexDigit(text.charAt(p + 2))) {
+            break;
+          }
+          p += PERCENT_ESCAPE_LENGTH;
+          continue;
+        }
+        if (c == ':' && colon < 0) {
           colon = p;
         }
         p++;
@@ -429,9 +438,32 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for a character allowed in the userinfo component of a URL: the unreserved
-   * characters, the sub-delimiters, the percent sign of an escape, and the colon that
-   * separates the user name from the password.
+   * Checks the complete scheme before an authority separator.
+   *
+   * @param text The text being scanned.
+   * @param end The offset of the scheme's colon.
+   * @return {@code true} for an ASCII scheme starting at an identifier boundary.
+   */
+  private boolean hasScheme(CharSequence text, int end) {
+    int start = end;
+    while (start > 0 && isSchemeChar(text.charAt(start - 1))) {
+      start--;
+    }
+    return start < end && Ascii.isLetter(text.charAt(start)) && onTokenStart(text, start, false);
+  }
+
+  /**
+   * Checks a character in the scheme after its initial ASCII letter.
+   *
+   * @param c The character to check.
+   * @return {@code true} for an ASCII letter, digit, plus sign, hyphen or dot.
+   */
+  private boolean isSchemeChar(char c) {
+    return Ascii.isLetterOrDigit(c) || c == '+' || c == '-' || c == '.';
+  }
+
+  /**
+   * Checks userinfo characters and percent signs. The scanner validates escape digits.
    *
    * @param c The character.
    * @return {@code true} if the character may appear in a userinfo component.
@@ -490,8 +522,8 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a token does not begin inside a longer identifier. GitHub token bodies
-   * allow underscores; base64url additionally allows hyphens.
+   * Rejects starts after Unicode letters/digits or underscores. Base64url also excludes
+   * a preceding hyphen.
    *
    * @param text The text being scanned.
    * @param start The candidate start.
@@ -503,7 +535,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
       return true;
     }
     final char previous = text.charAt(start - 1);
-    return !Ascii.isLetterOrDigit(previous) && previous != '_'
+    return Boundaries.onWordStart(text, start) && previous != '_'
         && (!base64Url || previous != '-');
   }
 
