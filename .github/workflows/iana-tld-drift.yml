@@ -21,15 +21,19 @@ on:
       - main
       - 'OPENNLP-*-pii'
     paths:
-      - 'dev/fetch-phone-number-lengths.sh'
+      - 'dev/fetch-*.sh'
       - 'dev/tests/**'
       - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/PhoneNumberLengths.java'
+      - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/IanaTlds.java'
+      - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/IbanLengths.java'
       - '.github/workflows/iana-tld-drift.yml'
   pull_request:
     paths:
-      - 'dev/fetch-phone-number-lengths.sh'
+      - 'dev/fetch-*.sh'
       - 'dev/tests/**'
       - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/PhoneNumberLengths.java'
+      - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/IanaTlds.java'
+      - 'opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/IbanLengths.java'
       - '.github/workflows/iana-tld-drift.yml'
   schedule:
     - cron: "17 6 * * 1"
@@ -46,7 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Test phone metadata generation without downloads
+      - name: Test reference-data generation without downloads
         run: python3 -B -m unittest discover -s dev/tests -v
   check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -516,6 +516,25 @@ String line = customReport.toString();]]>
 	<section xml:id="tools.pii.reference-data">
 		<title>Reference data</title>
 		<para>
+			The generators validate downloaded data before replacing Java tables.
+			The IANA list must have a 10-digit version, a valid UTC timestamp, and
+			at least 1,000 sorted, distinct ASCII labels. SWIFT input accepts UTF-8,
+			Windows-1252, or UTF-16 with a byte-order mark. Its country and length
+			rows must each occur once, have matching columns, and contain at least
+			80 distinct countries in alphabetical order. Lengths use two ASCII
+			digits, from 15 through 34. Invalid input leaves the source file unchanged.
+		</para>
+		<para>
+			Use saved IANA or SWIFT files without downloading another copy:
+			<programlisting><![CDATA[
+IANA_TLDS_SOURCE=/path/to/tlds-alpha-by-domain.txt \
+bash dev/fetch-iana-tlds.sh --check
+
+IBAN_REGISTRY_SOURCE=/path/to/iban-registry.txt \
+bash dev/fetch-iban-lengths.sh --check]]>
+			</programlisting>
+		</para>
+		<para>
 			Phone-table generation reads national lengths from libphonenumber
 			metadata. Each value contains comma-separated numbers or inclusive
 			ranges such as <code>[8-10],12</code>. Duplicate lengths within one
@@ -545,9 +564,10 @@ bash dev/fetch-phone-number-lengths.sh --check]]>
 		</para>
 		<para>
 			Run <code>python3 -B -m unittest discover -s dev/tests -v</code>
-			to check generation with synthetic XML in temporary directories.
-			These tests require no downloaded files and run in CI when the generator,
-			its tests, the phone table or the reference-data workflow changes.
+			to check all three generators with synthetic inputs in temporary
+			directories. These tests require no downloaded files and run in CI when
+			a generator, its tests, a reference table or the reference-data workflow
+			changes. Scheduled and manual drift checks compare against live sources.
 		</para>
 	</section>
 

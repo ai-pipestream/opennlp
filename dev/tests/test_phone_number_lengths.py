@@ -15,39 +15,25 @@
 
 """Offline checks for the phone metadata generator, using synthetic XML."""
 
-import os
-from pathlib import Path
 import re
-import shutil
-import subprocess
-import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
+from generator_test_case import GeneratorTestCase
 
-ROOT = Path(__file__).resolve().parents[2]
-SOURCE = Path("opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/pii/"
-              "PhoneNumberLengths.java")
 REVISION = "0123456789abcdef0123456789abcdef01234567"
 SNAPSHOT_DATE = "2024-02-29"
 
 
-class PhoneNumberLengthsTest(unittest.TestCase):
+class PhoneNumberLengthsTest(GeneratorTestCase):
     """Run the complete shell command against disposable source trees."""
+
+    script_name = "fetch-phone-number-lengths.sh"
+    java_name = "PhoneNumberLengths.java"
 
     def setUp(self):
         """Create an isolated checkout and 200 synthetic calling-code entries."""
-        temporary = tempfile.TemporaryDirectory(prefix="phone metadata ")
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self.script = self.root / "dev/fetch-phone-number-lengths.sh"
-        self.script.parent.mkdir()
-        shutil.copyfile(ROOT / "dev/fetch-phone-number-lengths.sh", self.script)
-        self.output = self.root / SOURCE
-        self.output.parent.mkdir(parents=True)
-        shutil.copyfile(ROOT / SOURCE, self.output)
-        self.original = self.output.read_bytes()
-        self.metadata = self.root / "phone source.xml"
+        super().setUp()
         self.xml = ET.Element("phoneNumberMetadata")
         self.territories = ET.SubElement(self.xml, "territories")
         for code in range(100, 300):
@@ -57,24 +43,13 @@ class PhoneNumberLengthsTest(unittest.TestCase):
             ET.SubElement(description, "possibleLengths", national="10")
         self.first = self.territories[0]
         self.lengths = self.first.find("fixedLine/possibleLengths")
-        self.environment = os.environ.copy()
-        self.environment.update(PHONE_METADATA_SOURCE=str(self.metadata),
+        self.environment.update(PHONE_METADATA_SOURCE=str(self.source),
                                 PHONE_METADATA_REVISION=REVISION,
                                 PHONE_METADATA_DATE=SNAPSHOT_DATE)
 
-    def run_generator(self, *arguments):
-        """Write the fixture and run offline with a bounded process timeout."""
-        ET.ElementTree(self.xml).write(self.metadata, encoding="utf-8")
-        return subprocess.run(["bash", str(self.script), *arguments],
-                              cwd=self.root, env=self.environment,
-                              capture_output=True, text=True, timeout=15)
-
-    def assert_rejected(self, message):
-        """Require an actionable error and an unchanged destination file."""
-        result = self.run_generator()
-        self.assertNotEqual(0, result.returncode, result.stdout)
-        self.assertIn(message, result.stderr)
-        self.assertEqual(self.original, self.output.read_bytes())
+    def write_source(self):
+        """Write the synthetic XML before each generator run."""
+        ET.ElementTree(self.xml).write(self.source, encoding="utf-8")
 
     def read_table(self):
         """Read code/mask pairs from the generated Java initializer."""
@@ -89,20 +64,12 @@ class PhoneNumberLengthsTest(unittest.TestCase):
 
     def test_write_then_check(self):
         """Generation is repeatable, and a current check does not rewrite the file."""
-        result = self.run_generator()
-        self.assertEqual(0, result.returncode, result.stderr)
+        self.assert_repeatable()
         generated = self.output.read_bytes()
         self.assertNotEqual(self.original, generated)
         self.assertIn(f"revision {{@code {REVISION[:12]}}} of {SNAPSHOT_DATE}",
                       generated.decode("utf-8"))
         self.assertEqual({code: 1 << 10 for code in range(100, 300)}, self.read_table())
-        modified = self.output.stat().st_mtime_ns
-        checked = self.run_generator("--check")
-        self.assertEqual(0, checked.returncode, checked.stderr)
-        self.assertEqual(generated, self.output.read_bytes())
-        self.assertEqual(modified, self.output.stat().st_mtime_ns)
-        self.assertEqual(0, self.run_generator().returncode)
-        self.assertEqual(generated, self.output.read_bytes())
 
     def test_stale_check_preserves_source(self):
         """A differing snapshot returns a failure without changing the table."""
