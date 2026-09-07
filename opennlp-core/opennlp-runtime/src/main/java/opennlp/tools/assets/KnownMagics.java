@@ -72,7 +72,8 @@ import java.util.Set;
  * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
  * matching a Section Header Block prefix. JPEG 2000 formats use the brand in the
  * file-type box after the shared signature box. DEX requires 3 decimal version
- * digits and a zero terminator after the prefix.</p>
+ * digits and a zero terminator after the prefix. WebVTT permits an initial UTF-8 BOM
+ * and requires a separator or EOF after its identifier.</p>
  *
  * @since 3.0.0
  */
@@ -238,9 +239,8 @@ final class KnownMagics {
       e("efbbbf3c3f786d6c", "xml", "application/xml"), // ...<?xml
       e("234558544d3355", "m3u8", "application/vnd.apple.mpegurl"), // #EXTM3U
       e("53747566664974", "sit", "application/x-stuffit"), // StuffIt
-      e("5745425654540a", "vtt", "text/vtt"), // WEBVTT.
-      e("5745425654540d", "vtt", "text/vtt"), // WEBVTT.
-      e("57454256545420", "vtt", "text/vtt"), // WEBVTT
+      e("efbbbf574542565454", "vtt", "text/vtt"), // UTF-8 BOM and WEBVTT
+      e("574542565454", "vtt", "text/vtt"), // WEBVTT
       e("894844460d0a1a0a", "hdf", "application/x-hdf"), // .HDF....
       e("000002000110", "wb1", "application/x-quattro-pro"),
       e("000002000210", "wb2", "application/x-quattro-pro"),

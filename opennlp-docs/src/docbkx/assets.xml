@@ -87,6 +87,15 @@
 			identifies a possible format, not runtime compatibility or valid bytecode.
 		</para>
 		<para>
+			WebVTT detection accepts an optional UTF-8 byte-order mark followed by
+			<code>WEBVTT</code> and TAB, LF, CR, SPACE or the end of the payload, as specified
+			in the <ulink url="https://www.w3.org/TR/2026/CRD-webvtt1-20260520/#iana-text-vtt">WebVTT
+			media-type registration</ulink>. A match reports <code>vtt</code> and
+			<code>text/vtt</code>. Cue syntax and UTF-8 content are not validated.
+			Bare payloads still require at least 32 encoded characters; an untyped
+			data URI can identify a shorter header.
+		</para>
+		<para>
 			EMF detection requires the <code>EMR_HEADER</code> type and the
 			<ulink url="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/b55cbd24-612d-47fe-81c9-1da6a682246f">EMF
 			signature</ulink> at byte 40, including the initial space in <code> EMF</code>.
@@ -191,6 +200,20 @@ String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
 // decoded = "Hi"
 // asset.format() = "plain"
 // asset.mediaType() = "text/plain;charset=UTF-8"]]>
+			</programlisting>
+		</para>
+		<para>
+			A caption attachment without a supplied media type is identified by its header:
+			<programlisting language="java"><![CDATA[
+String captions = "\uFEFFWEBVTT\tTrail captions\n\n"
+    + "00:00.000 --> 00:03.000\nTurn left at the bridge.\n";
+String text = "data:;base64,"
+    + Base64.getEncoder().encodeToString(captions.getBytes(StandardCharsets.UTF_8));
+EmbeddedAsset asset = new CursorAssetDetector().detect(text).get(0);
+String decoded = new String(asset.decode(text), StandardCharsets.UTF_8);
+// asset.format() = "vtt"
+// asset.mediaType() = "text/vtt"
+// decoded equals captions, including the byte-order mark]]>
 			</programlisting>
 		</para>
 		<para>

@@ -105,6 +105,9 @@ public class AssetMediaTypeTest {
       final byte[] magic = AssetTestSupport.dex("035", 8);
       System.arraycopy(magic, 0, bytes, 0, magic.length);
     }
+    if ("vtt".equals(entry.format().name())) {
+      bytes[entry.magic().length] = '\n';
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());

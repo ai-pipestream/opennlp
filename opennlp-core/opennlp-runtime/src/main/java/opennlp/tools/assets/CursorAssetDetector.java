@@ -69,6 +69,9 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int DEX_VERSION_OFFSET = 4;
   private static final int DEX_MAGIC_LENGTH = 8;
 
+  private static final int WEBVTT_MAGIC_LENGTH = 6;
+  private static final int UTF8_BOM_LENGTH = 3;
+
   private static final int BER_SEQUENCE_TAG = 0x30;
   private static final int BER_OBJECT_IDENTIFIER_TAG = 0x06;
   private static final int BER_INDEFINITE_LENGTH = 0x80;
@@ -623,6 +626,7 @@ public final class CursorAssetDetector implements AssetDetector {
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
         case "jp2" -> jpeg2000Format(header, known);
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
+        case "vtt" -> hasWebVttBoundary(header) ? known : null;
         case "xls" -> excelFormat(header, known);
         default -> known;
       };
@@ -639,6 +643,22 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return hasTimestampedDataType(header) ? TIMESTAMPED_DATA_FORMAT : null;
+  }
+
+  /**
+   * Checks the byte after a matched WebVTT identifier, with or without a UTF-8 BOM.
+   * Header text, cue syntax and UTF-8 content are not validated.
+   *
+   * @param header The decoded header with a matched WebVTT prefix.
+   * @return Whether the identifier ends at EOF or precedes TAB, LF, CR or SPACE.
+   * @see <a href="https://www.w3.org/TR/2026/CRD-webvtt1-20260520/#iana-text-vtt">WebVTT magic</a>
+   */
+  private boolean hasWebVttBoundary(byte[] header) {
+    final int end = header[0] == 'W' ? WEBVTT_MAGIC_LENGTH : WEBVTT_MAGIC_LENGTH + UTF8_BOM_LENGTH;
+    return header.length == end || switch (header[end]) {
+      case '\t', '\n', '\r', ' ' -> true;
+      default -> false;
+    };
   }
 
   /**
