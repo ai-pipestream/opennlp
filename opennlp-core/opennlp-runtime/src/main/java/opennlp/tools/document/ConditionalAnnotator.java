@@ -104,16 +104,10 @@ public final class ConditionalAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Tests the condition and runs the selected branch. In the two-argument form, a false
-   * condition adds every provided layer empty. All declared required layers must be
-   * present before the condition is tested.
+   * {@inheritDoc}
    *
-   * @param document The document to annotate. Must not be {@code null} and must contain
-   *                 every layer named by {@link #requires()}.
-   * @return A new {@link Document} containing the selected branch's provided layers.
-   *         Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or
-   *         lacks a layer named by {@link #requires()}.
+   * Requires all branch inputs before testing the condition, adding empty output layers
+   * when the implicit false branch is selected.
    */
   @Override
   public Document annotate(Document document) {

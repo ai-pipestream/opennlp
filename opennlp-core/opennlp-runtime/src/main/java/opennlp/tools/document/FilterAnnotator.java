@@ -104,15 +104,9 @@ public final class FilterAnnotator<T> implements DocumentAnnotator {
   }
 
   /**
-   * Reads the source layer and adds the target layer containing the annotations that pass
-   * the predicate, in their source order. The source layer must be present, but it may
-   * be empty: an empty source produces a present-but-empty target.
+   * {@inheritDoc}
    *
-   * @param document The document to annotate. Must not be {@code null} and must contain
-   *                 the source layer.
-   * @return A new {@link Document} with the target layer added. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or the
-   *         source layer is absent.
+   * Adds the target layer with matching source annotations in source order.
    */
   @Override
   public Document annotate(Document document) {

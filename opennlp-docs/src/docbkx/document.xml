@@ -434,8 +434,8 @@ DocumentAnnotator filter =
 // SELECTED_LENGTHS contains 6 and 5. TOKEN_LENGTHS still contains all five values.]]>
 		</programlisting>
 		<para>
-			A two-argument filter predicate receives an annotation. A document-aware
-			predicate receives the document too, so it can compare a normalized value with
+			A filter function receives an annotation and can also receive the document,
+			so it can compare a normalized value with
 			the original text at the annotation span:
 		</para>
 		<programlisting language="java">
@@ -447,9 +447,22 @@ LayerKey<String> CAPITALIZED_WORDS =
 
 DocumentAnnotator capitalized = new FilterAnnotator<>(
     NORMALIZED_WORDS, CAPITALIZED_WORDS,
-    (document, word) -> Character.isUpperCase(
-        document.text().charAt(word.span().getStart())));]]>
+    (document, word) -> {
+      Span span = word.span();
+      if (span.length() == 0) {
+        return false;
+      }
+      int initial = Character.codePointAt(document.text(), span.getStart());
+      return Character.charCount(initial) <= span.length() && Character.isUpperCase(initial);
+    });]]>
 		</programlisting>
+		<para>
+			Offsets use UTF-16 units, while capitalization is tested on Unicode code points.
+			For example, the Deseret capital letter U+10400 starts the Java string
+			<code>"\uD801\uDC00lice"</code> and occupies UTF-16 offsets 0 to 2.
+			Empty spans and spans containing only part of that
+			character do not pass the filter.
+		</para>
 		<para>
 			Both wrappers reject a document that lacks a required layer, with an
 			<code>IllegalArgumentException</code> naming the layer: the filter needs its
