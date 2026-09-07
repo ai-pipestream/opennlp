@@ -17,9 +17,7 @@
 
 package opennlp.tools.postag;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -514,9 +512,13 @@ public class BilstmPOSModel {
    * magic itself, and every one of those layouts stays readable.
    *
    * @param out The stream to write to; not closed. Must not be {@code null}.
+   * @throws IllegalArgumentException If {@code out} is {@code null}.
    * @throws IOException Thrown if writing fails.
    */
   public void serialize(OutputStream out) throws IOException {
+    if (out == null) {
+      throw new IllegalArgumentException("out must not be null");
+    }
     final DataOutputStream data =
         new DataOutputStream(new BufferedOutputStream(out));
     if (adapterWeights != null) {
@@ -576,9 +578,13 @@ public class BilstmPOSModel {
    * Serializes this model to a file, replacing any existing content.
    *
    * @param file The target path. Must not be {@code null}.
+   * @throws IllegalArgumentException If {@code file} is {@code null}.
    * @throws IOException Thrown if writing fails.
    */
   public void serialize(Path file) throws IOException {
+    if (file == null) {
+      throw new IllegalArgumentException("file must not be null");
+    }
     try (OutputStream out = Files.newOutputStream(file)) {
       serialize(out);
     }
@@ -587,86 +593,19 @@ public class BilstmPOSModel {
   /**
    * Loads a model from the versioned binary format, accepting {@code ONLP-BLPT-1}
    * through {@code ONLP-BLPT-5}; versions before 5 carry no adapter block.
+   * Vocabularies, layer dimensions and finite parameter values are checked before
+   * the model is returned. Parameter storage grows as values are read.
    *
    * @param in The stream to read from; not closed. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is not an
-   *         {@code ONLP-BLPT} model.
+   * @throws IllegalArgumentException If {@code in} is {@code null}.
+   * @throws IOException If reading fails or the model content is invalid.
    */
   public static BilstmPOSModel load(InputStream in) throws IOException {
-    final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
-    final String magic = data.readUTF();
-    if (!MAGIC.equals(magic) && !MAGIC_CRF.equals(magic)
-        && !MAGIC_TWO_LAYER.equals(magic) && !MAGIC_TWO_LAYER_CRF.equals(magic)
-        && !MAGIC_ADAPTER.equals(magic)) {
-      throw new IOException("not an ONLP-BLPT model: " + magic);
+    if (in == null) {
+      throw new IllegalArgumentException("in must not be null");
     }
-    final boolean adapterModel = MAGIC_ADAPTER.equals(magic);
-    final boolean twoLayer;
-    final boolean crf;
-    if (adapterModel) {
-      twoLayer = data.readBoolean();
-      crf = data.readBoolean();
-    }
-    else {
-      twoLayer = MAGIC_TWO_LAYER.equals(magic) || MAGIC_TWO_LAYER_CRF.equals(magic);
-      crf = MAGIC_CRF.equals(magic) || MAGIC_TWO_LAYER_CRF.equals(magic);
-    }
-    final LinkedHashMap<String, Integer> words = readVocabulary(data);
-    final LinkedHashMap<String, Integer> chars = readVocabulary(data);
-    final int tagCount = data.readInt();
-    final String[] tags = new String[tagCount];
-    for (int i = 0; i < tagCount; i++) {
-      tags[i] = data.readUTF();
-    }
-    final double[][] wordEmbeddings = readMatrix(data);
-    final double[][] charEmbeddings = readMatrix(data);
-    final LstmLayer charForward = readLstm(data);
-    final LstmLayer charBackward = readLstm(data);
-    final LstmLayer wordForward = readLstm(data);
-    final LstmLayer wordBackward = readLstm(data);
-    LstmLayer wordForward2 = null;
-    LstmLayer wordBackward2 = null;
-    if (twoLayer) {
-      wordForward2 = readLstm(data);
-      wordBackward2 = readLstm(data);
-    }
-    final double[][] outputWeights = readMatrix(data);
-    final double[] outputBias = readVector(data);
-    double[][] transitionWeights = null;
-    double[] startWeights = null;
-    double[] endWeights = null;
-    if (crf) {
-      transitionWeights = readMatrix(data);
-      startWeights = readVector(data);
-      endWeights = readVector(data);
-    }
-    final int maxWordLength = data.readInt();
-    final boolean hasPretrained = data.readBoolean();
-    LinkedHashMap<String, Integer> pretrainedIds = null;
-    float[][] pretrainedVectors = null;
-    if (hasPretrained) {
-      pretrainedIds = readVocabulary(data);
-      final int dimension = data.readInt();
-      final int rows = data.readInt();
-      pretrainedVectors = new float[rows][dimension];
-      for (int r = 0; r < rows; r++) {
-        for (int i = 0; i < dimension; i++) {
-          pretrainedVectors[r][i] = data.readFloat();
-        }
-      }
-    }
-    double[][] adapterWeights = null;
-    double[] adapterBias = null;
-    if (adapterModel) {
-      adapterWeights = readMatrix(data);
-      adapterBias = readVector(data);
-    }
-    return new BilstmPOSModel(words, chars, tags, wordEmbeddings, charEmbeddings,
-        charForward, charBackward, wordForward, wordBackward, wordForward2,
-        wordBackward2, outputWeights, outputBias, maxWordLength, pretrainedIds,
-        pretrainedVectors, transitionWeights, startWeights, endWeights, adapterWeights,
-        adapterBias);
+    return new BilstmPOSModelReader(in).read();
   }
 
   /**
@@ -674,10 +613,13 @@ public class BilstmPOSModel {
    *
    * @param file The model file. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is not an
-   *         {@code ONLP-BLPT} model.
+   * @throws IllegalArgumentException If {@code file} is {@code null}.
+   * @throws IOException If reading fails or the model content is invalid.
    */
   public static BilstmPOSModel load(Path file) throws IOException {
+    if (file == null) {
+      throw new IllegalArgumentException("file must not be null");
+    }
     try (InputStream in = Files.newInputStream(file)) {
       return load(in);
     }
@@ -701,22 +643,6 @@ public class BilstmPOSModel {
   }
 
   /**
-   * Reads one LSTM layer written by {@link #writeLstm(DataOutputStream, LstmLayer)}.
-   *
-   * @param data The stream to read from.
-   * @return The layer over the read arrays. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
-   */
-  private static LstmLayer readLstm(DataInputStream data) throws IOException {
-    final int inputSize = data.readInt();
-    final int hiddenSize = data.readInt();
-    final double[][] w = readMatrix(data);
-    final double[][] u = readMatrix(data);
-    final double[] b = readVector(data);
-    return LstmLayer.ofWeights(inputSize, hiddenSize, w, u, b);
-  }
-
-  /**
    * Writes a vocabulary as its size followed by symbol and row pairs, in iteration
    * order.
    *
@@ -731,24 +657,6 @@ public class BilstmPOSModel {
       data.writeUTF(entry.getKey());
       data.writeInt(entry.getValue());
     }
-  }
-
-  /**
-   * Reads a vocabulary written by
-   * {@link #writeVocabulary(DataOutputStream, LinkedHashMap)}, preserving its order.
-   *
-   * @param data The stream to read from.
-   * @return The vocabulary. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
-   */
-  private static LinkedHashMap<String, Integer> readVocabulary(DataInputStream data)
-      throws IOException {
-    final int size = data.readInt();
-    final LinkedHashMap<String, Integer> vocabulary = new LinkedHashMap<>();
-    for (int i = 0; i < size; i++) {
-      vocabulary.put(data.readUTF(), data.readInt());
-    }
-    return vocabulary;
   }
 
   /**
@@ -770,25 +678,6 @@ public class BilstmPOSModel {
   }
 
   /**
-   * Reads a matrix written by {@link #writeMatrix(DataOutputStream, double[][])}.
-   *
-   * @param data The stream to read from.
-   * @return The matrix. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
-   */
-  private static double[][] readMatrix(DataInputStream data) throws IOException {
-    final int rows = data.readInt();
-    final int cols = data.readInt();
-    final double[][] matrix = new double[rows][cols];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        matrix[r][c] = data.readDouble();
-      }
-    }
-    return matrix;
-  }
-
-  /**
    * Writes a vector as its length followed by the values.
    *
    * @param data The stream to write to.
@@ -803,18 +692,4 @@ public class BilstmPOSModel {
     }
   }
 
-  /**
-   * Reads a vector written by {@link #writeVector(DataOutputStream, double[])}.
-   *
-   * @param data The stream to read from.
-   * @return The vector. Never {@code null}.
-   * @throws IOException Thrown if reading fails.
-   */
-  private static double[] readVector(DataInputStream data) throws IOException {
-    final double[] vector = new double[data.readInt()];
-    for (int i = 0; i < vector.length; i++) {
-      vector[i] = data.readDouble();
-    }
-    return vector;
-  }
 }

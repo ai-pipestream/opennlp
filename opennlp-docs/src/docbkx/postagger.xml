@@ -470,9 +470,8 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
 		<para>
-		Closing the accuracy gap: the <code>Settings</code> record switches on the
-		optional parts that lift accuracy on real corpora. A linear-chain CRF output
-		layer (<code>crf</code>) decodes whole tag sequences with Viterbi instead of
+		The <code>Settings</code> record controls the optional model components.
+		A linear-chain CRF output layer (<code>crf</code>) decodes whole tag sequences with Viterbi instead of
 		per-position argmax, a second stacked encoder layer
 		(<code>encoderLayers</code>) deepens the sentence encoder, pretrained word
 		vectors passed to an overload of <code>train</code> can enter through a
@@ -493,6 +492,58 @@ BilstmPOSTagger tagger = new BilstmPOSTagger(
 
 String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
+		</para>
+		<para>
+		Save the trained model and load it without retraining:
+		<programlisting language="java">
+<![CDATA[Path file = Path.of("pos-bilstm.bin");
+model.serialize(file);
+
+BilstmPOSModel loaded = BilstmPOSModel.load(file);
+BilstmPOSTagger tagger = new BilstmPOSTagger(loaded);
+String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
+		</programlisting>
+		</para>
+		<para>
+		Loading accepts binary formats <code>ONLP-BLPT-1</code> through
+		<code>ONLP-BLPT-5</code>, including the CRF, stacked encoder and adapter
+		variants. Invalid vocabularies, incompatible layer dimensions, non-finite
+		weights and truncated files cause <code>IOException</code> during loading.
+		Parameter storage grows as values are read; large models still require
+		enough memory for their parameters. Stream overloads leave caller-owned
+		streams open. Null streams and paths cause <code>IllegalArgumentException</code>.
+		<code>BilstmPOSModelValidationTest</code> checks the formats and file round trip.
+		</para>
+		<para>
+		Training settings must use finite numbers within their allowed ranges.
+		Pretrained vectors must have a consistent positive length and finite components,
+		including vectors requested for an additional lexicon. Invalid settings or
+		vectors cause <code>IllegalArgumentException</code>; vector errors identify
+		the word and component index. Training copies provider arrays before storing
+		or fine-tuning them. Multi-task sample arrays must contain no null elements;
+		absent auxiliary taggings can use a null array. A literal <code>*UNK*</code>
+		token uses the reserved unknown-word embedding.
+		</para>
+		<para>
+		Training clips gradients before each Adam update and calculates softmax
+		loss from score differences. Non-finite scores, loss, gradients or optimizer
+		updates stop training with <code>IllegalStateException</code>.
+		</para>
+		<para>
+		Provide vectors with a lookup function. This example uses small arrays to
+		show the interface and stores an additional word for use after training:
+		<programlisting language="java">
+<![CDATA[Map<String, float[]> vectors = Map.of(
+    "cat", new float[] {0.5f, -0.25f},
+    "dog", new float[] {0.25f, 0.5f},
+    "kitten", new float[] {0.4f, -0.2f});
+
+BilstmPOSModel model = BilstmPOSTrainer.train(sampleStream, settings,
+    word -> vectors.get(word.toString()), List.of("kitten"));]]>
+		</programlisting>
+		A null lookup result means that the word has no vector. The provider must
+		return at least one vector across the training words and additional lexicon.
+		<code>BilstmPOSTrainingInputTest</code> checks this example.
 		</para>
 		</section>
 

@@ -48,9 +48,10 @@ import opennlp.tools.util.ObjectStream;
  * second stacked encoder layer, encoder and pretrained-block dropout, a learned adapter
  * over or fine-tuning of the pretrained table, and auxiliary training heads.
  *
- * <p>Everything is hand-rolled {@code double} arithmetic with no native runtime; two
- * separately seeded random streams (one for initialization, one for shuffling and
- * dropout masks) make a run with one settings object fully deterministic.</p>
+ * <p>Training uses Java {@code double} arithmetic without a native runtime.
+ * Initialization, shuffling and dropout are seeded. Repeated runs use the same
+ * reduction order for a given seed and worker count; results can differ across
+ * Java versions or worker counts.</p>
  *
  * @see BilstmPOSModel
  * @see BilstmPOSTagger
@@ -71,7 +72,7 @@ public final class BilstmPOSTrainer {
   }
 
   /**
-   * The hyperparameters of one training run.
+   * The hyperparameters of one training run. Floating-point settings must be finite.
    *
    * @param wordEmbeddingSize Dimension of the learned word embeddings.
    * @param charEmbeddingSize Dimension of the character embeddings.
@@ -87,9 +88,8 @@ public final class BilstmPOSTrainer {
    * @param seed The seed of both random streams.
    * @param threads Worker threads for sentence-parallel batches. Dropout masks are
    *                seeded per sentence and worker gradients are reduced in a fixed
-   *                order, so results are deterministic per (seed, threads) and
-   *                agree across thread counts up to floating-point noise from JIT
-   *                multiply-add contraction.
+   *                order. Changing the worker count can change floating-point
+   *                rounding through a different grouping of partial sums.
    * @param wordDropout Probability of replacing a training token's word embedding
    *                    with the unknown row, forcing the character and pretrained
    *                    paths to carry out-of-vocabulary words, which is exactly the
@@ -128,7 +128,7 @@ public final class BilstmPOSTrainer {
     /**
      * Validates the hyperparameters.
      *
-     * @throws IllegalArgumentException Thrown if a value is out of range.
+     * @throws IllegalArgumentException If a value is out of range or not finite.
      */
     public Settings {
       if (wordEmbeddingSize <= 0 || charEmbeddingSize <= 0 || charHiddenSize <= 0
@@ -138,10 +138,11 @@ public final class BilstmPOSTrainer {
       if (epochs <= 0 || batchSize <= 0) {
         throw new IllegalArgumentException("epochs and batchSize must be positive");
       }
-      if (learningRate <= 0.0d || clipNorm <= 0.0d) {
-        throw new IllegalArgumentException("learningRate and clipNorm must be positive");
+      if (!Double.isFinite(learningRate) || !Double.isFinite(clipNorm)
+          || learningRate <= 0.0d || clipNorm <= 0.0d) {
+        throw new IllegalArgumentException("learningRate and clipNorm must be positive and finite");
       }
-      if (dropout < 0.0d || dropout >= 1.0d) {
+      if (!Double.isFinite(dropout) || dropout < 0.0d || dropout >= 1.0d) {
         throw new IllegalArgumentException("dropout must be in [0, 1)");
       }
       if (wordCutoff <= 0 || maxWordLength <= 0) {
@@ -150,7 +151,7 @@ public final class BilstmPOSTrainer {
       if (threads <= 0) {
         throw new IllegalArgumentException("threads must be positive");
       }
-      if (wordDropout < 0.0d || wordDropout >= 1.0d) {
+      if (!Double.isFinite(wordDropout) || wordDropout < 0.0d || wordDropout >= 1.0d) {
         throw new IllegalArgumentException("wordDropout must be in [0, 1)");
       }
       if (learningRateHalfLife < 0) {
@@ -159,17 +160,17 @@ public final class BilstmPOSTrainer {
       if (encoderLayers < 1 || encoderLayers > 2) {
         throw new IllegalArgumentException("encoderLayers must be 1 or 2");
       }
-      if (pretrainedDropout < 0.0d || pretrainedDropout >= 1.0d) {
+      if (!Double.isFinite(pretrainedDropout) || pretrainedDropout < 0.0d || pretrainedDropout >= 1.0d) {
         throw new IllegalArgumentException("pretrainedDropout must be in [0, 1)");
       }
-      if (encoderDropout < 0.0d || encoderDropout >= 1.0d) {
+      if (!Double.isFinite(encoderDropout) || encoderDropout < 0.0d || encoderDropout >= 1.0d) {
         throw new IllegalArgumentException("encoderDropout must be in [0, 1)");
       }
-      if (auxLossWeight < 0.0d) {
-        throw new IllegalArgumentException("auxLossWeight must not be negative");
+      if (!Double.isFinite(auxLossWeight) || auxLossWeight < 0.0d) {
+        throw new IllegalArgumentException("auxLossWeight must be finite and non-negative");
       }
-      if (pretrainedTuning < 0.0d) {
-        throw new IllegalArgumentException("pretrainedTuning must not be negative");
+      if (!Double.isFinite(pretrainedTuning) || pretrainedTuning < 0.0d) {
+        throw new IllegalArgumentException("pretrainedTuning must be finite and non-negative");
       }
       if (pretrainedAdapter && pretrainedTuning > 0.0d) {
         throw new IllegalArgumentException(
@@ -194,13 +195,13 @@ public final class BilstmPOSTrainer {
    * Auxiliary heads exist only at training time as regularizers of the shared
    * encoder; the built model tags UPOS exactly as a single-task model does.
    *
-   * @param tokens The tokens. Must not be {@code null} or empty.
+   * @param tokens The tokens. Must not be {@code null} or empty, or contain {@code null}.
    * @param upos The universal POS tags, aligned with {@code tokens}. Must not be
-   *             {@code null}.
+   *             {@code null} or contain {@code null}.
    * @param xpos The treebank-specific tags, aligned with {@code tokens}, or
-   *             {@code null} when the sentence carries none.
+   *             {@code null} when absent. Must not contain {@code null}.
    * @param feats The morphological feature strings, aligned with {@code tokens}, or
-   *              {@code null} when the sentence carries none.
+   *              {@code null} when absent. Must not contain {@code null}.
    */
   public record MultiTaskSample(String[] tokens, String[] upos, String[] xpos,
       String[] feats) {
@@ -209,7 +210,8 @@ public final class BilstmPOSTrainer {
      * Validates the alignment of the taggings.
      *
      * @throws IllegalArgumentException Thrown if {@code tokens} or {@code upos} is
-     *         {@code null} or empty, or a tagging's length differs from the tokens.
+     *         {@code null} or empty, a tagging's length differs from the tokens,
+     *         or any array contains a null element.
      */
     public MultiTaskSample {
       if (tokens == null || tokens.length == 0 || upos == null) {
@@ -219,6 +221,27 @@ public final class BilstmPOSTrainer {
           || (xpos != null && xpos.length != tokens.length)
           || (feats != null && feats.length != tokens.length)) {
         throw new IllegalArgumentException("taggings must align with the tokens");
+      }
+      checkElements(tokens, "tokens");
+      checkElements(upos, "upos");
+      checkElements(xpos, "xpos");
+      checkElements(feats, "feats");
+    }
+
+    /**
+     * Checks the elements of a present sample array.
+     *
+     * @param values The array, or null for an absent auxiliary tagging.
+     * @param name The argument name used in errors.
+     * @throws IllegalArgumentException If an element is null.
+     */
+    private void checkElements(String[] values, String name) {
+      if (values != null) {
+        for (int i = 0; i < values.length; i++) {
+          if (values[i] == null) {
+            throw new IllegalArgumentException(name + " must not contain null at index " + i);
+          }
+        }
       }
     }
   }
@@ -232,6 +255,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the
    *         samples contain no token.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings)
       throws IOException {
@@ -239,23 +264,25 @@ public final class BilstmPOSTrainer {
   }
 
   /**
-   * Trains a model from POS samples with a frozen pretrained-vector table beside the
-   * learned word embedding. For every distinct normalized (lowercased) training word
+   * Trains a model from POS samples with pretrained vectors and learned word
+   * embeddings. For every distinct normalized (lowercased) training word
    * the function is asked once for a vector; {@code null} means the word has none.
-   * The returned vectors must all share one length, they are never updated by
-   * training, and the collected slice is stored inside the model, so tagging later
-   * needs no embedding component.
+   * Returned vectors must have one consistent positive length and finite components.
+   * Training copies them into the model without changing the provider's arrays, so
+   * tagging requires no vector provider.
    *
    * @param samples The training samples. Must not be {@code null}.
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source consulted at training time. Must not be
    *                    {@code null}; must return vectors of one consistent positive
-   *                    length and a vector for at least one training word.
+   *                    length, finite components and a vector for at least one training word.
    * @return A trained {@link BilstmPOSModel} carrying the vector table. Never
    *         {@code null}.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings,
       Function<CharSequence, float[]> wordVectors) throws IOException {
@@ -274,7 +301,8 @@ public final class BilstmPOSTrainer {
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source consulted at training time. Must not be
    *                    {@code null}; must return vectors of one consistent positive
-   *                    length and a vector for at least one training word.
+   *                    length and finite components, and a vector for at least one
+   *                    training or lexicon word.
    * @param lexicon Additional words to store vectors for, normalized like the training
    *                words. Must not be {@code null} or contain {@code null}; words the
    *                source has no vector for are skipped.
@@ -283,6 +311,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings,
       Function<CharSequence, float[]> wordVectors,
@@ -306,7 +336,9 @@ public final class BilstmPOSTrainer {
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source consulted at training time, or
    *                    {@code null} to train without pretrained vectors; the same
-   *                    contract as {@link #train(ObjectStream, Settings, Function)}.
+   *                    length and finite-value requirements as
+   *                    {@link #train(ObjectStream, Settings, Function)}. It must
+   *                    return a vector for at least one training or lexicon word.
    * @param lexicon Additional words to store vectors for, or {@code null} for none;
    *                ignored when {@code wordVectors} is {@code null}.
    * @return A trained {@link BilstmPOSModel}. Never {@code null}.
@@ -314,6 +346,8 @@ public final class BilstmPOSTrainer {
    * @throws IllegalArgumentException Thrown if samples or settings are {@code null},
    *         the samples contain no token, or {@code wordVectors} violates its
    *         contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel trainMultiTask(ObjectStream<MultiTaskSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -341,6 +375,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
    *         {@code null}, or the samples contain no token.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   private static BilstmPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -371,7 +407,7 @@ public final class BilstmPOSTrainer {
    * @return A trained {@link BilstmPOSModel}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code corpus} is empty.
    * @throws IllegalStateException Thrown if a training worker fails or the training
-   *         thread is interrupted.
+   *         thread is interrupted, or training arithmetic produces a non-finite value.
    */
   private static BilstmPOSModel trainCorpus(List<MultiTaskSample> corpus,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -445,14 +481,14 @@ public final class BilstmPOSTrainer {
               throw new IllegalStateException("training worker failed", e.getCause());
             }
           }
+          if (!Double.isFinite(loss)) {
+            throw new IllegalStateException("training loss must be finite");
+          }
           for (final TrainingContext.Worker worker : workers) {
             context.absorb(worker);
           }
           timestep++;
-          final double norm = context.adam.globalNorm();
-          if (norm > settings.clipNorm()) {
-            context.adam.scaleGradients(settings.clipNorm() / norm);
-          }
+          context.adam.clipGradients(settings.clipNorm());
           context.adam.step(learningRate, timestep);
           context.adam.zero();
           context.refreshLayerTransposes();
@@ -900,8 +936,8 @@ public final class BilstmPOSTrainer {
      * @param wordVectors The word vector source, or {@code null} to train without one.
      * @param lexicon Additional words to store vectors for, or {@code null} for none.
      * @return The initialized context. Never {@code null}.
-     * @throws IllegalArgumentException Thrown if {@code lexicon} contains {@code null}
-     *         or {@code wordVectors} returns no vector for any word.
+     * @throws IllegalArgumentException If {@code lexicon} contains {@code null}
+     *         or {@code wordVectors} violates its contract.
      */
     static TrainingContext build(List<MultiTaskSample> corpus, Settings settings,
         Function<CharSequence, float[]> wordVectors,
@@ -940,7 +976,7 @@ public final class BilstmPOSTrainer {
       words.put(BilstmPOSModel.UNKNOWN, 0);
       for (final Map.Entry<String, Integer> entry : wordCounts.entrySet()) {
         if (entry.getValue() >= settings.wordCutoff()) {
-          words.put(entry.getKey(), words.size());
+          words.putIfAbsent(entry.getKey(), words.size());
         }
       }
       final LinkedHashMap<String, Integer> chars = new LinkedHashMap<>();
@@ -1162,7 +1198,7 @@ public final class BilstmPOSTrainer {
      * @param ids Receives the word to row mapping.
      * @param collected Receives the vectors, indexed by row.
      * @throws IllegalArgumentException Thrown if the source returns a vector of length
-     *         zero or of a length differing from the first one it returned.
+     *         zero, a length differing from the first one it returned, or a non-finite component.
      */
     private static void collectVectors(Iterable<String> candidates,
         Function<CharSequence, float[]> wordVectors,
@@ -1181,8 +1217,15 @@ public final class BilstmPOSTrainer {
             throw new IllegalArgumentException(
                 "wordVectors must return vectors of positive length");
           }
+          final float[] copy = vector.clone();
+          for (int i = 0; i < copy.length; i++) {
+            if (!Float.isFinite(copy[i])) {
+              throw new IllegalArgumentException(
+                  "wordVectors returned a non-finite value for '" + word + "' at index " + i);
+            }
+          }
           ids.put(word, ids.size());
-          collected.add(vector.clone());
+          collected.add(copy);
         }
       }
     }
@@ -1237,6 +1280,7 @@ public final class BilstmPOSTrainer {
      *               not be {@code null}.
      * @param worker The gradient-storage owner. Must not be {@code null}.
      * @return The summed cross-entropy loss of the sentence, auxiliary heads included.
+     * @throws IllegalStateException Thrown if a score or loss is not finite.
      */
     double sentenceGradients(MultiTaskSample sample, Random random, Worker worker) {
       final double[][] wordEmbeddingGrads = worker.wordEmbeddingGrads;
@@ -1395,6 +1439,9 @@ public final class BilstmPOSTrainer {
           for (int j = 0; j < 2 * hidden; j++) {
             sum += row[j] * topStates[t][j];
           }
+          if (!Double.isFinite(sum)) {
+            throw new IllegalStateException("tag score must be finite");
+          }
           emissions[t][o] = sum;
         }
       }
@@ -1421,7 +1468,7 @@ public final class BilstmPOSTrainer {
             emissionGrads[t][o] = Math.exp(emissions[t][o] - max);
             total += emissionGrads[t][o];
           }
-          loss += Math.log(total) - Math.log(emissionGrads[t][goldIds[t]]);
+          loss += (max - emissions[t][goldIds[t]]) + Math.log(total);
           for (int o = 0; o < tags.length; o++) {
             emissionGrads[t][o] = emissionGrads[t][o] / total
                 - (o == goldIds[t] ? 1.0d : 0.0d);
@@ -1449,6 +1496,9 @@ public final class BilstmPOSTrainer {
       if (featsWeights != null && sample.feats() != null) {
         loss += auxiliaryLoss(sample.feats(), featsIds, featsWeights, featsBias,
             worker.featsWeightGrads, worker.featsBiasGrads, topStates, dTop, hidden);
+      }
+      if (!Double.isFinite(loss)) {
+        throw new IllegalStateException("sentence loss must be finite");
       }
 
       if (topMasks != null) {
@@ -1618,6 +1668,7 @@ public final class BilstmPOSTrainer {
      * @param dTop The encoder-state gradient accumulator.
      * @param hidden The encoder hidden size per direction.
      * @return The weighted auxiliary loss of the sentence.
+     * @throws IllegalStateException Thrown if an auxiliary score is not finite.
      */
     private double auxiliaryLoss(String[] gold, Map<String, Integer> ids,
         double[][] weights, double[] bias, double[][] weightGrads, double[] biasGrads,
@@ -1639,15 +1690,19 @@ public final class BilstmPOSTrainer {
           for (int j = 0; j < 2 * hidden; j++) {
             sum += row[j] * topStates[t][j];
           }
+          if (!Double.isFinite(sum)) {
+            throw new IllegalStateException("auxiliary tag score must be finite");
+          }
           scores[o] = sum;
           max = Math.max(max, sum);
         }
+        final double goldScore = scores[goldId];
         double total = 0.0d;
         for (int o = 0; o < labels; o++) {
           scores[o] = Math.exp(scores[o] - max);
           total += scores[o];
         }
-        loss += weight * (Math.log(total) - Math.log(scores[goldId]));
+        loss += weight * ((max - goldScore) + Math.log(total));
         for (int o = 0; o < labels; o++) {
           final double gradient =
               weight * (scores[o] / total - (o == goldId ? 1.0d : 0.0d));

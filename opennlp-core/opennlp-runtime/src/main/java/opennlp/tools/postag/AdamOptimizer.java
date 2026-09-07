@@ -64,17 +64,17 @@ final class AdamOptimizer {
    * @param weight The weight array, shared and updated in place. Must not be
    *               {@code null}.
    * @param lrMultiplier Multiplier applied to the learning rate for this group; must
-   *                     be positive.
+   *                     be finite and positive.
    * @return The index used to reach the gradient mirror.
    * @throws IllegalArgumentException Thrown if {@code weight} is {@code null} or
-   *         {@code lrMultiplier} is not positive.
+   *         {@code lrMultiplier} is not finite and positive.
    */
   int register(double[][] weight, double lrMultiplier) {
     if (weight == null) {
       throw new IllegalArgumentException("weight must not be null");
     }
-    if (lrMultiplier <= 0.0d) {
-      throw new IllegalArgumentException("lrMultiplier must be positive");
+    if (!Double.isFinite(lrMultiplier) || lrMultiplier <= 0.0d) {
+      throw new IllegalArgumentException("lrMultiplier must be finite and positive");
     }
     weights.add(weight);
     final double[][] gradient = new double[weight.length][];
@@ -117,13 +117,81 @@ final class AdamOptimizer {
 
   /**
    * @return The global gradient norm over every registered array.
+   * @throws IllegalStateException Thrown if a gradient is not finite.
    */
   double globalNorm() {
+    double sumSquares = 0.0d;
+    double scale = 0.0d;
+    for (final double[][] gradient : gradients) {
+      for (final double[] row : gradient) {
+        for (final double value : row) {
+          if (!Double.isFinite(value)) {
+            throw new IllegalStateException("gradient must be finite");
+          }
+          sumSquares += value * value;
+          scale = Math.max(scale, Math.abs(value));
+        }
+      }
+    }
+    if (scale > 0.0d && (!Double.isFinite(sumSquares) || sumSquares < Double.MIN_NORMAL)) {
+      return scale * normalizedNorm(scale);
+    }
+    return Math.sqrt(sumSquares);
+  }
+
+  /**
+   * Clips the accumulated gradients to a maximum Euclidean norm.
+   *
+   * @param limit The positive, finite norm bound validated by the training settings.
+   * @throws IllegalStateException Thrown if a gradient is not finite.
+   */
+  void clipGradients(double limit) {
+    final double norm = globalNorm();
+    if (norm > limit) {
+      final double factor = limit / norm;
+      if (factor >= Double.MIN_NORMAL) {
+        scaleGradients(factor);
+        return;
+      }
+      double scale = 0.0d;
+      for (final double[][] gradient : gradients) {
+        for (final double[] row : gradient) {
+          for (final double value : row) {
+            scale = Math.max(scale, Math.abs(value));
+          }
+        }
+      }
+      final double normalizedNorm = normalizedNorm(scale);
+      final double scaledFactor = (limit / scale) / normalizedNorm;
+      if (scaledFactor >= Double.MIN_NORMAL) {
+        scaleGradients(scaledFactor);
+      } else {
+        // A subnormal factor can lose precision before it reaches the gradient.
+        final double magnitude = limit / normalizedNorm;
+        for (final double[][] gradient : gradients) {
+          for (final double[] row : gradient) {
+            for (int i = 0; i < row.length; i++) {
+              row[i] = (row[i] / scale) * magnitude;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Calculates the norm after division by the largest gradient magnitude.
+   *
+   * @param scale The positive, finite largest magnitude.
+   * @return The norm of the scaled gradients.
+   */
+  private double normalizedNorm(double scale) {
     double sumSquares = 0.0d;
     for (final double[][] gradient : gradients) {
       for (final double[] row : gradient) {
         for (final double value : row) {
-          sumSquares += value * value;
+          final double normalized = value / scale;
+          sumSquares += normalized * normalized;
         }
       }
     }
@@ -148,14 +216,19 @@ final class AdamOptimizer {
   /**
    * Applies one Adam step with bias correction to every registered weight array.
    *
-   * @param learningRate The step size.
+   * @param learningRate The finite, nonnegative step size.
    * @param timestep The one-based number of this update, driving bias correction.
    *        Must be positive.
-   * @throws IllegalArgumentException Thrown if {@code timestep} is not positive.
+   * @throws IllegalArgumentException Thrown if {@code timestep} is not positive or
+   *         {@code learningRate} is negative or not finite.
+   * @throws IllegalStateException Thrown if a gradient or computed update is not finite.
    */
   void step(double learningRate, int timestep) {
     if (timestep <= 0) {
       throw new IllegalArgumentException("timestep must be positive");
+    }
+    if (!Double.isFinite(learningRate) || learningRate < 0.0d) {
+      throw new IllegalArgumentException("learningRate must be finite and nonnegative");
     }
     final double biasCorrection =
         Math.sqrt(1.0d - Math.pow(BETA2, timestep)) / (1.0d - Math.pow(BETA1, timestep));
@@ -165,13 +238,24 @@ final class AdamOptimizer {
       final double[][] first = firstMoments.get(p);
       final double[][] second = secondMoments.get(p);
       final double scaledRate = learningRate * lrMultipliers.get(p);
+      if (!Double.isFinite(scaledRate)) {
+        throw new IllegalStateException("scaled learning rate must be finite");
+      }
       for (int r = 0; r < weight.length; r++) {
         for (int i = 0; i < weight[r].length; i++) {
           final double g = gradient[r][i];
-          first[r][i] = BETA1 * first[r][i] + (1.0d - BETA1) * g;
-          second[r][i] = BETA2 * second[r][i] + (1.0d - BETA2) * g * g;
-          weight[r][i] -= scaledRate * biasCorrection * first[r][i]
-              / (Math.sqrt(second[r][i]) + EPSILON);
+          final double firstMoment = BETA1 * first[r][i] + (1.0d - BETA1) * g;
+          final double secondMoment = BETA2 * second[r][i] + (1.0d - BETA2) * g * g;
+          final double updated = weight[r][i] - scaledRate * biasCorrection * firstMoment
+              / (Math.sqrt(secondMoment) + EPSILON);
+          if (!Double.isFinite(g) || !Double.isFinite(firstMoment)
+              || !Double.isFinite(secondMoment) || !Double.isFinite(updated)) {
+            throw new IllegalStateException("Adam update must be finite at parameter " + p
+                + ", row " + r + ", component " + i);
+          }
+          first[r][i] = firstMoment;
+          second[r][i] = secondMoment;
+          weight[r][i] = updated;
         }
       }
     }
