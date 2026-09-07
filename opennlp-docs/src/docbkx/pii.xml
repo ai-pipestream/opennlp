@@ -225,6 +225,20 @@ Document labelled = Document.of(rewrite.text()).with(PiiAnnotator.PII,
 			</programlisting>
 		</para>
 		<para>
+			Types are case-sensitive. Labels uppercase ASCII letters in the type and
+			share a numbering sequence when the displayed prefixes match. Custom
+			types such as <code>id</code> and <code>ID</code> receive distinct labels.
+			Numbering starts at one for each rewrite, so matching labels in separate
+			documents do not identify the same value.
+			<programlisting language="java"><![CDATA[
+List<PiiMention> custom = List.of(
+    new PiiMention(new Span(0, 1), "id", "a"),
+    new PiiMention(new Span(2, 3), "ID", "b"));
+String numbered = new Pseudonymizer().rewrite("a b", custom).text();
+// "ID-1 ID-2"]]>
+			</programlisting>
+		</para>
+		<para>
 			<code>mapSpan</code> expands a non-empty span intersecting a replacement
 			to include its complete label. Empty spans remain empty at their mapped
 			position. <code>remap</code> omits empty annotations and changes only the
@@ -240,23 +254,32 @@ Document labelled = Document.of(rewrite.text()).with(PiiAnnotator.PII,
 			from the document text in both locations.
 		</para>
 		<para>
-			Labels number from one in every text, so they say nothing across
-			documents. Where that is the question, <code>HmacTokenizer</code> derives
-			the label from the value under a secret key, and the same address
-			tokenizes identically in every document. A plain digest of a value drawn
-			from a small space, a Social Security number for instance, is recovered by
-			digesting the space. The secret key prevents that attack, and it must contain
-			at least 32 random bytes. Tokens made under one key are deliberately
-			linkable, so they remain pseudonymous data and logs containing them still
-			require access control.
+			<code>HmacTokenizer</code> derives a token from the type and normalized value
+			under a secret key. The same input and key produce the same token across
+			documents. Use at least 32 random key bytes and keep the key separate from
+			the data. Retain the key to compare tokens across runs. Tokens are linkable
+			pseudonymous data and require access control.
 			<programlisting language="java"><![CDATA[
-HmacTokenizer tokenizer = new HmacTokenizer(key); // at least 32 random bytes
+byte[] key = new byte[32];
+new SecureRandom().nextBytes(key);
+HmacTokenizer tokenizer = new HmacTokenizer(key);
 
+PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
+Document first = annotator.annotate(Document.of("From jane@example.com"));
+Document second = annotator.annotate(Document.of("To jane@example.com"));
 String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
-// "EMAIL-3f2a1c9d7e4b6a20", the same in every document scanned under this key
 
-String tokenized = tokenizer.rewrite(document).text();]]>
+String from = tokenizer.rewrite(first).text();   // "From " + stable
+String to = tokenizer.rewrite(second).text();   // "To " + stable]]>
 			</programlisting>
+		</para>
+		<para>
+			The default token contains sixteen hexadecimal digits (64 bits). The
+			constructor accepts lengths from 4 to 64 digits; shorter tokens increase
+			collision risk. Types and normalized values must contain well-formed
+			UTF-16. Unpaired surrogates cause <code>IllegalArgumentException</code> in
+			tokenization, rewriting and sampled audit values, instead of being
+			replaced during UTF-8 encoding. Count-only reports do not encode values.
 		</para>
 		<para>
 			<code>PiiAuditReport</code> is what a review can be given instead of the

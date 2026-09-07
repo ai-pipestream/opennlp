@@ -24,19 +24,15 @@ import java.util.Map;
 import opennlp.tools.document.Document;
 
 /**
- * Replaces PII mentions with numbered labels, {@code EMAIL-1} and {@code EMAIL-2}, so that
- * a text stays readable and internally consistent while revealing nothing.
+ * Replaces PII mentions with numbered labels such as {@code EMAIL-1} and {@code EMAIL-2}.
  *
- * <p>Within one rewrite the same value always gets the same label: a support ticket that
- * mentions one address in the greeting and again in the signature keeps the connection
- * between the two, which masking to {@code *****} destroys. The numbering restarts with
- * every rewrite and carries no meaning beyond one text, so the same address in two
- * documents will usually get different labels. Use {@link HmacTokenizer} where labels have
- * to agree across documents.</p>
+ * <p>Mentions with the same type and {@link PiiMention#normalized() normalized form}
+ * share a label within one rewrite. Types are case-sensitive. Labels uppercase ASCII
+ * letters in the type, so custom types such as {@code id} and {@code ID} share a sequence
+ * of numbers but receive distinct labels.</p>
  *
- * <p>Two mentions count as the same value when they have the same type and the same
- * {@link PiiMention#normalized() normalized form}, so formatting differences do not split
- * a label: {@code 4111 1111 1111 1111} and {@code 4111-1111-1111-1111} share one.</p>
+ * <p>Numbering restarts with every rewrite. Matching labels in separate documents do not
+ * establish a shared identity. Use {@link HmacTokenizer} for cross-document tokens.</p>
  *
  * <p>Labels are rarely as long as the values they replace, so offsets move; see
  * {@link PiiRewrite} for mapping annotations onto the rewritten text.</p>
@@ -63,8 +59,7 @@ public final class Pseudonymizer {
   }
 
   /**
-   * Initializes a pseudonymizer that surrounds each label, for instance with brackets to
-   * set the labels apart from the surrounding prose.
+   * Initializes a pseudonymizer with a prefix and suffix around each label.
    *
    * @param prefix Placed before each label. Must not be {@code null}; may be empty.
    * @param suffix Placed after each label. Must not be {@code null}; may be empty.
@@ -118,15 +113,16 @@ public final class Pseudonymizer {
    *
    * @param mention The mention being replaced.
    * @param labels Labels already assigned by type and normalized value.
-   * @param counters The next sequence number by type.
+   * @param counters The sequence numbers by displayed type prefix.
    * @return The existing or newly assigned label.
    */
   private String label(PiiMention mention, Map<Identity, String> labels,
       Map<String, Integer> counters) {
     final Identity key = new Identity(mention.type(), mention.normalized());
     return labels.computeIfAbsent(key, ignored -> {
-      final int number = counters.merge(mention.type(), 1, Integer::sum);
-      return prefix + Ascii.toUpper(mention.type()) + '-' + number + suffix;
+      final String typePrefix = Ascii.toUpper(mention.type());
+      final int number = counters.merge(typePrefix, 1, Integer::sum);
+      return prefix + typePrefix + '-' + number + suffix;
     });
   }
 }

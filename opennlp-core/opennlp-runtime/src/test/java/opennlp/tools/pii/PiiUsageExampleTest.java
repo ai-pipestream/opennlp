@@ -18,6 +18,7 @@
 package opennlp.tools.pii;
 
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -187,6 +188,37 @@ public class PiiUsageExampleTest {
           rewrite.text().substring(annotation.span().getStart(), annotation.span().getEnd()));
     }
     Assertions.assertEquals(rewrite.text(), new Pseudonymizer().rewrite(labelled).text());
+  }
+
+  /** Checks the manual's custom type numbering example. */
+  @Test
+  void testNumberingForCustomTypes() {
+    final List<PiiMention> custom = List.of(
+        new PiiMention(new Span(0, 1), "id", "a"),
+        new PiiMention(new Span(2, 3), "ID", "b"));
+
+    Assertions.assertEquals("ID-1 ID-2", new Pseudonymizer().rewrite("a b", custom).text());
+  }
+
+  /** Checks the manual's generated-key example across documents and audit samples. */
+  @Test
+  void testStableTokensAcrossDocuments() {
+    final byte[] key = new byte[32];
+    new SecureRandom().nextBytes(key);
+    final HmacTokenizer tokenizer = new HmacTokenizer(key);
+    final PiiAnnotator emailAnnotator = new PiiAnnotator(new CursorPiiExtractor());
+    final Document first = emailAnnotator.annotate(Document.of("From jane@example.com"));
+    final Document second = emailAnnotator.annotate(Document.of("To jane@example.com"));
+    final String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
+
+    Assertions.assertEquals("From " + stable, tokenizer.rewrite(first).text());
+    Assertions.assertEquals("To " + stable, tokenizer.rewrite(second).text());
+    Assertions.assertEquals(List.of(stable),
+        PiiAuditReport.of(first, tokenizer).samples(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(List.of(stable),
+        PiiAuditReport.of(second, tokenizer).samples(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(stable,
+        new HmacTokenizer(key).token(PiiMention.TYPE_EMAIL, "jane@example.com"));
   }
 
   /**

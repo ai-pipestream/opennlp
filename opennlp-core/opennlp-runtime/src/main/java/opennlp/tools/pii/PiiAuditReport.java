@@ -76,8 +76,8 @@ public final class PiiAuditReport {
    *                 {@code null}; may be empty.
    * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
    * @return The report. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a mention is
-   *         {@code null}.
+   * @throws IllegalArgumentException Thrown if an argument or a mention is {@code null},
+   *         or a sampled mention's type or normalized value contains an unpaired surrogate.
    */
   public static PiiAuditReport of(List<PiiMention> mentions, HmacTokenizer tokenizer) {
     return of(mentions, tokenizer, DEFAULT_SAMPLES);
@@ -94,7 +94,8 @@ public final class PiiAuditReport {
    *                       reports counts only.
    * @return The report. Never {@code null}.
    * @throws IllegalArgumentException Thrown if an argument is {@code null}, a mention is
-   *         {@code null}, or {@code samplesPerType} is negative.
+   *         {@code null}, {@code samplesPerType} is negative, or a sampled mention's type
+   *         or normalized value contains an unpaired surrogate.
    */
   public static PiiAuditReport of(List<PiiMention> mentions, HmacTokenizer tokenizer,
       int samplesPerType) {
@@ -148,7 +149,8 @@ public final class PiiAuditReport {
    * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
    * @return The report. Never {@code null}.
    * @throws IllegalArgumentException Thrown if an argument is null, the document lacks
-   *         the PII layer, or a mention's offsets differ from its annotation's offsets.
+   *         the PII layer, a mention's offsets differ from its annotation's offsets, or a
+   *         sampled mention's type or normalized value contains an unpaired surrogate.
    */
   public static PiiAuditReport of(Document document, HmacTokenizer tokenizer) {
     return of(PiiLayer.mentions(document), tokenizer);
