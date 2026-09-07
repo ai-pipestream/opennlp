@@ -54,7 +54,6 @@ import opennlp.tools.wordnet.LexicalKnowledgeBase;
  * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
  * @since 3.0.0
  */
-
 public record WnLmfLexicon(
     String id,
     String label,
@@ -100,7 +99,7 @@ public record WnLmfLexicon(
       }
     }
     if (extensionOf == null) {
-      throw new IllegalArgumentException("ExtensionOf must not be null; use Optional.empty()");
+      throw new IllegalArgumentException("extensionOf must not be null; use Optional.empty()");
     }
     if (knowledgeBase == null) {
       throw new IllegalArgumentException("knowledgeBase must not be null");
@@ -110,7 +109,7 @@ public record WnLmfLexicon(
   }
 
   /**
-   * Creates a descriptor for an ordinary lexicon, which extends nothing.
+   * Creates a descriptor for a lexicon without an extension base.
    *
    * @param id            The WN-LMF lexicon id. Must not be {@code null} or empty.
    * @param label         The human-readable label. Must not be {@code null} or empty.
@@ -119,8 +118,8 @@ public record WnLmfLexicon(
    * @param metadata      The remaining Lexicon attributes. Must not be {@code null}.
    * @param dependencies  The required lexicons in source order. Must not be {@code null}.
    * @param knowledgeBase The independently queryable lexicon. Must not be {@code null}.
- * @since 3.0.0
    * @throws IllegalArgumentException Thrown if a component violates its documented constraint.
+   * @since 3.0.0
    */
   public WnLmfLexicon(String id, String label, String language, String version,
       Map<QName, String> metadata, List<WnLmfDependency> dependencies,
