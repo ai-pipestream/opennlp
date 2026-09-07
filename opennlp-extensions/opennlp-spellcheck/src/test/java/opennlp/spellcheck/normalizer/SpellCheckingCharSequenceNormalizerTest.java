@@ -100,12 +100,9 @@ public class SpellCheckingCharSequenceNormalizerTest {
     assertEquals("world", norm(normalizer, "wrold"));
   }
 
+  /** Checks a capitalized Deseret initial using a dictionary lookup. */
   @Test
   void perTokenPreservesCasingOfSupplementaryPlaneInitial() {
-    // DESERET CAPITAL LETTER LONG I (U+10400) and its lower-case form (U+10428) are
-    // cased letters outside the BMP, so each is two chars in UTF-16. The leading-capital
-    // pattern must be recognized on the original and re-applied to the correction as a
-    // whole code point, not as the bare leading surrogate.
     final SymSpell engine = new SymSpell();
     engine.add("𐐨word", 1000);
     final var normalizer = new SpellCheckingCharSequenceNormalizer(engine);
