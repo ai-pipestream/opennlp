@@ -45,6 +45,7 @@ public class BilstmPOSTagger implements POSTagger {
 
   /**
    * Initializes a {@link BilstmPOSTagger}.
+   * Taggers using the same model share its token-representation cache.
    *
    * @param model The model to tag with. Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if {@code model} is {@code null}.
@@ -55,7 +56,6 @@ public class BilstmPOSTagger implements POSTagger {
     }
     this.model = model;
     this.tags = model.tags();
-    // A tagger only ever reads a frozen model, so the representation cache is safe.
     model.enableRepresentationCache();
   }
 

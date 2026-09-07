@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The trained parameters of the bidirectional LSTM POS tagger: word and character
@@ -90,6 +91,8 @@ public class BilstmPOSModel {
   private final double[] endWeights;
 
   private volatile Map<String, double[]> representationCache;
+  private final AtomicInteger representationCacheRemaining =
+      new AtomicInteger(REPRESENTATION_CACHE_LIMIT);
 
   /**
    * Initializes a single-layer softmax model without a CRF output layer and without an
@@ -279,13 +282,18 @@ public class BilstmPOSModel {
   }
 
   /**
-   * Allows a consumer that only reads this model to memoize word representations per
-   * token string. A word representation is a pure function of the token, so the cache
-   * is sound on a frozen model and invalid during training; trainers must never call
-   * this.
+   * Enables a model-scoped cache of up to 100,000 token representations. Repeated
+   * calls preserve existing entries, including calls from additional taggers.
+   * After the cache is full, uncached tokens are computed without being stored.
+   * The cache is not serialized and is released with the model; its memory use
+   * depends on token lengths and representation width.
    */
   public void enableRepresentationCache() {
-    representationCache = new ConcurrentHashMap<>();
+    synchronized (this) {
+      if (representationCache == null) {
+        representationCache = new ConcurrentHashMap<>();
+      }
+    }
   }
 
   /**
@@ -356,18 +364,42 @@ public class BilstmPOSModel {
    *         {@code null}.
    */
   double[] wordRepresentation(String token) {
-    if (representationCache != null) {
-      final double[] cached = representationCache.get(token);
+    final Map<String, double[]> cache = representationCache;
+    if (cache != null) {
+      final double[] cached = cache.get(token);
       if (cached != null) {
         return cached.clone();
       }
     }
     final double[] representation = computeRepresentation(token);
-    if (representationCache != null
-        && representationCache.size() < REPRESENTATION_CACHE_LIMIT) {
-      representationCache.putIfAbsent(token, representation.clone());
+    if (cache != null && reserveRepresentation()) {
+      boolean stored = false;
+      try {
+        stored = cache.putIfAbsent(token, representation.clone()) == null;
+      } finally {
+        if (!stored) {
+          representationCacheRemaining.incrementAndGet();
+        }
+      }
     }
     return representation;
+  }
+
+  /**
+   * Reserves one cache entry before copying and publishing a representation.
+   * Unsuccessful insertions return the reservation in {@link #wordRepresentation(String)}.
+   *
+   * @return Whether capacity was available and reserved.
+   */
+  private boolean reserveRepresentation() {
+    int remaining = representationCacheRemaining.get();
+    while (remaining > 0) {
+      if (representationCacheRemaining.compareAndSet(remaining, remaining - 1)) {
+        return true;
+      }
+      remaining = representationCacheRemaining.get();
+    }
+    return false;
   }
 
   /**

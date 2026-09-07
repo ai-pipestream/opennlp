@@ -470,6 +470,17 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
 		<para>
+		Taggers created from the same <code>BilstmPOSModel</code> share a cache of
+		up to 100,000 token representations, including during concurrent requests.
+		Creating another tagger or calling <code>enableRepresentationCache</code>
+		again preserves cached entries. After the cache is full, uncached tokens
+		are computed without being stored. Reuse the model across requests to
+		reuse this work. Cache memory depends on token lengths and representation
+		width; it is released with the model and is not included in saved model
+		files. <code>BilstmRepresentationCacheTest</code> checks shared taggers,
+		concurrent limits, result copies and independent loaded models.
+		</para>
+		<para>
 		The <code>Settings</code> record controls the optional model components.
 		A linear-chain CRF output layer (<code>crf</code>) decodes whole tag sequences with Viterbi instead of
 		per-position argmax, a second stacked encoder layer
