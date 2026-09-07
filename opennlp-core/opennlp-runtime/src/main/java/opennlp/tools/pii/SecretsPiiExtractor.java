@@ -127,23 +127,21 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Initializes an extractor limited to a subset of the types, for a caller that scans
-   * commit messages for cloud keys, for example, without flagging every signed token.
+   * Initializes an extractor for selected credential types.
    *
-   * @param types The types to report, drawn from
-   *              {@link PiiMention#TYPE_AWS_ACCESS_KEY},
+   * @param types The types to report: {@link PiiMention#TYPE_AWS_ACCESS_KEY},
    *              {@link PiiMention#TYPE_GITHUB_TOKEN}, {@link PiiMention#TYPE_JWT}, and
-   *              {@link PiiMention#TYPE_URL_CREDENTIAL}. Must not be {@code null} or
-   *              empty and must not contain a type this extractor does not recognize.
+   *              {@link PiiMention#TYPE_URL_CREDENTIAL}. Must be non-null and non-empty,
+   *              without null or unrecognized entries.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty, or
-   *         contains an unrecognized type.
+   *         contains a null or unrecognized type.
    */
   public SecretsPiiExtractor(Set<String> types) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
     for (final String type : types) {
-      if (!ALL_TYPES.contains(type)) {
+      if (type == null || !ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
     }

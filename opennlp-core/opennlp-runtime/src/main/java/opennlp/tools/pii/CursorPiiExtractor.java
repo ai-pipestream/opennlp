@@ -109,21 +109,21 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Initializes an extractor limited to a subset of the types, for a caller that wants
-   * only payment data masked, for example, without flagging every email address.
+   * Initializes an extractor for selected contact and payment types.
    *
-   * @param types The types to report, drawn from the {@code TYPE_*} constants on
-   *              {@link PiiMention}. Must not be {@code null} or empty and must not
-   *              contain a type this extractor does not recognize.
+   * @param types The types to report: {@link PiiMention#TYPE_EMAIL},
+   *              {@link PiiMention#TYPE_PHONE}, {@link PiiMention#TYPE_IBAN} or
+   *              {@link PiiMention#TYPE_CARD}. Must be non-null and non-empty,
+   *              without null or unrecognized entries.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty,
-   *         or contains an unrecognized type.
+   *         or contains a null or unrecognized type.
    */
   public CursorPiiExtractor(Set<String> types) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
     for (final String type : types) {
-      if (!ALL_TYPES.contains(type)) {
+      if (type == null || !ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
     }

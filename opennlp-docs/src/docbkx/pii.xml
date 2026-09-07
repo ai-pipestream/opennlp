@@ -45,6 +45,10 @@
 			An extractor limited to a subset of the types, for a caller that wants
 			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
+			A type set must be non-null and non-empty, with no null or unrecognized
+			entries; invalid selections raise <code>IllegalArgumentException</code>.
+			Each configurable detector copies the selection, so changing the supplied
+			set after construction does not change its enabled types.
 		</para>
 		<para>
 			Further detectors, for network addresses, credentials, cryptocurrency

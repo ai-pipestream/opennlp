@@ -109,18 +109,18 @@ public final class CryptoPiiExtractor implements PiiExtractor {
   /**
    * Initializes an extractor limited to a subset of the types.
    *
-   * @param types The types to report, drawn from {@link PiiMention#TYPE_BTC_ADDRESS} and
-   *              {@link PiiMention#TYPE_ETH_ADDRESS}. Must not be {@code null} or empty and
-   *              must not contain a type this extractor does not recognize.
+   * @param types The types to report: {@link PiiMention#TYPE_BTC_ADDRESS} or
+   *              {@link PiiMention#TYPE_ETH_ADDRESS}. Must be non-null and non-empty,
+   *              without null or unrecognized entries.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty, or
-   *         contains an unrecognized type.
+   *         contains a null or unrecognized type.
    */
   public CryptoPiiExtractor(Set<String> types) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
     for (final String type : types) {
-      if (!ALL_TYPES.contains(type)) {
+      if (type == null || !ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
     }
