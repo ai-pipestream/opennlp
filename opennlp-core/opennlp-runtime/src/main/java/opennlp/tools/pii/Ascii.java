@@ -161,4 +161,21 @@ final class Ascii {
     }
     return folded.toString();
   }
+
+  /**
+   * Compares an ASCII literal at a validated text offset, ignoring ASCII letter case.
+   *
+   * @param text The non-null text.
+   * @param start The literal start, with enough remaining text for the comparison.
+   * @param literal The non-null ASCII literal.
+   * @return {@code true} if the text range matches the literal ignoring ASCII case.
+   */
+  static boolean equalsIgnoreCase(CharSequence text, int start, String literal) {
+    for (int i = 0; i < literal.length(); i++) {
+      if (toLower(text.charAt(start + i)) != toLower(literal.charAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
 }

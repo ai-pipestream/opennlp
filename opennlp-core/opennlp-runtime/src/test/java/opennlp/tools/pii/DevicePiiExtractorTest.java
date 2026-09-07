@@ -29,6 +29,12 @@ public class DevicePiiExtractorTest {
 
   private final DevicePiiExtractor extractor = new DevicePiiExtractor();
 
+  /**
+   * Checks accepted labels and separator removal.
+   *
+   * @param text The labeled input.
+   * @param normalized The expected digits without separators.
+   */
   @ParameterizedTest
   @CsvSource({
       "'IMEI: 490154203237518', 490154203237518",
@@ -42,6 +48,11 @@ public class DevicePiiExtractorTest {
     Assertions.assertEquals(normalized, mentions.get(0).normalized());
   }
 
+  /**
+   * Checks missing labels, invalid checksums and invalid lengths.
+   *
+   * @param text The rejected input.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "490154203237518",
@@ -54,6 +65,7 @@ public class DevicePiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks the numeric span without including its label. */
   @Test
   void testReportsExactNumberSpan() {
     final String text = "Device IMEI: 490154203237518.";
@@ -63,6 +75,7 @@ public class DevicePiiExtractorTest {
         text.substring(mention.span().getStart(), mention.span().getEnd()));
   }
 
+  /** Checks the null-text boundary contract. */
   @Test
   void testRejectsMissingText() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));

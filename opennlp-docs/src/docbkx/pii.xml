@@ -176,19 +176,35 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 					<code>CaIdentityPiiExtractor</code>: United States Social Security
 					and taxpayer numbers, United Kingdom NHS numbers, the German tax
 					identifier, and context-labeled Canadian Social Insurance Numbers.
-					National identifiers are the most context
-					dependent of the lot, which is why they are never on by default.
+					Canadian SINs require <code>SIN</code>, <code>Social Insurance Number</code>
+					or <code>Social Insurance No.</code> immediately before the value.
+					They accept 9 ASCII digits, compact or in three groups of three
+					with matching single spaces or hyphens. Partial groupings are rejected.
+					These detectors are opt-in.
 				</para>
 			</listitem>
 			<listitem>
 				<para>
 					<code>DevicePiiExtractor</code>: 15-digit, Luhn-valid IMEIs that
-					directly follow an <code>IMEI</code> label. The label prevents a
-					generic long number from becoming a device identifier by checksum
-					alone.
+					directly follow an <code>IMEI</code> label. Variable-length digit groups
+					may use single spaces or hyphens, but not a mixture of both.
 				</para>
 			</listitem>
 		</itemizedlist>
+		<para>
+			SIN and IMEI labels are ASCII case-insensitive and must not continue a
+			Unicode letter or digit. Whitespace and <code>:</code>, <code>#</code> or
+			<code>=</code> may separate labels from values; SIN also permits
+			<code>.</code>. Both detectors check format and checksum, not assignment
+			to a person or device. This example masks only the numeric spans:
+			<programlisting language="java"><![CDATA[
+PiiExtractor labeled = new CompositePiiExtractor(PiiPacks.caIdentity(), PiiPacks.device());
+Document identifiers = new PiiAnnotator(labeled)
+    .annotate(Document.of("SIN: 046 454 286; IMEI: 490154203237518."));
+String masked = Masker.mask(identifiers, PiiAnnotator.PII, '*');
+// "SIN: ***********; IMEI: ***************."]]>
+			</programlisting>
+		</para>
 		<para>
 			This synthetic routing number illustrates extraction and masking without
 			using a bank-directory entry:

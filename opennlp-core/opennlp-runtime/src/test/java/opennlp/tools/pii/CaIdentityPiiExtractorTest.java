@@ -28,6 +28,11 @@ public class CaIdentityPiiExtractorTest {
 
   private final CaIdentityPiiExtractor extractor = new CaIdentityPiiExtractor();
 
+  /**
+   * Checks accepted labels and compact or grouped number forms.
+   *
+   * @param text The labeled input.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "SIN: 046 454 286",
@@ -42,6 +47,11 @@ public class CaIdentityPiiExtractorTest {
     Assertions.assertEquals("046454286", mentions.get(0).normalized());
   }
 
+  /**
+   * Checks missing labels, invalid checksums and invalid number forms.
+   *
+   * @param text The rejected input.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "046 454 286",
@@ -55,6 +65,7 @@ public class CaIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks the numeric span without including its label. */
   @Test
   void testReportsExactNumberSpan() {
     final String text = "Employee SIN: 046 454 286.";
@@ -64,6 +75,7 @@ public class CaIdentityPiiExtractorTest {
         text.substring(mention.span().getStart(), mention.span().getEnd()));
   }
 
+  /** Checks the null-text boundary contract. */
   @Test
   void testRejectsMissingText() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));

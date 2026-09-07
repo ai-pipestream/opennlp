@@ -350,7 +350,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
             || !Boundaries.onEnd(text, end)
-            || !luhnValid(digits, length)) {
+            || !Luhn.valid(digits, length)) {
           continue;
         }
         final String candidate = digits.substring(0, length);
@@ -477,31 +477,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
       }
     }
     return remainder;
-  }
-
-  /**
-   * Applies the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a> check
-   * to a digit sequence.
-   *
-   * @param digits The digits to check.
-   * @param length The number of leading digits that form the candidate.
-   * @return {@code true} if the checksum passes.
-   */
-  private boolean luhnValid(CharSequence digits, int length) {
-    int sum = 0;
-    boolean twice = false;
-    for (int i = length - 1; i >= 0; i--) {
-      int d = digits.charAt(i) - '0';
-      if (twice) {
-        d *= 2;
-        if (d > 9) {
-          d -= 9;
-        }
-      }
-      sum += d;
-      twice = !twice;
-    }
-    return sum % 10 == 0;
   }
 
   /**
