@@ -16,6 +16,12 @@
  */
 package opennlp.tools.util.normalizer;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -36,6 +42,29 @@ public class DehyphenationCharSequenceNormalizerTest {
 
   private static final DehyphenationCharSequenceNormalizer NORMALIZER =
       DehyphenationCharSequenceNormalizer.getInstance();
+
+  /**
+   * Deserialization restores the shared normalizer and aligned output.
+   *
+   * @throws IOException If serialization fails.
+   * @throws ClassNotFoundException If the normalizer class cannot be loaded.
+   */
+  @Test
+  void testSerializationRestoresSharedInstance() throws IOException, ClassNotFoundException {
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+      output.writeObject(NORMALIZER);
+    }
+    try (ObjectInputStream input = new ObjectInputStream(
+        new ByteArrayInputStream(bytes.toByteArray()))) {
+      final DehyphenationCharSequenceNormalizer restored =
+          (DehyphenationCharSequenceNormalizer) input.readObject();
+      assertSame(NORMALIZER, restored);
+      assertEquals("litigation", restored.normalize("litiga-\ntion").toString());
+      assertEquals(new Span(0, 12),
+          restored.normalizeAligned("litiga-\ntion").toOriginalSpan(0, 10));
+    }
+  }
 
   @ParameterizedTest
   @ValueSource(strings = {
