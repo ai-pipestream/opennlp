@@ -22,37 +22,32 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for United States taxpayer identifiers: forward scans
- * over the text, no regular expressions, recognizing Social Security numbers and Individual
- * Taxpayer Identification Numbers. This extractor is opt-in and is never part of the default
- * extractor, because a national identifier is a jurisdiction-specific concern and its number
- * space overlaps ordinary numbers.
+ * Extracts grouped United States Social Security number and Individual Taxpayer
+ * Identification Number candidates. This detector is opt-in.
  *
- * <p>Neither number carries a checksum, so the written form is the evidence: the grouped
- * form {@code xxx-xx-xxxx} is required, with hyphens or with spaces but not with a mixture,
- * and a bare nine-digit run is never reported. The number spaces are then checked against
- * the rules the issuing agencies publish, which is what tells the two types apart and
- * rejects the numbers that are never issued:</p>
+ * <p>Requires 9 ASCII digits grouped as {@code xxx-xx-xxxx}, using matching single
+ * spaces or hyphens. Compact digits and other separators are rejected. These types
+ * have no checksum. The leading and middle groups determine the type:</p>
  * <ul>
  *   <li>Social Security number: the area may not be {@code 000} or {@code 666} and may not
  *   be {@code 900} or above, the group may not be {@code 00}, and the serial may not be
  *   {@code 0000}, per the
- *   <a href="https://www.ssa.gov/employer/randomization.html">SSA randomization
- *   notice</a>.</li>
+ *   <a href="https://www.ssa.gov/employer/randomizationfaqs.html">SSA randomization
+ *   FAQ</a>.</li>
  *   <li>Individual Taxpayer Identification Number: the area is {@code 900} or above and the
  *   group is one of the ranges the
- *   <a href="https://www.irs.gov/individuals/individual-taxpayer-identification-number">
+ *   <a href="https://www.irs.gov/irm/part21/irm_21-006-001r">
  *   IRS</a> assigns, {@code 50} to {@code 65}, {@code 70} to {@code 88}, {@code 90} to
  *   {@code 92}, and {@code 94} to {@code 99}.</li>
  * </ul>
  *
- * <p>Normalized form: the nine digits in the hyphenated form {@code xxx-xx-xxxx}, whichever
- * separator the text used.</p>
+ * <p>This detector rejects a zero serial for either type. A match checks format and
+ * number ranges, not assignment to a person. Normalization uses hyphens between groups.</p>
  *
  * <p>Both types are reported by default; the {@link #UsIdentityPiiExtractor(Set)} constructor
  * limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -65,7 +60,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   private static final int GROUP_DIGITS = 2;
   private static final int SERIAL_DIGITS = 4;
 
-  /** The nine digits and the two separators of the grouped form. */
+  /** The 9 digits and two separators of the grouped form. */
   private static final int FORM_LENGTH =
       AREA_DIGITS + GROUP_DIGITS + SERIAL_DIGITS + 2;
 
@@ -73,10 +68,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   private static final int ITIN_AREA_FIRST = 900;
 
   /**
-   * The group ranges the IRS assigns to Individual Taxpayer Identification Numbers, as
-   * published as of 2026-08-10. The ranges are assignment policy rather than arithmetic and
-   * have been widened before, in 2011, so a number the IRS begins issuing outside them stays
-   * unreported until this table is updated.
+   * ITIN middle-group ranges from the IRS Internal Revenue Manual.
    */
   private static final int[][] ITIN_GROUPS = {{50, 65}, {70, 88}, {90, 92}, {94, 99}};
 
@@ -163,7 +155,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
    * @param group The middle two digits.
    * @param serial The last four digits.
    * @return {@link PiiMention#TYPE_US_SSN}, {@link PiiMention#TYPE_US_ITIN}, or {@code null}
-   *         when the number is never issued.
+   *         if the number fails this detector's range checks.
    */
   private String classify(int area, int group, int serial) {
     if (group == 0 || serial == 0) {
@@ -181,12 +173,12 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a range holds ASCII digits only.
+   * Checks that a range contains ASCII digits only.
    *
    * @param text The text being scanned.
    * @param start The first character of the range.
    * @param length The number of characters.
-   * @return {@code true} if the range holds digits only.
+   * @return {@code true} if the range contains digits only.
    */
   private boolean digitsAt(CharSequence text, int start, int length) {
     for (int i = start; i < start + length; i++) {

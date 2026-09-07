@@ -171,16 +171,32 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 			</listitem>
 			<listitem>
 				<para>
-					<code>UsIdentityPiiExtractor</code>,
-					<code>EuIdentityPiiExtractor</code>, and
-					<code>CaIdentityPiiExtractor</code>: United States Social Security
-					and taxpayer numbers, United Kingdom NHS numbers, the German tax
-					identifier, and context-labeled Canadian Social Insurance Numbers.
+					<code>UsIdentityPiiExtractor</code>: United States Social Security
+					and taxpayer number candidates in <code>3-2-4</code> digit groups.
+					The detector checks number ranges and rejects a zero final group for
+					both types. It requires matching single ASCII spaces or hyphens;
+					compact digits and other separators are rejected.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>EuIdentityPiiExtractor</code>: United Kingdom NHS numbers and
+					German tax identifiers. It accepts compact ASCII digits or the
+					<code>3-3-4</code> NHS and <code>2-3-3-3</code> tax identifier groupings.
+					Groups require matching single ASCII spaces or hyphens. Control
+					characters, mixed delimiters and other separators are rejected.
+					Both types require valid check digits; German identifiers also have
+					digit-repetition checks. Uniform NHS digit runs are rejected.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					<code>CaIdentityPiiExtractor</code>: labeled Canadian Social Insurance
+					Number candidates.
 					Canadian SINs require <code>SIN</code>, <code>Social Insurance Number</code>
 					or <code>Social Insurance No.</code> immediately before the value.
 					They accept 9 ASCII digits, compact or in three groups of three
 					with matching single spaces or hyphens. Partial groupings are rejected.
-					These detectors are opt-in.
 				</para>
 			</listitem>
 			<listitem>
@@ -191,6 +207,17 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 				</para>
 			</listitem>
 		</itemizedlist>
+		<para>
+			National identity detectors are opt-in. A match checks format and number
+			rules, not assignment to a person. This example selects the European
+			identity pack and masks the original grouped spans:
+			<programlisting language="java"><![CDATA[
+Document identifiers = new PiiAnnotator(PiiPacks.euIdentity())
+    .annotate(Document.of("NHS: 943 476 5919; IdNr: 65-929-970-489."));
+String masked = Masker.mask(identifiers, PiiAnnotator.PII, '*');
+// "NHS: ************; IdNr: **************."]]>
+			</programlisting>
+		</para>
 		<para>
 			SIN and IMEI labels are ASCII case-insensitive and must not continue a
 			Unicode letter or digit. Whitespace and <code>:</code>, <code>#</code> or

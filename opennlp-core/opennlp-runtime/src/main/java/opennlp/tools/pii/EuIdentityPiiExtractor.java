@@ -22,42 +22,34 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for European national identifiers: forward scans over
- * the text, no regular expressions, recognizing United Kingdom NHS numbers and German tax
- * identification numbers. This extractor is opt-in and is never part of the default
- * extractor, because a national identifier is a jurisdiction-specific concern and its number
- * space overlaps ordinary numbers.
+ * Extracts United Kingdom NHS number and German tax identification number candidates.
+ * This detector is opt-in.
  *
  * <p>Recognized forms:</p>
  * <ul>
- *   <li>NHS number: ten digits, bare or in the {@code 3 3 4} grouping records use, with
- *   spaces or hyphens but not a mixture, whose tenth digit is the modulus 11 check digit the
+ *   <li>NHS number: 10 ASCII digits, compact or grouped as {@code 3 3 4}. The final digit
+ *   must pass the modulus 11 check from the
  *   <a href="https://www.datadictionary.nhs.uk/attributes/nhs_number.html">NHS data
- *   dictionary</a> prescribes, computed over the first nine digits under the weights ten
- *   down to two. A remainder that would make the check digit ten marks a number that is
- *   never issued.</li>
- *   <li>German tax identification number: eleven digits, bare or in the {@code 2 3 3 3}
- *   grouping the tax office prints, whose eleventh digit is the ISO 7064 MOD 11,10 check
- *   digit. The
+ *   dictionary</a>, using weights 10 down to 2 over the first 9 digits. A check value
+ *   of 11 becomes zero; a check value of 10 is rejected. Uniform digit runs are rejected.</li>
+ *   <li>German tax identification number: 11 ASCII digits, compact or grouped as
+ *   {@code 2 3 3 3}, with an ISO 7064 MOD 11,10 check digit. The
  *   <a href="https://www.bzst.de/DE/Privatpersonen/SteuerlicheIdentifikationsnummer/steuerlicheidentifikationsnummer_node.html">
  *   BZSt</a> also constrains the digits themselves: the first may not be zero, and of the
  *   first ten digits exactly one appears twice or three times while every other appears at
  *   most once, and three occurrences may not stand in direct succession.</li>
  * </ul>
  *
- * <p>A single check digit leaves about one bare digit run in eleven passing by chance. For the
- * German number the digit rules cut that much further, since they demand a very particular
- * spread of digits; for the NHS number the check digit is all there is, so a text full of
- * ten-digit identifiers will produce false positives and the surrounding context, not this
- * extractor alone, should decide what to do about them.</p>
+ * <p>Groups require matching single ASCII spaces or hyphens. Other separators, including
+ * control characters, are rejected. Numeric grouping is checked before the compact form.</p>
  *
- * <p>Normalized forms: the digits without separators, ten for an NHS number and eleven for a
- * tax identification number.</p>
+ * <p>Normalization removes separators. A match checks format and number rules, not
+ * assignment to a person. Unrelated numeric identifiers can match these rules.</p>
  *
  * <p>Both types are reported by default; the {@link #EuIdentityPiiExtractor(Set)} constructor
  * limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -117,9 +109,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to a non-overlapping set, leftmost and longest first, so an eleven-digit tax
-   * number is never also reported as the ten-digit number inside it.</p>
+   * <p>Enabled types are scanned separately and their candidates are resolved together.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -137,8 +127,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds one type of identifier, trying the grouped form before the bare one so the longer
-   * candidate is the one that is judged.
+   * Finds one identifier type, trying its grouped form before its compact form.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -189,11 +178,10 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
           return -1;
         }
         final char c = text.charAt(p);
-        if (separator == 0 && (c == ' ' || c == '-')) {
-          separator = c;
-        } else if (c != separator) {
+        if ((c != ' ' && c != '-') || (g > 1 && c != separator)) {
           return -1;
         }
+        separator = c;
         p++;
       }
       for (int d = 0; d < groups[g]; d++) {
@@ -236,20 +224,17 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
    *
    * @param value The digits.
    * @param type The type to validate for.
-   * @return {@code true} if the number could have been issued.
+   * @return {@code true} if the candidate passes this type's format checks.
    */
   private boolean valid(int[] value, String type) {
     return PiiMention.TYPE_UK_NHS.equals(type) ? validNhs(value) : validSteuerId(value);
   }
 
   /**
-   * Applies the NHS modulus 11 check: the first nine digits weighted ten down to two must
-   * leave a remainder whose complement is the tenth digit, and a complement of ten marks a
-   * number that is never issued. A run of one repeated digit is rejected as well, since such
-   * a run is a placeholder wherever it appears and two of them do pass the check digit.
+   * Applies the NHS modulus 11 check and rejects uniform digit runs.
    *
-   * @param value The ten digits.
-   * @return {@code true} if the check digit holds.
+   * @param value The 10 digits.
+   * @return {@code true} if the check digit passes and the digits are not uniform.
    */
   private boolean validNhs(int[] value) {
     boolean uniform = true;
@@ -273,7 +258,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
    * repetition rule, and the ISO 7064 MOD 11,10 check digit.
    *
    * @param value The eleven digits.
-   * @return {@code true} if the number could have been issued.
+   * @return {@code true} if the digits satisfy the number rules and checksum.
    */
   private boolean validSteuerId(int[] value) {
     if (value[0] == 0 || !repetitionValid(value)) {
