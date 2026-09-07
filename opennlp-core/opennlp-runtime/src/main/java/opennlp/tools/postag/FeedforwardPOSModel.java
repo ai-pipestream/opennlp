@@ -26,8 +26,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
@@ -36,20 +41,18 @@ import opennlp.tools.util.StringUtil;
 /**
  * The weights of the feedforward tagger: embeddings for words, suffixes, word shapes,
  * and previous tags, one hidden layer with cube activation, and a tag output layer,
- * stored in a plain versioned binary format with no serialization framework involved.
+ * stored in a versioned binary format.
  *
  * <p>The network is executed with ordinary array arithmetic, so tagging needs no native
  * runtime. Unknown words and suffixes fall back to learned unknown symbols; words are
  * matched case-insensitively, with capitalization carried by the shape features instead.
- * The weight arrays are mutated in place by {@link FeedforwardPOSTrainer} while training
- * runs and never afterwards, so a model handed back by the trainer or read by
- * {@link #load(InputStream)} can be shared between threads.</p>
+ * {@link FeedforwardPOSTrainer} modifies the weight arrays during training.
+ * Trained and loaded models can be shared between threads.</p>
  *
- * <p>A model trained with pretrained word vectors additionally carries a frozen vector
- * block: the vectors of the words seen in training are stored inside the model, so
+ * <p>A model trained with pretrained word vectors stores those vectors, so
  * inference needs no embedding component, and a word without a stored vector scores as
- * zeros. Such a model is written under its own format marker, so a model without the
- * block stays readable by readers that predate the block.</p>
+ * zeros. Models use format marker {@code ONLP-FFPT-2} with this block and
+ * {@code ONLP-FFPT-1} without it.</p>
  *
  * @see FeedforwardPOSTagger
  * @see FeedforwardPOSTrainer
@@ -57,18 +60,17 @@ import opennlp.tools.util.StringUtil;
  */
 public class FeedforwardPOSModel {
 
-  /** The format of models carrying only the learned embeddings. */
+  /** The format of models with only learned embeddings. */
   private static final String MAGIC = "ONLP-FFPT-1";
 
-  /** The format of models carrying the optional pretrained word-vector block. */
+  /** The format of models with the optional pretrained word-vector block. */
   private static final String MAGIC_PRETRAINED = "ONLP-FFPT-2";
 
-  /**
-   * The most entries or values a single length field of the binary format may claim.
-   * A length beyond it cannot come from a sanely sized model, so the loader treats it
-   * as corruption and fails with an {@link IOException} instead of allocating it.
-   */
+  /** Maximum entry or value count in a binary-format field. */
   private static final int MAX_LENGTH = 1 << 30;
+
+  /** Initial allocation limit when reading vector values. */
+  private static final int READ_BUFFER_SIZE = 4096;
 
   /** The row marker of a word without a stored pretrained vector; scores as zeros. */
   static final int NO_VECTOR = -1;
@@ -101,9 +103,8 @@ public class FeedforwardPOSModel {
   private final float[][] pretrainedVectors;
 
   /**
-   * Initializes a model from its vocabularies and weight arrays. The trainer is the
-   * only caller; the arrays are taken over without copying and must not be mutated
-   * afterwards except by the trainer that created them.
+   * Initializes a model from vocabularies and weight arrays. The arrays are
+   * taken over without copying. Only the trainer may modify them, during training.
    *
    * @param wordIds The word symbol to embedding row mapping.
    * @param suffixIds The suffix symbol to embedding row mapping.
@@ -126,9 +127,20 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * Initializes a model carrying the optional pretrained word-vector block. The trainer
+   * Initializes a model with the optional pretrained word-vector block. The trainer
    * and the loader are the only callers; the arrays are taken over without copying.
    *
+   * @param wordIds The word symbol to embedding row mapping.
+   * @param suffixIds The suffix symbol to embedding row mapping.
+   * @param shapeIds The shape symbol to embedding row mapping.
+   * @param tagIds The tag symbol to embedding row mapping.
+   * @param tags The tag inventory by output index.
+   * @param embeddingSize The embedding dimensionality.
+   * @param embeddings The embedding matrix, one row per symbol.
+   * @param hiddenWeights The hidden layer weight matrix.
+   * @param hiddenBias The hidden layer bias vector.
+   * @param outputWeights The output layer weight matrix.
+   * @param outputBias The output layer bias vector.
    * @param pretrainedSize The pretrained vector dimensionality, {@code 0} when absent.
    * @param pretrainedIds The normalized word to vector row mapping; empty when absent.
    * @param pretrainedVectors The stored vector slice, one row per mapped word.
@@ -262,10 +274,7 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * Turns on the scoring cache: the hidden-layer contribution of a (template slot,
-   * embedding row) pair is fixed once the weights are, so it is computed on first sight
-   * and afterwards added instead of being re-derived from the embedding on every token.
-   * This is the adaptive form of the precomputation described for this architecture in
+   * Caches hidden-layer contributions by feature slot and embedding row, following
    * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>.
    *
    * <p>Only call this on a model whose weights no longer change. Cached contributions
@@ -279,11 +288,9 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * The bounded lazy contribution cache behind {@link #enableScoringCache()}: one
-   * slot per (template slot, embedding row) pair, filled on first use. Filling is
-   * idempotent, so concurrent readers may compute a contribution twice but never see
-   * a partial one, and a shared budget bounds the total memory; pairs beyond the
-   * budget simply keep the direct path.
+   * Caches complete contribution vectors on first use. Concurrent callers may compute
+   * the same entry before one publishes it. Uncached pairs use direct scoring after
+   * the entry budget is exhausted.
    */
   private static final class ContributionCache {
 
@@ -293,6 +300,12 @@ public class FeedforwardPOSModel {
     private final AtomicReferenceArray<float[]>[] bySlot;
     private final AtomicInteger remaining = new AtomicInteger(MAX_PAIRS);
 
+    /**
+     * Allocates one reference array per feature slot.
+     *
+     * @param slots The number of feature slots.
+     * @param rows The number of embedding rows.
+     */
     @SuppressWarnings("unchecked")
     private ContributionCache(int slots, int rows) {
       bySlot = new AtomicReferenceArray[slots];
@@ -305,7 +318,7 @@ public class FeedforwardPOSModel {
      * Returns the cached hidden-layer contribution of one pair, computing and
      * publishing it on first sight while the budget lasts.
      *
-     * @param model The frozen model the contributions derive from.
+     * @param model The model providing the weights.
      * @param slot The template slot.
      * @param row The embedding row at that slot.
      * @return The contribution vector, or {@code null} when the budget is spent and
@@ -494,8 +507,8 @@ public class FeedforwardPOSModel {
    *
    * @param in The stream to read from. Must not be {@code null}. Not closed.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails, the content is not this format, or a
-   *         length field is negative or implausibly large for a model.
+   * @throws IOException If reading fails, the format or dimensions are invalid,
+   *         vocabulary entries are invalid, or a weight is non-finite.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    */
   public static FeedforwardPOSModel load(InputStream in) throws IOException {
@@ -512,25 +525,108 @@ public class FeedforwardPOSModel {
     final Map<String, Integer> suffixIds = readVocabulary(data, "suffix vocabulary size");
     final Map<String, Integer> shapeIds = readVocabulary(data, "shape vocabulary size");
     final Map<String, Integer> tagIds = readVocabulary(data, "tag vocabulary size");
-    final String[] tags = new String[readLength(data, "tag count")];
-    for (int i = 0; i < tags.length; i++) {
-      tags[i] = data.readUTF();
+    final int tagCount = readLength(data, "tag count");
+    final List<String> tagList = new ArrayList<>();
+    final Set<String> distinctTags = new HashSet<>();
+    for (int i = 0; i < tagCount; i++) {
+      final String tag = data.readUTF();
+      if (!distinctTags.add(tag)) {
+        throw new IOException("duplicate output tag: " + tag);
+      }
+      tagList.add(tag);
     }
+    final String[] tags = tagList.toArray(String[]::new);
     final int embeddingSize = readLength(data, "embedding size");
     final float[][] embeddings = readMatrix(data, "embedding matrix");
     final float[][] hiddenWeights = readMatrix(data, "hidden weight matrix");
     final float[] hiddenBias = readVector(data, "hidden bias");
     final float[][] outputWeights = readMatrix(data, "output weight matrix");
     final float[] outputBias = readVector(data, "output bias");
-    if (!pretrained) {
-      return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
-          embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias);
-    }
-    final int pretrainedSize = readLength(data, "pretrained vector size");
-    return new FeedforwardPOSModel(wordIds, suffixIds, shapeIds, tagIds, tags,
+    final int pretrainedSize = pretrained ? readLength(data, "pretrained vector size") : 0;
+    final Map<String, Integer> pretrainedIds = pretrained
+        ? readVocabulary(data, "pretrained vocabulary size") : Map.of();
+    final float[][] pretrainedVectors = pretrained
+        ? readMatrix(data, "pretrained vector matrix") : new float[0][];
+    final FeedforwardPOSModel model = new FeedforwardPOSModel(
+        wordIds, suffixIds, shapeIds, tagIds, tags,
         embeddingSize, embeddings, hiddenWeights, hiddenBias, outputWeights, outputBias,
-        pretrainedSize, readVocabulary(data, "pretrained vocabulary size"),
-        readMatrix(data, "pretrained vector matrix"));
+        pretrainedSize, pretrainedIds, pretrainedVectors);
+    model.validate(pretrained);
+    return model;
+  }
+
+  /**
+   * Checks the relationships between decoded fields before the model can be scored.
+   *
+   * @param pretrained Whether the format declares a pretrained vector block.
+   * @throws IOException If the model cannot be indexed with the tagger's feature template.
+   */
+  private void validate(boolean pretrained) throws IOException {
+    if (tags.length == 0) {
+      throw new IOException("tag count must be positive");
+    }
+    if (embeddingSize == 0 || embeddings.length == 0) {
+      throw new IOException("embedding size and row count must be positive");
+    }
+    if (hiddenBias.length == 0) {
+      throw new IOException("hidden layer size must be positive");
+    }
+    if (pretrained && pretrainedSize == 0) {
+      throw new IOException("pretrained vector size must be positive");
+    }
+    final long inputSize = (long) FeedforwardPOSContext.SLOTS * embeddingSize
+        + (long) FeedforwardPOSContext.PRETRAINED_SLOTS * pretrainedSize;
+    checkMatrix(embeddings, embeddings.length, embeddingSize, "embedding matrix");
+    checkMatrix(hiddenWeights, hiddenBias.length, inputSize, "hidden weight matrix");
+    checkMatrix(outputWeights, tags.length, hiddenBias.length, "output weight matrix");
+    if (outputBias.length != tags.length) {
+      throw new IOException("output bias length must match the tag count");
+    }
+    checkVocabulary(wordIds, embeddings.length, "word vocabulary", true);
+    checkVocabulary(suffixIds, embeddings.length, "suffix vocabulary", true);
+    checkVocabulary(shapeIds, embeddings.length, "shape vocabulary", true);
+    checkVocabulary(tagIds, embeddings.length, "tag vocabulary", true);
+    checkMatrix(pretrainedVectors, pretrainedVectors.length, pretrainedSize,
+        "pretrained vector matrix");
+    checkVocabulary(pretrainedIds, pretrainedVectors.length, "pretrained vocabulary", false);
+  }
+
+  /**
+   * Checks a matrix against the dimensions required by the scoring code.
+   *
+   * @param matrix The decoded matrix.
+   * @param rows The required row count.
+   * @param columns The required column count.
+   * @param field The matrix name for error messages.
+   * @throws IOException If the dimensions do not match.
+   */
+  private void checkMatrix(float[][] matrix, int rows, long columns, String field)
+      throws IOException {
+    if (matrix.length != rows || (matrix.length > 0 && matrix[0].length != columns)) {
+      throw new IOException(field + " must have " + rows + " rows and " + columns + " columns");
+    }
+  }
+
+  /**
+   * Checks fallback symbols and row indices without requiring distinct row assignments.
+   *
+   * @param ids The decoded vocabulary.
+   * @param rows The number of available embedding rows.
+   * @param field The vocabulary name for error messages.
+   * @param requireUnknown Whether lookups use an unknown-symbol fallback.
+   * @throws IOException If a required symbol is absent or a row is outside the matrix.
+   */
+  private void checkVocabulary(Map<String, Integer> ids, int rows, String field,
+      boolean requireUnknown) throws IOException {
+    if (requireUnknown && !ids.containsKey(UNKNOWN)) {
+      throw new IOException(field + " must contain " + UNKNOWN);
+    }
+    for (final Map.Entry<String, Integer> entry : ids.entrySet()) {
+      if (entry.getValue() < 0 || entry.getValue() >= rows) {
+        throw new IOException(field + " has an invalid row for " + entry.getKey()
+            + ": " + entry.getValue());
+      }
+    }
   }
 
   /**
@@ -538,7 +634,7 @@ public class FeedforwardPOSModel {
    *
    * @param path The file to read. Must not be {@code null}.
    * @return The loaded model. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the content is not this format.
+   * @throws IOException If reading fails or the model data is invalid.
    * @throws IllegalArgumentException Thrown if {@code path} is {@code null}.
    */
   public static FeedforwardPOSModel load(Path path) throws IOException {
@@ -597,7 +693,7 @@ public class FeedforwardPOSModel {
    * @param ids The vocabulary to write.
    * @throws IOException Thrown if writing fails.
    */
-  private static void writeVocabulary(DataOutputStream data, Map<String, Integer> ids)
+  private void writeVocabulary(DataOutputStream data, Map<String, Integer> ids)
       throws IOException {
     data.writeInt(ids.size());
     for (final Map.Entry<String, Integer> entry : ids.entrySet()) {
@@ -607,9 +703,7 @@ public class FeedforwardPOSModel {
   }
 
   /**
-   * Reads and validates a length field of the binary format, so corrupt bytes after a
-   * valid format marker fail as a named format error instead of reaching an array
-   * allocation as a negative or absurdly large size.
+   * Reads a length field within the binary format's supported range.
    *
    * @param data The stream to read from.
    * @param field The name of the field, used in the error message.
@@ -631,15 +725,17 @@ public class FeedforwardPOSModel {
    * @param data The stream to read from.
    * @param field The name of the size field, used in the error message.
    * @return The restored vocabulary. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the size field is implausible.
+   * @throws IOException If reading fails, the size field is invalid or a symbol is repeated.
    */
   private static Map<String, Integer> readVocabulary(DataInputStream data, String field)
       throws IOException {
     final int size = readLength(data, field);
-    final Map<String, Integer> ids = LinkedHashMap.newLinkedHashMap(size);
+    final Map<String, Integer> ids = new LinkedHashMap<>();
     for (int i = 0; i < size; i++) {
       final String key = data.readUTF();
-      ids.put(key, data.readInt());
+      if (ids.putIfAbsent(key, data.readInt()) != null) {
+        throw new IOException("duplicate symbol in " + field + ": " + key);
+      }
     }
     return ids;
   }
@@ -651,7 +747,7 @@ public class FeedforwardPOSModel {
    * @param matrix The matrix to write.
    * @throws IOException Thrown if writing fails.
    */
-  private static void writeMatrix(DataOutputStream data, float[][] matrix)
+  private void writeMatrix(DataOutputStream data, float[][] matrix)
       throws IOException {
     data.writeInt(matrix.length);
     data.writeInt(matrix.length == 0 ? 0 : matrix[0].length);
@@ -668,8 +764,8 @@ public class FeedforwardPOSModel {
    * @param data The stream to read from.
    * @param field The name of the matrix, used in the error message.
    * @return The restored matrix. Never {@code null}.
-   * @throws IOException Thrown if reading fails or a dimension or the resulting
-   *         element count is implausible.
+   * @throws IOException If reading fails, a dimension is invalid, the element count
+   *         exceeds the format limit, or a value is non-finite.
    */
   private static float[][] readMatrix(DataInputStream data, String field)
       throws IOException {
@@ -679,13 +775,14 @@ public class FeedforwardPOSModel {
       throw new IOException(
           "implausible " + field + " element count: " + rows + " x " + columns);
     }
-    final float[][] matrix = new float[rows][columns];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < columns; c++) {
-        matrix[r][c] = data.readFloat();
-      }
+    if ((rows == 0) != (columns == 0)) {
+      throw new IOException(field + " must have both dimensions zero or both positive");
     }
-    return matrix;
+    final List<float[]> matrix = new ArrayList<>();
+    for (int r = 0; r < rows; r++) {
+      matrix.add(readValues(data, columns, field));
+    }
+    return matrix.toArray(float[][]::new);
   }
 
   /**
@@ -695,7 +792,7 @@ public class FeedforwardPOSModel {
    * @param vector The vector to write.
    * @throws IOException Thrown if writing fails.
    */
-  private static void writeVector(DataOutputStream data, float[] vector)
+  private void writeVector(DataOutputStream data, float[] vector)
       throws IOException {
     data.writeInt(vector.length);
     for (final float value : vector) {
@@ -709,13 +806,34 @@ public class FeedforwardPOSModel {
    * @param data The stream to read from.
    * @param field The name of the vector, used in the error message.
    * @return The restored vector. Never {@code null}.
-   * @throws IOException Thrown if reading fails or the length field is implausible.
+   * @throws IOException If reading fails, the length is invalid or a value is non-finite.
    */
   private static float[] readVector(DataInputStream data, String field)
       throws IOException {
-    final float[] vector = new float[readLength(data, field + " length")];
-    for (int i = 0; i < vector.length; i++) {
-      vector[i] = data.readFloat();
+    return readValues(data, readLength(data, field + " length"), field);
+  }
+
+  /**
+   * Reads finite values, growing storage only after the next value has been read.
+   *
+   * @param data The stream to read from.
+   * @param length The declared value count.
+   * @param field The field name for error messages.
+   * @return The decoded values.
+   * @throws IOException If reading fails or a value is non-finite.
+   */
+  private static float[] readValues(DataInputStream data, int length, String field)
+      throws IOException {
+    float[] vector = new float[Math.min(length, READ_BUFFER_SIZE)];
+    for (int i = 0; i < length; i++) {
+      final float value = data.readFloat();
+      if (!Float.isFinite(value)) {
+        throw new IOException("non-finite value in " + field);
+      }
+      if (i == vector.length) {
+        vector = Arrays.copyOf(vector, Math.min(length, vector.length * 2));
+      }
+      vector[i] = value;
     }
     return vector;
   }

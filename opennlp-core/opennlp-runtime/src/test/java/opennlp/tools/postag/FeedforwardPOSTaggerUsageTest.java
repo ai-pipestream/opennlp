@@ -18,10 +18,14 @@
 package opennlp.tools.postag;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Sequence;
@@ -39,6 +43,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * of a reproducible training run.
  */
 public class FeedforwardPOSTaggerUsageTest {
+
+  @TempDir
+  Path temporary;
+
+  /**
+   * Runs the manual's file example with a trained model.
+   *
+   * @throws IOException If training, saving or loading fails.
+   */
+  @Test
+  void testSaveAndLoadFile() throws IOException {
+    final FeedforwardPOSTrainer.Settings settings = new FeedforwardPOSTrainer.Settings(
+        16, 32, 80, 32, 0.05, 0.0, 0.0, 1, 1, 17L);
+    final FeedforwardPOSModel model = FeedforwardPOSTrainer.train(
+        ObjectStreamUtils.createObjectStream(corpus()), settings);
+    final Path modelPath = temporary.resolve("pos-feedforward.bin");
+    try (OutputStream out = Files.newOutputStream(modelPath)) {
+      model.serialize(out);
+    }
+    final FeedforwardPOSTagger reloaded = new FeedforwardPOSTagger(
+        FeedforwardPOSModel.load(modelPath));
+    assertArrayEquals(new String[] {"DT", "NN", "VBZ"},
+        reloaded.tag(new String[] {"the", "cat", "barks"}));
+  }
 
   /**
    * Builds the tiny in-memory training corpus. Each distinct sentence is repeated so

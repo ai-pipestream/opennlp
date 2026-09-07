@@ -404,20 +404,26 @@ double[] probs = best.getProbs();]]>
 		</programlisting>
 		</para>
 		<para>
-		A trained model serializes to a stream and loads back with identical tagging
-		behavior, so models train once and deploy as files.
-		<code>FeedforwardPOSTaggerEdgeCaseTest</code> asserts the behavior shown
-		here.
+		Save a trained model to a file and load it for tagging:
 		<programlisting language="java">
-<![CDATA[ByteArrayOutputStream out = new ByteArrayOutputStream();
-model.serialize(out);
+<![CDATA[Path modelPath = Path.of("pos-feedforward.bin");
+try (OutputStream out = Files.newOutputStream(modelPath)) {
+    model.serialize(out);
+}
 
 FeedforwardPOSTagger reloaded = new FeedforwardPOSTagger(
-    FeedforwardPOSModel.load(new ByteArrayInputStream(out.toByteArray())));
+    FeedforwardPOSModel.load(modelPath));
 
-// The reloaded tagger decides exactly like the original.
-String[] tags = reloaded.tag(new String[] {"she", "eats", "fish"});]]>
+String[] tags = reloaded.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
+		</para>
+		<para>
+		Loading rejects truncated files, inconsistent dimensions, invalid vocabulary
+		rows, duplicate symbols or tags, and non-finite weights with <code>IOException</code>.
+		Storage grows as values are read; a short file declaring a large array does not
+		allocate that array in advance. Complete models still require memory for their
+		weights, vocabularies and scoring cache. Stream overloads leave the caller's
+		stream open; the <code>Path</code> overload closes the file after loading.
 		</para>
 		</section>
 		
