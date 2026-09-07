@@ -139,6 +139,20 @@ String masked = Masker.mask(document, PiiAnnotator.PII, MaskPolicies.byType());
 			</programlisting>
 		</para>
 		<para>
+			Card candidates have 13 to 19 digits and pass the Luhn checksum. Their
+			accepted prefixes are 2 through 6 and
+			<ulink url="https://www.unionpayintl.com/en/mediaCenter/brandCenter/brandEmbodiment/">UnionPay's
+			81 prefix</ulink>. Single spaces or hyphens may separate digits,
+			including the prefix digits. <code>CardPrefixTest</code> checks this
+			synthetic number and the receipt-style output:
+			<programlisting language="java"><![CDATA[
+Document cards = new PiiAnnotator(PiiPacks.payment())
+    .annotate(Document.of("Card 8100 0000 0000 0028."));
+String cardReceipt = Masker.mask(cards, PiiAnnotator.PII, MaskPolicies.byType());
+// "Card **** **** **** 0028."]]>
+			</programlisting>
+		</para>
+		<para>
 			Masking accepts positional layers only. A document-scoped layer, such as
 			a language identifier, has no spans and is rejected with
 			<code>IllegalArgumentException</code>. Each policy reads the original

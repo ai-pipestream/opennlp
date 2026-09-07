@@ -51,8 +51,10 @@ import java.util.Set;
  *   with an unregistered country or a wrong length is rejected.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
  *   validated with the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a>
- *   check and required to start with a digit between 2 and 6,
- *   the range that covers the major card networks. When the full run fails the check,
+ *   check and required to start with a digit between 2 and 6 or with
+ *   <a href="https://www.unionpayintl.com/en/mediaCenter/brandCenter/brandEmbodiment/">
+ *   UnionPay's 81 prefix</a>. The prefix is checked after removing separators.
+ *   When the full run fails the check,
  *   shorter separator-delimited prefixes are tried longest first, so a trailing
  *   separated digit group, such as an expiry date, does not hide the card before
  *   it.</li>
@@ -85,6 +87,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private static final int IBAN_ROTATION = 4;
   private static final int CARD_MIN_DIGITS = 13;
   private static final int CARD_MAX_DIGITS = 19;
+  private static final char UNIONPAY_LEADING_DIGIT = '8';
   private static final int PHONE_MAX_DIGITS = 15;
   private static final int PHONE_DOMESTIC_MIN_DIGITS = 10;
   private static final int PHONE_DOMESTIC_MAX_DIGITS = 11;
@@ -309,11 +312,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds payment card numbers: a digit run with optional single space or hyphen
-   * separators, an accepted leading digit, and a passing Luhn check. Candidates are
-   * tried longest first at separator boundaries until the Luhn check passes, so a card
-   * directly followed by another separated digit group, such as an expiry date, is
-   * still found instead of being swallowed into one over-long rejected candidate.
+   * Finds card numbers with an accepted prefix and a passing Luhn check. Single
+   * spaces and hyphens may separate digits, including prefix digits. Candidates
+   * are tried longest first at separator boundaries.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -321,7 +322,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private void scanCards(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char first = text.charAt(i);
-      if (first < '2' || first > '6' || !Boundaries.onNumberStart(text, i)) {
+      if (((first < '2' || first > '6') && first != UNIONPAY_LEADING_DIGIT)
+          || !Boundaries.onNumberStart(text, i)) {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
@@ -349,6 +351,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
+            || (first == UNIONPAY_LEADING_DIGIT && digits.charAt(1) != '1')
             || !Boundaries.onEnd(text, end)
             || !Luhn.valid(digits, length)) {
           continue;
