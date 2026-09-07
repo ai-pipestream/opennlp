@@ -56,7 +56,7 @@ public class AssetEmfSignatureTest {
       "44,uri", "45,uri", "46,uri", "88,uri"})
   void testSignatureBeyondInitialHeader(int length, String transport) {
     final byte[] bytes = header(length, 40, EMF_SIGNATURE);
-    final String text = encoded(bytes, transport);
+    final String text = AssetTestSupport.encode(bytes, transport);
     final List<EmbeddedAsset> assets = detector.detect(text);
     assertEquals(1, assets.size());
     final EmbeddedAsset asset = assets.get(0);
@@ -144,25 +144,6 @@ public class AssetEmfSignatureTest {
     Arrays.fill(buffer.array(), 8, 40, (byte) 0xfb);
     buffer.position(offset).put(signature.getBytes(StandardCharsets.US_ASCII));
     return buffer.array();
-  }
-
-  /**
-   * Encodes a fixture with the selected transport.
-   *
-   * @param bytes The fixture.
-   * @param transport The transport name.
-   * @return The encoded text.
-   * @throws IllegalArgumentException If the transport is unsupported.
-   */
-  private String encoded(byte[] bytes, String transport) {
-    return switch (transport) {
-      case "standard" -> Base64.getEncoder().encodeToString(bytes);
-      case "url" -> Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-      case "mime64" -> Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(bytes);
-      case "mime76" -> Base64.getMimeEncoder(76, new byte[] {'\r', '\n'}).encodeToString(bytes);
-      case "uri" -> DATA_URI + Base64.getEncoder().encodeToString(bytes);
-      default -> throw new IllegalArgumentException("transport is unsupported");
-    };
   }
 
   /**

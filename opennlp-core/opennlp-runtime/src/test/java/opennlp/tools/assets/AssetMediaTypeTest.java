@@ -88,6 +88,10 @@ public class AssetMediaTypeTest {
       // Excel signatures also require a supported document type: 0x0010 is a worksheet.
       bytes[6] = 0x10;
     }
+    if ("pcapng".equals(entry.format().name())) {
+      // The block type also requires byte-order magic at byte 8.
+      ByteBuffer.wrap(bytes).putInt(8, 0x1a2b3c4d);
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());

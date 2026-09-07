@@ -70,6 +70,11 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int EMF_SIGNATURE_OFFSET = 40;
   private static final String EMF_SIGNATURE = " EMF";
 
+  private static final int PCAPNG_BYTE_ORDER_OFFSET = 8;
+  private static final int PCAPNG_BYTE_ORDER_MAGIC = 0x1a2b3c4d;
+  private static final int PCAPNG_REVERSED_BYTE_ORDER_MAGIC =
+      Integer.reverseBytes(PCAPNG_BYTE_ORDER_MAGIC);
+
   private static final String DATA_URI_SCHEME = "data:";
   private static final String BASE64_MARKER = ";base64,";
   private static final String JWT_MEDIA_TYPE = "application/jwt";
@@ -570,7 +575,7 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Identifies the format and media type from the longest matching signature,
-   * checking Excel document types, EMF signatures and RIFF form types where required.
+   * checking additional format fields where required.
    *
    * @param header The decoded leading bytes.
    * @return The format and media type, or {@code null} for an unknown header.
@@ -578,10 +583,12 @@ public final class CursorAssetDetector implements AssetDetector {
   private KnownMagics.Format formatOf(byte[] header) {
     final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
-      if ("emf".equals(known.name()) && !carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE)) {
-        return null;
-      }
-      return "xls".equals(known.name()) ? excelFormat(header, known) : known;
+      return switch (known.name()) {
+        case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
+        case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
+        case "xls" -> excelFormat(header, known);
+        default -> known;
+      };
     }
     if (carries(header, 0, RIFF_MAGIC)) {
       if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
@@ -595,6 +602,23 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return null;
+  }
+
+  /**
+   * Checks the byte-order magic of a possible pcapng Section Header Block.
+   * The signature table checks the block type.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete byte-order magic matches in either byte order.
+   * @see <a href="https://www.ietf.org/archive/id/draft-ietf-opsawg-pcapng-05.html#name-section-header-block">
+   *     pcapng Section Header Block</a>
+   */
+  private boolean hasPcapngByteOrderMagic(byte[] header) {
+    if (header.length < PCAPNG_BYTE_ORDER_OFFSET + Integer.BYTES) {
+      return false;
+    }
+    final int magic = readInt(header, PCAPNG_BYTE_ORDER_OFFSET);
+    return magic == PCAPNG_BYTE_ORDER_MAGIC || magic == PCAPNG_REVERSED_BYTE_ORDER_MAGIC;
   }
 
   /**

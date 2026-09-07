@@ -19,8 +19,9 @@ package opennlp.tools.assets;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Base64;
 
-/** Header fixtures for format detection, not complete image files. */
+/** Header fixtures and encodings for format detection, not complete image files. */
 final class AssetTestSupport {
 
   /** Prevents construction of the fixture utility. */
@@ -54,5 +55,24 @@ final class AssetTestSupport {
     return ByteBuffer.allocate(30).order(ByteOrder.LITTLE_ENDIAN)
         .put(new byte[] {'G', 'I', 'F', '8', '9', 'a'})
         .putShort((short) width).putShort((short) height).array();
+  }
+
+  /**
+   * Encodes a fixture with the selected transport.
+   *
+   * @param bytes The fixture.
+   * @param transport The transport name.
+   * @return The encoded text, including the data-URI prefix when requested.
+   * @throws IllegalArgumentException If the transport is unsupported.
+   */
+  static String encode(byte[] bytes, String transport) {
+    return switch (transport) {
+      case "standard" -> Base64.getEncoder().encodeToString(bytes);
+      case "url" -> Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+      case "mime64" -> Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(bytes);
+      case "mime76" -> Base64.getMimeEncoder(76, new byte[] {'\r', '\n'}).encodeToString(bytes);
+      case "uri" -> "data:;base64," + Base64.getEncoder().encodeToString(bytes);
+      default -> throw new IllegalArgumentException("transport is unsupported");
+    };
   }
 }
