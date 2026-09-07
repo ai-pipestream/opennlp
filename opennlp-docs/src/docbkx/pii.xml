@@ -41,7 +41,9 @@
 			automated drift check without changing the source tree. The calling-code
 			and IBAN length tables are regenerated from libphonenumber and the SWIFT
 			registry with <code>dev/fetch-phone-number-lengths.sh</code> and
-			<code>dev/fetch-iban-lengths.sh</code>, respectively.
+			<code>dev/fetch-iban-lengths.sh</code>, respectively. See
+			<link linkend="tools.pii.reference-data">Reference data</link> for
+			offline phone-table generation and validation.
 			An extractor limited to a subset of the types, for a caller that wants
 			only payment data found, is built with
 			<code>new CursorPiiExtractor(Set.of(PiiMention.TYPE_CARD))</code>.
@@ -511,4 +513,42 @@ String line = customReport.toString();]]>
 			output encoding.
 		</para>
 	</section>
+	<section xml:id="tools.pii.reference-data">
+		<title>Reference data</title>
+		<para>
+			Phone-table generation reads national lengths from libphonenumber
+			metadata. Each value contains comma-separated numbers or inclusive
+			ranges such as <code>[8-10],12</code>. Duplicate lengths within one
+			value, invalid syntax, and lengths outside 1 through 31 stop generation
+			without replacing the Java source. Ranges must contain at least three
+			lengths; use <code>8,9</code> for a pair. Lengths shared by different
+			phone types or territories are combined. Local-only lengths are excluded.
+			The scanner also applies its 15-digit international-number limit.
+			The bundled snapshot accepts national lengths 7 or 9 under
+			<code>+220</code> and 7, 9 or 10 under <code>+263</code>. These
+			length checks do not confirm that a particular phone number exists.
+		</para>
+		<para>
+			To regenerate from a saved metadata file, provide its Git revision and
+			commit date. The revision must contain 7 to 40 lowercase hexadecimal
+			characters and the date must use <code>YYYY-MM-DD</code> with a valid
+			calendar date. Calling codes use one to three digits without leading
+			zeros. With <code>--check</code>, a difference returns a nonzero exit
+			status and leaves the source file unchanged. This command requires
+			Bash and Python 3, and does not download metadata:
+			<programlisting><![CDATA[
+PHONE_METADATA_SOURCE=/path/to/PhoneNumberMetadata.xml \
+PHONE_METADATA_REVISION=4ad67e90c65e365658ff9a480d3ac29ccfc6977b \
+PHONE_METADATA_DATE=2026-08-28 \
+bash dev/fetch-phone-number-lengths.sh --check]]>
+			</programlisting>
+		</para>
+		<para>
+			Run <code>python3 -B -m unittest discover -s dev/tests -v</code>
+			to check generation with synthetic XML in temporary directories.
+			These tests require no downloaded files and run in CI when the generator,
+			its tests, the phone table or the reference-data workflow changes.
+		</para>
+	</section>
+
 </chapter>

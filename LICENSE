@@ -432,3 +432,9 @@ The IANA download does not include separate license text. IANA's CC0 statement
 at https://www.iana.org/help/licensing-terms is expressly limited to Protocol
 Registries and is not asserted here to cover the Root Zone Database. No IANA
 website text, delegation metadata, or branding is included in the table.
+
+The generated opennlp.tools.pii.PhoneNumberLengths table is derived from
+libphonenumber PhoneNumberMetadata.xml, distributed under the Apache License,
+Version 2.0, reproduced above:
+
+    https://github.com/google/libphonenumber
