@@ -255,6 +255,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the
    *         samples contain no token.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings)
       throws IOException {
@@ -279,6 +281,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings,
       Function<CharSequence, float[]> wordVectors) throws IOException {
@@ -307,6 +311,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel train(ObjectStream<POSSample> samples, Settings settings,
       Function<CharSequence, float[]> wordVectors,
@@ -340,6 +346,8 @@ public final class BilstmPOSTrainer {
    * @throws IllegalArgumentException Thrown if samples or settings are {@code null},
    *         the samples contain no token, or {@code wordVectors} violates its
    *         contract.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   public static BilstmPOSModel trainMultiTask(ObjectStream<MultiTaskSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -367,6 +375,8 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
    *         {@code null}, or the samples contain no token.
+   * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
+   *         or training arithmetic produces a non-finite value.
    */
   private static BilstmPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -397,7 +407,7 @@ public final class BilstmPOSTrainer {
    * @return A trained {@link BilstmPOSModel}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code corpus} is empty.
    * @throws IllegalStateException Thrown if a training worker fails or the training
-   *         thread is interrupted.
+   *         thread is interrupted, or training arithmetic produces a non-finite value.
    */
   private static BilstmPOSModel trainCorpus(List<MultiTaskSample> corpus,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -471,14 +481,14 @@ public final class BilstmPOSTrainer {
               throw new IllegalStateException("training worker failed", e.getCause());
             }
           }
+          if (!Double.isFinite(loss)) {
+            throw new IllegalStateException("training loss must be finite");
+          }
           for (final TrainingContext.Worker worker : workers) {
             context.absorb(worker);
           }
           timestep++;
-          final double norm = context.adam.globalNorm();
-          if (norm > settings.clipNorm()) {
-            context.adam.scaleGradients(settings.clipNorm() / norm);
-          }
+          context.adam.clipGradients(settings.clipNorm());
           context.adam.step(learningRate, timestep);
           context.adam.zero();
           context.refreshLayerTransposes();
@@ -1270,6 +1280,7 @@ public final class BilstmPOSTrainer {
      *               not be {@code null}.
      * @param worker The gradient-storage owner. Must not be {@code null}.
      * @return The summed cross-entropy loss of the sentence, auxiliary heads included.
+     * @throws IllegalStateException Thrown if a score or loss is not finite.
      */
     double sentenceGradients(MultiTaskSample sample, Random random, Worker worker) {
       final double[][] wordEmbeddingGrads = worker.wordEmbeddingGrads;
@@ -1428,6 +1439,9 @@ public final class BilstmPOSTrainer {
           for (int j = 0; j < 2 * hidden; j++) {
             sum += row[j] * topStates[t][j];
           }
+          if (!Double.isFinite(sum)) {
+            throw new IllegalStateException("tag score must be finite");
+          }
           emissions[t][o] = sum;
         }
       }
@@ -1454,7 +1468,7 @@ public final class BilstmPOSTrainer {
             emissionGrads[t][o] = Math.exp(emissions[t][o] - max);
             total += emissionGrads[t][o];
           }
-          loss += Math.log(total) - Math.log(emissionGrads[t][goldIds[t]]);
+          loss += (max - emissions[t][goldIds[t]]) + Math.log(total);
           for (int o = 0; o < tags.length; o++) {
             emissionGrads[t][o] = emissionGrads[t][o] / total
                 - (o == goldIds[t] ? 1.0d : 0.0d);
@@ -1482,6 +1496,9 @@ public final class BilstmPOSTrainer {
       if (featsWeights != null && sample.feats() != null) {
         loss += auxiliaryLoss(sample.feats(), featsIds, featsWeights, featsBias,
             worker.featsWeightGrads, worker.featsBiasGrads, topStates, dTop, hidden);
+      }
+      if (!Double.isFinite(loss)) {
+        throw new IllegalStateException("sentence loss must be finite");
       }
 
       if (topMasks != null) {
@@ -1651,6 +1668,7 @@ public final class BilstmPOSTrainer {
      * @param dTop The encoder-state gradient accumulator.
      * @param hidden The encoder hidden size per direction.
      * @return The weighted auxiliary loss of the sentence.
+     * @throws IllegalStateException Thrown if an auxiliary score is not finite.
      */
     private double auxiliaryLoss(String[] gold, Map<String, Integer> ids,
         double[][] weights, double[] bias, double[][] weightGrads, double[] biasGrads,
@@ -1672,15 +1690,19 @@ public final class BilstmPOSTrainer {
           for (int j = 0; j < 2 * hidden; j++) {
             sum += row[j] * topStates[t][j];
           }
+          if (!Double.isFinite(sum)) {
+            throw new IllegalStateException("auxiliary tag score must be finite");
+          }
           scores[o] = sum;
           max = Math.max(max, sum);
         }
+        final double goldScore = scores[goldId];
         double total = 0.0d;
         for (int o = 0; o < labels; o++) {
           scores[o] = Math.exp(scores[o] - max);
           total += scores[o];
         }
-        loss += weight * (Math.log(total) - Math.log(scores[goldId]));
+        loss += weight * ((max - goldScore) + Math.log(total));
         for (int o = 0; o < labels; o++) {
           final double gradient =
               weight * (scores[o] / total - (o == goldId ? 1.0d : 0.0d));

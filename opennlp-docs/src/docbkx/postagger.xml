@@ -498,6 +498,11 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		token uses the reserved unknown-word embedding.
 		</para>
 		<para>
+		Training clips gradients before each Adam update and calculates softmax
+		loss from score differences. Non-finite scores, loss, gradients or optimizer
+		updates stop training with <code>IllegalStateException</code>.
+		</para>
+		<para>
 		Provide vectors with a lookup function. This example uses small arrays to
 		show the interface and stores an additional word for use after training:
 		<programlisting language="java">
