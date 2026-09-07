@@ -38,33 +38,26 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Expands each resolved location into the places that contain it: reads the geocoded
- * locations layer, joins each entry to a {@link PlaceHierarchy} through a configured
- * attribute key, and provides {@link #CONTAINMENT}, one annotation per expandable
- * mention carrying its {@link ContainmentChain} on the mention's span.
+ * Adds a {@link ContainmentChain} to each expandable geocoded mention, preserving
+ * the original span. The configured gazetteer attribute supplies the identifier
+ * passed to {@link PlaceHierarchy}; the default is the Who's On First attribute.
  *
- * <p>A mention whose entry lacks the join attribute, whose identifier the hierarchy
- * does not know, or whose place sits at the top of the hierarchy (an empty chain)
- * simply gets no annotation; nothing is invented. The default join key is the
- * conventional Who's On First attribute, matching the identifiers the bundled
- * gazetteer derivations carry.</p>
+ * <p>Location annotations are grouped by start and end offsets. The first annotation
+ * determines the chain. Span types do not affect this grouping. A missing join attribute or an
+ * empty hierarchy result produces no annotation, even if a later candidate is
+ * expandable. An empty locations layer produces an empty containment layer.</p>
  *
- * <p>A {@link GeocodeAnnotator} emits one annotation per candidate, in the geocoder's
- * order, for a mention it ranks against several. Only the first annotation of a span
- * decides that mention's chain, so one span never carries two contradicting chains and a
- * mention whose best candidate cannot be expanded gets no annotation rather than the
- * chain of a lower-ranked candidate.</p>
+ * <p>Location annotations must match the resolution's character offsets.
+ * Input validation precedes hierarchy lookups. Provider failures propagate to
+ * the application without returning a partial document.</p>
  *
- * <p>The annotator holds no per-call state; it is as thread-safe as its hierarchy.</p>
+ * <p>Concurrent calls are supported when the supplied hierarchy supports them.</p>
  *
  * @since 3.0.0
  */
 public class HierarchyAnnotator implements DocumentAnnotator {
 
-  /**
-   * Containment chains; each annotation covers one resolved mention and carries its
-   * {@link ContainmentChain}.
-   */
+  /** Containment chains on their resolved mention spans. */
   public static final LayerKey<ContainmentChain> CONTAINMENT =
       Layers.key("containment", ContainmentChain.class);
 
@@ -74,7 +67,7 @@ public class HierarchyAnnotator implements DocumentAnnotator {
   /**
    * Initializes the annotator joining on the Who's On First attribute.
    *
-   * @param hierarchy The hierarchy to walk. Must not be {@code null}.
+   * @param hierarchy The place hierarchy. Must not be {@code null}.
    * @throws IllegalArgumentException Thrown if {@code hierarchy} is {@code null}.
    */
   public HierarchyAnnotator(PlaceHierarchy hierarchy) {
@@ -84,10 +77,9 @@ public class HierarchyAnnotator implements DocumentAnnotator {
   /**
    * Initializes the annotator.
    *
-   * @param hierarchy The hierarchy to walk. Must not be {@code null}.
-   * @param attributeKey The gazetteer attribute holding the identifier in the
-   *                     hierarchy's identifier space. Must not be {@code null} or
-   *                     blank.
+   * @param hierarchy The place hierarchy. Must not be {@code null}.
+   * @param attributeKey The attribute containing the hierarchy identifier.
+   *                     Must not be {@code null} or blank.
    * @throws IllegalArgumentException Thrown if {@code hierarchy} is {@code null} or
    *         {@code attributeKey} is {@code null} or blank.
    */
@@ -103,20 +95,11 @@ public class HierarchyAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Annotates the document with the {@link #CONTAINMENT} layer.
+   * {@inheritDoc}
    *
-   * <p>A mention is keyed by its character offsets alone, so a typed and an untyped span
-   * over the same text are one mention and are expanded once.</p>
-   *
-   * <p>The locations layer must be present, but it may be empty: an absent layer is a
-   * pipeline error, not a location-free document.</p>
-   *
-   * @param document The document to annotate. Must not be {@code null} and must carry
-   *                 the {@link GeocodeAnnotator#LOCATIONS} layer.
-   * @return A new {@link Document} with the {@link #CONTAINMENT} layer added, one
-   *         annotation per expandable mention. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}, lacks
-   *         the locations layer, or already carries the {@link #CONTAINMENT} layer.
+   * @throws IllegalArgumentException If the containment layer already exists, location
+   *         and resolution offsets do not match, or the hierarchy returns a null list,
+   *         a null ancestor or the queried place as an ancestor.
    */
   @Override
   public Document annotate(Document document) {
@@ -127,10 +110,18 @@ public class HierarchyAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("document lacks the required layer "
           + GeocodeAnnotator.LOCATIONS);
     }
+    if (document.layers().contains(CONTAINMENT)) {
+      throw new IllegalArgumentException("document already contains layer " + CONTAINMENT);
+    }
+    final List<Annotation<GeoResolution>> locations = document.get(GeocodeAnnotator.LOCATIONS);
+    for (final Annotation<GeoResolution> location : locations) {
+      if (offsets(location.span()) != offsets(location.value().mention())) {
+        throw new IllegalArgumentException("location and resolution offsets must match");
+      }
+    }
     final List<Annotation<ContainmentChain>> chains = new ArrayList<>();
     final Set<Long> expanded = new HashSet<>();
-    for (final Annotation<GeoResolution> location
-        : document.get(GeocodeAnnotator.LOCATIONS)) {
+    for (final Annotation<GeoResolution> location : locations) {
       if (!expanded.add(offsets(location.span()))) {
         continue;
       }
@@ -140,23 +131,40 @@ public class HierarchyAnnotator implements DocumentAnnotator {
         continue;
       }
       final List<PlaceAncestor> ancestors = hierarchy.ancestors(joinId.value());
+      if (ancestors == null) {
+        throw new IllegalArgumentException("hierarchy must not return null ancestors");
+      }
       if (!ancestors.isEmpty()) {
-        chains.add(new Annotation<>(location.span(), new ContainmentChain(ancestors)));
+        final ContainmentChain chain = new ContainmentChain(ancestors);
+        for (final PlaceAncestor ancestor : chain.ancestors()) {
+          if (joinId.value().equals(ancestor.id())) {
+            throw new IllegalArgumentException("ancestors must exclude the queried place: "
+                + joinId.value());
+          }
+        }
+        chains.add(new Annotation<>(location.span(), chain));
       }
     }
     return document.with(CONTAINMENT, chains);
   }
 
-  /** Collapses a span to its offsets, so typed and untyped spans key one mention. */
-  private static long offsets(Span span) {
+  /**
+   * Combines the start and end offsets without the span type.
+   *
+   * @param span The mention span.
+   * @return The combined offsets.
+   */
+  private long offsets(Span span) {
     return ((long) span.getStart() << 32) | span.getEnd();
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> requires() {
     return Set.of(GeocodeAnnotator.LOCATIONS);
   }
 
+  /** {@inheritDoc} */
   @Override
   public Set<LayerKey<?>> provides() {
     return Set.of(CONTAINMENT);

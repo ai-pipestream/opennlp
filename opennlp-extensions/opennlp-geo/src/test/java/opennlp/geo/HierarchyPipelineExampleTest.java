@@ -17,15 +17,17 @@
 
 package opennlp.geo;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.dictionary.Dictionary;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.DocumentAnalyzer;
 import opennlp.tools.document.Layers;
 import opennlp.tools.geo.AttributeValue;
 import opennlp.tools.geo.ContainmentChain;
@@ -35,26 +37,27 @@ import opennlp.tools.geo.GeoResolution;
 import opennlp.tools.geo.GeocodeAnnotator;
 import opennlp.tools.geo.Geocoder;
 import opennlp.tools.geo.PlaceAncestor;
+import opennlp.tools.namefind.DictionaryNameFinder;
+import opennlp.tools.namefind.NameFinderAnnotator;
+import opennlp.tools.sentdetect.NewlineSentenceDetector;
+import opennlp.tools.sentdetect.SentenceDetectorAnnotator;
+import opennlp.tools.tokenize.SimpleTokenizer;
+import opennlp.tools.tokenize.TokenizerAnnotator;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringList;
 
 /**
- * Exercises the containment feature end to end the way a user assembles it: a document
- * with location entities flows through a {@link GeocodeAnnotator} into a
- * {@link HierarchyAnnotator}, and each resolved mention expands into the exact chain of
- * places that contain it. The hierarchy is a small self-contained
- * {@link ContainmentSpine} spanning one chain from a neighbourhood up to its country;
- * no external data is involved.
+ * Tests containment pipelines with in-memory place records and hierarchy links.
+ * No model or external data file is required.
  */
 public class HierarchyPipelineExampleTest {
 
   /**
-   * Builds the example hierarchy, one containment chain of four places: the Le Marais
-   * neighbourhood inside the locality Paris, inside the region Ile-de-France, inside
-   * the country France, which is the root.
+   * Builds the example hierarchy from neighbourhood to country.
    *
    * @return The spine over the four example places. Never {@code null}.
    */
-  private static ContainmentSpine exampleSpine() {
+  private ContainmentSpine exampleSpine() {
     return ContainmentSpine.builder()
         .add("101", "102", "Le Marais", "neighbourhood")
         .add("102", "103", "Paris", "locality")
@@ -64,44 +67,14 @@ public class HierarchyPipelineExampleTest {
   }
 
   /**
-   * Builds a geocoder stub that resolves a mention by looking its exact covered text up
-   * in a fixed table, with a fixed confidence of {@code 0.9}. Mentions whose text the
-   * table does not contain are omitted from the result, as the {@link Geocoder}
-   * contract requires for unresolvable mentions.
-   *
-   * @param entriesByName The surface-text-to-entry table. Must not be {@code null}.
-   * @return The stub geocoder. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code entriesByName} is {@code null}.
-   */
-  private static Geocoder tableGeocoder(Map<String, GazetteerEntry> entriesByName) {
-    if (entriesByName == null) {
-      throw new IllegalArgumentException("entriesByName must not be null");
-    }
-    return (text, mentions) -> {
-      final List<GeoResolution> resolutions = new ArrayList<>();
-      for (final Span mention : mentions) {
-        final String name =
-            text.subSequence(mention.getStart(), mention.getEnd()).toString();
-        final GazetteerEntry entry = entriesByName.get(name);
-        if (entry != null) {
-          resolutions.add(new GeoResolution(mention, entry, 0.9));
-        }
-      }
-      return resolutions;
-    };
-  }
-
-  /**
-   * Builds a minimal gazetteer entry carrying the given place name and, when an
-   * identifier is supplied, the conventional Who's On First attribute the
-   * {@link HierarchyAnnotator} joins on by default.
+   * Creates an example entry with an optional Who's On First join identifier.
    *
    * @param name The place name. Must not be {@code null} or empty.
    * @param wofId The Who's On First identifier, or {@code null} for an entry without
    *              the join attribute.
    * @return The entry. Never {@code null}.
    */
-  private static GazetteerEntry entry(String name, String wofId) {
+  private GazetteerEntry entry(String name, String wofId) {
     final Map<String, AttributeValue> attributes = wofId == null ? Map.of()
         : Map.of(GazetteerEntry.ATTRIBUTE_KEY_WHOSONFIRST,
             new AttributeValue(wofId, "test", "fixture"));
@@ -111,10 +84,7 @@ public class HierarchyPipelineExampleTest {
   }
 
   /**
-   * Runs one location mention through the full pipeline and asserts the exact
-   * containment layer: one chain on the mention's span, the ancestors nearest first
-   * with their identifiers, names, and types, and the mentioned place itself excluded
-   * from its own chain.
+   * A resolved mention gets the parent places in order on the original span.
    */
   @Test
   void testMentionExpandsIntoItsExactContainmentChain() {
@@ -122,8 +92,8 @@ public class HierarchyPipelineExampleTest {
     final Span mention = new Span(20, 29);
     Assertions.assertEquals("Le Marais", mention.getCoveredText(text).toString());
 
-    final Geocoder geocoder =
-        tableGeocoder(Map.of("Le Marais", entry("Le Marais", "101")));
+    final Geocoder geocoder = new PopulationPriorGeocoder(
+        InMemoryGazetteer.fromEntries(List.of(entry("Le Marais", "101"))));
     final Document document = Document.of(text)
         .with(Layers.ENTITIES, List.of(new Annotation<>(mention, "location")));
 
@@ -148,10 +118,7 @@ public class HierarchyPipelineExampleTest {
   }
 
   /**
-   * Runs two location mentions through the full pipeline where the geocoder cannot
-   * resolve one of them, and asserts that only the resolved mention gets a chain: the
-   * unresolvable mention is dropped by the geocoder, so no containment annotation is
-   * ever fabricated for it.
+   * An unresolved entity has no location or containment annotation.
    */
   @Test
   void testUnresolvedMentionsGetNoChain() {
@@ -161,8 +128,8 @@ public class HierarchyPipelineExampleTest {
     Assertions.assertEquals("Narnia", unresolvable.getCoveredText(text).toString());
     Assertions.assertEquals("Le Marais", resolvable.getCoveredText(text).toString());
 
-    final Geocoder geocoder =
-        tableGeocoder(Map.of("Le Marais", entry("Le Marais", "101")));
+    final Geocoder geocoder = new PopulationPriorGeocoder(
+        InMemoryGazetteer.fromEntries(List.of(entry("Le Marais", "101"))));
     final Document document = Document.of(text)
         .with(Layers.ENTITIES, List.of(
             new Annotation<>(unresolvable, "location"),
@@ -176,5 +143,58 @@ public class HierarchyPipelineExampleTest {
     Assertions.assertEquals(1, chains.size());
     Assertions.assertEquals(resolvable, chains.get(0).span());
     Assertions.assertEquals(3, chains.get(0).value().ancestors().size());
+  }
+
+  /** The manual's raw-text pipeline preserves offsets across sentences and repeated mentions. */
+  @Test
+  void testRawTextWithCustomHierarchyIdentifiers() {
+    final String joinKey = "customer:district";
+    final GazetteerEntry place = new GazetteerEntry("catalog", "record-7", "Le Marais",
+        List.of(), new GeoPoint(48.859, 2.361), "FR", List.of(), 0,
+        GazetteerEntry.FEATURE_CLASS_CITY,
+        Map.of(joinKey, new AttributeValue("district-1", "customer", "")));
+    final InMemoryGazetteer gazetteer = InMemoryGazetteer.fromEntries(List.of(place));
+    final ContainmentSpine hierarchy = ContainmentSpine.builder()
+        .add("district-1", "city-1", "Le Marais", "neighbourhood")
+        .add("city-1", "country-1", "Paris", "locality")
+        .add("country-1", null, "France", "country")
+        .build();
+    final Dictionary names = new Dictionary();
+    names.put(new StringList("Le", "Marais"));
+    names.put(new StringList("Narnia"));
+    final DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
+        .add(new SentenceDetectorAnnotator(new NewlineSentenceDetector()))
+        .add(new TokenizerAnnotator(SimpleTokenizer.INSTANCE))
+        .add(new NameFinderAnnotator(new DictionaryNameFinder(names, "location")))
+        .add(new GeocodeAnnotator(new PopulationPriorGeocoder(gazetteer)))
+        .add(new HierarchyAnnotator(hierarchy, joinKey))
+        .build();
+    final String text = "\uD83D\uDE86 Le Marais.\nLe Marais and Narnia.";
+    final Document document = analyzer.analyze(text);
+    final List<Annotation<ContainmentChain>> chains = document.get(HierarchyAnnotator.CONTAINMENT);
+
+    Assertions.assertEquals(text, document.text().toString());
+    Assertions.assertEquals(Set.of(Layers.SENTENCES, Layers.TOKENS, Layers.ENTITIES,
+        GeocodeAnnotator.LOCATIONS, HierarchyAnnotator.CONTAINMENT), document.layers());
+    Assertions.assertEquals(2, document.get(Layers.SENTENCES).size());
+    Assertions.assertEquals(3, document.get(Layers.ENTITIES).size());
+    Assertions.assertEquals("Narnia", document.get(Layers.ENTITIES).getLast()
+        .span().getCoveredText(text).toString());
+    final List<Annotation<GeoResolution>> locations = document.get(GeocodeAnnotator.LOCATIONS);
+    Assertions.assertEquals(2, locations.size());
+    Assertions.assertEquals(List.of(new Span(3, 12), new Span(14, 23)),
+        chains.stream().map(Annotation::span).toList());
+    for (int i = 0; i < chains.size(); i++) {
+      Assertions.assertEquals("Le Marais", chains.get(i).span().getCoveredText(text).toString());
+      Assertions.assertEquals(locations.get(i).span(), chains.get(i).span());
+      Assertions.assertEquals("record-7", locations.get(i).value().entry().recordId());
+      Assertions.assertEquals(List.of(new PlaceAncestor("city-1", "Paris", "locality"),
+          new PlaceAncestor("country-1", "France", "country")), chains.get(i).value().ancestors());
+    }
+    final Document empty = analyzer.analyze("");
+    Assertions.assertEquals(document.layers(), empty.layers());
+    for (final var layer : empty.layers()) {
+      Assertions.assertTrue(empty.get(layer).isEmpty());
+    }
   }
 }

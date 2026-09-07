@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Tests ancestor order, invalid input and defensive copying. */
 public class ContainmentChainTest {
 
   private static final PlaceAncestor BROOKLYN =
@@ -35,12 +36,14 @@ public class ContainmentChainTest {
   private static final PlaceAncestor NEW_YORK =
       new PlaceAncestor("85977539", "New York", "locality");
 
+  /** The supplied nearest-first order is retained. */
   @Test
   void testHoldsAncestorsNearestFirst() {
     final ContainmentChain chain = new ContainmentChain(List.of(BROOKLYN, NEW_YORK));
     assertEquals(List.of(BROOKLYN, NEW_YORK), chain.ancestors());
   }
 
+  /** Null lists are rejected. */
   @Test
   void testRejectsNullAncestors() {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
@@ -48,15 +51,13 @@ public class ContainmentChainTest {
     assertTrue(e.getMessage().startsWith("ancestors must not be null or empty"), e.getMessage());
   }
 
+  /** Empty lists cannot represent a containment chain. */
   @Test
   void testRejectsEmptyAncestors() {
     assertThrows(IllegalArgumentException.class, () -> new ContainmentChain(List.of()));
   }
 
-  /**
-   * Pins the documented exception type for a chain holding a {@code null} step: the
-   * defensive copy would otherwise report it as a {@link NullPointerException}.
-   */
+  /** Null elements produce the documented argument error. */
   @Test
   void testRejectsNullAncestorElement() {
     final List<PlaceAncestor> withNull = Arrays.asList(BROOKLYN, null);
@@ -66,6 +67,7 @@ public class ContainmentChainTest {
         e.getMessage());
   }
 
+  /** Later list edits cannot affect the immutable chain. */
   @Test
   void testCopiesTheSuppliedListToAnImmutableView() {
     final List<PlaceAncestor> supplied = new ArrayList<>(List.of(BROOKLYN));

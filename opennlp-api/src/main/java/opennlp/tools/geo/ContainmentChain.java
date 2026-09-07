@@ -32,8 +32,7 @@ import java.util.List;
 public record ContainmentChain(List<PlaceAncestor> ancestors) {
 
   /**
-   * Validates the chain and copies the list to an immutable view, so instances stay
-   * immutable regardless of what the caller later does with the supplied list.
+   * Validates the chain and makes an immutable copy of the ancestor list.
    *
    * @throws IllegalArgumentException Thrown if {@code ancestors} is {@code null},
    *         empty, or contains {@code null}.
