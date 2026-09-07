@@ -75,6 +75,15 @@
 			provide an inferred <code>mpx</code> format name.
 		</para>
 		<para>
+			Calendar detection requires a <code>BEGIN:VCALENDAR</code> opening line ending
+			in CRLF. It accepts ASCII letter-case variants and unfolds CRLF followed by
+			SPACE or TAB, as specified in
+			<ulink url="https://www.rfc-editor.org/rfc/rfc5545.html#section-3.1">RFC 5545</ulink>.
+			The detector reads this line incrementally, including continuations beyond the usual
+			header probe. It reports <code>ics</code> and <code>text/calendar</code> without
+			checking the version, property order, event data or closing line.
+		</para>
+		<para>
 			JPEG 2000 detection requires the 12-byte signature box followed by an
 			<code>ftyp</code> box with complete brand and minor-version fields.
 			Standard and extended box lengths are supported. The primary brand selects
@@ -254,6 +263,23 @@ String decoded = new String(asset.decode(text), StandardCharsets.US_ASCII);
 // asset.format() = "mpx"
 // asset.mediaType() = "application/x-project"
 // decoded equals project]]>
+			</programlisting>
+		</para>
+		<para>
+			A calendar attachment retains its original text, including letter case:
+			<programlisting language="java"><![CDATA[
+String calendar = "begin:vcalendar\r\n"
+    + "PRODID:-//Fieldwork Planner//EN\r\n"
+    + "VERSION:2.0\r\nBEGIN:VEVENT\r\nUID:survey@example.org\r\n"
+    + "DTSTAMP:20260907T090000Z\r\nDTSTART:20260908T100000Z\r\n"
+    + "SUMMARY:Survey schedule\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+String text = "data:;base64," + Base64.getEncoder().encodeToString(
+    calendar.getBytes(StandardCharsets.US_ASCII));
+EmbeddedAsset asset = new CursorAssetDetector().detect(text).get(0);
+String decoded = new String(asset.decode(text), StandardCharsets.US_ASCII);
+// asset.format() = "ics"
+// asset.mediaType() = "text/calendar"
+// decoded equals calendar]]>
 			</programlisting>
 		</para>
 		<para>
