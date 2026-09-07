@@ -49,17 +49,22 @@ public interface FsaSequenceReader {
   void forEachSequence(Consumer<byte[]> action);
 
   /**
-   * Checks that a byte block starts with {@link #MAGIC} and carries a version byte.
+   * Checks the ASCII {@code \fsa} signature and presence of a version byte.
    *
    * @param bytes The automaton bytes. Must not be {@code null}.
-   * @throws IOException Thrown if the block is too short or does not start with {@link #MAGIC}.
+   * @throws IllegalArgumentException If {@code bytes} is null.
+   * @throws IOException If the signature or version byte is missing.
    */
   static void requireFsaHeader(byte[] bytes) throws IOException {
-    if (bytes.length <= MAGIC.length) {
+    if (bytes == null) {
+      throw new IllegalArgumentException("bytes must not be null");
+    }
+    final String signature = "\\fsa";
+    if (bytes.length <= signature.length()) {
       throw new IOException("not an FSA automaton: bad magic header");
     }
-    for (int i = 0; i < MAGIC.length; i++) {
-      if (bytes[i] != MAGIC[i]) {
+    for (int i = 0; i < signature.length(); i++) {
+      if (bytes[i] != signature.charAt(i)) {
         throw new IOException("not an FSA automaton: bad magic header");
       }
     }
@@ -72,7 +77,7 @@ public interface FsaSequenceReader {
    *           {@code null}.
    * @return A reader over the automaton.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
-   * @throws IOException Thrown on IO errors, or if the stream is not a supported FSA automaton.
+   * @throws IOException If reading fails, the format is unsupported, or reachable nodes are malformed.
    */
   static FsaSequenceReader read(InputStream in) throws IOException {
     if (in == null) {

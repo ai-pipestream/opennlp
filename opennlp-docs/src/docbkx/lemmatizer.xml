@@ -356,6 +356,12 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 				explicitly. Dictionary data is not bundled with OpenNLP.
 			</para>
 			<para>
+				Reachable nodes and arcs are checked on load. Truncated data, invalid
+				addresses, unsupported format flags and cycles cause <code>IOException</code>.
+				Traversal uses a per-call stack without recursive calls. Paths exceeding
+				8192 bytes and nodes with shared outgoing arcs are supported.
+			</para>
+			<para>
 				The supported encoders are <code>NONE</code>, <code>SUFFIX</code>,
 				<code>PREFIX</code> and <code>INFIX</code>. Removal counts use bytes, not
 				characters. Encoded control values wrap modulo 256; a removal count of 255

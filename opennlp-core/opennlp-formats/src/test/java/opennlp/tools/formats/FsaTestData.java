@@ -48,4 +48,24 @@ final class FsaTestData {
     }
     return out;
   }
+
+  /**
+   * Builds a CFSA2 automaton accepting one non-empty sequence.
+   *
+   * @param labels The accepted bytes.
+   * @return The serialized automaton.
+   * @throws IllegalArgumentException If labels is null or empty.
+   */
+  static byte[] singleCfsaSequence(byte[] labels) {
+    if (labels == null || labels.length == 0) {
+      throw new IllegalArgumentException("labels must not be null or empty");
+    }
+    final byte[] header = {'\\', 'f', 's', 'a', (byte) 0xc6, 0, 7, 0, (byte) 0xc0, '^'};
+    final byte[] out = Arrays.copyOf(header, header.length + labels.length * 2 + 1);
+    for (int i = 0; i < labels.length; i++) {
+      out[header.length + i * 2] = (byte) (i == labels.length - 1 ? 0x60 : 0xc0);
+      out[header.length + i * 2 + 1] = labels[i];
+    }
+    return out;
+  }
 }
