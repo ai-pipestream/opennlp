@@ -345,6 +345,13 @@ lemmatizer.lemmatize(new String[] {"Psa"}, new String[] {"subst:sg:gen:m2"});   
 lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); // ["O"], tag miss]]>
 				</programlisting>
 			</para>
+			<para>
+				Distinct lemmas for a form and tag retain their first-seen order. A
+				<code>#</code> is part of a lemma, not a separator: an entry
+				<code>csharp&#x9;C#&#x9;NNP</code> returns <code>C#</code>, not <code>C</code>.
+				Empty lemma and tag fields are retained; columns after the tag are ignored.
+				Malformed entries and invalid character data cause <code>IOException</code>.
+			</para>
 		</section>
 		<section xml:id="tools.lemmatizer.morfologik">
 			<title>Reading morfologik dictionaries</title>
@@ -354,6 +361,20 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 				third-party dependency. Supply a dictionary and <code>.info</code> metadata
 				file, or specify the separator, character encoding and base-form encoder
 				explicitly. Dictionary data is not bundled with OpenNLP.
+			</para>
+			<para>
+				The metadata file is UTF-8, regardless of the dictionary's encoding.
+				It must declare <code>fsa.dict.separator</code>, <code>fsa.dict.encoding</code>
+				and <code>fsa.dict.encoder</code>. The separator character must encode as
+				a single byte in the dictionary's charset. For example, <code>€</code>
+				is byte <code>0x80</code> in Windows-1252 but cannot be a UTF-8 dictionary
+				separator. Invalid separator definitions cause <code>IllegalArgumentException</code>.
+			</para>
+			<para>
+				Decoded tags and lemmas retain characters such as
+				<code>#</code>, tabs and line breaks. Forms are lower-cased to match
+				lookup. Empty fields are retained. Invalid character data in a decoded
+				field, or invalid UTF-8 metadata, causes <code>IOException</code>.
 			</para>
 			<para>
 				Reachable nodes and arcs are checked on load. Truncated data, invalid
