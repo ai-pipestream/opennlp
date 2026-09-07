@@ -87,6 +87,21 @@ String masked = Masker.mask(document, PiiAnnotator.PII, '*');
 			</programlisting>
 		</para>
 		<para>
+			An ASCII email candidate is rejected if the domain continues into a
+			Unicode letter or digit, including after dots or hyphens. A terminal dot
+			or hyphen is excluded from the span. The scanner does not convert Unicode
+			domain names to punycode. <code>EmailSpanTest</code> checks this example:
+			<programlisting language="java"><![CDATA[
+String emailText = "Skip user@example.com.é; contact User+tag@Example.COM.";
+Document emailDocument = new PiiAnnotator(PiiPacks.contact())
+    .annotate(Document.of(emailText));
+String emailMasked = Masker.mask(emailDocument, PiiAnnotator.PII, '*');
+// "Skip user@example.com.é; contact " + "*".repeat("User+tag@Example.COM".length()) + "."
+String emailReplaced = new Pseudonymizer().rewrite(emailDocument).text();
+// "Skip user@example.com.é; contact EMAIL-1."]]>
+			</programlisting>
+		</para>
+		<para>
 			A phone span includes its formatting, including a closing parenthesis
 			paired with an opening parenthesis inside the number. Normalization
 			removes that formatting. The following period is outside the span, so

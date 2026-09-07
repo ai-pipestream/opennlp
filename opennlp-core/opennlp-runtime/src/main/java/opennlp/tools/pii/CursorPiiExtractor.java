@@ -161,7 +161,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds email addresses by expanding around each {@code @}.
+   * Finds email addresses by expanding around each {@code @}. Checks the domain
+   * boundary before removing terminal punctuation.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -182,14 +183,16 @@ public final class CursorPiiExtractor implements PiiExtractor {
       while (end < text.length() && isDomainChar(text.charAt(end))) {
         end++;
       }
+      if (!Boundaries.onEnd(text, end)) {
+        continue;
+      }
       while (end > i + 1 && (text.charAt(end - 1) == '.' || text.charAt(end - 1) == '-')) {
         end--;
       }
       if (end == i + 1
           || end - start > EMAIL_MAX_LENGTH
           || !validDomain(text, i + 1, end)
-          || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
-          || !Boundaries.onEnd(text, end)) {
+          || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))) {
         continue;
       }
       final StringBuilder normalized = new StringBuilder(end - start);
