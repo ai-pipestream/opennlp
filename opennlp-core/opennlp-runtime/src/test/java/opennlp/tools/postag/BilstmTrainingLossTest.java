@@ -18,6 +18,7 @@
 package opennlp.tools.postag;
 
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -132,6 +133,39 @@ class BilstmTrainingLossTest {
         sample, new Random(7), fixture.worker()));
   }
 
+  /** {@return scores and weights with finite weighted differences} */
+  private static Stream<Arguments> weightedScores() {
+    return Stream.of(Head.XPOS, Head.FEATS).flatMap(head -> Stream.concat(
+        Stream.of(0.25, 0.5, 1e-200, 1e-300, Double.MIN_VALUE)
+            .map(weight -> Arguments.of(head, -Double.MAX_VALUE, Double.MAX_VALUE, weight)),
+        Stream.of(Arguments.of(head, 1e10 - 1000, 1e10, 1e300))));
+  }
+
+  /**
+   * Weighting can make an otherwise unrepresentable score difference finite.
+   *
+   * @param head The auxiliary head.
+   * @param gold The correct label's score.
+   * @param other The other label's score.
+   * @param weight The auxiliary loss weight.
+   * @throws ReflectiveOperationException If the auxiliary bias cannot be accessed.
+   */
+  @ParameterizedTest
+  @MethodSource("weightedScores")
+  void testWeightedLoss(Head head, double gold, double other, double weight)
+      throws ReflectiveOperationException {
+    final Fixture fixture = fixture(weight);
+    fixture.biases()[head.ordinal()][0] = gold;
+    fixture.biases()[head.ordinal()][1] = other;
+    final double headLoss = new BigDecimal(other).subtract(new BigDecimal(gold))
+        .multiply(new BigDecimal(weight)).doubleValue();
+    final double expected = headLoss + weight * Math.log(2) + Math.log(2);
+    assertEquals(expected, fixture.context().sentenceGradients(fixture.sample(),
+        new Random(7), fixture.worker()), 4 * Math.ulp(expected));
+    final double[] gradients = fixture.worker().buffers().get(15 + 2 * head.ordinal())[0];
+    assertArrayEquals(new double[] {-weight, weight}, gradients);
+  }
+
   /**
    * Creates a single-token example with two labels per head and zero scoring weights.
    *
@@ -139,6 +173,17 @@ class BilstmTrainingLossTest {
    * @throws ReflectiveOperationException If the auxiliary bias cannot be accessed.
    */
   private Fixture fixture() throws ReflectiveOperationException {
+    return fixture(1.0);
+  }
+
+  /**
+   * Creates a bias-only example with a specified auxiliary weight.
+   *
+   * @param auxiliaryWeight The auxiliary loss weight.
+   * @return The training context and mutable head biases.
+   * @throws ReflectiveOperationException If the auxiliary bias cannot be accessed.
+   */
+  private Fixture fixture(double auxiliaryWeight) throws ReflectiveOperationException {
     final List<BilstmPOSTrainer.MultiTaskSample> corpus = List.of(
         new BilstmPOSTrainer.MultiTaskSample(new String[] {"one"},
             new String[] {"X"}, new String[] {"X0"}, new String[] {"F0"}),
@@ -146,7 +191,7 @@ class BilstmTrainingLossTest {
             new String[] {"Y"}, new String[] {"X1"}, new String[] {"F1"}));
     final BilstmPOSTrainer.Settings settings = new BilstmPOSTrainer.Settings(
         4, 3, 3, 4, 1, 2, 1e-3, 5, 0, 1, 10, 7L, 1, 0, 0, false, 1,
-        0, 0, 1, 0, false);
+        0, 0, auxiliaryWeight, 0, false);
     final BilstmPOSTrainer.TrainingContext context =
         BilstmPOSTrainer.TrainingContext.build(corpus, settings, null, null);
     for (final double[][] weights : List.of(context.testingOutputWeights(),

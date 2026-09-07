@@ -1702,7 +1702,13 @@ public final class BilstmPOSTrainer {
           scores[o] = Math.exp(scores[o] - max);
           total += scores[o];
         }
-        loss += weight * ((max - goldScore) + Math.log(total));
+        final double gap = max - goldScore;
+        if (Double.isFinite(gap)) {
+          loss += weight * (gap + Math.log(total));
+        } else {
+          // The weighted difference can be finite even when the raw difference overflows.
+          loss += (weight * max - weight * goldScore) + weight * Math.log(total);
+        }
         for (int o = 0; o < labels; o++) {
           final double gradient =
               weight * (scores[o] / total - (o == goldId ? 1.0d : 0.0d));
