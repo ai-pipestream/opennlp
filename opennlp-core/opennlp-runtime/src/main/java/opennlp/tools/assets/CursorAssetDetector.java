@@ -73,6 +73,10 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int DEX_VERSION_OFFSET = 4;
   private static final int DEX_MAGIC_LENGTH = 8;
 
+  private static final int DWF_VERSION_OFFSET = 6;
+  private static final int DWF_DECIMAL_OFFSET = 8;
+  private static final int DWF_HEADER_LENGTH = 12;
+
   private static final int WEBVTT_MAGIC_LENGTH = 6;
   private static final int UTF8_BOM_LENGTH = 3;
 
@@ -629,6 +633,7 @@ public final class CursorAssetDetector implements AssetDetector {
       return switch (known.name()) {
         case "aiff" -> hasAiffFormType(header) ? known : null;
         case "dex" -> hasDexMagic(header) ? known : null;
+        case "dwf" -> hasDwfHeader(header) ? known : null;
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
         case "jp2" -> jpeg2000Format(header, known);
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
@@ -753,10 +758,36 @@ public final class CursorAssetDetector implements AssetDetector {
    *     DEX file magic</a>
    */
   private boolean hasDexMagic(byte[] header) {
-    if (header.length < DEX_MAGIC_LENGTH || header[DEX_MAGIC_LENGTH - 1] != 0) {
-      return false;
-    }
-    for (int i = DEX_VERSION_OFFSET; i < DEX_MAGIC_LENGTH - 1; i++) {
+    return header.length >= DEX_MAGIC_LENGTH && header[DEX_MAGIC_LENGTH - 1] == 0
+        && hasDecimalDigits(header, DEX_VERSION_OFFSET, DEX_MAGIC_LENGTH - 1);
+  }
+
+  /**
+   * Checks the complete DWF version field and closing parenthesis after the matched prefix.
+   * Drawing records and package contents are not validated.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the header has the form {@code (DWF Vdd.dd)} with ASCII decimal digits.
+   * @see <a href="https://github.com/kveretennicov/dwf-toolkit/blob/fd1e8097b158ab3afef335484d7a111ab8da3d74/develop/global/src/dwf/whiptk/dwfhead.cpp">
+   *     Autodesk DWF header reader and writer</a>
+   */
+  private boolean hasDwfHeader(byte[] header) {
+    return header.length >= DWF_HEADER_LENGTH
+        && header[DWF_DECIMAL_OFFSET] == '.' && header[DWF_HEADER_LENGTH - 1] == ')'
+        && hasDecimalDigits(header, DWF_VERSION_OFFSET, DWF_DECIMAL_OFFSET)
+        && hasDecimalDigits(header, DWF_DECIMAL_OFFSET + 1, DWF_HEADER_LENGTH - 1);
+  }
+
+  /**
+   * Checks an available header field for ASCII decimal digits.
+   *
+   * @param header The decoded leading bytes.
+   * @param start The first field byte.
+   * @param end The exclusive field end, within the header.
+   * @return Whether all field bytes are ASCII decimal digits.
+   */
+  private boolean hasDecimalDigits(byte[] header, int start, int end) {
+    for (int i = start; i < end; i++) {
       if (header[i] < '0' || header[i] > '9') {
         return false;
       }

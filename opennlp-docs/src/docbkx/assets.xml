@@ -99,6 +99,14 @@
 			identifies a possible format, not runtime compatibility or valid bytecode.
 		</para>
 		<para>
+			DWF detection requires the complete 12-byte
+			<ulink url="https://github.com/kveretennicov/dwf-toolkit/blob/fd1e8097b158ab3afef335484d7a111ab8da3d74/develop/global/src/dwf/whiptk/dwfhead.cpp">header</ulink>:
+			<code>(DWF Vdd.dd)</code>, with ASCII decimal digits at each <code>d</code>.
+			A match reports <code>dwf</code> and <code>model/vnd.dwf</code>. Version numbers
+			are not restricted to particular releases. Drawing records and package contents
+			are not validated. W2D streams and ZIP-based DWFx files are not identified as DWF.
+		</para>
+		<para>
 			WebVTT detection accepts an optional UTF-8 byte-order mark followed by
 			<code>WEBVTT</code> and TAB, LF, CR, SPACE or the end of the payload, as specified
 			in the <ulink url="https://www.w3.org/TR/2026/CRD-webvtt1-20260520/#iana-text-vtt">WebVTT

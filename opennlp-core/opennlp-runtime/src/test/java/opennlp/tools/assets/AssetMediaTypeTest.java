@@ -110,6 +110,9 @@ public class AssetMediaTypeTest {
     if ("vtt".equals(entry.format().name())) {
       bytes[entry.magic().length] = '\n';
     }
+    if ("dwf".equals(entry.format().name())) {
+      System.arraycopy("00.55)".getBytes(StandardCharsets.US_ASCII), 0, bytes, 6, 6);
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());
