@@ -363,13 +363,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds phone numbers: an international form starting with {@code +} and validated
-   * against {@link PhoneNumberLengths}, or a domestic form whose digits are visibly
-   * formatted with spaces, hyphens, or parentheses. Candidates are tried longest first
-   * at separator boundaries until the length and form checks pass, exactly like the
-   * card scan, so a phone directly followed by another separated digit group, such as
-   * an extension or a count, is still found instead of being swallowed into one
-   * over-long rejected candidate.
+   * Finds international and formatted domestic phone candidates. International lengths
+   * use {@link PhoneNumberLengths}. When a longer run fails, separator-delimited prefixes
+   * are tried longest first. Paired parentheses are included in the selected span.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -379,23 +375,21 @@ public final class CursorPiiExtractor implements PiiExtractor {
     for (int i = 0; i < text.length(); i++) {
       final char c = text.charAt(i);
       final boolean plus = c == '+';
-      // A position where a reported phone just ended is a fresh start boundary even
-      // though the character before it is a digit of that phone.
+      // Adjacent phones may start at the preceding phone's exclusive end.
       if ((!plus && !Ascii.isDigit(c) && c != '(')
           || (i != lastEnd && !Boundaries.onNumberStart(text, i))
           || (i > 0 && text.charAt(i - 1) == '+')) {
         continue;
       }
       int digits = 0;
-      int lastDigit = -1;
+      int candidateEnd = i;
       int open = 0;
       int close = 0;
       boolean separated = false;
       boolean previousSeparator = false;
       final StringBuilder digitRun = new StringBuilder();
-      // Each entry is a candidate cut at a separator boundary: the exclusive text end,
-      // the digit count, whether the digits were visibly separated, and the
-      // parenthesis counts up to the cut, so every prefix is judged by its own form.
+      // Candidate cuts store the exclusive end, digit count, formatting flag and
+      // parenthesis counts.
       final List<int[]> groups = new ArrayList<>();
       int p = plus ? i + 1 : i;
       while (p < text.length() && digits <= PHONE_MAX_DIGITS) {
@@ -406,11 +400,11 @@ public final class CursorPiiExtractor implements PiiExtractor {
           }
           digits++;
           digitRun.append(ch);
-          lastDigit = p;
+          candidateEnd = p + 1;
           previousSeparator = false;
           p++;
         } else if ((ch == ' ' || ch == '-') && !previousSeparator) {
-          groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
+          groups.add(new int[] {candidateEnd, digits, separated ? 1 : 0, open, close});
           previousSeparator = true;
           p++;
         } else if (ch == '(' && open == 0) {
@@ -419,13 +413,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
           p++;
         } else if (ch == ')' && close == 0 && open == 1) {
           close++;
+          candidateEnd = p + 1;
           previousSeparator = false;
           p++;
         } else {
           break;
         }
       }
-      groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
+      groups.add(new int[] {candidateEnd, digits, separated ? 1 : 0, open, close});
       for (int g = groups.size() - 1; g >= 0; g--) {
         final int end = groups.get(g)[0];
         final int count = groups.get(g)[1];

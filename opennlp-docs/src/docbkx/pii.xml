@@ -84,6 +84,22 @@ String masked = Masker.mask(document, PiiAnnotator.PII, '*');
 			</programlisting>
 		</para>
 		<para>
+			A phone span includes its formatting, including a closing parenthesis
+			paired with an opening parenthesis inside the number. Normalization
+			removes that formatting. The following period is outside the span, so
+			masking and label replacement leave it in place.
+			<code>PhoneSpanTest</code> checks this example:
+			<programlisting language="java"><![CDATA[
+String phone = "+1 (4155550123)";
+Document phoneDocument = new PiiAnnotator(PiiPacks.contact())
+    .annotate(Document.of("Call " + phone + "."));
+String phoneMasked = Masker.mask(phoneDocument, PiiAnnotator.PII, '*');
+// "Call " + "*".repeat(phone.length()) + "."
+String phoneReplaced = new Pseudonymizer().rewrite(phoneDocument).text();
+// "Call PHONE-1."]]>
+			</programlisting>
+		</para>
+		<para>
 			A <code>MaskPolicy</code> controls how the covered characters are
 			replaced while staying length preserving. <code>keepingFormat()</code>
 			leaves separators visible so the kind of value stays recognizable, and
