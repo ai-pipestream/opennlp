@@ -282,18 +282,35 @@ String to = tokenizer.rewrite(second).text();   // "To " + stable]]>
 			replaced during UTF-8 encoding. Count-only reports do not encode values.
 		</para>
 		<para>
-			<code>PiiAuditReport</code> is what a review can be given instead of the
-			mentions: how many of each type, how many were distinct, and a keyed token
-			per distinct value rather than the value. Nothing in a report carries a
-			value or an offset, but its tokens remain linkable pseudonymous data.
+			<code>PiiAuditReport</code> reports mention counts, distinct-value counts
+			and up to three sampled tokens per type by default. It stores types,
+			counts and tokens, without normalized values or offsets. Custom types
+			should be labels, not personal data, because they appear in the report.
+			Tokens remain linkable pseudonymous data.
 			<programlisting language="java"><![CDATA[
-PiiAuditReport report = PiiAuditReport.of(document, tokenizer);
+PiiAuditReport report = PiiAuditReport.of(first, tokenizer);
 
-report.total();                              // 3
-report.counts().get(PiiMention.TYPE_CARD);   // 1
-report.distinctCounts();                     // repeats counted once
-report.samples(PiiMention.TYPE_EMAIL);       // tokens, never addresses]]>
+report.total();                                        // 1
+report.counts().get(PiiMention.TYPE_EMAIL);              // 1
+report.distinctCounts().get(PiiMention.TYPE_EMAIL);      // 1
+report.samples(PiiMention.TYPE_EMAIL);                  // List.of(stable)]]>
 			</programlisting>
+		</para>
+		<para>
+			<code>toString()</code> produces one line per type. It doubles backslashes
+			and escapes colons, commas, square brackets, control characters, Unicode
+			formatting characters, line and paragraph separators, and unpaired
+			surrogates as UTF-16 hexadecimal sequences. The types and tokens returned
+			by accessors are unchanged.
+			<programlisting language="java"><![CDATA[
+List<PiiMention> customMentions = List.of(
+    new PiiMention(new Span(0, 1), "custom\nid", "a"));
+PiiAuditReport customReport = PiiAuditReport.of(customMentions, tokenizer, 0);
+String line = customReport.toString();]]>
+			</programlisting>
+			The output is <literal>custom\u000aid: 1 mentions, 1 distinct</literal>
+			on one line. This escaping is for plain-text reports, not HTML or JSON
+			output encoding.
 		</para>
 	</section>
 </chapter>

@@ -29,23 +29,18 @@ import java.util.TreeMap;
 import opennlp.tools.document.Document;
 
 /**
- * What a scan found without carrying raw values: how many mentions of each type, how many
- * of them were distinct, and a keyed token per sampled distinct value.
+ * Reports mention counts, distinct-value counts and sampled keyed tokens by type.
  *
- * <p>A report is the artefact a review actually needs. Whether a redaction pipeline is
- * working is a question about counts and about which types appear where, and answering it by
- * printing the mentions recreates the exposure the pipeline exists to prevent. Nothing here
- * carries a value or an offset: two reports of the same document are identical, and a report
- * of a document with one address repeated four times says exactly that without saying which
- * address.</p>
+ * <p>The report stores types, counts and tokens, without normalized values or offsets.
+ * Custom types should be labels, not personal data, because they appear in the report.
+ * Tokens come from {@link HmacTokenizer} and match the tokens in a
+ * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text.
+ * They remain linkable pseudonymous data and require access control.</p>
  *
- * <p>The tokens come from an {@link HmacTokenizer}, so they agree with the tokens of a
- * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text and across
- * every report made under the same key. That is what lets a reviewer ask whether the value
- * behind {@code EMAIL-3f2a1c9d7e4b6a20} in one report is the one in another, without either report
- * holding it. The tokens are deliberately linkable and therefore pseudonymous rather than
- * anonymous; logs containing them require the same access controls as other pseudonymous
- * analytics.</p>
+ * <p>{@link #toString()} doubles backslashes and uses UTF-16 hexadecimal escapes for
+ * colons, commas, square brackets, control characters, Unicode formatting characters,
+ * line and paragraph separators, and unpaired surrogates. Accessors return the original
+ * types and tokens.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -53,7 +48,7 @@ import opennlp.tools.document.Document;
  */
 public final class PiiAuditReport {
 
-  /** How many distinct values per type a report names unless asked otherwise. */
+  /** Default number of sampled distinct values per type. */
   private static final int DEFAULT_SAMPLES = 3;
 
   private final Map<String, Integer> counts;
@@ -61,6 +56,14 @@ public final class PiiAuditReport {
   private final Map<String, List<String>> samples;
   private final int total;
 
+  /**
+   * Initializes a report from immutable maps.
+   *
+   * @param counts Mention counts by type.
+   * @param distinctCounts Distinct normalized-value counts by type.
+   * @param samples Immutable token lists by type.
+   * @param total The total mention count.
+   */
   private PiiAuditReport(Map<String, Integer> counts, Map<String, Integer> distinctCounts,
       Map<String, List<String>> samples, int total) {
     this.counts = counts;
@@ -167,10 +170,7 @@ public final class PiiAuditReport {
   }
 
   /**
-   * Returns how many distinct values of each type were found. One address mentioned four
-   * times counts once here and four times in {@link #counts()}, and the gap between the two
-   * is often the interesting part: a form letter with one recipient looks quite different
-   * from a leaked list.
+   * Returns the distinct-value count per type, comparing exact normalized forms.
    *
    * @return The distinct value counts by type, in type order. Never {@code null};
    *         immutable.
@@ -213,9 +213,11 @@ public final class PiiAuditReport {
   }
 
   /**
-   * Formats the report as one line per type, for a log or a build output.
+   * {@inheritDoc}
    *
-   * @return The formatted report, ending without a line separator. Never {@code null}.
+   * <p>Formats one line per type with escaped type names and token samples.</p>
+   *
+   * @return The formatted report, ending without a line separator.
    */
   @Override
   public String toString() {
@@ -228,13 +230,65 @@ public final class PiiAuditReport {
       if (out.length() > 0) {
         out.append(System.lineSeparator());
       }
-      out.append(type).append(": ").append(entry.getValue()).append(" mentions, ")
+      appendEscaped(type, out);
+      out.append(": ").append(entry.getValue()).append(" mentions, ")
           .append(distinctCounts.get(type)).append(" distinct");
       final List<String> kept = samples(type);
       if (!kept.isEmpty()) {
-        out.append(' ').append(kept);
+        out.append(" [");
+        for (int i = 0; i < kept.size(); i++) {
+          if (i > 0) {
+            out.append(", ");
+          }
+          appendEscaped(kept.get(i), out);
+        }
+        out.append(']');
       }
     }
     return out.toString();
+  }
+
+  /**
+   * Appends text with report delimiters, controls and formatting characters escaped.
+   *
+   * @param value The text to display.
+   * @param out The report output.
+   */
+  private void appendEscaped(String value, StringBuilder out) {
+    for (int offset = 0; offset < value.length();) {
+      final int codePoint = value.codePointAt(offset);
+      if (codePoint == '\\') {
+        out.append("\\\\");
+      } else if (codePoint == ':' || codePoint == ',' || codePoint == '[' || codePoint == ']') {
+        appendUnicodeEscape((char) codePoint, out);
+      } else {
+        switch (Character.getType(codePoint)) {
+          case Character.CONTROL, Character.FORMAT, Character.LINE_SEPARATOR,
+               Character.PARAGRAPH_SEPARATOR, Character.SURROGATE -> {
+            if (Character.isSupplementaryCodePoint(codePoint)) {
+              appendUnicodeEscape(Character.highSurrogate(codePoint), out);
+              appendUnicodeEscape(Character.lowSurrogate(codePoint), out);
+            } else {
+              appendUnicodeEscape((char) codePoint, out);
+            }
+          }
+          default -> out.appendCodePoint(codePoint);
+        }
+      }
+      offset += Character.charCount(codePoint);
+    }
+  }
+
+  /**
+   * Appends one UTF-16 code unit as a four-digit hexadecimal escape.
+   *
+   * @param unit The code unit to display.
+   * @param out The report output.
+   */
+  private void appendUnicodeEscape(char unit, StringBuilder out) {
+    out.append("\\u");
+    for (int shift = 12; shift >= 0; shift -= 4) {
+      out.append(Character.forDigit((unit >> shift) & 0xf, 16));
+    }
   }
 }

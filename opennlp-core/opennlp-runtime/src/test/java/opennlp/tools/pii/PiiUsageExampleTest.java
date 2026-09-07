@@ -213,8 +213,11 @@ public class PiiUsageExampleTest {
 
     Assertions.assertEquals("From " + stable, tokenizer.rewrite(first).text());
     Assertions.assertEquals("To " + stable, tokenizer.rewrite(second).text());
-    Assertions.assertEquals(List.of(stable),
-        PiiAuditReport.of(first, tokenizer).samples(PiiMention.TYPE_EMAIL));
+    final PiiAuditReport report = PiiAuditReport.of(first, tokenizer);
+    Assertions.assertEquals(1, report.total());
+    Assertions.assertEquals(1, report.counts().get(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(1, report.distinctCounts().get(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(List.of(stable), report.samples(PiiMention.TYPE_EMAIL));
     Assertions.assertEquals(List.of(stable),
         PiiAuditReport.of(second, tokenizer).samples(PiiMention.TYPE_EMAIL));
     Assertions.assertEquals(stable,
