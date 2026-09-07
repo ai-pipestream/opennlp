@@ -70,7 +70,8 @@ import java.util.Set;
  * can also appear here. The detector also checks AIFF form types after matching a
  * FORM prefix, Excel document types after matching a BOF prefix, EMF signatures
  * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
- * matching a Section Header Block prefix.</p>
+ * matching a Section Header Block prefix. JPEG 2000 formats use the brand in the
+ * file-type box after the shared signature box.</p>
  *
  * @since 3.0.0
  */

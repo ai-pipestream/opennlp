@@ -30,7 +30,7 @@
 		<para>
 			<code>CursorAssetDetector</code> checks encoded prefixes and validates the payload
 			alphabet and padding. Format detection uses up to 24 decoded leading bytes,
-			or 45 bytes for EMF candidates.
+			36 bytes for JPEG 2000 candidates, or 45 bytes for EMF candidates.
 			Bare runs need at least 32 encoded characters and a recognized file signature.
 			The signature table is derived from Apache Tika's media-type catalog. Recognized
 			PNG and GIF headers also provide image dimensions. A declared media type alone
@@ -41,6 +41,18 @@
 			A signature match does not establish that a file is complete, valid, or safe to open.
 			Inferred format names and media types come from the same signature. Formats such as
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
+		</para>
+		<para>
+			JPEG 2000 detection requires the 12-byte signature box followed by an
+			<code>ftyp</code> box with complete brand and minor-version fields.
+			Standard and extended box lengths are supported. The primary brand selects
+			<ulink url="https://www.rfc-editor.org/rfc/rfc3745.html#section-4">format metadata</ulink>:
+			<code>jp2 </code> gives <code>jp2</code> and <code>image/jp2</code>,
+			<code>jpx </code> gives <code>jpx</code> and <code>image/jpx</code>,
+			<code>jpm </code> gives <code>jpm</code> and <code>image/jpm</code>, and
+			<code>mjp2</code> gives <code>mj2</code> and <code>video/mj2</code>.
+			Unknown brands are not inferred from compatibility-list entries. Minor-version
+			values, compatibility lists, image data and complete file lengths are not validated.
 		</para>
 		<para>
 			AIFF detection requires <code>FORM</code> at byte 0 and an audio form type

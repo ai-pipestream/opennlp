@@ -63,6 +63,17 @@ public final class CursorAssetDetector implements AssetDetector {
 
   private static final int HEADER_ENCODED_LENGTH = 32;
   private static final int EMF_HEADER_ENCODED_LENGTH = 60;
+  private static final int JPEG2000_HEADER_ENCODED_LENGTH = 48;
+
+  /** Base64 encoding of the JPEG 2000 signature box. */
+  private static final String JPEG2000_PREFIX = "AAAADGpQICANCocK";
+  private static final int JPEG2000_BOX_OFFSET = 12;
+  private static final int JPEG2000_BRAND_OFFSET = 20;
+  private static final int JPEG2000_MIN_BOX_LENGTH = 16;
+
+  private static final KnownMagics.Format JPX_FORMAT = new KnownMagics.Format("jpx", "image/jpx");
+  private static final KnownMagics.Format JPM_FORMAT = new KnownMagics.Format("jpm", "image/jpm");
+  private static final KnownMagics.Format MJ2_FORMAT = new KnownMagics.Format("mj2", "video/mj2");
 
   /** Base64 prefix of the little-endian EMR_HEADER record type (1). */
   private static final String EMF_PREFIX = "AQAAA";
@@ -546,8 +557,8 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Decodes the leading payload characters into header bytes.
-   * EMF candidates need up to 60 encoded characters to include the signature
-   * at byte 40; other headers use at most 32 encoded characters.
+   * EMF candidates use up to 60 encoded characters, JPEG 2000 candidates use 48,
+   * and other headers use 32.
    *
    * @param text The text.
    * @param payload The scanned payload.
@@ -557,8 +568,14 @@ public final class CursorAssetDetector implements AssetDetector {
     if (!payload.valid()) {
       return null;
     }
-    final int limit = matchesBase64Prefix(text, payload.start(), EMF_PREFIX)
-        ? EMF_HEADER_ENCODED_LENGTH : HEADER_ENCODED_LENGTH;
+    final int limit;
+    if (matchesBase64Prefix(text, payload.start(), EMF_PREFIX)) {
+      limit = EMF_HEADER_ENCODED_LENGTH;
+    } else if (matchesBase64Prefix(text, payload.start(), JPEG2000_PREFIX)) {
+      limit = JPEG2000_HEADER_ENCODED_LENGTH;
+    } else {
+      limit = HEADER_ENCODED_LENGTH;
+    }
     final int usable = Math.min(payload.encodedLength() - payload.padding(), limit);
     final StringBuilder head = new StringBuilder(usable);
     for (int i = payload.start(); i < payload.end() && head.length() < usable; i++) {
@@ -588,6 +605,7 @@ public final class CursorAssetDetector implements AssetDetector {
       return switch (known.name()) {
         case "aiff" -> hasAiffFormType(header) ? known : null;
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
+        case "jp2" -> jpeg2000Format(header, known);
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
         case "xls" -> excelFormat(header, known);
         default -> known;
@@ -605,6 +623,46 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return null;
+  }
+
+  /**
+   * Identifies JPEG 2000 file brands from the fixed fields of the initial file-type box.
+   * The signature table checks the preceding signature box. Compatibility lists,
+   * minor-version values and image data are not validated.
+   *
+   * @param header The decoded leading bytes.
+   * @param jp2 The JP2 format from the signature table.
+   * @return The format and media type, or {@code null} for incomplete or unsupported headers.
+   * @see <a href="https://www.itu.int/rec/T-REC-T.800">JPEG 2000 core coding system, Annex I</a>
+   * @see <a href="https://www.rfc-editor.org/rfc/rfc3745.html#section-4">JPEG 2000 media types</a>
+   */
+  private KnownMagics.Format jpeg2000Format(byte[] header, KnownMagics.Format jp2) {
+    if (header.length < JPEG2000_BOX_OFFSET + JPEG2000_MIN_BOX_LENGTH
+        || !carries(header, JPEG2000_BOX_OFFSET + Integer.BYTES, "ftyp")) {
+      return null;
+    }
+    long boxLength = Integer.toUnsignedLong(readInt(header, JPEG2000_BOX_OFFSET));
+    int brandOffset = JPEG2000_BRAND_OFFSET;
+    if (boxLength == 1) {
+      if (header.length < JPEG2000_BOX_OFFSET + JPEG2000_MIN_BOX_LENGTH + Long.BYTES) {
+        return null;
+      }
+      boxLength = (Integer.toUnsignedLong(readInt(header, brandOffset)) << Integer.SIZE)
+          | Integer.toUnsignedLong(readInt(header, brandOffset + Integer.BYTES));
+      if (Long.compareUnsigned(boxLength, JPEG2000_MIN_BOX_LENGTH + Long.BYTES) < 0) {
+        return null;
+      }
+      brandOffset += Long.BYTES;
+    } else if (boxLength != 0 && boxLength < JPEG2000_MIN_BOX_LENGTH) {
+      return null;
+    }
+    return switch (readInt(header, brandOffset)) {
+      case 0x6a703220 -> jp2; // jp2 with a trailing space
+      case 0x6a707820 -> JPX_FORMAT; // jpx with a trailing space
+      case 0x6a706d20 -> JPM_FORMAT; // jpm with a trailing space
+      case 0x6d6a7032 -> MJ2_FORMAT; // mjp2
+      default -> null;
+    };
   }
 
   /**

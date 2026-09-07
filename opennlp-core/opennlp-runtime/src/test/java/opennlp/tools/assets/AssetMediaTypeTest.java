@@ -96,6 +96,11 @@ public class AssetMediaTypeTest {
       // FORM requires an AIFF or AIFC type at byte 8.
       ByteBuffer.wrap(bytes).putInt(8, 0x41494646);
     }
+    if ("jp2".equals(entry.format().name())) {
+      // The shared signature requires an ftyp box with the JP2 brand.
+      ByteBuffer.wrap(bytes).putInt(12, 20).putInt(16, 0x66747970)
+          .putInt(20, 0x6a703220).putInt(28, 0x6a703220);
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());
