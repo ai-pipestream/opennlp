@@ -19,6 +19,7 @@ package opennlp.tools.postag;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -194,6 +195,8 @@ public final class BilstmPOSTrainer {
    * auxiliary taggings, each auxiliary label the composite string of its column.
    * Auxiliary heads exist only at training time as regularizers of the shared
    * encoder; the built model tags UPOS exactly as a single-task model does.
+   * Samples copy their input arrays and return copies from their accessors.
+   * Equality and hash codes use the contents of all four component arrays.
    *
    * @param tokens The tokens. Must not be {@code null} or empty, or contain {@code null}.
    * @param upos The universal POS tags, aligned with {@code tokens}. Must not be
@@ -207,7 +210,7 @@ public final class BilstmPOSTrainer {
       String[] feats) {
 
     /**
-     * Validates the alignment of the taggings.
+     * Copies the arrays and validates their alignment and elements.
      *
      * @throws IllegalArgumentException Thrown if {@code tokens} or {@code upos} is
      *         {@code null} or empty, a tagging's length differs from the tokens,
@@ -222,10 +225,59 @@ public final class BilstmPOSTrainer {
           || (feats != null && feats.length != tokens.length)) {
         throw new IllegalArgumentException("taggings must align with the tokens");
       }
+      tokens = tokens.clone();
+      upos = upos.clone();
+      xpos = xpos == null ? null : xpos.clone();
+      feats = feats == null ? null : feats.clone();
       checkElements(tokens, "tokens");
       checkElements(upos, "upos");
       checkElements(xpos, "xpos");
       checkElements(feats, "feats");
+    }
+
+    /** @return A copy of the tokens. */
+    public String[] tokens() {
+      return tokens.clone();
+    }
+
+    /** @return A copy of the universal POS tags. */
+    public String[] upos() {
+      return upos.clone();
+    }
+
+    /** @return A copy of the treebank-specific tags, or {@code null} when absent. */
+    public String[] xpos() {
+      return xpos == null ? null : xpos.clone();
+    }
+
+    /** @return A copy of the morphological feature strings, or {@code null} when absent. */
+    public String[] feats() {
+      return feats == null ? null : feats.clone();
+    }
+
+    /**
+     * {@inheritDoc}
+     * Compares the contents of all four component arrays.
+     */
+    @Override
+    public final boolean equals(Object object) {
+      return object instanceof MultiTaskSample other
+          && Arrays.equals(tokens, other.tokens)
+          && Arrays.equals(upos, other.upos)
+          && Arrays.equals(xpos, other.xpos)
+          && Arrays.equals(feats, other.feats);
+    }
+
+    /**
+     * {@inheritDoc}
+     * Uses the contents of all four component arrays.
+     */
+    @Override
+    public final int hashCode() {
+      int hash = Arrays.hashCode(tokens);
+      hash = 31 * hash + Arrays.hashCode(upos);
+      hash = 31 * hash + Arrays.hashCode(xpos);
+      return 31 * hash + Arrays.hashCode(feats);
     }
 
     /**
@@ -444,7 +496,7 @@ public final class BilstmPOSTrainer {
         for (int start = 0; start < order.length; start += settings.batchSize()) {
           final int end = Math.min(order.length, start + settings.batchSize());
           for (int i = start; i < end; i++) {
-            tokens += corpus.get(order[i]).tokens().length;
+            tokens += corpus.get(order[i]).tokens.length;
           }
           if (pool == null) {
             final TrainingContext.Worker worker = workers.get(0);
@@ -948,24 +1000,24 @@ public final class BilstmPOSTrainer {
       final TreeSet<String> xposSet = new TreeSet<>();
       final TreeSet<String> featsSet = new TreeSet<>();
       for (final MultiTaskSample sample : corpus) {
-        final String[] sentence = sample.tokens();
+        final String[] sentence = sample.tokens;
         for (final String token : sentence) {
           wordCounts.merge(BilstmPOSModel.normalize(token), 1, Integer::sum);
           for (int i = 0; i < token.length(); i++) {
             charCounts.merge(String.valueOf(token.charAt(i)), 1, Integer::sum);
           }
         }
-        for (final String tag : sample.upos()) {
+        for (final String tag : sample.upos) {
           tagSet.add(tag);
         }
         if (settings.auxLossWeight() > 0.0d) {
-          if (sample.xpos() != null) {
-            for (final String tag : sample.xpos()) {
+          if (sample.xpos != null) {
+            for (final String tag : sample.xpos) {
               xposSet.add(tag);
             }
           }
-          if (sample.feats() != null) {
-            for (final String tag : sample.feats()) {
+          if (sample.feats != null) {
+            for (final String tag : sample.feats) {
               featsSet.add(tag);
             }
           }
@@ -1291,8 +1343,8 @@ public final class BilstmPOSTrainer {
       final LstmLayer.Gradients charBackwardGrads = worker.charBackwardGrads;
       final LstmLayer.Gradients wordForwardGrads = worker.wordForwardGrads;
       final LstmLayer.Gradients wordBackwardGrads = worker.wordBackwardGrads;
-      final String[] sentence = sample.tokens();
-      final String[] goldTags = sample.upos();
+      final String[] sentence = sample.tokens;
+      final String[] goldTags = sample.upos;
       final int steps = sentence.length;
       final int hidden = settings.hiddenSize();
       final int charHidden = settings.charHiddenSize();
@@ -1489,12 +1541,12 @@ public final class BilstmPOSTrainer {
         }
       }
 
-      if (xposWeights != null && sample.xpos() != null) {
-        loss += auxiliaryLoss(sample.xpos(), xposIds, xposWeights, xposBias,
+      if (xposWeights != null && sample.xpos != null) {
+        loss += auxiliaryLoss(sample.xpos, xposIds, xposWeights, xposBias,
             worker.xposWeightGrads, worker.xposBiasGrads, topStates, dTop, hidden);
       }
-      if (featsWeights != null && sample.feats() != null) {
-        loss += auxiliaryLoss(sample.feats(), featsIds, featsWeights, featsBias,
+      if (featsWeights != null && sample.feats != null) {
+        loss += auxiliaryLoss(sample.feats, featsIds, featsWeights, featsBias,
             worker.featsWeightGrads, worker.featsBiasGrads, topStates, dTop, hidden);
       }
       if (!Double.isFinite(loss)) {

@@ -521,7 +521,12 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		vectors cause <code>IllegalArgumentException</code>; vector errors identify
 		the word and component index. Training copies provider arrays before storing
 		or fine-tuning them. Multi-task sample arrays must contain no null elements;
-		absent auxiliary taggings can use a null array. A literal <code>*UNK*</code>
+		absent auxiliary taggings can use a null array. <code>MultiTaskSample</code>
+		copies constructor inputs, returns copies from its accessors, and compares
+		samples by array contents. A stream can reuse its input buffers without
+		changing samples it has already returned. <code>BilstmSampleOwnershipTest</code>
+		compares training from reused buffers with independent samples.
+		A literal <code>*UNK*</code>
 		token uses the reserved unknown-word embedding.
 		</para>
 		<para>
