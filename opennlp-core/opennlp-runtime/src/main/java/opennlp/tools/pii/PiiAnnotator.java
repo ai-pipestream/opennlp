@@ -28,8 +28,8 @@ import opennlp.tools.document.LayerKey;
 import opennlp.tools.document.Layers;
 
 /**
- * Adapts a {@link PiiExtractor} to the document pipeline: scans the document text and
- * provides {@link #PII}, one annotation per mention carrying its {@link PiiMention}.
+ * Scans document text with a {@link PiiExtractor} and writes one {@link #PII} annotation
+ * per mention.
  *
  * <p>The extractor works on the raw text, so this annotator requires no other layer and
  * can run anywhere in a pipeline. Combine the layer with {@link Masker} to produce a
@@ -61,15 +61,12 @@ public final class PiiAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Scans the document text and adds the {@link #PII} layer.
+   * {@inheritDoc}
    *
-   * <p>No other layer is required: a text without any PII yields a present-but-empty
-   * PII layer.</p>
+   * <p>Scans the text and adds the PII layer, including an empty layer when no PII is found.</p>
    *
-   * @param document The document to annotate. Must not be {@code null}.
-   * @return A new {@link Document} with the {@link #PII} layer added. Never
-   *         {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code document} is null, or the extractor
+   *         returns a null result, a null mention or a mention outside the document text.
    */
   @Override
   public Document annotate(Document document) {
@@ -77,7 +74,7 @@ public final class PiiAnnotator implements DocumentAnnotator {
       throw new IllegalArgumentException("document must not be null");
     }
     final List<Annotation<PiiMention>> mentions = new ArrayList<>();
-    for (final PiiMention mention : extractor.extract(document.text())) {
+    for (final PiiMention mention : PiiExtraction.extract(extractor, document.text())) {
       mentions.add(new Annotation<>(mention.span(), mention));
     }
     return document.with(PII, mentions);

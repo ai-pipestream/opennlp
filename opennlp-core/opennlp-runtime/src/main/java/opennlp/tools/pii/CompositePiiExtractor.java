@@ -17,47 +17,39 @@
 
 package opennlp.tools.pii;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 
 /**
- * A {@link PiiExtractor} that runs several extractors over the same text and merges what
- * they report into one non-overlapping list in text order.
+ * Combines PII extractors into one non-overlapping result in text order.
  *
- * <p>Each delegate scans the full text independently, so delegates never influence one
- * another's decisions and a delegate may be reused in any number of composites. When
- * candidates from different delegates overlap, the same rule the single extractors use
- * decides: the leftmost candidate wins, then the longest, then the
- * {@link PiiTypePriority type priority}, and only then the delegate that was supplied
- * first. A candidate that overlaps an already accepted one is dropped, never truncated, so
- * every reported span is exactly what its extractor found.</p>
+ * <p>Candidates are selected by start offset, then descending length, then
+ * {@link PiiTypePriority type priority}, then delegate order. A candidate overlapping an
+ * accepted mention is omitted without truncating its span.</p>
  *
- * <p>Deciding by type before delegate order is what makes a composite independent of how it
- * was assembled: a text in which two types claim the same span, an NHS number that is also
- * a validly formatted phone number for instance, yields the same mention whichever pack was
- * listed first. The delegate order only settles ties between types of equal priority, which
- * in practice means types this package does not name.</p>
+ * <p>Nested composites contribute their individual extractors to the same overlap pass,
+ * in depth-first, left-to-right order. Grouping the same ordered extractors does not
+ * change the result. Other extractors contribute their returned mentions; their internal
+ * filtering is unchanged. {@link #extractors()} retains the configured nested structure.</p>
  *
- * <p>Delegates that report the same span for the same type, for example two packs that
- * both carry the card scanner, therefore yield one mention rather than a duplicate.</p>
- *
- * <p>This extractor is as thread safe as its delegates; it holds no per-call state of its
- * own. See {@link PiiPacks} for ready-made combinations.</p>
+ * <p>Thread safety depends on the delegates. See {@link PiiPacks} for built-in
+ * combinations.</p>
  *
  * @since 3.0.0
  */
 public final class CompositePiiExtractor implements PiiExtractor {
 
   /**
-   * One candidate contributed by a delegate, held until overlap resolution decides which
-   * candidates survive.
+   * One candidate with its delegate order and type priority.
    *
    * @param start The candidate start offset, inclusive.
    * @param end The candidate end offset, exclusive.
-   * @param order The index of the contributing delegate.
+   * @param order The index of the contributing individual extractor.
    * @param priority The {@link PiiTypePriority} rank of the candidate's type.
-   * @param mention The mention to report if this candidate survives.
+   * @param mention The candidate mention.
    */
   private record Hit(int start, int end, int order, int priority, PiiMention mention) {
   }
@@ -99,8 +91,9 @@ public final class CompositePiiExtractor implements PiiExtractor {
   }
 
   /**
-   * @return The delegates in the order they were supplied. Never {@code null}; the list
-   *         is unmodifiable.
+   * Returns the configured delegates, including nested composites.
+   *
+   * @return The immutable delegate list in the supplied order.
    */
   public List<PiiExtractor> extractors() {
     return extractors;
@@ -109,8 +102,10 @@ public final class CompositePiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Every delegate scans the whole text; the union of what they report is reduced to
-   * the non-overlapping set this class describes.</p>
+   * <p>Scans the individual extractors and resolves all their candidates together.</p>
+   *
+   * @throws IllegalArgumentException Thrown if {@code text} is null, or a delegate
+   *         returns a null result, a null mention or a mention outside the input text.
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -118,10 +113,20 @@ public final class CompositePiiExtractor implements PiiExtractor {
       throw new IllegalArgumentException("text must not be null");
     }
     final List<Hit> hits = new ArrayList<>();
-    for (int order = 0; order < extractors.size(); order++) {
-      for (final PiiMention mention : extractors.get(order).extract(text)) {
-        hits.add(new Hit(mention.span().getStart(), mention.span().getEnd(), order,
-            PiiTypePriority.rank(mention.type()), mention));
+    final Deque<PiiExtractor> pending = new ArrayDeque<>(extractors);
+    int order = 0;
+    while (!pending.isEmpty()) {
+      final PiiExtractor extractor = pending.removeFirst();
+      if (extractor instanceof CompositePiiExtractor composite) {
+        for (int i = composite.extractors.size() - 1; i >= 0; i--) {
+          pending.addFirst(composite.extractors.get(i));
+        }
+      } else {
+        for (final PiiMention mention : PiiExtraction.extract(extractor, text)) {
+          hits.add(new Hit(mention.span().getStart(), mention.span().getEnd(), order,
+              PiiTypePriority.rank(mention.type()), mention));
+        }
+        order++;
       }
     }
     hits.sort((a, b) -> {

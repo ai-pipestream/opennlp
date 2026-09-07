@@ -35,8 +35,8 @@ public interface PiiExtractor {
    * Extracts all PII mentions from a text.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @return The mentions in text order, non-overlapping. Never {@code null}; empty when
-   *         the text contains no PII mention.
+   * @return Non-null mentions in text order, non-overlapping and within the input text.
+   *         The list is non-null and empty when no PII mention is found.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   List<PiiMention> extract(CharSequence text);

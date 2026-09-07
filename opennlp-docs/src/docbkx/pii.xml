@@ -181,15 +181,16 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 		</itemizedlist>
 		<para>
 			<code>CompositePiiExtractor</code> runs several extractors over one text
-			and merges the result, and <code>PiiPacks</code> names the combinations
-			worth having: <code>payment()</code>, <code>contact()</code>,
+			and merges the result. <code>PiiPacks</code> provides
+			<code>payment()</code>, <code>contact()</code>,
 			<code>network()</code>, <code>secrets()</code>, <code>crypto()</code>,
 			<code>usIdentity()</code>, <code>euIdentity()</code>,
 			<code>caIdentity()</code>, <code>device()</code>, and
-			<code>allStructured()</code> for everything. Overlaps are resolved the way
-			a single extractor resolves them: the leftmost candidate wins, then the
-			longest, then the more specific type, so a value two types both claim
-			resolves the same way whichever pack was listed first.
+			<code>allStructured()</code> for all supported structured types. The
+			leftmost candidate wins an overlap, then the longest, then the type with
+			the lower <code>PiiTypePriority</code> rank. Delegate order breaks equal
+			ranks. Nested composites contribute their individual extractors before
+			overlaps are resolved, in depth-first, left-to-right order.
 			<programlisting language="java"><![CDATA[
 String text = "Deploy from 10.0.0.7 using AKIAIOSFODNN7EXAMPLE, ask jane@example.com.";
 
@@ -200,6 +201,29 @@ PiiExtractor keysOnly = PiiPacks.secrets();
 PiiExtractor custom = new CompositePiiExtractor(
     new CursorPiiExtractor(), new NetworkPiiExtractor());]]>
 			</programlisting>
+		</para>
+		<para>
+			Grouping the same ordered extractors into nested composites does not
+			change their result. In this example, selecting the leftmost span rejects
+			the middle candidate but retains the final person mention:
+			<programlisting language="java"><![CDATA[
+PiiExtractor first = text -> List.of(new PiiMention(new Span(0, 3), "person", "Amy"));
+PiiExtractor middle = text -> List.of(new PiiMention(new Span(1, 5), "custom", "my B"));
+PiiExtractor last = text -> List.of(new PiiMention(new Span(4, 7), "person", "Bob"));
+PiiExtractor combined = new CompositePiiExtractor(first,
+    new CompositePiiExtractor(middle, last));
+Document people = new PiiAnnotator(combined).annotate(Document.of("Amy Bob"));
+String masked = Masker.mask(people, PiiAnnotator.PII, '*');
+// "*** ***"]]>
+			</programlisting>
+		</para>
+		<para>
+			Custom extractors must return a non-null list with non-null mentions
+			inside the input text. <code>CompositePiiExtractor</code> and
+			<code>PiiAnnotator</code> reject invalid results with
+			<code>IllegalArgumentException</code>, including candidates that would
+			otherwise be removed during overlap resolution. Exceptions raised by an
+			extractor propagate unchanged.
 		</para>
 	</section>
 
