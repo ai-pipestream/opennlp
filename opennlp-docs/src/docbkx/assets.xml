@@ -42,6 +42,16 @@
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
 		</para>
 		<para>
+			Excel 2-4 detection requires a complete
+			<ulink url="https://www.openoffice.org/sc/excelfileformat.pdf#page=135">BOF
+			(Beginning of File) record</ulink> with a supported document type. Worksheets,
+			charts and macro sheets are reported as <code>xls</code>. Excel 3 and 4
+			workspaces are reported as <code>xlw</code> with media types
+			<code>application/vnd.ms-excel.workspace.3</code> and
+			<code>application/vnd.ms-excel.workspace.4</code>. Unused BOF fields do not
+			restrict detection. A recognized header does not validate the rest of the file.
+		</para>
+		<para>
 			XAR archives are reported as <code>xar</code> with media type
 			<code>application/x-xar</code>, not Xara graphics. Encoded XPM images are
 			reported as <code>xpm</code> with media type <code>image/x-xpixmap</code>.

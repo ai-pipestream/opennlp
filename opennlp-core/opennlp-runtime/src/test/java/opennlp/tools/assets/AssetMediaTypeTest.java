@@ -79,6 +79,10 @@ public class AssetMediaTypeTest {
   @MethodSource("signatures")
   void testEverySignatureRetainsItsMediaType(KnownMagics.Entry entry) {
     final byte[] bytes = Arrays.copyOf(entry.magic(), 32);
+    if ("xls".equals(entry.format().name())) {
+      // Excel signatures also require a supported document type: 0x0010 is a worksheet.
+      bytes[6] = 0x10;
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());

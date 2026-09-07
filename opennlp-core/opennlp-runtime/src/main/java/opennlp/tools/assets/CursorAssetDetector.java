@@ -117,6 +117,14 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final KnownMagics.Format AVI_FORMAT =
       new KnownMagics.Format(EmbeddedAsset.FORMAT_AVI, "video/x-msvideo");
 
+  private static final int BIFF_RECORD_HEADER_SIZE = 4;
+  private static final int BIFF_DOCUMENT_TYPE_OFFSET = 6;
+  private static final String EXCEL_WORKSPACE_FORMAT = "xlw";
+  private static final KnownMagics.Format EXCEL_3_WORKSPACE =
+      new KnownMagics.Format(EXCEL_WORKSPACE_FORMAT, "application/vnd.ms-excel.workspace.3");
+  private static final KnownMagics.Format EXCEL_4_WORKSPACE =
+      new KnownMagics.Format(EXCEL_WORKSPACE_FORMAT, "application/vnd.ms-excel.workspace.4");
+
   /**
    * {@inheritDoc}
    *
@@ -450,8 +458,8 @@ public final class CursorAssetDetector implements AssetDetector {
       width = readInt(header, 16);
       height = readInt(header, 20);
     } else if (EmbeddedAsset.FORMAT_GIF.equals(format) && header.length >= 10) {
-      width = (header[6] & 0xFF) | ((header[7] & 0xFF) << 8);
-      height = (header[8] & 0xFF) | ((header[9] & 0xFF) << 8);
+      width = readUnsignedShortLE(header, 6);
+      height = readUnsignedShortLE(header, 8);
     }
     if (width <= 0 || height <= 0) {
       width = -1;
@@ -549,7 +557,7 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Identifies the format and media type from the longest matching signature,
-   * or from the RIFF form type when no table entry matches.
+   * checking Excel document types and RIFF form types where required.
    *
    * @param header The decoded leading bytes.
    * @return The format and media type, or {@code null} for an unknown header.
@@ -557,7 +565,7 @@ public final class CursorAssetDetector implements AssetDetector {
   private KnownMagics.Format formatOf(byte[] header) {
     final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
-      return known;
+      return "xls".equals(known.name()) ? excelFormat(header, known) : known;
     }
     if (carries(header, 0, RIFF_MAGIC)) {
       if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
@@ -571,6 +579,33 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return null;
+  }
+
+  /**
+   * Distinguishes BIFF2-BIFF4 worksheet and workspace document headers.
+   * The signature table checks the record identifier and length. Unused BOF
+   * fields do not affect the document type.
+   *
+   * @param header The decoded bytes matching an Excel signature.
+   * @param worksheet The worksheet format for that BIFF version.
+   * @return The document format, or {@code null} for incomplete or unsupported headers.
+   * @see <a href="https://www.openoffice.org/sc/excelfileformat.pdf#page=135">
+   *     OpenOffice Excel file format reference, BOF records</a>
+   */
+  private KnownMagics.Format excelFormat(byte[] header, KnownMagics.Format worksheet) {
+    if (header.length < BIFF_DOCUMENT_TYPE_OFFSET + Short.BYTES
+        || header.length < BIFF_RECORD_HEADER_SIZE + readUnsignedShortLE(header, Short.BYTES)) {
+      return null;
+    }
+    return switch (readUnsignedShortLE(header, BIFF_DOCUMENT_TYPE_OFFSET)) {
+      case 0x0010, 0x0020, 0x0040 -> worksheet;
+      case 0x0100 -> switch (readUnsignedShortLE(header, 0)) {
+        case 0x0209 -> EXCEL_3_WORKSPACE;
+        case 0x0409 -> EXCEL_4_WORKSPACE;
+        default -> null;
+      };
+      default -> null;
+    };
   }
 
   /**
@@ -758,6 +793,17 @@ public final class CursorAssetDetector implements AssetDetector {
   private int readInt(byte[] bytes, int at) {
     return ((bytes[at] & 0xFF) << 24) | ((bytes[at + 1] & 0xFF) << 16)
         | ((bytes[at + 2] & 0xFF) << 8) | (bytes[at + 3] & 0xFF);
+  }
+
+  /**
+   * Returns an unsigned little-endian 16-bit value within checked bounds.
+   *
+   * @param bytes The source bytes.
+   * @param at The byte offset.
+   * @return The value from 0 to 65535.
+   */
+  private int readUnsignedShortLE(byte[] bytes, int at) {
+    return (bytes[at] & 0xFF) | ((bytes[at + 1] & 0xFF) << Byte.SIZE);
   }
 
   /**
