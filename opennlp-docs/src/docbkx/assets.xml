@@ -43,6 +43,18 @@
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
 		</para>
 		<para>
+			<ulink url="https://docs.oracle.com/cd/E19253-01/816-5174/6mbb98ucf/index.html">AU</ulink>
+			detection uses <code>.snd</code> without restricting the audio encoding.
+			<ulink url="https://lasformat.org/latest/02.00_definition.html#public-header-block">LAS</ulink>
+			uses <code>LASF</code> without a version filter.
+			<ulink url="https://axcrypt.net/information/technical-details/">AxCrypt</ulink>
+			uses its 16-byte GUID without checking header blocks or authenticating data.
+			Universal <ulink url="https://github.com/apple-oss-distributions/cctools/blob/main/include/mach-o/fat.h">Mach-O</ulink>
+			detection does not check architecture counts. The shared <code>CAFEBABE</code>
+			signature is reported as <code>class</code> and <code>application/java-vm</code>,
+			not as a 32-bit universal Mach-O file.
+		</para>
+		<para>
 			JPEG 2000 detection requires the 12-byte signature box followed by an
 			<code>ftyp</code> box with complete brand and minor-version fields.
 			Standard and extended box lengths are supported. The primary brand selects
