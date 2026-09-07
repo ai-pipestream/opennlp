@@ -166,8 +166,7 @@ String masked = Masker.mask(addresses, PiiAnnotator.PII, '*');
 				<para>
 					<code>SecretsPiiExtractor</code>: AWS access key identifiers,
 					GitHub tokens from their current minimum lengths through the
-					255-character scanner limit, JSON Web Tokens whose header decodes to a
-					JWS header, and credentials embedded in a URL.
+					255-character scanner limit, JWT candidates, and URL credentials.
 					Token boundaries use Unicode letters and digits, and exclude
 					adjoining underscores. URL schemes start with an ASCII letter and
 					may include digits, plus signs, hyphens and dots. Usernames and
@@ -179,6 +178,20 @@ Document credentials = new PiiAnnotator(PiiPacks.secrets()).annotate(Document.of
     "Fetch s3://user:demo%40pass@example.invalid/model.bin"));
 String masked = Masker.mask(credentials, PiiAnnotator.PII, '*');
 // "Fetch s3://****************@example.invalid/model.bin"]]>
+					</programlisting>
+					JWT detection requires three non-empty, unpadded base64url segments
+					with valid lengths and zero unused bits. The complete UTF-8 header
+					must be a JSON object with one top-level <code>alg</code> member
+					containing a non-empty ASCII string. Member order, JSON whitespace,
+					escaped names and nested values are supported. Detection does not
+					verify signatures, claims or other JOSE parameter semantics. Unsigned
+					tokens with empty signatures and five-part encrypted tokens are excluded.
+					This example uses synthetic signature bytes, not a signed credential:
+					<programlisting language="java"><![CDATA[
+String token = "eyAiYWxnIjogIkhTMjU2IiB9.e30.dGVzdA";
+Document bearer = new PiiAnnotator(PiiPacks.secrets()).annotate(Document.of("Bearer " + token));
+String masked = Masker.mask(bearer, PiiAnnotator.PII, '*');
+// "Bearer " + "*".repeat(token.length())]]>
 					</programlisting>
 				</para>
 			</listitem>

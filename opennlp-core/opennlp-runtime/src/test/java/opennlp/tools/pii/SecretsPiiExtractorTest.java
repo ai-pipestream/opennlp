@@ -17,6 +17,8 @@
 
 package opennlp.tools.pii;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 
@@ -129,6 +131,37 @@ public class SecretsPiiExtractorTest {
         "a".repeat(length) + "1://u:pw@example.invalid");
     Assertions.assertEquals(List.of("u:pw"),
         extractor.extract(text).stream().map(PiiMention::normalized).toList());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
+  /**
+   * Checks that dotted candidate prefixes do not cause repeated suffix scans.
+   *
+   * @param prefix The repeated candidate prefix.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"e.e.", "I.I.", "C.C.", "D.D."})
+  void testDottedJwtReadCount(String prefix) {
+    final CountingCharSequence text = new CountingCharSequence(prefix.repeat(4096));
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
+  /**
+   * Checks recognition and character-read bounds across a long header field.
+   *
+   * @param length The field length before the algorithm.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {64, 4096, 65536})
+  void testLongJwtReadCount(int length) {
+    final String json = "{\"field\":\"" + "x".repeat(length) + "\",\"alg\":\"HS256\"}";
+    final CountingCharSequence text = new CountingCharSequence(
+        Base64.getUrlEncoder().withoutPadding().encodeToString(json.getBytes(StandardCharsets.UTF_8))
+            + "." + PAYLOAD + "." + SIGNATURE);
+    Assertions.assertEquals(1, extractor.extract(text).size());
     Assertions.assertTrue(text.reads <= text.length() * 40,
         () -> "read " + text.reads + " characters from an input of " + text.length());
   }

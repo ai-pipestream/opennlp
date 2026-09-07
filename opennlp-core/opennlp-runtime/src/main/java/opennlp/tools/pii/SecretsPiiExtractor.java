@@ -17,8 +17,10 @@
 
 package opennlp.tools.pii;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -40,13 +42,15 @@ import java.util.Set;
  *   letters, digits, and underscores and are capped at 255 characters, following the
  *   <a href="https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/">
  *   documented token formats</a>. The prefixes are case sensitive.</li>
- *   <li>JSON Web Token: three
+ *   <li>JWT candidate: three non-empty, unpadded
  *   <a href="https://datatracker.ietf.org/doc/html/rfc4648#section-5">base64url</a>
- *   segments separated by dots, the compact serialization of
- *   <a href="https://datatracker.ietf.org/doc/html/rfc7519">RFC 7519</a>. The first
- *   segment is decoded and must be a JSON object carrying the {@code alg} header that
- *   <a href="https://datatracker.ietf.org/doc/html/rfc7515">RFC 7515</a> requires, so a
- *   dotted run of base64url characters is not enough.</li>
+ *   segments separated by dots. Encodings must have valid lengths and zero unused bits.
+ *   The complete UTF-8 header must be a JSON object with one top-level {@code alg} member
+ *   containing a non-empty ASCII string. JSON whitespace, escaped names and nested
+ *   values are supported. Signatures, claims and other JOSE parameter semantics are not
+ *   verified. Unsigned tokens with empty signatures and five-part encrypted tokens are
+ *   excluded. See <a href="https://datatracker.ietf.org/doc/html/rfc7515">RFC 7515</a>
+ *   and <a href="https://datatracker.ietf.org/doc/html/rfc7519">RFC 7519</a>.</li>
  *   <li>URL credential: the userinfo component of a URL, as
  *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1">RFC 3986</a>
  *   defines it: a non-empty username, a colon and a non-empty password before {@code @}.
@@ -97,22 +101,6 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final int GITHUB_MAX_LENGTH = 255;
 
   private static final int JWT_SEGMENTS = 3;
-  private static final int JWT_HEADER_MIN_LENGTH = 8;
-  private static final int JWT_PAYLOAD_MIN_LENGTH = 4;
-  private static final int JWT_SIGNATURE_MIN_LENGTH = 4;
-
-  /** The base64url prefix of a JSON object, that is of {@code {"}. */
-  private static final String JWT_HEADER_PREFIX = "eyJ";
-
-  /** As many header characters as any {@code alg} declaration needs to be visible in. */
-  private static final int JWT_HEADER_SCAN_LENGTH = 88;
-
-  /**
-   * The header parameter every JWS header must carry, as it is written in the JSON: with
-   * its quotes, so that a longer member name ending in those three letters, {@code notalg}
-   * for instance, is not mistaken for it.
-   */
-  private static final String JWT_ALGORITHM_PARAMETER = "\"alg\"";
 
   private static final String SCHEME_SEPARATOR = "://";
   private static final int PERCENT_ESCAPE_LENGTH = 3;
@@ -282,10 +270,8 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    * @param hits The candidate collector.
    */
   private void scanJwts(CharSequence text, List<Hits.Hit> hits) {
-    final int[] minimum =
-        {JWT_HEADER_MIN_LENGTH, JWT_PAYLOAD_MIN_LENGTH, JWT_SIGNATURE_MIN_LENGTH};
     for (int i = 0; i < text.length(); i++) {
-      if (!startsWith(text, i, JWT_HEADER_PREFIX) || !onTokenStart(text, i, true)) {
+      if (!canStartJsonHeader(text.charAt(i)) || !onJwtStart(text, i)) {
         continue;
       }
       int p = i;
@@ -303,13 +289,13 @@ public final class SecretsPiiExtractor implements PiiExtractor {
         while (p < text.length() && isBase64UrlChar(text.charAt(p))) {
           p++;
         }
-        if (p - segmentStart < minimum[segment]) {
+        if (!isBase64UrlEncoding(text, segmentStart, p)) {
           segments = false;
         } else if (segment == 0) {
           headerEnd = p;
         }
       }
-      if (!segments || !onTokenEnd(text, p) || !isJwsHeader(text, i, headerEnd)) {
+      if (!segments || !onJwtEnd(text, p) || !isJwsHeader(text, i, headerEnd)) {
         continue;
       }
       Hits.add(hits, i, p, PiiMention.TYPE_JWT, text.subSequence(i, p).toString());
@@ -319,70 +305,103 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Decodes a candidate's first segment and checks that it is a JSON object carrying the
-   * {@code alg} header parameter, which is what tells a token from any other dotted run
-   * of base64url characters.
-   *
-   * <p>The parameter has to appear as a member name, quoted and followed by its colon.
-   * Looking for the three letters anywhere would accept a header whose only member is
-   * named {@code notalg} or {@code algorithm}, and a base64url segment that happens to
-   * decode to text containing them.</p>
+   * Decodes the complete UTF-8 header and checks JSON syntax and its algorithm member.
    *
    * @param text The text being scanned.
    * @param start The first header character.
    * @param end The exclusive end of the header segment.
-   * @return {@code true} if the segment decodes to a JWS header.
+   * @return {@code true} if the header passes the candidate syntax checks.
    */
   private boolean isJwsHeader(CharSequence text, int start, int end) {
-    final int scanEnd = Math.min(end, start + JWT_HEADER_SCAN_LENGTH);
-    final byte[] header = decodeBase64Url(text, start, scanEnd);
-    if (header.length == 0 || header[0] != '{') {
+    final byte[] header = decodeBase64Url(text, start, end);
+    try {
+      return new JwsHeader(StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(header)))
+          .isValid();
+    } catch (CharacterCodingException e) {
       return false;
     }
-    for (int i = 0; i + JWT_ALGORITHM_PARAMETER.length() <= header.length; i++) {
-      boolean match = true;
-      for (int j = 0; j < JWT_ALGORITHM_PARAMETER.length(); j++) {
-        match &= header[i + j] == (byte) JWT_ALGORITHM_PARAMETER.charAt(j);
-      }
-      if (match && followedByColon(header, i + JWT_ALGORITHM_PARAMETER.length())) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
-   * Tests whether a member name is followed by its colon, across the whitespace JSON
-   * allows there.
+   * Checks the first base64url character for a JSON object or JSON whitespace byte.
    *
-   * @param header The decoded header bytes.
-   * @param from The first byte after the member name.
-   * @return {@code true} if a colon follows.
+   * @param c The first encoded character.
+   * @return {@code true} for an encoded opening brace, space, tab, CR or LF.
    */
-  private boolean followedByColon(byte[] header, int from) {
-    for (int i = from; i < header.length; i++) {
-      final byte b = header[i];
-      if (b == ':') {
-        return true;
-      }
-      if (b != ' ' && b != '\t' && b != '\n' && b != '\r') {
+  private boolean canStartJsonHeader(char c) {
+    return c == 'e' || c == 'I' || c == 'C' || c == 'D';
+  }
+
+  /**
+   * Checks a non-empty unpadded base64url run, including unused low bits.
+   *
+   * @param text The candidate text; the run contains only base64url characters.
+   * @param start The run start.
+   * @param end The exclusive run end.
+   * @return {@code true} for an encoding of a non-empty byte sequence.
+   */
+  private boolean isBase64UrlEncoding(CharSequence text, int start, int end) {
+    final int length = end - start;
+    if (length == 0 || length % 4 == 1) {
+      return false;
+    }
+    final int unusedMask = switch (length % 4) {
+      case 2 -> 0x0f;
+      case 3 -> 0x03;
+      default -> 0;
+    };
+    return (base64UrlValue(text.charAt(end - 1)) & unusedMask) == 0;
+  }
+
+  /**
+   * Rejects candidates inside a longer base64url or dotted value.
+   *
+   * @param text The text being scanned.
+   * @param start The candidate start.
+   * @return {@code true} if the candidate may start here.
+   */
+  private boolean onJwtStart(CharSequence text, int start) {
+    int p = start;
+    while (p > 0 && text.charAt(p - 1) == '.') {
+      p--;
+    }
+    return onTokenStart(text, start, true) && onTokenStart(text, p, true);
+  }
+
+  /**
+   * Rejects extra segments, padding and non-URL base64 continuations.
+   *
+   * @param text The text being scanned.
+   * @param end The exclusive candidate end.
+   * @return {@code true} if the candidate may end here.
+   */
+  private boolean onJwtEnd(CharSequence text, int end) {
+    if (!onTokenEnd(text, end)) {
+      return false;
+    }
+    if (end < text.length()) {
+      final char c = text.charAt(end);
+      if (c == '=' || c == '+' || c == '/') {
         return false;
       }
     }
-    return false;
+    int p = end;
+    while (p < text.length() && text.charAt(p) == '.') {
+      p++;
+    }
+    return onTokenEnd(text, p) && (p == text.length() || text.charAt(p) != '-');
   }
 
   /**
-   * Decodes base64url characters to bytes, ignoring a trailing group too short to form
-   * one more byte.
+   * Decodes an already checked, unpadded base64url run.
    *
    * @param text The text being scanned.
    * @param start The first character to decode.
    * @param end The exclusive end of the characters to decode.
-   * @return The decoded bytes. Never {@code null}.
+   * @return The decoded bytes.
    */
   private byte[] decodeBase64Url(CharSequence text, int start, int end) {
-    final byte[] decoded = new byte[(end - start) * 3 / 4 + 1];
+    final byte[] decoded = new byte[(int) ((long) (end - start) * 3 / 4)];
     int accumulator = 0;
     int bits = 0;
     int length = 0;
@@ -394,7 +413,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
         decoded[length++] = (byte) (accumulator >> bits & 0xFF);
       }
     }
-    return Arrays.copyOf(decoded, length);
+    return decoded;
   }
 
   /**
