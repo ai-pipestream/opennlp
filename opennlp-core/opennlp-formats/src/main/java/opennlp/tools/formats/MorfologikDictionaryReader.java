@@ -61,6 +61,10 @@ import opennlp.tools.util.StringUtil;
  * {@link DictionaryLemmatizer} lookup. Tags and lemmas retain their decoded contents,
  * including {@code #}, tabs and line breaks. Invalid character data is rejected on load.</p>
  *
+ * <p>Loading expands every entry into an in-memory lookup map. Lookup uses that map,
+ * not the compressed automaton. Budget heap for the decoded forms, tags and lemmas,
+ * including temporary collections during loading; file size alone is not a memory estimate.</p>
+ *
  * <p>Dictionary data is supplied by the caller; none is bundled with OpenNLP. This class is
  * stateless, so its methods may be called concurrently.</p>
  */

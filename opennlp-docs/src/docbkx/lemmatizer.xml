@@ -363,6 +363,12 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 				explicitly. Dictionary data is not bundled with OpenNLP.
 			</para>
 			<para>
+				Loading expands every entry into an in-memory lookup map. Subsequent
+				lookups use that map, not the compressed automaton. Allow heap for decoded
+				forms, tags and lemmas, plus temporary collections during loading.
+				Compressed file size alone does not indicate the heap required.
+			</para>
+			<para>
 				The metadata file is UTF-8, regardless of the dictionary's encoding.
 				It must declare <code>fsa.dict.separator</code>, <code>fsa.dict.encoding</code>
 				and <code>fsa.dict.encoder</code>. The separator character must encode as
