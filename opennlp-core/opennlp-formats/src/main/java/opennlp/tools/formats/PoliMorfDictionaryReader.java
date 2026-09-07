@@ -109,7 +109,7 @@ public final class PoliMorfDictionaryReader {
               + " has fewer than " + MIN_FIELDS + " tab-separated fields: " + line);
         }
         final int thirdTab = line.indexOf(FIELD_SEPARATOR, secondTab + 1);
-        final String form = line.substring(0, firstTab).toLowerCase(Locale.ROOT);
+        final String form = line.substring(0, firstTab);
         final String lemma = line.substring(firstTab + 1, secondTab);
         final String tag = line.substring(secondTab + 1, thirdTab < 0 ? line.length() : thirdTab);
         entries.add(form, tag, lemma);

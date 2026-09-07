@@ -369,6 +369,24 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 				a single byte in the dictionary's charset. For example, <code>€</code>
 				is byte <code>0x80</code> in Windows-1252 but cannot be a UTF-8 dictionary
 				separator. Invalid separator definitions cause <code>IllegalArgumentException</code>.
+				Surrounding spaces in encoder names are ignored.
+			</para>
+			<para>
+				Optional <code>fsa.dict.input-conversion</code> metadata supplies ordered
+				string substitutions for query tokens. Each comma-separated entry uses a single
+				space between the input and replacement strings. For example:
+				<screen>fsa.dict.input-conversion=\uFB03 ffi, \u2019 '</screen>
+				This expands the U+FB03 ligature to <code>ffi</code> and converts a
+				typographic apostrophe to an ASCII apostrophe, allowing <code>can’t</code>
+				to match <code>can't</code>.
+			</para>
+			<para>
+				Query tokens are lower-cased before substitution. Rules apply in order to
+				non-overlapping matches; text inserted by a rule is considered only by later rules.
+				Lookup remains case-insensitive after substitution. Tags, stored forms and lemmas
+				are not substituted. Invalid pairs and duplicate input strings cause
+				<code>IllegalArgumentException</code> before the dictionary is read.
+				Spelling options and output-display conversions do not change lemmatizer results.
 			</para>
 			<para>
 				Decoded tags and lemmas retain characters such as

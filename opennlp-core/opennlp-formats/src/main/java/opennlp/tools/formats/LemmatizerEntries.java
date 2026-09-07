@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
@@ -39,12 +40,12 @@ final class LemmatizerEntries {
   /**
    * Adds a lemma, preserving first-seen order for each form and tag.
    *
-   * @param form The lower-cased surface form used for dictionary lookup.
+   * @param form The surface form.
    * @param tag The part-of-speech tag.
    * @param lemma The lemma, including any delimiter characters.
    */
   void add(String form, String tag, String lemma) {
-    entries.computeIfAbsent(List.of(form, tag), key -> new LinkedHashSet<>()).add(lemma);
+    entries.computeIfAbsent(List.of(lookupForm(form), tag), key -> new LinkedHashSet<>()).add(lemma);
   }
 
   /**
@@ -56,9 +57,28 @@ final class LemmatizerEntries {
   DictionaryLemmatizer toLemmatizer() throws IOException {
     final DictionaryLemmatizer dictionary =
         new DictionaryLemmatizer(InputStream.nullInputStream());
+    copyTo(dictionary);
+    return dictionary;
+  }
+
+  /**
+   * Copies collected entries into a lemmatizer.
+   *
+   * @param dictionary The destination dictionary.
+   */
+  void copyTo(DictionaryLemmatizer dictionary) {
     for (final Map.Entry<List<String>, LinkedHashSet<String>> entry : entries.entrySet()) {
       dictionary.getDictMap().put(entry.getKey(), new ArrayList<>(entry.getValue()));
     }
-    return dictionary;
+  }
+
+  /**
+   * Applies the lowercase conversion used by DictionaryLemmatizer lookup.
+   *
+   * @param form The surface form.
+   * @return The lookup key.
+   */
+  static String lookupForm(String form) {
+    return form.toLowerCase(Locale.ROOT);
   }
 }

@@ -124,6 +124,21 @@ public final class MorfologikDictionaryReader {
       throw new IllegalArgumentException("charset must not be null");
     }
 
+    return readEntries(dictionary, separator, encoding, charset).toLemmatizer();
+  }
+
+  /**
+   * Collects decoded entries from an FSA stream.
+   *
+   * @param dictionary The automaton stream.
+   * @param separator The separator byte.
+   * @param encoding The base-form encoder.
+   * @param charset The dictionary charset.
+   * @return The collected entries.
+   * @throws IOException If the dictionary cannot be read or contains invalid entries.
+   */
+  private static LemmatizerEntries readEntries(InputStream dictionary, byte separator,
+      BaseFormEncoding encoding, Charset charset) throws IOException {
     final FsaSequenceReader automaton = FsaSequenceReader.read(dictionary);
     final LemmatizerEntries entries = new LemmatizerEntries();
     final CharsetDecoder decoder = charset.newDecoder();
@@ -133,13 +148,16 @@ public final class MorfologikDictionaryReader {
       throw e.getCause();
     }
 
-    return entries.toLemmatizer();
+    return entries;
   }
 
   /**
    * Reads a morfologik dictionary into a {@link DictionaryLemmatizer}, taking the separator,
    * charset, and encoder from the dictionary's UTF-8 {@code .info} metadata.
    * The separator character must encode as a single byte in the dictionary charset.
+   * Optional {@code fsa.dict.input-conversion} pairs apply in metadata order after
+   * lower-casing each query token. Dictionary lookup remains case-insensitive.
+   * Tags and lemmas are unchanged. Spelling options do not affect lemmatizer lookup.
    *
    * @param dictionary The FSA5 or CFSA2 automaton, referenced by an open {@link InputStream}.
    *                   Must not be {@code null}.
@@ -148,8 +166,8 @@ public final class MorfologikDictionaryReader {
    *                   {@code fsa.dict.separator}, {@code fsa.dict.encoding}, and
    *                   {@code fsa.dict.encoder}.
    * @return A {@link DictionaryLemmatizer} over the decoded entries.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a required metadata
-   *                                  key is missing or invalid.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}, a required metadata
+   *                                  key is missing or a metadata value is invalid.
    * @throws IOException Thrown on IO errors, invalid dictionary content or invalid UTF-8 metadata.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, InputStream info)
@@ -169,8 +187,18 @@ public final class MorfologikDictionaryReader {
     }
     final Charset charset = Charset.forName(required(properties, KEY_ENCODING));
     final BaseFormEncoding encoding =
-        BaseFormEncoding.valueOf(StringUtil.toUpperCase(required(properties, KEY_ENCODER)));
-    return read(dictionary, separatorByte(separator, charset), encoding, charset);
+        BaseFormEncoding.valueOf(StringUtil.toUpperCase(required(properties, KEY_ENCODER).trim()));
+    final byte separatorByte = separatorByte(separator, charset);
+    final String inputConversion = properties.getProperty(MorfologikInputConversion.PROPERTY);
+    final MorfologikInputConversion conversion = inputConversion == null ? null
+        : MorfologikInputConversion.parse(inputConversion);
+    final LemmatizerEntries entries = readEntries(dictionary, separatorByte, encoding, charset);
+    if (conversion == null || conversion.isEmpty()) {
+      return entries.toLemmatizer();
+    }
+    final DictionaryLemmatizer lemmatizer = conversion.newLemmatizer();
+    entries.copyTo(lemmatizer);
+    return lemmatizer;
   }
 
   /**
@@ -251,7 +279,7 @@ public final class MorfologikDictionaryReader {
       final String tag = secondSeparator < 0 ? ""
           : decoder.decode(ByteBuffer.wrap(sequence, secondSeparator + 1,
               sequence.length - secondSeparator - 1)).toString();
-      entries.add(surface.toLowerCase(Locale.ROOT), tag, lemma);
+      entries.add(surface, tag, lemma);
     } catch (CharacterCodingException e) {
       throw new UncheckedIOException(new IOException("invalid morfologik character data", e));
     }

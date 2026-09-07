@@ -31,6 +31,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.formats.MorfologikDictionaryReader.BaseFormEncoding;
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
@@ -169,6 +170,40 @@ class MorfologikMetadataTest {
     Assertions.assertThrows(IOException.class, () -> MorfologikDictionaryReader.read(
         automaton("word+lemma+NN".getBytes(StandardCharsets.UTF_8), false),
         new ByteArrayInputStream(metadata)));
+  }
+
+  /**
+   * Encoder names allow surrounding ASCII whitespace in properties files.
+   *
+   * @param encoder The encoder property value.
+   * @throws IOException If loading fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"NONE ", " NONE ", "\\tNoNe\\t", "\\fnone\\f",
+      "\\nnone\\r", "\\u0000NONE\\u0000"})
+  void testEncoderWhitespace(String encoder) throws IOException {
+    final String metadata = "fsa.dict.separator=+\nfsa.dict.encoding=UTF-8\n"
+        + "fsa.dict.encoder=" + encoder + "\n";
+    final DictionaryLemmatizer dictionary = MorfologikDictionaryReader.read(
+        automaton("word+lemma+NN".getBytes(StandardCharsets.UTF_8), false),
+        new ByteArrayInputStream(metadata.getBytes(StandardCharsets.UTF_8)));
+    Assertions.assertEquals(List.of(List.of("lemma")),
+        dictionary.lemmatize(List.of("word"), List.of("NN")));
+  }
+
+  /**
+   * Whitespace handling does not allow unknown or internally separated encoder names.
+   *
+   * @param encoder The invalid encoder property.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"NO NE", "none\\u00a0", "\\u2003NONE", " NONE extra ", " ", "\\t\\n"})
+  void testInvalidEncoderWhitespace(String encoder) {
+    final String metadata = "fsa.dict.separator=+\nfsa.dict.encoding=UTF-8\n"
+        + "fsa.dict.encoder=" + encoder + "\n";
+    Assertions.assertThrows(IllegalArgumentException.class, () -> MorfologikDictionaryReader.read(
+        InputStream.nullInputStream(),
+        new ByteArrayInputStream(metadata.getBytes(StandardCharsets.UTF_8))));
   }
 
   /**
