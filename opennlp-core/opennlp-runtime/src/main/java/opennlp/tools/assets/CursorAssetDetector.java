@@ -110,6 +110,13 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final String RIFF_MAGIC = "RIFF";
   private static final int RIFF_FORM_TYPE = 8;
 
+  private static final KnownMagics.Format WEBP_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_WEBP, "image/webp");
+  private static final KnownMagics.Format WAV_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_WAV, "audio/wav");
+  private static final KnownMagics.Format AVI_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_AVI, "video/x-msvideo");
+
   /**
    * {@inheritDoc}
    *
@@ -188,12 +195,14 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return start;
     }
-    final String sniffed = formatOf(header);
-    final String mediaType = declared.indexOf('/') > 0 ? declared : mediaTypeOf(sniffed);
+    final KnownMagics.Format sniffed = formatOf(header);
+    final String inferredType = sniffed == null ? null : sniffed.mediaType();
+    final String mediaType = declared.indexOf('/') > 0 ? declared : inferredType;
     if (mediaType == null) {
       return start;
     }
-    assets.add(asset(start, payload.end(), payload, sniffed, mediaType, header));
+    assets.add(asset(start, payload.end(), payload,
+        sniffed == null ? null : sniffed.name(), mediaType, header));
     return payload.end();
   }
 
@@ -225,12 +234,12 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return;
     }
-    final String format = formatOf(header);
+    final KnownMagics.Format format = formatOf(header);
     if (format == null) {
       return;
     }
     assets.add(asset(payload.start(), payload.end(), payload,
-        format, mediaTypeOf(format), header));
+        format.name(), format.mediaType(), header));
   }
 
   /**
@@ -539,48 +548,29 @@ public final class CursorAssetDetector implements AssetDetector {
   }
 
   /**
-   * Identifies the format of decoded header bytes: the longest matching magic in
-   * {@link KnownMagics}, then the RIFF container resolved by its file type.
+   * Identifies the format and media type from the longest matching signature,
+   * or from the RIFF form type when no table entry matches.
    *
    * @param header The decoded leading bytes.
-   * @return The format tag, or {@code null} when the bytes match no known magic.
+   * @return The format and media type, or {@code null} for an unknown header.
    */
-  private String formatOf(byte[] header) {
-    final String known = KnownMagics.formatOf(header);
+  private KnownMagics.Format formatOf(byte[] header) {
+    final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
       return known;
     }
     if (carries(header, 0, RIFF_MAGIC)) {
       if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
-        return EmbeddedAsset.FORMAT_WEBP;
+        return WEBP_FORMAT;
       }
       if (carries(header, RIFF_FORM_TYPE, "WAVE")) {
-        return EmbeddedAsset.FORMAT_WAV;
+        return WAV_FORMAT;
       }
       if (carries(header, RIFF_FORM_TYPE, "AVI ")) {
-        return EmbeddedAsset.FORMAT_AVI;
+        return AVI_FORMAT;
       }
     }
     return null;
-  }
-
-  /**
-   * Maps a format to its media type through {@link KnownMagics}, covering the
-   * RIFF-carried formats that table cannot hold.
-   *
-   * @param format The format tag, or {@code null}.
-   * @return The media type, or {@code null} for an unknown format.
-   */
-  private String mediaTypeOf(String format) {
-    if (format == null) {
-      return null;
-    }
-    return switch (format) {
-      case EmbeddedAsset.FORMAT_WEBP -> "image/webp";
-      case EmbeddedAsset.FORMAT_WAV -> "audio/wav";
-      case EmbeddedAsset.FORMAT_AVI -> "video/x-msvideo";
-      default -> KnownMagics.mediaTypeOf(format);
-    };
   }
 
   /**

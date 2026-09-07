@@ -18,6 +18,7 @@
 package opennlp.tools.assets;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
 
@@ -89,6 +90,22 @@ public class AssetsManualExampleTest {
     assertEquals("plain", asset.format());
     assertEquals("text/plain;charset=UTF-8", asset.mediaType());
     assertEquals(2, asset.decodedLength());
+  }
+
+  /** Tests the EC media type and decoded PEM text from the manual. */
+  @Test
+  void testEncodedEcParametersExample() {
+    String parameters = "-----BEGIN EC PARAMETERS-----\n"
+        + "BggqhkjOPQMBBw==\n"
+        + "-----END EC PARAMETERS-----\n";
+    String encoded = Base64.getEncoder().encodeToString(
+        parameters.getBytes(StandardCharsets.US_ASCII));
+    EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+    String decoded = new String(asset.decode(encoded), StandardCharsets.US_ASCII);
+
+    assertEquals("pem-parameters", asset.format());
+    assertEquals("application/x-x509-ec-parameters", asset.mediaType());
+    assertEquals(parameters, decoded);
   }
 
   @Test

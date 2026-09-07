@@ -38,6 +38,8 @@
 			<ulink url="https://www.w3.org/TR/png-3/#11IHDR">IHDR chunk</ulink> and positive
 			values no greater than 2,147,483,647. GIF dimensions describe the logical screen.
 			A signature match does not establish that a file is complete, valid, or safe to open.
+			Inferred format names and media types come from the same signature. Formats such as
+			<code>xls</code> and <code>pem-parameters</code> can have several media types.
 		</para>
 		<para>
 			XAR archives are reported as <code>xar</code> with media type
@@ -118,6 +120,24 @@ String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
 // asset.format() = "plain"
 // asset.mediaType() = "text/plain;charset=UTF-8"]]>
 			</programlisting>
+		</para>
+		<para>
+			PEM text can also appear inside base64. This example uses public elliptic-curve
+			parameters for <code>prime256v1</code>, not a private key:
+			<programlisting language="java"><![CDATA[
+String parameters = "-----BEGIN EC PARAMETERS-----\n"
+    + "BggqhkjOPQMBBw==\n"
+    + "-----END EC PARAMETERS-----\n";
+String encoded = Base64.getEncoder().encodeToString(
+    parameters.getBytes(StandardCharsets.US_ASCII));
+EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+String decoded = new String(asset.decode(encoded), StandardCharsets.US_ASCII);
+// asset.format() = "pem-parameters"
+// asset.mediaType() = "application/x-x509-ec-parameters"
+// decoded equals parameters]]>
+			</programlisting>
+			The media type distinguishes EC parameters from DSA parameters. Decoding the
+			outer base64 returns the PEM text. Detection does not validate the parameters.
 		</para>
 	</section>
 

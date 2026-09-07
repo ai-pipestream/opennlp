@@ -74,15 +74,23 @@ import java.util.Set;
 final class KnownMagics {
 
   /**
+   * The format name and media type identified by a header.
+   *
+   * @param name The format name.
+   * @param mediaType The media type.
+   */
+  record Format(String name, String mediaType) {
+  }
+
+  /**
    * One table entry: the magic bytes, their precomputed base64 image, and the tags.
    *
    * @param magic The leading bytes a file of the format starts with.
    * @param prefix The base64 image of {@code magic}, floored to the characters the
    *               magic fully determines.
-   * @param format The format tag.
-   * @param mediaType The media type.
+   * @param format The format name and media type.
    */
-  record Entry(byte[] magic, String prefix, String format, String mediaType) {
+  record Entry(byte[] magic, String prefix, Format format) {
   }
 
   /** The formats named by the constants on {@link EmbeddedAsset}. */
@@ -363,32 +371,16 @@ final class KnownMagics {
   }
 
   /**
-   * Identifies the format of decoded header bytes.
+   * Identifies the format and media type of decoded header bytes.
    *
    * @param header The decoded leading bytes.
-   * @return The format of the longest matching magic, or {@code null} when the bytes
-   *         match no known magic.
+   * @return Both identifiers from the longest matching signature, or {@code null}
+   *         when the bytes match no known signature.
    */
-  static String formatOf(byte[] header) {
+  static Format formatOf(byte[] header) {
     for (final Entry entry : ENTRIES) {
       if (startsWith(header, entry.magic())) {
         return entry.format();
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Maps a format to its media type.
-   *
-   * @param format The format tag.
-   * @return The media type of the format's first entry, or {@code null} for a format
-   *         not in the table.
-   */
-  static String mediaTypeOf(String format) {
-    for (final Entry entry : ENTRIES) {
-      if (entry.format().equals(format)) {
-        return entry.mediaType();
       }
     }
     return null;
@@ -426,6 +418,6 @@ final class KnownMagics {
   private static Entry e(String hex, String format, String mediaType) {
     final byte[] magic = HexFormat.of().parseHex(hex);
     final String encoded = Base64.getEncoder().withoutPadding().encodeToString(magic);
-    return new Entry(magic, encoded.substring(0, magic.length * 8 / 6), format, mediaType);
+    return new Entry(magic, encoded.substring(0, magic.length * 8 / 6), new Format(format, mediaType));
   }
 }

@@ -25,15 +25,18 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -51,9 +54,9 @@ public class KnownMagicsTest {
       final String encoded =
           Base64.getEncoder().withoutPadding().encodeToString(entry.magic());
       assertEquals(entry.magic().length * 8 / 6, entry.prefix().length(),
-          entry.format() + ": a magic of n bytes fixes exactly floor(8n/6) characters");
+          entry.format().name() + ": incorrect base64 prefix length");
       assertTrue(encoded.startsWith(entry.prefix()),
-          entry.format() + ": the prefix must be the image of the magic");
+          entry.format().name() + ": the prefix must be the image of the magic");
     }
   }
 
@@ -73,7 +76,7 @@ public class KnownMagicsTest {
     final Set<String> seen = new HashSet<>();
     for (final KnownMagics.Entry entry : KnownMagics.ENTRIES) {
       assertTrue(seen.add(Arrays.toString(entry.magic())),
-          "duplicate magic for " + entry.format());
+          "duplicate magic for " + entry.format().name());
     }
   }
 
@@ -81,9 +84,9 @@ public class KnownMagicsTest {
   @Test
   void testLookupFavorsTheLongestMagic() {
     final byte[] deb = "!<arch>\ndebian-binary junk".getBytes(StandardCharsets.US_ASCII);
-    assertEquals("deb", KnownMagics.formatOf(deb));
+    assertEquals("deb", KnownMagics.formatOf(deb).name());
     final byte[] ar = "!<arch>\nsomething else".getBytes(StandardCharsets.US_ASCII);
-    assertEquals("ar", KnownMagics.formatOf(ar));
+    assertEquals("ar", KnownMagics.formatOf(ar).name());
   }
 
   /** Binary DXF uses control bytes after the ASCII sentinel. */
@@ -92,7 +95,7 @@ public class KnownMagicsTest {
     final byte[] header = "AutoCAD Binary DXF\r\n\u001a\u0000"
         .getBytes(StandardCharsets.US_ASCII);
     assertEquals(22, header.length);
-    assertEquals("dxf", KnownMagics.formatOf(header));
+    assertEquals("dxf", KnownMagics.formatOf(header).name());
     final byte[] content = Arrays.copyOf(header, 30);
     final String encoded = Base64.getEncoder().encodeToString(content);
     final EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
@@ -111,7 +114,7 @@ public class KnownMagicsTest {
   void testDxbPointDrawing() {
     final byte[] header = DXB_HEADER.getBytes(StandardCharsets.US_ASCII);
     assertEquals(19, header.length);
-    assertEquals("dxb", KnownMagics.formatOf(header));
+    assertEquals("dxb", KnownMagics.formatOf(header).name());
     final byte[] drawing = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN)
         .put(header).put((byte) 2).putShort((short) 10).putShort((short) 20)
         .put((byte) 0).array();
@@ -159,7 +162,7 @@ public class KnownMagicsTest {
   @ValueSource(ints = {0, 0x200, 0x400, 0x600, 0x800, 0xc00, 0x1000, 0x1400, 0x1800, 0x1c00})
   void testOpenExrHeaderFlags(int flags) {
     final byte[] header = openExrHeader(flags);
-    assertEquals("exr", KnownMagics.formatOf(header));
+    assertEquals("exr", KnownMagics.formatOf(header).name());
     final String encoded = Base64.getEncoder().encodeToString(header);
     final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
     assertEquals(1, assets.size());
@@ -207,7 +210,7 @@ public class KnownMagicsTest {
     final byte[] stream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN)
         .putInt(0x000006ff).put("sNaPpY".getBytes(StandardCharsets.US_ASCII))
         .putInt(0x000012fe).array();
-    assertEquals("sz", KnownMagics.formatOf(stream));
+    assertEquals("sz", KnownMagics.formatOf(stream).name());
     final String encoded = Base64.getEncoder().encodeToString(stream);
     final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
     assertEquals(1, assets.size());
@@ -245,7 +248,7 @@ public class KnownMagicsTest {
       buffer.putInt(8);
     }
     final byte[] header = buffer.array();
-    assertEquals(EmbeddedAsset.FORMAT_TIFF, KnownMagics.formatOf(header));
+    assertEquals(EmbeddedAsset.FORMAT_TIFF, KnownMagics.formatOf(header).name());
     final String encoded = Base64.getEncoder().encodeToString(header);
     final List<EmbeddedAsset> assets = new CursorAssetDetector().detect(encoded);
     assertEquals(1, assets.size());
@@ -301,39 +304,63 @@ public class KnownMagicsTest {
     assertNull(KnownMagics.formatOf(header));
   }
 
-  /** Every format constant on the record resolves, except the RIFF-carried ones. */
+  /** @return The format constants and media types represented in the signature table. */
+  static Stream<KnownMagics.Format> coreFormats() {
+    return Stream.of(
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_PNG, "image/png"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_JPEG, "image/jpeg"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_GIF, "image/gif"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_PDF, "application/pdf"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_ZIP, "application/zip"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_TIFF, "image/tiff"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_GZIP, "application/gzip"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_SEVEN_ZIP, "application/x-7z-compressed"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_RAR, "application/vnd.rar"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_FLAC, "audio/flac"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_OGG, "application/ogg"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_MIDI, "audio/midi"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_SQLITE, "application/vnd.sqlite3"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_ELF, "application/x-elf"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_PE, "application/vnd.microsoft.portable-executable"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_CLASS, "application/java-vm"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_WOFF, "font/woff"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_WOFF2, "font/woff2"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_MP3, "audio/mpeg"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_OLE2, "application/x-ole-storage"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_ZSTD, "application/zstd"),
+        new KnownMagics.Format(EmbeddedAsset.FORMAT_WASM, "application/wasm"));
+  }
+
+  /**
+   * The signature table includes each non-RIFF format constant and media type.
+   *
+   * @param format The expected identifiers.
+   */
+  @ParameterizedTest
+  @MethodSource("coreFormats")
+  void testEmbeddedAssetConstantsResolve(KnownMagics.Format format) {
+    assertTrue(KnownMagics.ENTRIES.stream().map(KnownMagics.Entry::format)
+        .anyMatch(format::equals));
+  }
+
+  /**
+   * The detector, not the signature table, resolves RIFF form types.
+   *
+   * @param format The RIFF format name.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {EmbeddedAsset.FORMAT_WEBP, EmbeddedAsset.FORMAT_WAV, EmbeddedAsset.FORMAT_AVI})
+  void testRiffFormatsAreNotTableEntries(String format) {
+    assertTrue(KnownMagics.ENTRIES.stream()
+        .noneMatch(entry -> format.equals(entry.format().name())));
+  }
+
+  /** Lookups return the shared identifiers of each matching table entry. */
   @Test
-  void testEmbeddedAssetConstantsResolve() {
-    assertEquals("image/png", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_PNG));
-    assertEquals("image/jpeg", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_JPEG));
-    assertEquals("image/gif", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_GIF));
-    assertEquals("application/pdf", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_PDF));
-    assertEquals("application/zip", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_ZIP));
-    assertEquals("image/tiff", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_TIFF));
-    assertEquals("application/gzip", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_GZIP));
-    assertEquals("application/x-7z-compressed",
-        KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_SEVEN_ZIP));
-    assertEquals("application/vnd.rar", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_RAR));
-    assertEquals("audio/flac", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_FLAC));
-    assertEquals("application/ogg", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_OGG));
-    assertEquals("audio/midi", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_MIDI));
-    assertEquals("application/vnd.sqlite3",
-        KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_SQLITE));
-    assertEquals("application/x-elf", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_ELF));
-    assertEquals("application/vnd.microsoft.portable-executable",
-        KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_PE));
-    assertEquals("application/java-vm", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_CLASS));
-    assertEquals("font/woff", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_WOFF));
-    assertEquals("font/woff2", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_WOFF2));
-    assertEquals("audio/mpeg", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_MP3));
-    assertEquals("application/x-ole-storage",
-        KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_OLE2));
-    assertEquals("application/zstd", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_ZSTD));
-    assertEquals("application/wasm", KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_WASM));
-    // the RIFF-carried formats are resolved by the detector, not by the table
-    assertNull(KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_WEBP));
-    assertNull(KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_WAV));
-    assertNull(KnownMagics.mediaTypeOf(EmbeddedAsset.FORMAT_AVI));
+  void testMatchingFormatAndMediaTypeStayTogether() {
+    for (final KnownMagics.Entry entry : KnownMagics.ENTRIES) {
+      assertSame(entry.format(), KnownMagics.formatOf(entry.magic()));
+    }
   }
 
   /** The table stays clear of prose: no magic under four bytes except the core set. */
@@ -341,10 +368,10 @@ public class KnownMagicsTest {
   void testShortMagicsAreLimitedToTheCoreSet() {
     for (final KnownMagics.Entry entry : KnownMagics.ENTRIES) {
       if (entry.magic().length < 4) {
-        assertTrue(entry.format().equals(EmbeddedAsset.FORMAT_JPEG)
-                || entry.format().equals(EmbeddedAsset.FORMAT_GZIP)
-                || entry.format().equals(EmbeddedAsset.FORMAT_MP3),
-            "unexpected short magic for " + entry.format());
+        assertTrue(entry.format().name().equals(EmbeddedAsset.FORMAT_JPEG)
+                || entry.format().name().equals(EmbeddedAsset.FORMAT_GZIP)
+                || entry.format().name().equals(EmbeddedAsset.FORMAT_MP3),
+            "unexpected short magic for " + entry.format().name());
       }
     }
   }
