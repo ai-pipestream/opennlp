@@ -25,8 +25,9 @@
 			<code>PiiAnnotator</code> writes the <code>opennlp:pii</code> layer from a
 			<code>PiiExtractor</code>; the built-in <code>CursorPiiExtractor</code>
 			recognizes email addresses, phone numbers, IBANs, and payment card
-			numbers, each with a type constant and a normalized form. Numeric types
-			are checksum validated, and an IBAN candidate must additionally match the
+			numbers, each with a type constant and a normalized form. IBANs and card
+			numbers are checksum validated. Phone candidates use formatting and
+			length checks. An IBAN candidate must also match the
 			ISO 13616 registry: a registered country code and exactly the length that
 			country assigns, so a checksum-passing run with an unknown country or a
 			wrong length is not reported. Email domains must end in an
@@ -150,6 +151,22 @@ Document cards = new PiiAnnotator(PiiPacks.payment())
     .annotate(Document.of("Card 8100 0000 0000 0028."));
 String cardReceipt = Masker.mask(cards, PiiAnnotator.PII, MaskPolicies.byType());
 // "Card **** **** **** 0028."]]>
+			</programlisting>
+		</para>
+		<para>
+			IBANs are recognized in compact form or with spaces between groups
+			after the 4-character country/check-digit header. Normalization removes
+			those spaces; masking covers the complete original span. Country, length
+			and checksum checks do not establish whether an account exists.
+			<code>IbanValidationTest</code> checks this example:
+			<programlisting language="java"><![CDATA[
+String account = "DE89 3704 0044 0532 0130 00";
+Document transfer = new PiiAnnotator(PiiPacks.payment())
+    .annotate(Document.of("Wire " + account + "; reference 1234."));
+String maskedTransfer = Masker.mask(transfer, PiiAnnotator.PII, '*');
+// "Wire " + "*".repeat(account.length()) + "; reference 1234."
+String replacedTransfer = new Pseudonymizer().rewrite(transfer).text();
+// "Wire IBAN-1; reference 1234."]]>
 			</programlisting>
 		</para>
 		<para>

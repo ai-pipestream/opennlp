@@ -427,14 +427,18 @@ public class CursorPiiExtractorTest {
   }
 
   /**
-   * Registry lengths accept the extremes and a letter-bearing middle: Norway is the
-   * shortest registered IBAN at 15 and Malta the longest at 31.
+   * Checks registered lengths from Norway's 15 characters through Russia's 33.
+   *
+   * @param text The text containing the IBAN.
+   * @param normalized The compact number.
    */
   @ParameterizedTest
   @CsvSource({
       "wire to NO9386011117947 today, NO9386011117947",
       "wire to MT84MALT011000012345MTLCAST001S today, MT84MALT011000012345MTLCAST001S",
-      "wire to FR1420041010050500013M02606 today, FR1420041010050500013M02606"})
+      "wire to FR1420041010050500013M02606 today, FR1420041010050500013M02606",
+      "wire to LC55HEMM000100010012001200023015, LC55HEMM000100010012001200023015",
+      "wire to RU0304452522540817810538091310419, RU0304452522540817810538091310419"})
   void testIbanRegistryLengthExtremes(String text, String normalized) {
     final List<PiiMention> mentions = extractor.extract(text);
     Assertions.assertEquals(1, mentions.size());

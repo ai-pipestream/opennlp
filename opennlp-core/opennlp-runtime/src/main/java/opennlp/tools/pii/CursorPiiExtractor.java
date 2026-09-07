@@ -258,9 +258,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds IBANs: a run of uppercase letters and digits in optional space-separated
-   * groups, accepted at the group boundary whose length equals the country's
-   * {@link IbanLengths registry entry} and whose mod-97 check passes.
+   * Finds uppercase IBAN candidates with a registered country/length and a passing
+   * MOD 97 checksum. Spaces may separate groups after the 4-character header.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -453,16 +452,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Computes the mod-97 remainder that
-   * <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
-   * prescribes for a compact IBAN candidate. The four leading characters are read last,
-   * which is the rearrangement the check prescribes.
+   * Computes the <a href="https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB%20EN/Bottom%20Menu/IBAN/Communique">
+   * MOD 97 remainder</a> after moving the 4-character header to the end and converting
+   * uppercase letters to decimal values 10 through 35.
    *
    * @param compact The candidate characters without spaces, uppercase letters and digits
    *                only.
-   * @param length The number of leading characters that form the candidate; must be
-   *               longer than the four characters that are rotated.
-   * @return The remainder; {@code 1} for a valid IBAN.
+   * @param length The candidate length, at least 5.
+   * @return The remainder; {@code 1} indicates a passing checksum.
    */
   private int mod97(CharSequence compact, int length) {
     int remainder = 0;

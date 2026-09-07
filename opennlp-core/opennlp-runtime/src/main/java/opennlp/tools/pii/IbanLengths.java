@@ -18,14 +18,10 @@
 package opennlp.tools.pii;
 
 /**
- * The country entries of the
+ * Country codes and IBAN lengths from the
  * <a href="https://www.swift.com/standards/data-standards/iban-international-bank-account-number">
  * ISO 13616 IBAN registry</a>. Country-length projection SHA-256:
  * {@code 0eb634a364ca9ba6b2f5541d3fcd18ff63300e5a027c634f0b8db83af5e994be}.
- * The registry defines which two-letter country codes issue IBANs and the exact length
- * each country assigns. The mod-97 check alone passes about one in 97 random
- * candidates, so validating the country and its registered length is what keeps
- * arbitrary letter-digit runs from being reported as IBANs.
  */
 final class IbanLengths {
 
@@ -53,8 +49,8 @@ final class IbanLengths {
     }
   }
 
+  /** Prevents construction. */
   private IbanLengths() {
-    // This class holds static lookups only and is never instantiated.
   }
 
   /**

@@ -52,29 +52,10 @@ class CardPrefixTest {
    */
   private static Stream<Arguments> formats() {
     return NUMBERS.stream().flatMap(number -> Stream.of(number,
-        grouped(number, 4, ' '), grouped(number, 4, '-'),
-        grouped(number, 1, ' '), grouped(number, 1, '-'),
+        PiiTestSupport.grouped(number, 4, ' '), PiiTestSupport.grouped(number, 4, '-'),
+        PiiTestSupport.grouped(number, 1, ' '), PiiTestSupport.grouped(number, 1, '-'),
         "8-" + number.substring(1)).flatMap(formatted -> Stream.of("", "😀 Card: ")
             .map(prefix -> Arguments.of(number, formatted, prefix))));
-  }
-
-  /**
-   * Inserts one separator after each complete group, without a trailing separator.
-   *
-   * @param number The compact number.
-   * @param size The number of digits in each group.
-   * @param separator The character between groups.
-   * @return The formatted number.
-   */
-  private static String grouped(String number, int size, char separator) {
-    final StringBuilder result = new StringBuilder();
-    for (int index = 0; index < number.length(); index++) {
-      if (index > 0 && index % size == 0) {
-        result.append(separator);
-      }
-      result.append(number.charAt(index));
-    }
-    return result.toString();
   }
 
   /**
@@ -146,7 +127,7 @@ class CardPrefixTest {
     final String number = "8" + digit + "0".repeat(12) + "2" + check;
     Assertions.assertTrue(Luhn.valid(number, number.length()));
     Assertions.assertTrue(extractor.extract(number).isEmpty());
-    Assertions.assertTrue(extractor.extract(grouped(number, 4, ' ')).isEmpty());
+    Assertions.assertTrue(extractor.extract(PiiTestSupport.grouped(number, 4, ' ')).isEmpty());
   }
 
   /**
