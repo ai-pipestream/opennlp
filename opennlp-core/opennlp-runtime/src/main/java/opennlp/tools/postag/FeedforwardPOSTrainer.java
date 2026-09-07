@@ -34,20 +34,20 @@ import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Trains the {@link FeedforwardPOSModel} with plain array arithmetic inside the JVM: one
+ * Trains the {@link FeedforwardPOSModel} with array arithmetic inside the JVM: one
  * example per token with gold tag history, minibatch AdaGrad over a softmax
  * cross-entropy loss, cube activation, and inverted dropout on the hidden layer.
  *
  * <p>Words and suffixes below their frequency cutoffs share learned unknown embeddings;
  * positions outside the sentence share a learned padding embedding. Training is
- * deterministic for a fixed {@link Settings#seed()} on a given platform and JVM: the
- * optimization computes through {@link Math}, whose {@code exp}, {@code sqrt}, and
- * {@code log} may differ in the last ulp between platforms.</p>
+ * deterministic for a fixed {@link Settings#seed()} on a given platform and JVM.
+ * {@link Math#exp(double)}, {@link Math#sqrt(double)} and {@link Math#log(double)}
+ * can produce small numerical differences between platforms.</p>
  *
  * <p>Pretrained word vectors are an opt-in through
  * {@link #train(ObjectStream, Settings, Function)}: the vectors of the words seen in
- * training extend the input layer as a frozen window block and are stored inside the
- * model, so the resulting model infers without any embedding component.</p>
+ * training extend the input layer and are stored in the model without being updated.
+ * Tagging requires no external vector source.</p>
  *
  * @since 3.0.0
  */
@@ -61,8 +61,8 @@ public final class FeedforwardPOSTrainer {
   private static final List<String> SPECIAL_SYMBOLS =
       List.of(FeedforwardPOSModel.UNKNOWN, FeedforwardPOSModel.ABSENT);
 
+  /** Prevents construction of the training utility. */
   private FeedforwardPOSTrainer() {
-    // This class only exposes static training methods and is never instantiated.
   }
 
   /**
@@ -72,8 +72,8 @@ public final class FeedforwardPOSTrainer {
    * @param hiddenSize The hidden layer width. Must be positive.
    * @param epochs The number of passes over the examples. Must be positive.
    * @param batchSize The minibatch size. Must be positive.
-   * @param learningRate The AdaGrad step size. Must be positive.
-   * @param l2 The L2 penalty applied to the dense weights. Must not be negative.
+   * @param learningRate The AdaGrad step size. Must be finite and positive.
+   * @param l2 The L2 penalty applied to the dense weights. Must be finite and non-negative.
    * @param dropout The hidden dropout probability. Must be in {@code [0, 1)}.
    * @param wordCutoff The minimum frequency for a word to get its own embedding. Must
    *                   not be negative.
@@ -104,11 +104,11 @@ public final class FeedforwardPOSTrainer {
       if (batchSize <= 0) {
         throw new IllegalArgumentException("batchSize must be positive: " + batchSize);
       }
-      if (learningRate <= 0.0) {
-        throw new IllegalArgumentException("learningRate must be positive: " + learningRate);
+      if (!Double.isFinite(learningRate) || learningRate <= 0.0) {
+        throw new IllegalArgumentException("learningRate must be finite and positive: " + learningRate);
       }
-      if (l2 < 0.0) {
-        throw new IllegalArgumentException("l2 must not be negative: " + l2);
+      if (!Double.isFinite(l2) || l2 < 0.0) {
+        throw new IllegalArgumentException("l2 must be finite and non-negative: " + l2);
       }
       if (!(dropout >= 0.0 && dropout < 1.0)) {
         throw new IllegalArgumentException("dropout must be in [0, 1): " + dropout);
@@ -138,6 +138,7 @@ public final class FeedforwardPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null} or the
    *         samples contain no token.
+   * @throws IllegalStateException If training produces non-finite values.
    */
   public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
       Settings settings) throws IOException {
@@ -145,23 +146,20 @@ public final class FeedforwardPOSTrainer {
   }
 
   /**
-   * Trains a model from POS samples with pretrained word vectors extending the input
-   * layer. For every distinct normalized (lowercased) training word the function is
-   * asked once for a vector; {@code null} means the word has none. The returned
-   * vectors must all share one length, they are never updated by training, and the
-   * collected slice is stored inside the model, so tagging later needs no embedding
-   * component and a word without a stored vector scores the block as zeros.
+   * Trains with pretrained vectors for normalized training words. The source is called
+   * once per distinct normalized word; {@code null} means no vector. Training copies
+   * the vectors without updating them and stores them in the model.
    *
    * @param samples The training samples. Must not be {@code null}.
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source consulted at training time. Must not be
    *                    {@code null}; must return vectors of one consistent positive
-   *                    length and a vector for at least one training word.
-   * @return A trained {@link FeedforwardPOSModel} carrying the vector block. Never
-   *         {@code null}.
+   *                    length, only finite components, and a vector for at least one training word.
+   * @return A trained model with pretrained vectors.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException If training produces non-finite values.
    */
   public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors) throws IOException {
@@ -172,26 +170,22 @@ public final class FeedforwardPOSTrainer {
   }
 
   /**
-   * Trains a model from POS samples with pretrained word vectors, storing vectors for
-   * the words of an additional lexicon besides the training words. Training itself is
-   * unchanged by the lexicon: the block weights are learned over the vector space from
-   * the training words alone, and a lexicon word's row is only read when a tagged
-   * sentence contains that word. The lexicon therefore widens tagging-time coverage to
-   * words never seen in training, which would otherwise score the block as zeros.
+   * Trains with pretrained vectors and stores vectors for additional words. The
+   * lexicon extends vector lookup at inference but does not supply training examples.
    *
    * @param samples The training samples. Must not be {@code null}.
    * @param settings The hyperparameters. Must not be {@code null}.
    * @param wordVectors The word vector source consulted at training time. Must not be
    *                    {@code null}; must return vectors of one consistent positive
-   *                    length and a vector for at least one training word.
+   *                    length, only finite components, and a vector for at least one training word.
    * @param lexicon Additional words to store vectors for, normalized like the training
    *                words. Must not be {@code null} or contain {@code null}; words the
    *                source has no vector for are skipped.
-   * @return A trained {@link FeedforwardPOSModel} carrying the vector block. Never
-   *         {@code null}.
+   * @return A trained model with pretrained vectors.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
    *         samples contain no token, or {@code wordVectors} violates its contract.
+   * @throws IllegalStateException If training produces non-finite values.
    */
   public static FeedforwardPOSModel train(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -206,7 +200,7 @@ public final class FeedforwardPOSTrainer {
   }
 
   /**
-   * The shared training path behind both public entry points.
+   * Trains from samples, with optional vectors and additional words.
    *
    * @param samples The training samples. Must not be {@code null}.
    * @param settings The hyperparameters. Must not be {@code null}.
@@ -218,6 +212,7 @@ public final class FeedforwardPOSTrainer {
    * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
    *         {@code null}, the samples contain no token, or {@code wordVectors} violates
    *         its contract.
+   * @throws IllegalStateException If training produces non-finite values.
    */
   private static FeedforwardPOSModel trainWith(ObjectStream<POSSample> samples,
       Settings settings, Function<CharSequence, float[]> wordVectors,
@@ -264,7 +259,7 @@ public final class FeedforwardPOSTrainer {
 
   /**
    * Builds the word, suffix, shape, and tag vocabularies from the corpus, assigns each
-   * surviving symbol an embedding row, and creates a model with randomly initialized
+   * retained symbol an embedding row, and creates a model with randomly initialized
    * weights that {@link #optimize} then trains in place.
    *
    * @param corpus The non-empty training samples.
@@ -273,7 +268,8 @@ public final class FeedforwardPOSTrainer {
    * @param lexicon Additional words to store vectors for, or {@code null} for none.
    * @return An untrained model with all vocabularies in place. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code wordVectors} returns an empty
-   *         vector, vectors of differing lengths, or no vector for any training word,
+   *         vector, a non-finite component, vectors of differing lengths,
+   *         or no vector for any training word,
    *         or if {@code lexicon} contains {@code null}.
    */
   private static FeedforwardPOSModel initialize(List<POSSample> corpus,
@@ -344,16 +340,7 @@ public final class FeedforwardPOSTrainer {
         if (vector == null) {
           continue;
         }
-        if (pretrainedSize == 0) {
-          if (vector.length == 0) {
-            throw new IllegalArgumentException(
-                "wordVectors returned an empty vector for: " + word);
-          }
-          pretrainedSize = vector.length;
-        } else if (vector.length != pretrainedSize) {
-          throw new IllegalArgumentException("wordVectors returned a vector of length "
-              + vector.length + " after length " + pretrainedSize + " for: " + word);
-        }
+        pretrainedSize = validateVector(vector, pretrainedSize, word);
         pretrainedIds.put(word, pretrainedVectors.size());
         pretrainedVectors.add(vector.clone());
       }
@@ -374,10 +361,7 @@ public final class FeedforwardPOSTrainer {
           if (vector == null) {
             continue;
           }
-          if (vector.length != pretrainedSize) {
-            throw new IllegalArgumentException("wordVectors returned a vector of length "
-                + vector.length + " after length " + pretrainedSize + " for: " + word);
-          }
+          validateVector(vector, pretrainedSize, word);
           pretrainedIds.put(word, pretrainedVectors.size());
           pretrainedVectors.add(vector.clone());
         }
@@ -399,22 +383,48 @@ public final class FeedforwardPOSTrainer {
   }
 
   /**
+   * Checks the dimensions and finite components of a supplied vector.
+   *
+   * @param vector The non-null vector from the source.
+   * @param expectedSize The established dimension, or zero for the first vector.
+   * @param word The normalized word for error messages.
+   * @return The vector dimension.
+   * @throws IllegalArgumentException If the vector is empty, has a different length,
+   *         or contains a non-finite component.
+   */
+  private static int validateVector(float[] vector, int expectedSize, String word) {
+    if (vector.length == 0) {
+      throw new IllegalArgumentException("wordVectors returned an empty vector for: " + word);
+    }
+    if (expectedSize != 0 && vector.length != expectedSize) {
+      throw new IllegalArgumentException("wordVectors returned a vector of length "
+          + vector.length + " after length " + expectedSize + " for: " + word);
+    }
+    for (int i = 0; i < vector.length; i++) {
+      if (!Float.isFinite(vector[i])) {
+        throw new IllegalArgumentException("wordVectors returned a non-finite value at index "
+            + i + " for: " + word);
+      }
+    }
+    return vector.length;
+  }
+
+  /**
    * Trains the model weights in place with minibatch AdaGrad over a softmax
    * cross-entropy loss, using the cube activation on the hidden layer and inverted
    * dropout during training. Each epoch shuffles the example order with the seeded
    * random generator, so the whole optimization is reproducible for a fixed seed on a
    * given platform and JVM.
    *
-   * @param model The freshly initialized model whose weight arrays are updated.
+   * @param model The initialized model to train in place.
    * @param featureList The embedding row indices of every training example.
    * @param pretrainedList The pretrained vector rows of every training example, or
-   *                       {@code null} when the model carries no vector block. The
-   *                       vectors themselves stay frozen: their input deltas are
-   *                       simply never applied anywhere, while the hidden weights
-   *                       over the block train normally.
+   *                       {@code null} without pretrained vectors. The vectors remain
+   *                       fixed while the hidden weights over them are trained.
    * @param goldList The gold output index of every training example, aligned with
    *                 {@code featureList}.
    * @param settings The hyperparameters controlling the optimization.
+   * @throws IllegalStateException If a gradient, accumulator or updated weight is non-finite.
    */
   private static void optimize(FeedforwardPOSModel model, List<int[]> featureList,
       List<int[]> pretrainedList, List<Integer> goldList, Settings settings) {
@@ -586,8 +596,8 @@ public final class FeedforwardPOSTrainer {
           for (int d = 0; d < embeddingSize; d++) {
             final double gradient = gradientRow[d] / batch;
             accumulatorRow[d] += gradient * gradient;
-            embeddingRow[d] -= settings.learningRate() * gradient
-                / (Math.sqrt(accumulatorRow[d]) + ADAGRAD_EPSILON);
+            embeddingRow[d] = updateWeight(embeddingRow[d], gradient,
+                accumulatorRow[d], settings.learningRate());
           }
         }
       }
@@ -605,6 +615,7 @@ public final class FeedforwardPOSTrainer {
    * @param accumulators The running sums of squared gradients per weight.
    * @param batch The number of examples in the current minibatch.
    * @param settings The hyperparameters providing the learning rate and L2 penalty.
+   * @throws IllegalStateException If a gradient, accumulator or updated weight is non-finite.
    */
   private static void update(float[][] weights, double[][] gradients,
       double[][] accumulators, int batch, Settings settings) {
@@ -615,30 +626,51 @@ public final class FeedforwardPOSTrainer {
       for (int c = 0; c < weightRow.length; c++) {
         final double gradient = gradientRow[c] / batch + settings.l2() * weightRow[c];
         accumulatorRow[c] += gradient * gradient;
-        weightRow[c] -= settings.learningRate() * gradient
-            / (Math.sqrt(accumulatorRow[c]) + ADAGRAD_EPSILON);
+        weightRow[c] = updateWeight(weightRow[c], gradient,
+            accumulatorRow[c], settings.learningRate());
       }
     }
   }
 
   /**
    * Applies one AdaGrad step to a bias vector, averaging the accumulated batch
-   * gradient and scaling by the per-weight adaptive rate. Biases carry no L2 penalty.
+   * gradient and scaling by the per-weight adaptive rate. Biases have no L2 penalty.
    *
    * @param weights The bias vector to update in place.
    * @param gradients The summed gradients of the current minibatch.
    * @param accumulators The running sums of squared gradients per weight.
    * @param batch The number of examples in the current minibatch.
    * @param settings The hyperparameters providing the learning rate.
+   * @throws IllegalStateException If a gradient, accumulator or updated weight is non-finite.
    */
   private static void updateVector(float[] weights, double[] gradients,
       double[] accumulators, int batch, Settings settings) {
     for (int i = 0; i < weights.length; i++) {
       final double gradient = gradients[i] / batch;
       accumulators[i] += gradient * gradient;
-      weights[i] -= settings.learningRate() * gradient
-          / (Math.sqrt(accumulators[i]) + ADAGRAD_EPSILON);
+      weights[i] = updateWeight(weights[i], gradient, accumulators[i], settings.learningRate());
     }
+  }
+
+  /**
+   * Checks an AdaGrad update for finite inputs and output.
+   *
+   * @param weight The current weight.
+   * @param gradient The gradient for this update.
+   * @param accumulator The sum of squared gradients, including this update.
+   * @param learningRate The configured step size.
+   * @return The updated weight.
+   * @throws IllegalStateException If the gradient, accumulator or updated weight is non-finite.
+   */
+  private static float updateWeight(float weight, double gradient, double accumulator,
+      double learningRate) {
+    final float updated = (float) (weight - learningRate * gradient
+        / (Math.sqrt(accumulator) + ADAGRAD_EPSILON));
+    if (!Double.isFinite(gradient) || !Double.isFinite(accumulator) || !Float.isFinite(updated)) {
+      throw new IllegalStateException(
+          "training produced non-finite values; check learningRate, l2 and word vectors");
+    }
+    return updated;
   }
 
   /**

@@ -365,6 +365,13 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
 		<para>
+		The learning rate must be finite and positive; the L2 penalty must be finite
+		and non-negative. Invalid settings cause <code>IllegalArgumentException</code>.
+		If a gradient, optimizer accumulator or updated weight becomes non-finite,
+		training stops with <code>IllegalStateException</code> and does not return a model.
+		Check the learning rate, L2 penalty and vector magnitudes before trying again.
+		</para>
+		<para>
 		Pretrained word vectors are an opt-in: an overload of <code>train</code> takes a
 		<code>java.util.function.Function</code> that is asked once per distinct
 		lowercased training word and returns its vector, or <code>null</code> for a word
@@ -387,6 +394,13 @@ FeedforwardPOSModel vectored =
 FeedforwardPOSModel withLexicon =
     FeedforwardPOSTrainer.train(sampleStream, settings, wordVectors, lexiconWords);]]>
 		</programlisting>
+		</para>
+		<para>
+		Supplied vectors must have a consistent positive length and finite components,
+		including vectors for additional words. Invalid vectors cause
+		<code>IllegalArgumentException</code>; the message identifies the word and, for
+		a non-finite value, the component index. Vectors are copied without clipping
+		or normalization, and training does not modify the supplied arrays.
 		</para>
 		<para>
 		How confident was the tagger? <code>topKSequences</code> returns the greedy
