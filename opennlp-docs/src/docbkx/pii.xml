@@ -165,8 +165,7 @@ String masked = Masker.mask(addresses, PiiAnnotator.PII, '*');
 			<listitem>
 				<para>
 					<code>SecretsPiiExtractor</code>: AWS access key identifiers,
-					GitHub tokens from their current minimum lengths through the
-					255-character scanner limit, JWT candidates, and URL credentials.
+					GitHub tokens, JWT candidates, and URL credentials.
 					Token boundaries use Unicode letters and digits, and exclude
 					adjoining underscores. URL schemes start with an ASCII letter and
 					may include digits, plus signs, hyphens and dots. Usernames and
@@ -178,6 +177,24 @@ Document credentials = new PiiAnnotator(PiiPacks.secrets()).annotate(Document.of
     "Fetch s3://user:demo%40pass@example.invalid/model.bin"));
 String masked = Masker.mask(credentials, PiiAnnotator.PII, '*');
 // "Fetch s3://****************@example.invalid/model.bin"]]>
+					</programlisting>
+					GitHub installation tokens start with <code>ghs_</code> and have
+					at least 36 body characters: ASCII letters, digits, underscores,
+					hyphens and dots. The scanner reads the complete token without a
+					fixed maximum length, following
+					<ulink url="https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/">GitHub's matching guidance</ulink>.
+					Terminal dots are excluded as sentence punctuation. Token contents,
+					checksums and active status are not verified. Other supported GitHub
+					prefixes accept ASCII letters, digits and underscores, with a
+					255-character scanner limit. Their body minimum is 36 characters,
+					or 82 for <code>github_pat_</code>.
+					This installation-token example uses synthetic signature bytes:
+					<programlisting language="java"><![CDATA[
+String installationToken = "ghs_12345_eyJhbGciOiJIUzI1NiJ9.e30." + "A-_".repeat(160);
+Document credentials = new PiiAnnotator(PiiPacks.secrets()).annotate(
+    Document.of("Bearer " + installationToken));
+String masked = Masker.mask(credentials, PiiAnnotator.PII, '*');
+// "Bearer " + "*".repeat(installationToken.length())]]>
 					</programlisting>
 					JWT detection requires three non-empty, unpadded base64url segments
 					with valid lengths and zero unused bits. The complete UTF-8 header

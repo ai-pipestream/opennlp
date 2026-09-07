@@ -71,16 +71,16 @@ public class SecretsPiiExtractorTest {
   /** The header of {@code {"alg":"RS256","kid":"abc123"}} in base64url. */
   private static final String RS256_HEADER = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImFiYzEyMyJ9";
 
-  /** The header of {@code {"typ":"JWT"}}, which carries no algorithm. */
+  /** The header of {@code {"typ":"JWT"}}, without an algorithm. */
   private static final String NO_ALGORITHM_HEADER = "eyJ0eXAiOiJKV1QifQ";
 
-  /** The header of {@code {"notalg":"HS256"}}, whose member only ends in those letters. */
+  /** The header of {@code {"notalg":"HS256"}}, without an exact algorithm member. */
   private static final String NOTALG_HEADER = "eyJub3RhbGciOiJIUzI1NiJ9";
 
-  /** The header of {@code {"algorithm":"HS256"}}, whose member only begins with them. */
+  /** The header of {@code {"algorithm":"HS256"}}, without an exact algorithm member. */
   private static final String ALGORITHM_HEADER = "eyJhbGdvcml0aG0iOiJIUzI1NiJ9";
 
-  /** The header of <code>{"alg" : "HS256"}</code>, spaced out as JSON permits. */
+  /** The header of <code>{"alg" : "HS256"}</code>, with JSON whitespace. */
   private static final String SPACED_HEADER = "eyJhbGciIDogIkhTMjU2In0";
 
   private static final String PAYLOAD =
@@ -166,6 +166,41 @@ public class SecretsPiiExtractorTest {
         () -> "read " + text.reads + " characters from an input of " + text.length());
   }
 
+  /**
+   * Checks complete installation-token extraction with linear character reads.
+   *
+   * @param length The number of body groups.
+   */
+  @ParameterizedTest
+  @ValueSource(ints = {128, 4096, 65536})
+  void testLongGithubInstallationReadCount(int length) {
+    final String value = "ghs_" + "a-_b.c".repeat(length);
+    final CountingCharSequence text = new CountingCharSequence(value);
+    Assertions.assertEquals(List.of(value),
+        extractor.extract(text).stream().map(PiiMention::normalized).toList());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
+  /**
+   * Checks that a rejected run is not scanned again from each embedded prefix.
+   *
+   * @param group The repeated installation-token prefix and separator.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"ghs_.", "ghs_-", "ghs_a."})
+  void testInvalidGithubInstallationReadCount(String group) {
+    final CountingCharSequence text = new CountingCharSequence(group.repeat(4096) + "é");
+    Assertions.assertTrue(extractor.extract(text).isEmpty());
+    Assertions.assertTrue(text.reads <= text.length() * 40,
+        () -> "read " + text.reads + " characters from an input of " + text.length());
+  }
+
+  /**
+   * Checks supported AWS key prefixes, normalization and exact spans.
+   *
+   * @param text The synthetic access key identifier.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "AKIAIOSFODNN7EXAMPLE",
@@ -183,6 +218,11 @@ public class SecretsPiiExtractorTest {
     Assertions.assertEquals(text.length(), mentions.get(0).span().getEnd());
   }
 
+  /**
+   * Rejects invalid key lengths, alphabets and other AWS identifier prefixes.
+   *
+   * @param text The invalid key candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "AKIAIOSFODNN7EXAMPL",
@@ -202,6 +242,7 @@ public class SecretsPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_AWS_ACCESS_KEY.equals(m.type())), text);
   }
 
+  /** Checks the original span of a key identifier within a sentence. */
   @Test
   void testAwsAccessKeySpanInSentence() {
     final String text = "Rotate AKIAIOSFODNN7EXAMPLE right away.";
@@ -212,6 +253,11 @@ public class SecretsPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /**
+   * Checks all supported short GitHub token prefixes.
+   *
+   * @param text The synthetic token.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
@@ -228,11 +274,11 @@ public class SecretsPiiExtractorTest {
     Assertions.assertEquals(text, mentions.get(0).normalized());
   }
 
+  /** Checks a fine-grained token at the scanner's minimum length. */
   @Test
   void testAcceptsFineGrainedGithubToken() {
     final String token = "github_pat_11ABCDEFG0abcdefghijkl_"
         + "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW";
-    // The documented form is the 11-character prefix and 82 body characters.
     Assertions.assertEquals(93, token.length());
     final List<PiiMention> mentions = extractor.extract("token: " + token);
 
@@ -242,30 +288,39 @@ public class SecretsPiiExtractorTest {
   }
 
   /**
-   * GitHub explicitly reserves the right to change token lengths and asks scanners to
-   * accept the documented alphabet up to 255 characters.
+   * Checks variable-length bodies containing underscores.
+   *
+   * @param prefix The token prefix.
+   * @param minimum The scanner's minimum body length for the prefix.
    */
-  @Test
-  void testAcceptsVariableLengthGithubTokens() {
-    final String legacy = "ghp_" + "a".repeat(36) + "_" + "B".repeat(24);
-    final String fineGrained = "github_pat_" + "a".repeat(82) + "_" + "7".repeat(40);
-
-    Assertions.assertEquals(legacy,
-        extractor.extract(legacy).get(0).normalized());
-    Assertions.assertEquals(fineGrained,
-        extractor.extract(fineGrained).get(0).normalized());
+  @ParameterizedTest
+  @CsvSource({"ghp_,36", "gho_,36", "ghu_,36", "ghr_,36", "github_pat_,82"})
+  void testAcceptsVariableLengthGithubTokens(String prefix, int minimum) {
+    final String value = prefix + "a".repeat(minimum) + "_" + "B".repeat(24);
+    Assertions.assertEquals(value, extractor.extract(value).get(0).normalized());
   }
 
-  @Test
-  void testGithubTokenMaximumLengthBoundary() {
-    final String accepted = "ghp_" + "a".repeat(251);
-    final String rejected = "ghp_" + "a".repeat(252);
+  /**
+   * Checks the scanner limit for non-installation token prefixes.
+   *
+   * @param prefix The token prefix.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"ghp_", "gho_", "ghu_", "ghr_", "github_pat_"})
+  void testGithubTokenMaximumLengthBoundary(String prefix) {
+    final String accepted = prefix + "a".repeat(255 - prefix.length());
+    final String rejected = accepted + "a";
 
     Assertions.assertEquals(255, accepted.length());
     Assertions.assertEquals(accepted, extractor.extract(accepted).get(0).normalized());
     Assertions.assertTrue(extractor.extract(rejected).isEmpty());
   }
 
+  /**
+   * Rejects short bodies, incorrect alphabets and unknown or embedded prefixes.
+   *
+   * @param text The invalid token candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "ghp_1234567890abcdefghijklmnopqrstuvwxy",
@@ -281,6 +336,7 @@ public class SecretsPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_GITHUB_TOKEN.equals(m.type())), text);
   }
 
+  /** Checks a complete token inside an authorization header. */
   @Test
   void testAcceptsJsonWebToken() {
     final String token = HS256_HEADER + "." + PAYLOAD + "." + SIGNATURE;
@@ -292,8 +348,9 @@ public class SecretsPiiExtractorTest {
   }
 
   /**
-   * Verifies that requiring the colon of the {@code alg} member does not reject a header
-   * whose JSON is spaced out, which the grammar allows.
+   * Checks algorithm values and permitted JSON whitespace.
+   *
+   * @param header The base64url header.
    */
   @ParameterizedTest
   @ValueSource(strings = {HS256_HEADER, RS256_HEADER, SPACED_HEADER})
@@ -309,10 +366,9 @@ public class SecretsPiiExtractorTest {
   }
 
   /**
-   * Verifies the near misses that a plain three-segment test would accept: a header
-   * without the algorithm parameter that RFC 7515 requires, a header whose member name
-   * merely contains those three letters, a header that is not base64url of a JSON object,
-   * and a token missing a segment.
+   * Rejects headers without an algorithm and incomplete or embedded compact tokens.
+   *
+   * @param text The invalid token candidate.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -331,6 +387,12 @@ public class SecretsPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_JWT.equals(m.type())), text);
   }
 
+  /**
+   * Checks complete userinfo spans across URL schemes and encoded passwords.
+   *
+   * @param text The URL containing credentials.
+   * @param credential The expected userinfo text.
+   */
   @ParameterizedTest
   @CsvSource({
       "https://user:secret@example.com/path, user:secret",
@@ -350,6 +412,11 @@ public class SecretsPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /**
+   * Rejects URLs without complete credentials or a valid scheme.
+   *
+   * @param text The URL or incomplete credential candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "https://example.com/path",
@@ -366,6 +433,7 @@ public class SecretsPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_URL_CREDENTIAL.equals(m.type())), text);
   }
 
+  /** Checks that containing URL credentials take precedence over embedded tokens. */
   @Test
   void testUrlCredentialContainingATokenIsReportedOnce() {
     final String text = "https://oauth2:ghp_1234567890abcdefghijklmnopqrstuvwxyz@github.com/x.git";
@@ -377,6 +445,7 @@ public class SecretsPiiExtractorTest {
         mentions.get(0).normalized());
   }
 
+  /** Checks independent scans produce ordered, non-overlapping mentions. */
   @Test
   void testFindsSeveralSecretsInOneText() {
     final String text = "key AKIAIOSFODNN7EXAMPLE token ghp_1234567890abcdefghijklmnopqrstuvwxyz "
@@ -394,6 +463,7 @@ public class SecretsPiiExtractorTest {
     }
   }
 
+  /** Checks that scanning continues after the first token. */
   @Test
   void testTwoTokensSideBySideAreBothFound() {
     final String text = "ghp_1234567890abcdefghijklmnopqrstuvwxyz "
@@ -401,6 +471,7 @@ public class SecretsPiiExtractorTest {
     Assertions.assertEquals(2, extractor.extract(text).size());
   }
 
+  /** Checks extraction can be restricted to selected credential types. */
   @Test
   void testTypeSubsetLimitsWhatIsReported() {
     final String text = "AKIAIOSFODNN7EXAMPLE and https://u:p@example.com/";
@@ -413,6 +484,11 @@ public class SecretsPiiExtractorTest {
             .stream().map(PiiMention::type).toList());
   }
 
+  /**
+   * Checks empty text, ordinary prose and incomplete prefixes.
+   *
+   * @param text The text without a supported credential.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "nothing to see here",
@@ -426,6 +502,7 @@ public class SecretsPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks constructor and extraction argument validation. */
   @Test
   void testRejectsUnrecognizedTypeAndMissingArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
