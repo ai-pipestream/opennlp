@@ -79,6 +79,9 @@ import java.util.Set;
  */
 final class KnownMagics {
 
+  private static final String MPX_FORMAT = "mpx";
+  private static final String MPX_MEDIA_TYPE = "application/x-project";
+
   /**
    * The format name and media type identified by a header.
    *
@@ -158,8 +161,9 @@ final class KnownMagics {
           "pem-key", "application/x-x509-key"),
       // Binary DXF sentinel ends with CR, LF, SUB, and NUL bytes.
       e("4175746f4341442042696e617279204458460d0a1a00", "dxf", "image/vnd.dxf"),
-      // MPX,Microsoft Project fo
-      e("4d50582c4d6963726f736f66742050726f6a65637420666f", "mpx", "application/x-project"),
+      // MPX followed by a comma or semicolon list separator.
+      e("4d50582c", MPX_FORMAT, MPX_MEDIA_TYPE),
+      e("4d50583b", MPX_FORMAT, MPX_MEDIA_TYPE),
       // %!PS-Adobe-3.0 EPSF-3.0
       e("252150532d41646f62652d332e3020455053462d332e30", "ps", "application/postscript"),
       // -----BEGIN DSA KEY-----

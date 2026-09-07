@@ -66,6 +66,15 @@
 			This does not validate message sections or establish support for decoding an edition.
 		</para>
 		<para>
+			MPX detection accepts <code>MPX,</code> and <code>MPX;</code>, the format identifier
+			followed by a common list separator in the
+			<ulink url="https://www.betaarchive.com/wiki/index.php/Microsoft_KB_Archive/270139">file-creation
+			record</ulink>. It reports <code>mpx</code> and <code>application/x-project</code>
+			without restricting the producing program. Version, code-page and project records
+			are not validated. Other separators require a supplied media type and do not
+			provide an inferred <code>mpx</code> format name.
+		</para>
+		<para>
 			JPEG 2000 detection requires the 12-byte signature box followed by an
 			<code>ftyp</code> box with complete brand and minor-version fields.
 			Standard and extended box lengths are supported. The primary brand selects
@@ -231,6 +240,20 @@ String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
 // decoded = "Hi"
 // asset.format() = "plain"
 // asset.mediaType() = "text/plain;charset=UTF-8"]]>
+			</programlisting>
+		</para>
+		<para>
+			An MPX attachment can identify a program other than Microsoft Project. This
+			example contains an original file-creation record and a comment:
+			<programlisting language="java"><![CDATA[
+String project = "MPX;Fieldwork Planner;4.0;ANSI\r\n0;Survey schedule\r\n";
+String text = "data:;base64," + Base64.getEncoder().encodeToString(
+    project.getBytes(StandardCharsets.US_ASCII));
+EmbeddedAsset asset = new CursorAssetDetector().detect(text).get(0);
+String decoded = new String(asset.decode(text), StandardCharsets.US_ASCII);
+// asset.format() = "mpx"
+// asset.mediaType() = "application/x-project"
+// decoded equals project]]>
 			</programlisting>
 		</para>
 		<para>
