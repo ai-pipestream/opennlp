@@ -295,8 +295,12 @@ public class BilstmPOSModel {
    *
    * @param token The token. Must not be {@code null}.
    * @return The lookup form. Never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code token} is {@code null}.
    */
   public static String normalize(String token) {
+    if (token == null) {
+      throw new IllegalArgumentException("token must not be null");
+    }
     return token.startsWith(SYMBOL_PREFIX) ? token : token.toLowerCase(Locale.ROOT);
   }
 
@@ -443,14 +447,21 @@ public class BilstmPOSModel {
    * sentence BiLSTM (both layers when stacked), and applies the linear tagger to the
    * final states.
    *
-   * @param tokens The sentence. Must not be {@code null} or empty.
-   * @return The unnormalized tag scores, {@code [tokens.length][tags.length]}.
+   * @param tokens The sentence. Must not be {@code null}, empty or contain null elements.
+   * @return The finite, unnormalized tag scores, {@code [tokens.length][tags.length]}.
    *         Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code tokens} is {@code null} or empty.
+   * @throws IllegalArgumentException Thrown if {@code tokens} is {@code null}, empty
+   *         or contains a null element.
+   * @throws IllegalStateException Thrown if a computed tag score is not finite.
    */
   public double[][] score(String[] tokens) {
     if (tokens == null || tokens.length == 0) {
       throw new IllegalArgumentException("tokens must not be null or empty");
+    }
+    for (int t = 0; t < tokens.length; t++) {
+      if (tokens[t] == null) {
+        throw new IllegalArgumentException("tokens[" + t + "] must not be null");
+      }
     }
     final int steps = tokens.length;
     final double[][] xs = new double[steps][];
@@ -468,6 +479,10 @@ public class BilstmPOSModel {
         double sum = outputBias[o];
         for (int j = 0; j < states[t].length; j++) {
           sum += row[j] * states[t][j];
+        }
+        if (!Double.isFinite(sum)) {
+          throw new IllegalStateException(
+              "tag score must be finite at token " + t + ", tag " + o);
         }
         scores[t][o] = sum;
       }

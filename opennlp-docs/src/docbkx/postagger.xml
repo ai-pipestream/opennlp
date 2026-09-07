@@ -530,6 +530,15 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		updates stop training with <code>IllegalStateException</code>.
 		</para>
 		<para>
+		Tagging and <code>BilstmPOSModel.score</code> reject null token arrays or
+		elements with <code>IllegalArgumentException</code>. Empty token strings are
+		accepted. An empty array produces an empty tagging, but cannot be passed to
+		<code>score</code>. Both decoders and <code>score</code> throw
+		<code>IllegalStateException</code> if a computed tag score is not finite,
+		identifying the token and tag indices. This can result from arithmetic
+		overflow even when the model file contains only finite parameters.
+		</para>
+		<para>
 		For a CRF model, <code>topKSequences</code> returns one best tagging with
 		posterior probabilities for the assigned tags. These are token probabilities,
 		not the probability of the complete tag sequence. CRF calculations remove

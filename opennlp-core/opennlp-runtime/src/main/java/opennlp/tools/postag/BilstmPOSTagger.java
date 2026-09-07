@@ -20,19 +20,13 @@ package opennlp.tools.postag;
 import opennlp.tools.util.Sequence;
 
 /**
- * The bidirectional LSTM {@link POSTagger}: one forward pass of the sentence BiLSTM
- * scores every tag at every position, and the per-position argmax forms the tagging.
- * Unlike the feedforward tagger there is no left-to-right tag conditioning, so every
- * position is scored from whole-sentence context instead of the two previously
- * assigned tags.
+ * A bidirectional LSTM {@link POSTagger} that scores tokens from sentence
+ * context. Softmax models select the highest scoring tag at each position; CRF
+ * models decode the best sequence with Viterbi.
  *
- * <p>Inference is ordinary array arithmetic with no native runtime involved, so this
- * tagger deploys exactly like the classical one. Decoding picks the per-position
- * argmax rather than running a search, so the tagger produces exactly one tag
- * sequence for a sentence. It supports the whole {@link POSTagger} interface on that
- * basis: {@link #topKSequences(String[])} returns an array holding that single
- * sequence, which is always the tagging {@link #tag(String[])} returns, carrying the
- * model's probability for every tag it assigned.</p>
+ * <p>Inference uses Java arrays without a native runtime. {@link #topKSequences(String[])}
+ * returns the same single tagging as {@link #tag(String[])}, with softmax or CRF
+ * posterior probabilities for the assigned tags.</p>
  *
  * <p>The {@code additionalContext} of the interface carries no information this model
  * was trained on, so both overloads that take it ignore it.</p>
@@ -66,12 +60,11 @@ public class BilstmPOSTagger implements POSTagger {
   }
 
   /**
-   * Assigns the sentence of tokens pos tags.
+   * {@inheritDoc}
    *
-   * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
-   * @return One pos tag per token of {@code sentence}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
-   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}
+   *         or contains a null element.
+   * @throws IllegalStateException Thrown if a computed tag score or CRF weight is not finite.
    */
   @Override
   public String[] tag(String[] sentence) {
@@ -79,13 +72,12 @@ public class BilstmPOSTagger implements POSTagger {
   }
 
   /**
-   * Assigns the sentence of tokens pos tags, ignoring {@code additionalContext}.
+   * {@inheritDoc}
+   * Ignores {@code additionalContext}.
    *
-   * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
-   * @param additionalContext Ignored, as this model is not trained on any.
-   * @return One pos tag per token of {@code sentence}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
-   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}
+   *         or contains a null element.
+   * @throws IllegalStateException Thrown if a computed tag score or CRF weight is not finite.
    */
   @Override
   public String[] tag(String[] sentence, Object[] additionalContext) {
@@ -97,10 +89,9 @@ public class BilstmPOSTagger implements POSTagger {
    * Returns one tagging with per-token probabilities; the score is the sum of their
    * logarithms, not the CRF joint log probability.
    *
-   * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
-   * @return An array of length one holding the decoded tagging. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
-   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}
+   *         or contains a null element.
+   * @throws IllegalStateException Thrown if a computed tag score or CRF weight is not finite.
    */
   @Override
   public Sequence[] topKSequences(String[] sentence) {
@@ -110,14 +101,12 @@ public class BilstmPOSTagger implements POSTagger {
   }
 
   /**
-   * Assigns the sentence its tag sequences, ignoring {@code additionalContext}. The
-   * result is the single tagging described on {@link #topKSequences(String[])}.
+   * {@inheritDoc}
+   * Ignores {@code additionalContext} and returns {@link #topKSequences(String[])}.
    *
-   * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
-   * @param additionalContext Ignored, as this model is not trained on any.
-   * @return An array of length one holding the decoded tagging. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
-   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}
+   *         or contains a null element.
+   * @throws IllegalStateException Thrown if a computed tag score or CRF weight is not finite.
    */
   @Override
   public Sequence[] topKSequences(String[] sentence, Object[] additionalContext) {
@@ -130,8 +119,9 @@ public class BilstmPOSTagger implements POSTagger {
    * @param sentence The input tokens.
    * @param collected The output sequence, or null when probabilities are not needed.
    * @return The assigned tags.
-   * @throws IllegalArgumentException Thrown if the tokens array is null.
-   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   * @throws IllegalArgumentException Thrown if the tokens array is null or contains
+   *         a null element.
+   * @throws IllegalStateException Thrown if a computed tag score or CRF weight is not finite.
    */
   private String[] decode(String[] sentence, Sequence collected) {
     if (sentence == null) {
@@ -178,23 +168,16 @@ public class BilstmPOSTagger implements POSTagger {
    * tag, applying the softmax shifted by the highest score so that no term of the sum
    * can overflow.
    *
-   * @param scores One unnormalized score per tag. Must not be empty.
+   * @param scores One finite, unnormalized score per tag. Must not be empty.
    * @param best The index of the highest scoring tag.
    * @return The model's probability of the tag at {@code best}, in the range
    *         {@code (0, 1]}.
-   * @throws IllegalStateException Thrown if a score is not finite, which no trained
-   *         model produces.
    */
-  private static double probability(double[] scores, int best) {
+  private double probability(double[] scores, int best) {
     double total = 0.0d;
     for (final double score : scores) {
       total += Math.exp(score - scores[best]);
     }
-    final double probability = 1.0d / total;
-    if (Double.isNaN(probability)) {
-      throw new IllegalStateException(
-          "the model produced a non-finite tag score; the model file is corrupt");
-    }
-    return probability;
+    return 1.0d / total;
   }
 }
