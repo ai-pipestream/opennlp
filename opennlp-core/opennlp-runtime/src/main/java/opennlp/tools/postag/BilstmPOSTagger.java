@@ -71,6 +71,7 @@ public class BilstmPOSTagger implements POSTagger {
    * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
    * @return One pos tag per token of {@code sentence}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
+   * @throws IllegalStateException Thrown if a CRF score is not finite.
    */
   @Override
   public String[] tag(String[] sentence) {
@@ -84,6 +85,7 @@ public class BilstmPOSTagger implements POSTagger {
    * @param additionalContext Ignored, as this model is not trained on any.
    * @return One pos tag per token of {@code sentence}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
+   * @throws IllegalStateException Thrown if a CRF score is not finite.
    */
   @Override
   public String[] tag(String[] sentence, Object[] additionalContext) {
@@ -91,17 +93,14 @@ public class BilstmPOSTagger implements POSTagger {
   }
 
   /**
-   * Assigns the sentence its tag sequences. The argmax decoder has exactly one
-   * tagging for a sentence, so the returned array always holds a single
-   * {@link Sequence}: the tagging {@link #tag(String[])} returns, whose probability
-   * per tag is the model's probability for the tag it assigned and whose score is the
-   * sum of the logs of those probabilities. This tagger never returns several ranked
-   * alternatives, which the interface permits because it fixes no minimum number of
-   * sequences.
+   * {@inheritDoc}
+   * Returns one tagging with per-token probabilities; the score is the sum of their
+   * logarithms, not the CRF joint log probability.
    *
    * @param sentence The sentence of tokens to be tagged. Must not be {@code null}.
    * @return An array of length one holding the decoded tagging. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
+   * @throws IllegalStateException Thrown if a CRF score is not finite.
    */
   @Override
   public Sequence[] topKSequences(String[] sentence) {
@@ -118,12 +117,22 @@ public class BilstmPOSTagger implements POSTagger {
    * @param additionalContext Ignored, as this model is not trained on any.
    * @return An array of length one holding the decoded tagging. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code sentence} is {@code null}.
+   * @throws IllegalStateException Thrown if a CRF score is not finite.
    */
   @Override
   public Sequence[] topKSequences(String[] sentence, Object[] additionalContext) {
     return topKSequences(sentence);
   }
 
+  /**
+   * Assigns tags and optionally collects their probabilities.
+   *
+   * @param sentence The input tokens.
+   * @param collected The output sequence, or null when probabilities are not needed.
+   * @return The assigned tags.
+   * @throws IllegalArgumentException Thrown if the tokens array is null.
+   * @throws IllegalStateException Thrown if a CRF score is not finite.
+   */
   private String[] decode(String[] sentence, Sequence collected) {
     if (sentence == null) {
       throw new IllegalArgumentException("sentence must not be null");

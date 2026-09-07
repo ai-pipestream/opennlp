@@ -530,6 +530,20 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		updates stop training with <code>IllegalStateException</code>.
 		</para>
 		<para>
+		For a CRF model, <code>topKSequences</code> returns one best tagging with
+		posterior probabilities for the assigned tags. These are token probabilities,
+		not the probability of the complete tag sequence. CRF calculations remove
+		common score offsets before computing probabilities; non-finite scores cause
+		<code>IllegalStateException</code>. <code>BilstmCrfUsageTest</code> checks
+		tagging and probabilities after model serialization and loading.
+		<programlisting language="java">
+<![CDATA[String[] tokens = {"the", "cat", "runs"};
+Sequence best = tagger.topKSequences(tokens)[0];
+String[] bestTags = best.getOutcomes().toArray(String[]::new);
+double[] tagProbabilities = best.getProbs();]]>
+		</programlisting>
+		</para>
+		<para>
 		Provide vectors with a lookup function. This example uses small arrays to
 		show the interface and stores an additional word for use after training:
 		<programlisting language="java">
