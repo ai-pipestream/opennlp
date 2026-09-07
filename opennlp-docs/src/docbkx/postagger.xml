@@ -418,6 +418,13 @@ double[] probs = best.getProbs();]]>
 		</programlisting>
 		</para>
 		<para>
+		Scoring multiplies and sums inputs in double precision. Cached contributions
+		retain that precision, so cached and direct scoring produce the same values.
+		The shared cache retains at most 32,768 feature-slot and embedding-row pairs;
+		other pairs use direct calculation. All tagging methods throw
+		<code>IllegalStateException</code> if the model produces a non-finite score.
+		</para>
+		<para>
 		Save a trained model to a file and load it for tagging:
 		<programlisting language="java">
 <![CDATA[Path modelPath = Path.of("pos-feedforward.bin");

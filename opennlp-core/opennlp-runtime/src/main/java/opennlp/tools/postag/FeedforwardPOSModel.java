@@ -221,7 +221,7 @@ public class FeedforwardPOSModel {
     final ContributionCache cache = this.cache;
     for (int f = 0; f < features.length; f++) {
       final int row = features[f];
-      final float[] contribution = cache == null ? null : cache.contribution(this, f, row);
+      final double[] contribution = cache == null ? null : cache.contribution(this, f, row);
       if (contribution != null) {
         for (int j = 0; j < hidden; j++) {
           h[j] += contribution[j];
@@ -233,7 +233,7 @@ public class FeedforwardPOSModel {
           final float[] weights = hiddenWeights[j];
           double sum = 0.0;
           for (int d = 0; d < embeddingSize; d++) {
-            sum += weights[offset + d] * embedding[d];
+            sum += (double) weights[offset + d] * embedding[d];
           }
           h[j] += sum;
         }
@@ -252,7 +252,7 @@ public class FeedforwardPOSModel {
           final float[] weights = hiddenWeights[j];
           double sum = 0.0;
           for (int d = 0; d < pretrainedSize; d++) {
-            sum += weights[offset + d] * vector[d];
+            sum += (double) weights[offset + d] * vector[d];
           }
           h[j] += sum;
         }
@@ -277,11 +277,10 @@ public class FeedforwardPOSModel {
    * Caches hidden-layer contributions by feature slot and embedding row, following
    * <a href="https://aclanthology.org/D14-1082/">Chen and Manning (2014)</a>.
    *
-   * <p>Only call this on a model whose weights no longer change. Cached contributions
-   * are rounded to floats once, so scores may differ from the uncached path in the last
-   * bits.</p>
+   * <p>Call this after training. Contributions retain double precision so cached and
+   * direct scoring use the same values.</p>
    */
-  void enableScoringCache() {
+  synchronized void enableScoringCache() {
     if (cache == null) {
       cache = new ContributionCache(FeedforwardPOSContext.SLOTS, embeddings.length);
     }
@@ -295,9 +294,9 @@ public class FeedforwardPOSModel {
   private static final class ContributionCache {
 
     /** The most (slot, row) pairs the cache will hold. */
-    private static final int MAX_PAIRS = 65536;
+    private static final int MAX_PAIRS = 32768;
 
-    private final AtomicReferenceArray<float[]>[] bySlot;
+    private final AtomicReferenceArray<double[]>[] bySlot;
     private final AtomicInteger remaining = new AtomicInteger(MAX_PAIRS);
 
     /**
@@ -324,33 +323,52 @@ public class FeedforwardPOSModel {
      * @return The contribution vector, or {@code null} when the budget is spent and
      *         the pair is not cached.
      */
-    private float[] contribution(FeedforwardPOSModel model, int slot, int row) {
-      final AtomicReferenceArray<float[]> slots = bySlot[slot];
-      float[] contribution = slots.get(row);
+    private double[] contribution(FeedforwardPOSModel model, int slot, int row) {
+      final AtomicReferenceArray<double[]> slots = bySlot[slot];
+      double[] contribution = slots.get(row);
       if (contribution != null) {
         return contribution;
       }
-      if (remaining.get() <= 0) {
+      if (!reserve()) {
         return null;
       }
-      final int hidden = model.hiddenBias.length;
-      final float[] embedding = model.embeddings[row];
-      final int offset = slot * model.embeddingSize;
-      contribution = new float[hidden];
-      for (int j = 0; j < hidden; j++) {
-        final float[] weights = model.hiddenWeights[j];
-        double sum = 0.0;
-        for (int d = 0; d < model.embeddingSize; d++) {
-          sum += weights[offset + d] * embedding[d];
+      boolean published = false;
+      try {
+        final int hidden = model.hiddenBias.length;
+        final float[] embedding = model.embeddings[row];
+        final int offset = slot * model.embeddingSize;
+        contribution = new double[hidden];
+        for (int j = 0; j < hidden; j++) {
+          final float[] weights = model.hiddenWeights[j];
+          double sum = 0.0;
+          for (int d = 0; d < model.embeddingSize; d++) {
+            sum += (double) weights[offset + d] * embedding[d];
+          }
+          contribution[j] = sum;
         }
-        contribution[j] = (float) sum;
+        published = slots.compareAndSet(row, null, contribution);
+        return published ? contribution : slots.get(row);
+      } finally {
+        if (!published) {
+          remaining.incrementAndGet();
+        }
       }
-      if (slots.compareAndSet(row, null, contribution)) {
-        remaining.decrementAndGet();
-      } else {
-        contribution = slots.get(row);
+    }
+
+    /**
+     * Reserves capacity for a contribution before allocating its array.
+     *
+     * @return Whether one entry was reserved.
+     */
+    private boolean reserve() {
+      int available = remaining.get();
+      while (available > 0) {
+        if (remaining.compareAndSet(available, available - 1)) {
+          return true;
+        }
+        available = remaining.get();
       }
-      return contribution;
+      return false;
     }
   }
 
