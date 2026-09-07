@@ -365,6 +365,13 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
 		<para>
+		The learning rate must be finite and positive; the L2 penalty must be finite
+		and non-negative. Invalid settings cause <code>IllegalArgumentException</code>.
+		If a gradient, optimizer accumulator or updated weight becomes non-finite,
+		training stops with <code>IllegalStateException</code> and does not return a model.
+		Check the learning rate, L2 penalty and vector magnitudes before trying again.
+		</para>
+		<para>
 		Pretrained word vectors are an opt-in: an overload of <code>train</code> takes a
 		<code>java.util.function.Function</code> that is asked once per distinct
 		lowercased training word and returns its vector, or <code>null</code> for a word
@@ -389,6 +396,13 @@ FeedforwardPOSModel withLexicon =
 		</programlisting>
 		</para>
 		<para>
+		Supplied vectors must have a consistent positive length and finite components,
+		including vectors for additional words. Invalid vectors cause
+		<code>IllegalArgumentException</code>; the message identifies the word and, for
+		a non-finite value, the component index. Vectors are copied without clipping
+		or normalization, and training does not modify the supplied arrays.
+		</para>
+		<para>
 		How confident was the tagger? <code>topKSequences</code> returns the greedy
 		tagging as a single scored <code>Sequence</code>: <code>getProbs()</code>
 		holds the model's probability for each assigned tag, one per token and each
@@ -404,20 +418,33 @@ double[] probs = best.getProbs();]]>
 		</programlisting>
 		</para>
 		<para>
-		A trained model serializes to a stream and loads back with identical tagging
-		behavior, so models train once and deploy as files.
-		<code>FeedforwardPOSTaggerEdgeCaseTest</code> asserts the behavior shown
-		here.
+		Scoring multiplies and sums inputs in double precision. Cached contributions
+		retain that precision, so cached and direct scoring produce the same values.
+		The shared cache retains at most 32,768 feature-slot and embedding-row pairs;
+		other pairs use direct calculation. All tagging methods throw
+		<code>IllegalStateException</code> if the model produces a non-finite score.
+		</para>
+		<para>
+		Save a trained model to a file and load it for tagging:
 		<programlisting language="java">
-<![CDATA[ByteArrayOutputStream out = new ByteArrayOutputStream();
-model.serialize(out);
+<![CDATA[Path modelPath = Path.of("pos-feedforward.bin");
+try (OutputStream out = Files.newOutputStream(modelPath)) {
+    model.serialize(out);
+}
 
 FeedforwardPOSTagger reloaded = new FeedforwardPOSTagger(
-    FeedforwardPOSModel.load(new ByteArrayInputStream(out.toByteArray())));
+    FeedforwardPOSModel.load(modelPath));
 
-// The reloaded tagger decides exactly like the original.
-String[] tags = reloaded.tag(new String[] {"she", "eats", "fish"});]]>
+String[] tags = reloaded.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
+		</para>
+		<para>
+		Loading rejects truncated files, inconsistent dimensions, invalid vocabulary
+		rows, duplicate symbols or tags, and non-finite weights with <code>IOException</code>.
+		Storage grows as values are read; a short file declaring a large array does not
+		allocate that array in advance. Complete models still require memory for their
+		weights, vocabularies and scoring cache. Stream overloads leave the caller's
+		stream open; the <code>Path</code> overload closes the file after loading.
 		</para>
 		</section>
 		
