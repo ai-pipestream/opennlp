@@ -181,10 +181,7 @@ class BilstmPOSTrainerTest {
 
   @Test
   void testParallelTrainingMatchesSequential() throws IOException {
-    // strided batch assignment plus ordered reduction gives the same per-element
-    // accumulation order for any thread count; the only wobble is last-ulp noise
-    // from the JIT contracting multiply-adds differently between compilation paths,
-    // so the comparison is tight but not bit-exact
+    // Worker counts change the grouping of partial sums and can change rounding.
     final BilstmPOSModel sequential = BilstmPOSTrainer.train(stream(CORPUS), TINY);
     final BilstmPOSModel parallel = BilstmPOSTrainer.train(stream(CORPUS),
         new BilstmPOSTrainer.Settings(8, 4, 4, 8, 40, 2, 5e-3d, 5.0d, 0.1d, 1, 12, 7L,

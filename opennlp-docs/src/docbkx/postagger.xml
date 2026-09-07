@@ -487,6 +487,32 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		streams open. Null streams and paths cause <code>IllegalArgumentException</code>.
 		<code>BilstmPOSModelValidationTest</code> checks the formats and file round trip.
 		</para>
+		<para>
+		Training settings must use finite numbers within their allowed ranges.
+		Pretrained vectors must have a consistent positive length and finite components,
+		including vectors requested for an additional lexicon. Invalid settings or
+		vectors cause <code>IllegalArgumentException</code>; vector errors identify
+		the word and component index. Training copies provider arrays before storing
+		or fine-tuning them. Multi-task sample arrays must contain no null elements;
+		absent auxiliary taggings can use a null array. A literal <code>*UNK*</code>
+		token uses the reserved unknown-word embedding.
+		</para>
+		<para>
+		Provide vectors with a lookup function. This example uses small arrays to
+		show the interface and stores an additional word for use after training:
+		<programlisting language="java">
+<![CDATA[Map<String, float[]> vectors = Map.of(
+    "cat", new float[] {0.5f, -0.25f},
+    "dog", new float[] {0.25f, 0.5f},
+    "kitten", new float[] {0.4f, -0.2f});
+
+BilstmPOSModel model = BilstmPOSTrainer.train(sampleStream, settings,
+    word -> vectors.get(word.toString()), List.of("kitten"));]]>
+		</programlisting>
+		A null lookup result means that the word has no vector. The provider must
+		return at least one vector across the training words and additional lexicon.
+		<code>BilstmPOSTrainingInputTest</code> checks this example.
+		</para>
 		</section>
 
 		<section xml:id="tools.postagger.eval">
