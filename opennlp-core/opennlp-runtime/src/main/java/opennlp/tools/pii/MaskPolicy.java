@@ -38,6 +38,13 @@ public final class MaskPolicy {
   private final boolean keepFormat;
   private final int keepTrailing;
 
+  /**
+   * Initializes a policy with validated options.
+   *
+   * @param mask The replacement character.
+   * @param keepFormat Whether punctuation stays visible.
+   * @param keepTrailing The trailing letter or digit count to retain.
+   */
   private MaskPolicy(char mask, boolean keepFormat, int keepTrailing) {
     this.mask = mask;
     this.keepFormat = keepFormat;
@@ -96,6 +103,19 @@ public final class MaskPolicy {
    *         units.
    */
   String apply(String spanText) {
+    final StringBuilder out = new StringBuilder(spanText);
+    apply(spanText, out, 0);
+    return out.toString();
+  }
+
+  /**
+   * Masks positions selected from an original span without restoring prior redactions.
+   *
+   * @param spanText The original text covered by the span.
+   * @param out The document text with any earlier redactions applied.
+   * @param offset The span's start in {@code out}.
+   */
+  void apply(String spanText, StringBuilder out, int offset) {
     int alphanumeric = 0;
     for (int i = 0; i < spanText.length(); ) {
       final int cp = spanText.codePointAt(i);
@@ -105,31 +125,18 @@ public final class MaskPolicy {
       i += Character.charCount(cp);
     }
     final int firstKept = alphanumeric - keepTrailing;
-    final StringBuilder out = new StringBuilder(spanText.length());
     int seen = 0;
     for (int i = 0; i < spanText.length(); ) {
       final int cp = spanText.codePointAt(i);
       final int units = Character.charCount(cp);
-      if (Character.isLetterOrDigit(cp)) {
-        if (seen >= firstKept) {
-          out.appendCodePoint(cp);
-        } else {
-          out.append(mask);
-          if (units == 2) {
-            out.append(mask);
-          }
-        }
-        seen++;
-      } else if (keepFormat) {
-        out.appendCodePoint(cp);
-      } else {
-        out.append(mask);
+      final boolean redact = Character.isLetterOrDigit(cp) ? seen++ < firstKept : !keepFormat;
+      if (redact) {
+        out.setCharAt(offset + i, mask);
         if (units == 2) {
-          out.append(mask);
+          out.setCharAt(offset + i + 1, mask);
         }
       }
       i += units;
     }
-    return out.toString();
   }
 }

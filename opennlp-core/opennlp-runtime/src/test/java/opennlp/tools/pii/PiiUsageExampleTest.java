@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.LayerKey;
+import opennlp.tools.util.Span;
 
 /**
  * Demonstrates the end-to-end PII flow on one realistic text that contains an email
@@ -112,6 +114,23 @@ public class PiiUsageExampleTest {
     Assertions.assertEquals(
         "Contact ****@*******.***, call (***) ***-****, or charge card **** **** **** 1111.",
         masked);
+  }
+
+  /** Checks the manual's example of overlapping custom span layers. */
+  @Test
+  void testMaskOverlappingLayers() {
+    final LayerKey<String> left = LayerKey.of("left", String.class);
+    final LayerKey<String> right = LayerKey.of("right", String.class);
+    final Document overlaps = Document.of("123456")
+        .with(left, List.of(new Annotation<>(new Span(0, 4), "1234")))
+        .with(right, List.of(new Annotation<>(new Span(2, 6), "3456")));
+    final MaskPolicy policy = MaskPolicy.of('*').keepingTrailing(2);
+
+    Assertions.assertEquals("****56", Masker.mask(overlaps, List.of(right, left), policy));
+    Assertions.assertEquals("****56", Masker.mask(overlaps, List.of(left, right), policy));
+    Assertions.assertEquals("123456", overlaps.text());
+    Assertions.assertEquals(new Span(0, 4), overlaps.get(left).getFirst().span());
+    Assertions.assertEquals(new Span(2, 6), overlaps.get(right).getFirst().span());
   }
 
   /**
