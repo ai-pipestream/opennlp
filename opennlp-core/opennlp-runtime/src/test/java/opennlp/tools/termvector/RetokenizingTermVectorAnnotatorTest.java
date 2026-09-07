@@ -36,30 +36,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Verifies the {@link RetokenizingTermVectorAnnotator} against the count-changing
- * de-hyphenation normalizer: the joined term appears once with one original-text occurrence
- * span, where {@link TermVectorAnnotator} could only ever keep the two halves apart. The
- * test lives in the runtime module because it pairs the API annotator with the runtime
- * normalizer and the {@link TextNormalizer} builder.
- */
+/** Checks terms, counts and source offsets after dehyphenation. */
 public class RetokenizingTermVectorAnnotatorTest {
 
   private static final OffsetAwareNormalizer DEHYPHENATION =
       DehyphenationCharSequenceNormalizer.getInstance();
 
-  private static RetokenizingTermVectorAnnotator annotator() {
+  /** {@return an annotator using dehyphenation and whitespace tokenization} */
+  private RetokenizingTermVectorAnnotator annotator() {
     return new RetokenizingTermVectorAnnotator(DEHYPHENATION, WhitespaceTokenizer.INSTANCE);
   }
 
-  /**
-   * The headline case: a whitespace tokenizer over the original
-   * {@code "word litiga-\ntion word"} yields four tokens ({@code word}, {@code litiga-},
-   * {@code tion}, {@code word}), so {@link TermVectorAnnotator} can never produce the term
-   * {@code litigation}. Re-tokenizing the normalized text yields three tokens, and the
-   * joined term reports one occurrence span covering exactly the original
-   * {@code "litiga-\ntion"} range.
-   */
+  /** A joined word produces one term with the original-text occurrence span. */
   @Test
   void testDehyphenationFusesTheBrokenWordIntoOneTerm() {
     final String text = "word litiga-\ntion word";
@@ -80,11 +68,7 @@ public class RetokenizingTermVectorAnnotatorTest {
         vectors.get(1).value().spans().get(0).getCoveredText(text).toString());
   }
 
-  /**
-   * A composed aligned pipeline (de-hyphenation, then the offset-aware full case fold)
-   * still maps every span back to the original: {@code "LITIGA-\nTION"} joins and folds to
-   * the term {@code litigation}, and its span covers the original surface form exactly.
-   */
+  /** Dehyphenation followed by case conversion preserves original-text offsets. */
   @Test
   void testComposedPipelineKeepsOriginalExactSpans() {
     final OffsetAwareNormalizer pipeline = TextNormalizer.builder()
@@ -122,11 +106,7 @@ public class RetokenizingTermVectorAnnotatorTest {
     }
   }
 
-  /**
-   * The mapping invariant: no normalized token span may map to an empty or inverted
-   * original span. A token carries at least one normalized character, and every normalized
-   * character is attributed to original text, so the mapped span always covers something.
-   */
+  /** This deletion-only normalizer maps non-empty terms to non-empty source spans. */
   @Test
   void testEveryOccurrenceSpanCoversOriginalText() {
     final String text = "word litiga-\ntion com-\r\n  plete";

@@ -33,38 +33,19 @@ import opennlp.tools.util.normalizer.AlignedText;
 import opennlp.tools.util.normalizer.OffsetAwareNormalizer;
 
 /**
- * Builds the term vector layer by re-tokenizing the <em>normalized</em> document text, the
- * counterpart to {@link TermVectorAnnotator} for normalizers whose edits change the token
- * count.
+ * Builds term vectors by tokenizing normalized document text.
  *
- * <p>{@link TermVectorAnnotator} maps the existing token layer's spans forward through the
- * normalizer's {@link opennlp.tools.util.normalizer.Alignment}, so it can never fuse two
- * tokens into one term: when a de-hyphenation step deletes a line-break hyphenation
- * ({@code "litiga-\ntion"}), the two original tokens stay two tokens and the joined word
- * never becomes a term. This annotator closes that gap. It normalizes the whole document
- * text once with {@link OffsetAwareNormalizer#normalizeAligned(CharSequence)}, tokenizes
- * the normalized form with its own {@link Tokenizer}, and groups occurrences by the covered
- * normalized text, so the two halves of a broken word land in one token and group under the
- * joined term.</p>
+ * <p>Use this annotator when normalization changes token boundaries, for example
+ * when dehyphenation joins {@code "litiga-\ntion"} into {@code "litigation"}.
+ * {@link TermVectorAnnotator} instead uses an existing token layer.</p>
  *
- * <p>The contract is the one {@link TermVector} states: terms are in normalized-form
- * identity, while every occurrence span reported in
- * {@link TermVectorAnnotator.Mode#FULL full mode} is mapped back through the alignment and
- * therefore always points into the <em>original</em> text. The joined term's single
- * occurrence span covers both halves and the deleted break between them
- * ({@code "litiga-\ntion"} whole), never the normalized form. Because it tokenizes the
- * normalized text itself, this annotator requires no input layers: it does not read the
- * {@link opennlp.tools.document.Layers#TOKENS} layer, and a whitespace or other
- * context-free tokenizer needs no sentence layer either. The layer preserves
- * first-occurrence order: the first token of a term fixes its position in the layer.</p>
+ * <p>Terms are grouped by normalized text in tokenizer output order. Empty token
+ * spans are omitted. In {@link TermVectorAnnotator.Mode#FULL full mode},
+ * occurrence spans map back to original-text offsets through the normalizer's
+ * alignment. A joined word's span includes the deleted hyphen and line break.</p>
  *
- * <p>Use this annotator whenever the normalizer's edits can change the token count
- * (de-hyphenation joining, emoticon expansion, and similar), and {@link TermVectorAnnotator}
- * when token-count-preserving folds should group the tokens an upstream tokenizer already
- * produced.</p>
- *
- * <p>The annotator holds no per-call state; it is as thread-safe as the normalizer and the
- * tokenizer it was built with.</p>
+ * <p>No input layers are required. Existing layers and document text are preserved.
+ * Thread safety depends on the supplied normalizer and tokenizer.</p>
  *
  * @since 3.0.0
  */
@@ -115,9 +96,8 @@ public class RetokenizingTermVectorAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Normalizes the document text, tokenizes the normalized form, and aggregates the tokens
-   * into the {@link TermVectorAnnotator#TERM_VECTORS} layer. An empty document text yields
-   * a present-but-empty term vector layer.
+   * Normalizes and tokenizes the text, then adds {@link TermVectorAnnotator#TERM_VECTORS}.
+   * Empty token spans are omitted in both modes. If no terms remain, the layer is empty.
    *
    * @param document The document to annotate. Must not be {@code null}.
    * @return A new {@link Document} with the {@link TermVectorAnnotator#TERM_VECTORS} layer
@@ -164,8 +144,11 @@ public class RetokenizingTermVectorAnnotator implements DocumentAnnotator {
       Span[] tokens) {
     final Map<String, List<Span>> spansByTerm = new LinkedHashMap<>();
     for (final Span token : tokens) {
-      spansByTerm.computeIfAbsent(termOf(normalized, token), key -> new ArrayList<>())
-          .add(aligned.toOriginalSpan(token.getStart(), token.getEnd()));
+      final String term = termOf(normalized, token);
+      if (!term.isEmpty()) {
+        spansByTerm.computeIfAbsent(term, key -> new ArrayList<>())
+            .add(aligned.toOriginalSpan(token.getStart(), token.getEnd()));
+      }
     }
     final List<Annotation<TermVector>> vectors = new ArrayList<>(spansByTerm.size());
     for (final Map.Entry<String, List<Span>> entry : spansByTerm.entrySet()) {
@@ -175,8 +158,7 @@ public class RetokenizingTermVectorAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Aggregates the normalized token spans into scoring-only term vectors, so no offset
-   * storage is ever allocated.
+   * Counts non-empty terms without storing occurrence offsets.
    *
    * @param normalized The normalized document text.
    * @param tokens The token spans in the normalized text.
@@ -185,7 +167,10 @@ public class RetokenizingTermVectorAnnotator implements DocumentAnnotator {
   private List<Annotation<TermVector>> countVectors(String normalized, Span[] tokens) {
     final Map<String, Integer> frequencies = new LinkedHashMap<>();
     for (final Span token : tokens) {
-      frequencies.merge(termOf(normalized, token), 1, Integer::sum);
+      final String term = termOf(normalized, token);
+      if (!term.isEmpty()) {
+        frequencies.merge(term, 1, Integer::sum);
+      }
     }
     final List<Annotation<TermVector>> vectors = new ArrayList<>(frequencies.size());
     for (final Map.Entry<String, Integer> entry : frequencies.entrySet()) {
@@ -195,12 +180,11 @@ public class RetokenizingTermVectorAnnotator implements DocumentAnnotator {
   }
 
   /**
-   * Determines the term one normalized token groups under: its covered text in the
-   * normalized form.
+   * Extracts the normalized text covered by a token.
    *
    * @param normalized The normalized document text.
    * @param token The token span in the normalized text.
-   * @return The term string. Never {@code null}.
+   * @return The term string, possibly empty.
    */
   private String termOf(String normalized, Span token) {
     return normalized.substring(token.getStart(), token.getEnd());

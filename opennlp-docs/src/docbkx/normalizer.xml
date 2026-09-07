@@ -374,37 +374,30 @@ Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized tex
 	<section xml:id="tools.normalizer.dehyphenation">
 		<title>De-hyphenation and re-tokenizing term vectors</title>
 		<para>
-			Text extracted from PDFs and other typeset sources breaks long words at the right
-			margin with a hyphen and a line break. <code>DehyphenationCharSequenceNormalizer</code>
-			undoes that: a letter followed by a hyphen (<code>U+002D</code>, the soft hyphen
-			<code>U+00AD</code>, or the typeset hyphen <code>U+2010</code> that PDF extractors
-			such as Poppler and PDFBox emit; the non-breaking hyphen <code>U+2011</code> is
-			excluded because it asserts the word was not broken there), a forced line break (the <code>UnicodeWhitespace.lineBreaks()</code>
-			set: <code>U+000A</code>, also as <code>U+000D U+000A</code>, <code>U+000B</code>,
-			<code>U+000C</code>, <code>U+000D</code>, <code>U+0085</code>, <code>U+2028</code>, or
-			<code>U+2029</code>), optional horizontal whitespace, and another letter join into one
-			word, so a document writing <code>"litiga-\ntion"</code> and a query writing
-			<code>"litigation"</code> agree on term identity. A second break inside the whitespace
-			run stops the join, so a form-feed page break (<code>"litiga-\n\fPage 3\ntion"</code>)
-			does not fuse the word with the page header. The hyphen is always deleted when the
-			pattern matches; a genuinely hyphenated compound split at its hyphen
-			(<code>"well-\nknown"</code>) joins too, because telling the two apart needs a
-			dictionary, which is deliberately out of scope. The normalizer is offset-aware, so it
-			composes into <code>buildAligned()</code> and every edit maps back to the original
-			text.
+			<code>DehyphenationCharSequenceNormalizer</code> joins words split at a
+			line break, such as <code>"litiga-\ntion"</code> to <code>"litigation"</code>.
+			A letter must precede the hyphen and follow the break, with optional
+			horizontal whitespace before the continuation. The supported hyphens are
+			<code>U+002D</code>, <code>U+00AD</code> and <code>U+2010</code>.
+			The non-breaking hyphen <code>U+2011</code> is excluded.
 		</para>
 		<para>
-			The join changes the token count of the text, which the plain
-			<code>TermVectorAnnotator</code> cannot express: it maps the existing token layer
-			forward through the alignment, so the two original tokens <code>litiga-</code> and
-			<code>tion</code> can never fuse into one term. The
-			<code>opennlp.tools.termvector.RetokenizingTermVectorAnnotator</code> closes that gap.
-			It normalizes the whole document text, tokenizes the <emphasis>normalized</emphasis>
-			form with its own tokenizer, and groups occurrences by the covered normalized text;
-			each occurrence span is then mapped back through the alignment, so the joined term
-			reports one span covering both halves and the deleted break in the original. Terms
-			are in normalized-form identity; spans are always original-text offsets.
-			<code>RetokenizingTermVectorAnnotatorTest</code> asserts the behavior shown here.
+			Breaks use <code>UnicodeWhitespace.lineBreaks()</code>: <code>U+000A</code>,
+			<code>U+000B</code>, <code>U+000C</code>, <code>U+000D</code>,
+			<code>U+0085</code>, <code>U+2028</code> and <code>U+2029</code>.
+			CRLF counts as one break. Additional breaks prevent a join, so
+			<code>"litiga-\n\fPage 3\ntion"</code> is unchanged.
+			No dictionary is used: a compound split at a hyphen, such as
+			<code>"well-\nknown"</code>, becomes <code>"wellknown"</code>.
+		</para>
+		<para>
+			<code>opennlp.tools.termvector.RetokenizingTermVectorAnnotator</code>
+			tokenizes normalized text and groups terms in tokenizer output order.
+			Unlike <code>TermVectorAnnotator</code>, it does not use an existing token
+			layer, so a joined word can become a single term. Existing layers and
+			document text are preserved. Empty token spans are omitted in both modes.
+			Full mode includes original-text occurrence spans; scoring-only mode
+			includes counts without spans. Offsets use UTF-16 code units.
 		</para>
 		<programlisting language="java">
 <![CDATA[OffsetAwareNormalizer pipeline = TextNormalizer.builder()
@@ -414,7 +407,9 @@ Span hit = aligned.toOriginalSpan(5, 14);   // "the-match" in the normalized tex
 
 Document annotated = new RetokenizingTermVectorAnnotator(
     pipeline, WhitespaceTokenizer.INSTANCE).annotate(Document.of("word litiga-\ntion word"));
-// term "litigation", frequency 1, one span covering "litiga-\ntion" in the original]]>
+TermVector term = annotated.get(TermVectorAnnotator.TERM_VECTORS).get(1).value();
+String original = term.spans().get(0).getCoveredText(annotated.text()).toString();
+// term.term(): "litigation", term.frequency(): 1, original: "litiga-\ntion"]]>
 		</programlisting>
 	</section>
 
