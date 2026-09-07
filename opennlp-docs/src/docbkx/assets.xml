@@ -31,6 +31,7 @@
 			<code>CursorAssetDetector</code> checks encoded prefixes and validates the payload
 			alphabet and padding. Format detection uses up to 24 decoded leading bytes,
 			36 bytes for JPEG 2000 or encoded PEM candidates, or 45 bytes for EMF candidates.
+			Calendar opening lines and XML root elements use the incremental checks below.
 			Bare runs need at least 32 encoded characters and a recognized file signature.
 			The signature table is derived from Apache Tika's media-type catalog. Recognized
 			PNG and GIF headers also provide image dimensions. A declared media type alone
@@ -82,6 +83,17 @@
 			The detector reads this line incrementally, including continuations beyond the usual
 			header probe. It reports <code>ics</code> and <code>text/calendar</code> without
 			checking the version, property order, event data or closing line.
+		</para>
+		<para>
+			SVG detection requires a root element named <code>svg</code> in the
+			<ulink url="https://www.w3.org/TR/SVG2/struct.html#Namespace">SVG namespace</ulink>.
+			XML declarations, byte-order marks, comments and namespace prefixes are accepted.
+			The root start tag must fit within the first 64 KiB of decoded data. The XML reader
+			disables DTD processing, external entities and catalog resolution. It stops at the
+			root element; image contents, scripts and links are not validated or executed.
+			A match reports <code>svg</code> and <code>image/svg+xml</code>. When the XML header
+			is too long or its namespace is unavailable without a DTD, callers can supply a
+			media type in a data URI. Recognition does not make an image safe to display.
 		</para>
 		<para>
 			JPEG 2000 detection requires the 12-byte signature box followed by an
@@ -280,6 +292,20 @@ String decoded = new String(asset.decode(text), StandardCharsets.US_ASCII);
 // asset.format() = "ics"
 // asset.mediaType() = "text/calendar"
 // decoded equals calendar]]>
+			</programlisting>
+		</para>
+		<para>
+			This SVG attachment contains an original circle image:
+			<programlisting language="java"><![CDATA[
+String svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>"
+    + "<circle cx='5' cy='5' r='4'/></svg>";
+String text = "data:;base64," + Base64.getEncoder().encodeToString(
+    svg.getBytes(StandardCharsets.UTF_8));
+EmbeddedAsset asset = new CursorAssetDetector().detect(text).get(0);
+String decoded = new String(asset.decode(text), StandardCharsets.UTF_8);
+// asset.format() = "svg"
+// asset.mediaType() = "image/svg+xml"
+// decoded equals svg]]>
 			</programlisting>
 		</para>
 		<para>

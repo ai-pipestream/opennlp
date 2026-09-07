@@ -38,6 +38,12 @@ final class AssetTestSupport {
   private AssetTestSupport() {
   }
 
+  /** {@return an original SVG circle with an explicit namespace} */
+  static byte[] svg() {
+    return ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>"
+        + "<circle cx='5' cy='5' r='4'/></svg>").getBytes(StandardCharsets.UTF_8);
+  }
+
   /**
    * Builds an original PEM envelope with placeholder bytes, not cryptographic data.
    *
