@@ -22,6 +22,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -60,6 +61,44 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /** Minimum encoded length for bare-payload detection. */
   private static final int MIN_BARE_PAYLOAD = 32;
+
+  private static final int HEADER_ENCODED_LENGTH = 32;
+  private static final int EMF_HEADER_ENCODED_LENGTH = 60;
+  private static final int JPEG2000_HEADER_ENCODED_LENGTH = 48;
+
+  private static final int DEX_VERSION_OFFSET = 4;
+  private static final int DEX_MAGIC_LENGTH = 8;
+
+  private static final int BER_SEQUENCE_TAG = 0x30;
+  private static final int BER_OBJECT_IDENTIFIER_TAG = 0x06;
+  private static final int BER_INDEFINITE_LENGTH = 0x80;
+
+  /** Encoded content type 1.2.840.113549.1.9.16.1.31. */
+  private static final byte[] TIMESTAMPED_DATA_OID = {
+      0x2a, (byte) 0x86, 0x48, (byte) 0x86, (byte) 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x01, 0x1f};
+  private static final KnownMagics.Format TIMESTAMPED_DATA_FORMAT =
+      new KnownMagics.Format("tsd", "application/timestamped-data");
+
+  /** Base64 encoding of the JPEG 2000 signature box. */
+  private static final String JPEG2000_PREFIX = "AAAADGpQICANCocK";
+  private static final int JPEG2000_BOX_OFFSET = 12;
+  private static final int JPEG2000_BRAND_OFFSET = 20;
+  private static final int JPEG2000_MIN_BOX_LENGTH = 16;
+
+  private static final KnownMagics.Format JPX_FORMAT = new KnownMagics.Format("jpx", "image/jpx");
+  private static final KnownMagics.Format JPM_FORMAT = new KnownMagics.Format("jpm", "image/jpm");
+  private static final KnownMagics.Format MJ2_FORMAT = new KnownMagics.Format("mj2", "video/mj2");
+
+  /** Base64 prefix of the little-endian EMR_HEADER record type (1). */
+  private static final String EMF_PREFIX = "AQAAA";
+
+  private static final int EMF_SIGNATURE_OFFSET = 40;
+  private static final String EMF_SIGNATURE = " EMF";
+
+  private static final int PCAPNG_BYTE_ORDER_OFFSET = 8;
+  private static final int PCAPNG_BYTE_ORDER_MAGIC = 0x1a2b3c4d;
+  private static final int PCAPNG_REVERSED_BYTE_ORDER_MAGIC =
+      Integer.reverseBytes(PCAPNG_BYTE_ORDER_MAGIC);
 
   private static final String DATA_URI_SCHEME = "data:";
   private static final String BASE64_MARKER = ";base64,";
@@ -106,9 +145,26 @@ public final class CursorAssetDetector implements AssetDetector {
    */
   private static final String RIFF_PREFIX = "UklGR";
 
-  /** The RIFF container magic, and the offset its four-character form type sits at. */
+  /** The RIFF container identifier. */
   private static final String RIFF_MAGIC = "RIFF";
-  private static final int RIFF_FORM_TYPE = 8;
+
+  /** Byte offset of the 4-character form type in RIFF and FORM headers. */
+  private static final int FORM_TYPE_OFFSET = 8;
+
+  private static final KnownMagics.Format WEBP_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_WEBP, "image/webp");
+  private static final KnownMagics.Format WAV_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_WAV, "audio/wav");
+  private static final KnownMagics.Format AVI_FORMAT =
+      new KnownMagics.Format(EmbeddedAsset.FORMAT_AVI, "video/x-msvideo");
+
+  private static final int BIFF_RECORD_HEADER_SIZE = 4;
+  private static final int BIFF_DOCUMENT_TYPE_OFFSET = 6;
+  private static final String EXCEL_WORKSPACE_FORMAT = "xlw";
+  private static final KnownMagics.Format EXCEL_3_WORKSPACE =
+      new KnownMagics.Format(EXCEL_WORKSPACE_FORMAT, "application/vnd.ms-excel.workspace.3");
+  private static final KnownMagics.Format EXCEL_4_WORKSPACE =
+      new KnownMagics.Format(EXCEL_WORKSPACE_FORMAT, "application/vnd.ms-excel.workspace.4");
 
   /**
    * {@inheritDoc}
@@ -188,12 +244,14 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return start;
     }
-    final String sniffed = formatOf(header);
-    final String mediaType = declared.indexOf('/') > 0 ? declared : mediaTypeOf(sniffed);
+    final KnownMagics.Format sniffed = formatOf(header);
+    final String inferredType = sniffed == null ? null : sniffed.mediaType();
+    final String mediaType = declared.indexOf('/') > 0 ? declared : inferredType;
     if (mediaType == null) {
       return start;
     }
-    assets.add(asset(start, payload.end(), payload, sniffed, mediaType, header));
+    assets.add(asset(start, payload.end(), payload,
+        sniffed == null ? null : sniffed.name(), mediaType, header));
     return payload.end();
   }
 
@@ -209,7 +267,8 @@ public final class CursorAssetDetector implements AssetDetector {
     if (payload.encodedLength() < MIN_BARE_PAYLOAD) {
       return;
     }
-    boolean magic = matchesBase64Prefix(text, payload.start(), RIFF_PREFIX);
+    boolean magic = matchesBase64Prefix(text, payload.start(), RIFF_PREFIX)
+        || startsWithSequence(text, payload.start());
     if (!magic) {
       for (final String prefix : KnownMagics.PREFIXES) {
         if (matchesBase64Prefix(text, payload.start(), prefix)) {
@@ -225,12 +284,12 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return;
     }
-    final String format = formatOf(header);
+    final KnownMagics.Format format = formatOf(header);
     if (format == null) {
       return;
     }
     assets.add(asset(payload.start(), payload.end(), payload,
-        format, mediaTypeOf(format), header));
+        format.name(), format.mediaType(), header));
   }
 
   /**
@@ -441,8 +500,8 @@ public final class CursorAssetDetector implements AssetDetector {
       width = readInt(header, 16);
       height = readInt(header, 20);
     } else if (EmbeddedAsset.FORMAT_GIF.equals(format) && header.length >= 10) {
-      width = (header[6] & 0xFF) | ((header[7] & 0xFF) << 8);
-      height = (header[8] & 0xFF) | ((header[9] & 0xFF) << 8);
+      width = readUnsignedShortLE(header, 6);
+      height = readUnsignedShortLE(header, 8);
     }
     if (width <= 0 || height <= 0) {
       width = -1;
@@ -513,6 +572,8 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Decodes the leading payload characters into header bytes.
+   * EMF candidates use up to 60 encoded characters, JPEG 2000 candidates use 48,
+   * and other headers use 32.
    *
    * @param text The text.
    * @param payload The scanned payload.
@@ -522,7 +583,15 @@ public final class CursorAssetDetector implements AssetDetector {
     if (!payload.valid()) {
       return null;
     }
-    final int usable = Math.min(payload.encodedLength() - payload.padding(), 32);
+    final int limit;
+    if (matchesBase64Prefix(text, payload.start(), EMF_PREFIX)) {
+      limit = EMF_HEADER_ENCODED_LENGTH;
+    } else if (matchesBase64Prefix(text, payload.start(), JPEG2000_PREFIX)) {
+      limit = JPEG2000_HEADER_ENCODED_LENGTH;
+    } else {
+      limit = HEADER_ENCODED_LENGTH;
+    }
+    final int usable = Math.min(payload.encodedLength() - payload.padding(), limit);
     final StringBuilder head = new StringBuilder(usable);
     for (int i = payload.start(); i < payload.end() && head.length() < usable; i++) {
       final char c = text.charAt(i);
@@ -539,47 +608,232 @@ public final class CursorAssetDetector implements AssetDetector {
   }
 
   /**
-   * Identifies the format of decoded header bytes: the longest matching magic in
-   * {@link KnownMagics}, then the RIFF container resolved by its file type.
+   * Identifies the format and media type from the longest matching signature,
+   * checking additional format fields where required.
    *
    * @param header The decoded leading bytes.
-   * @return The format tag, or {@code null} when the bytes match no known magic.
+   * @return The format and media type, or {@code null} for an unknown header.
    */
-  private String formatOf(byte[] header) {
-    final String known = KnownMagics.formatOf(header);
+  private KnownMagics.Format formatOf(byte[] header) {
+    final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
-      return known;
+      return switch (known.name()) {
+        case "aiff" -> hasAiffFormType(header) ? known : null;
+        case "dex" -> hasDexMagic(header) ? known : null;
+        case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
+        case "jp2" -> jpeg2000Format(header, known);
+        case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
+        case "xls" -> excelFormat(header, known);
+        default -> known;
+      };
     }
     if (carries(header, 0, RIFF_MAGIC)) {
-      if (carries(header, RIFF_FORM_TYPE, "WEBP")) {
-        return EmbeddedAsset.FORMAT_WEBP;
+      if (carries(header, FORM_TYPE_OFFSET, "WEBP")) {
+        return WEBP_FORMAT;
       }
-      if (carries(header, RIFF_FORM_TYPE, "WAVE")) {
-        return EmbeddedAsset.FORMAT_WAV;
+      if (carries(header, FORM_TYPE_OFFSET, "WAVE")) {
+        return WAV_FORMAT;
       }
-      if (carries(header, RIFF_FORM_TYPE, "AVI ")) {
-        return EmbeddedAsset.FORMAT_AVI;
+      if (carries(header, FORM_TYPE_OFFSET, "AVI ")) {
+        return AVI_FORMAT;
       }
     }
-    return null;
+    return hasTimestampedDataType(header) ? TIMESTAMPED_DATA_FORMAT : null;
   }
 
   /**
-   * Maps a format to its media type through {@link KnownMagics}, covering the
-   * RIFF-carried formats that table cannot hold.
+   * Checks a leading CMS content-type identifier within the decoded header.
+   * BER definite and indefinite sequence lengths are supported. Timestamp evidence
+   * and the remainder of the envelope are not validated.
    *
-   * @param format The format tag, or {@code null}.
-   * @return The media type, or {@code null} for an unknown format.
+   * @param header The decoded leading bytes.
+   * @return Whether the complete timestamped-data identifier is present.
+   * @see <a href="https://www.rfc-editor.org/rfc/rfc5544.html#section-2">TimeStampedData syntax</a>
    */
-  private String mediaTypeOf(String format) {
-    if (format == null) {
+  private boolean hasTimestampedDataType(byte[] header) {
+    if (header.length < 2 || header[0] != BER_SEQUENCE_TAG) {
+      return false;
+    }
+    final int sequenceStart = berContentOffset(header, 1);
+    if (sequenceStart < 0 || sequenceStart >= header.length
+        || header[sequenceStart] != BER_OBJECT_IDENTIFIER_TAG) {
+      return false;
+    }
+    final int oidStart = berContentOffset(header, sequenceStart + 1);
+    if (oidStart < 0 || berLength(header, sequenceStart + 1, oidStart) != TIMESTAMPED_DATA_OID.length
+        || oidStart + TIMESTAMPED_DATA_OID.length > header.length) {
+      return false;
+    }
+    final int sequenceLength = berLength(header, 1, sequenceStart);
+    final int oidEnd = oidStart + TIMESTAMPED_DATA_OID.length;
+    return (sequenceLength < 0 || sequenceLength >= oidEnd - sequenceStart)
+        && Arrays.equals(header, oidStart, oidEnd,
+            TIMESTAMPED_DATA_OID, 0, TIMESTAMPED_DATA_OID.length);
+  }
+
+  /**
+   * Locates the content after a complete BER length field, rejecting the reserved 0xff form.
+   *
+   * @param header The decoded leading bytes.
+   * @param at The length field offset.
+   * @return The content offset, or -1 for an incomplete or reserved length field.
+   */
+  private int berContentOffset(byte[] header, int at) {
+    if (at >= header.length) {
+      return -1;
+    }
+    final int descriptor = header[at] & 0xff;
+    final int lengthBytes = descriptor < BER_INDEFINITE_LENGTH ? 0 : descriptor & 0x7f;
+    if (descriptor == 0xff || lengthBytes > header.length - at - 1) {
+      return -1;
+    }
+    return at + 1 + lengthBytes;
+  }
+
+  /**
+   * Returns a checked BER length, limited to the header size plus one for comparison.
+   * Extra leading zero length bytes are permitted by BER. Capping avoids overflow without
+   * allocating storage for lengths that exceed the decoded header.
+   *
+   * @param header The bounded decoded header.
+   * @param at The length field offset.
+   * @param contentOffset The checked content offset.
+   * @return The limited content length, or -1 for the indefinite form.
+   * @see <a href="https://www.itu.int/rec/T-REC-X.690">X.690, section 8.1.3</a>
+   */
+  private int berLength(byte[] header, int at, int contentOffset) {
+    final int descriptor = header[at] & 0xff;
+    if (descriptor == BER_INDEFINITE_LENGTH) {
+      return -1;
+    }
+    if (descriptor < BER_INDEFINITE_LENGTH) {
+      return Math.min(header.length + 1, descriptor);
+    }
+    int length = 0;
+    for (int i = at + 1; i < contentOffset; i++) {
+      length = Math.min(header.length + 1, (length << Byte.SIZE) | (header[i] & 0xff));
+    }
+    return length;
+  }
+
+  /**
+   * Checks the 3 decimal version digits and zero terminator of DEX magic.
+   * The signature table checks the leading identifier. Version numbers are not
+   * restricted to those supported by a particular Android runtime.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete DEX magic is present.
+   * @see <a href="https://source.android.com/docs/core/runtime/dex-format#dex-file-magic">
+   *     DEX file magic</a>
+   */
+  private boolean hasDexMagic(byte[] header) {
+    if (header.length < DEX_MAGIC_LENGTH || header[DEX_MAGIC_LENGTH - 1] != 0) {
+      return false;
+    }
+    for (int i = DEX_VERSION_OFFSET; i < DEX_MAGIC_LENGTH - 1; i++) {
+      if (header[i] < '0' || header[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Identifies JPEG 2000 file brands from the fixed fields of the initial file-type box.
+   * The signature table checks the preceding signature box. Compatibility lists,
+   * minor-version values and image data are not validated.
+   *
+   * @param header The decoded leading bytes.
+   * @param jp2 The JP2 format from the signature table.
+   * @return The format and media type, or {@code null} for incomplete or unsupported headers.
+   * @see <a href="https://www.itu.int/rec/T-REC-T.800">JPEG 2000 core coding system, Annex I</a>
+   * @see <a href="https://www.rfc-editor.org/rfc/rfc3745.html#section-4">JPEG 2000 media types</a>
+   */
+  private KnownMagics.Format jpeg2000Format(byte[] header, KnownMagics.Format jp2) {
+    if (header.length < JPEG2000_BOX_OFFSET + JPEG2000_MIN_BOX_LENGTH
+        || !carries(header, JPEG2000_BOX_OFFSET + Integer.BYTES, "ftyp")) {
       return null;
     }
-    return switch (format) {
-      case EmbeddedAsset.FORMAT_WEBP -> "image/webp";
-      case EmbeddedAsset.FORMAT_WAV -> "audio/wav";
-      case EmbeddedAsset.FORMAT_AVI -> "video/x-msvideo";
-      default -> KnownMagics.mediaTypeOf(format);
+    long boxLength = Integer.toUnsignedLong(readInt(header, JPEG2000_BOX_OFFSET));
+    int brandOffset = JPEG2000_BRAND_OFFSET;
+    if (boxLength == 1) {
+      if (header.length < JPEG2000_BOX_OFFSET + JPEG2000_MIN_BOX_LENGTH + Long.BYTES) {
+        return null;
+      }
+      boxLength = (Integer.toUnsignedLong(readInt(header, brandOffset)) << Integer.SIZE)
+          | Integer.toUnsignedLong(readInt(header, brandOffset + Integer.BYTES));
+      if (Long.compareUnsigned(boxLength, JPEG2000_MIN_BOX_LENGTH + Long.BYTES) < 0) {
+        return null;
+      }
+      brandOffset += Long.BYTES;
+    } else if (boxLength != 0 && boxLength < JPEG2000_MIN_BOX_LENGTH) {
+      return null;
+    }
+    return switch (readInt(header, brandOffset)) {
+      case 0x6a703220 -> jp2; // jp2 with a trailing space
+      case 0x6a707820 -> JPX_FORMAT; // jpx with a trailing space
+      case 0x6a706d20 -> JPM_FORMAT; // jpm with a trailing space
+      case 0x6d6a7032 -> MJ2_FORMAT; // mjp2
+      default -> null;
+    };
+  }
+
+  /**
+   * Checks AIFF and AIFF-C form types.
+   * The signature table checks the leading FORM identifier.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete audio form type appears at byte 8.
+   * @see <a href="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-1.3.pdf#page=5">
+   *     AIFF FORM header</a>
+   * @see <a href="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-C.9.26.91.pdf#page=7">
+   *     AIFF-C FORM header</a>
+   */
+  private boolean hasAiffFormType(byte[] header) {
+    return carries(header, FORM_TYPE_OFFSET, "AIFF") || carries(header, FORM_TYPE_OFFSET, "AIFC");
+  }
+
+  /**
+   * Checks the byte-order magic of a possible pcapng Section Header Block.
+   * The signature table checks the block type.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete byte-order magic matches in either byte order.
+   * @see <a href="https://www.ietf.org/archive/id/draft-ietf-opsawg-pcapng-05.html#name-section-header-block">
+   *     pcapng Section Header Block</a>
+   */
+  private boolean hasPcapngByteOrderMagic(byte[] header) {
+    if (header.length < PCAPNG_BYTE_ORDER_OFFSET + Integer.BYTES) {
+      return false;
+    }
+    final int magic = readInt(header, PCAPNG_BYTE_ORDER_OFFSET);
+    return magic == PCAPNG_BYTE_ORDER_MAGIC || magic == PCAPNG_REVERSED_BYTE_ORDER_MAGIC;
+  }
+
+  /**
+   * Distinguishes BIFF2-BIFF4 worksheet and workspace document headers.
+   * The signature table checks the record identifier and length. Unused BOF
+   * fields do not affect the document type.
+   *
+   * @param header The decoded bytes matching an Excel signature.
+   * @param worksheet The worksheet format for that BIFF version.
+   * @return The document format, or {@code null} for incomplete or unsupported headers.
+   * @see <a href="https://www.openoffice.org/sc/excelfileformat.pdf#page=135">
+   *     OpenOffice Excel file format reference, BOF records</a>
+   */
+  private KnownMagics.Format excelFormat(byte[] header, KnownMagics.Format worksheet) {
+    if (header.length < BIFF_DOCUMENT_TYPE_OFFSET + Short.BYTES
+        || header.length < BIFF_RECORD_HEADER_SIZE + readUnsignedShortLE(header, Short.BYTES)) {
+      return null;
+    }
+    return switch (readUnsignedShortLE(header, BIFF_DOCUMENT_TYPE_OFFSET)) {
+      case 0x0010, 0x0020, 0x0040 -> worksheet;
+      case 0x0100 -> switch (readUnsignedShortLE(header, 0)) {
+        case 0x0209 -> EXCEL_3_WORKSPACE;
+        case 0x0409 -> EXCEL_4_WORKSPACE;
+        default -> null;
+      };
+      default -> null;
     };
   }
 
@@ -639,6 +893,19 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return true;
+  }
+
+  /**
+   * Tests whether the first decoded byte would be the ASN.1 SEQUENCE tag, 0x30.
+   * Both base64 alphabets encode that byte as M followed by A through P.
+   *
+   * @param text The encoded text.
+   * @param at The payload start.
+   * @return Whether the payload is a sequence candidate requiring a full identifier check.
+   */
+  private boolean startsWithSequence(CharSequence text, int at) {
+    return at + 1 < text.length() && text.charAt(at) == 'M'
+        && text.charAt(at + 1) >= 'A' && text.charAt(at + 1) <= 'P';
   }
 
   /**
@@ -768,6 +1035,17 @@ public final class CursorAssetDetector implements AssetDetector {
   private int readInt(byte[] bytes, int at) {
     return ((bytes[at] & 0xFF) << 24) | ((bytes[at + 1] & 0xFF) << 16)
         | ((bytes[at + 2] & 0xFF) << 8) | (bytes[at + 3] & 0xFF);
+  }
+
+  /**
+   * Returns an unsigned little-endian 16-bit value within checked bounds.
+   *
+   * @param bytes The source bytes.
+   * @param at The byte offset.
+   * @return The value from 0 to 65535.
+   */
+  private int readUnsignedShortLE(byte[] bytes, int at) {
+    return (bytes[at] & 0xFF) | ((bytes[at + 1] & 0xFF) << Byte.SIZE);
   }
 
   /**

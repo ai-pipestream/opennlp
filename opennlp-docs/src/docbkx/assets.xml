@@ -28,8 +28,9 @@
 			while keeping every offset mapped to the source.
 		</para>
 		<para>
-			<code>CursorAssetDetector</code> checks encoded prefixes, validates the payload
-			alphabet and padding, and decodes up to 24 leading bytes for format detection.
+			<code>CursorAssetDetector</code> checks encoded prefixes and validates the payload
+			alphabet and padding. Format detection uses up to 24 decoded leading bytes,
+			36 bytes for JPEG 2000 candidates, or 45 bytes for EMF candidates.
 			Bare runs need at least 32 encoded characters and a recognized file signature.
 			The signature table is derived from Apache Tika's media-type catalog. Recognized
 			PNG and GIF headers also provide image dimensions. A declared media type alone
@@ -38,17 +39,102 @@
 			<ulink url="https://www.w3.org/TR/png-3/#11IHDR">IHDR chunk</ulink> and positive
 			values no greater than 2,147,483,647. GIF dimensions describe the logical screen.
 			A signature match does not establish that a file is complete, valid, or safe to open.
+			Inferred format names and media types come from the same signature. Formats such as
+			<code>xls</code> and <code>pem-parameters</code> can have several media types.
+		</para>
+		<para>
+			JPEG 2000 detection requires the 12-byte signature box followed by an
+			<code>ftyp</code> box with complete brand and minor-version fields.
+			Standard and extended box lengths are supported. The primary brand selects
+			<ulink url="https://www.rfc-editor.org/rfc/rfc3745.html#section-4">format metadata</ulink>:
+			<code>jp2 </code> gives <code>jp2</code> and <code>image/jp2</code>,
+			<code>jpx </code> gives <code>jpx</code> and <code>image/jpx</code>,
+			<code>jpm </code> gives <code>jpm</code> and <code>image/jpm</code>, and
+			<code>mjp2</code> gives <code>mj2</code> and <code>video/mj2</code>.
+			Unknown brands are not inferred from compatibility-list entries. Minor-version
+			values, compatibility lists, image data and complete file lengths are not validated.
+		</para>
+		<para>
+			AIFF detection requires <code>FORM</code> at byte 0 and an audio form type
+			at byte 8: <code>AIFF</code> or <code>AIFC</code>. Both use format name
+			<code>aiff</code> and media type <code>audio/x-aiff</code>.
+			The <ulink url="https://www.mmsp.ece.mcgill.ca/Documents/AudioFormats/AIFF/Docs/AIFF-1.3.pdf#page=5">FORM
+			size field</ulink> does not participate in identification. Other FORM
+			types are not classified as AIFF. Local chunks and audio data are not validated.
+		</para>
+		<para>
+			PNG, MNG, JNG and HDF5 detection requires the complete 8-byte signature
+			at the start of the payload, including the control bytes.
+			<ulink url="https://www.libpng.org/pub/mng/spec/jng.html">JNG</ulink>
+			is reported as <code>jng</code> with media type <code>image/x-jng</code>.
+			<ulink url="https://portal.hdfgroup.org/documentation/hdf5/latest/_f_m_t11.html">HDF5</ulink>
+			is reported as <code>hdf</code> with media type <code>application/x-hdf</code>.
+			HDF5 signatures after an initial user block are not searched.
+		</para>
+		<para>
+			Pcapng detection requires a
+			<ulink url="https://www.ietf.org/archive/id/draft-ietf-opsawg-pcapng-05.html#name-section-header-block">Section
+			Header Block</ulink> identifier and the byte-order magic at byte 8.
+			Both big-endian and little-endian sections are recognized. These identifiers
+			do not validate block lengths or packet contents.
+		</para>
+		<para>
+			DEX detection requires the complete 8-byte
+			<ulink url="https://source.android.com/docs/core/runtime/dex-format#dex-file-magic">file
+			magic</ulink>: <code>dex</code>, a newline, 3 ASCII decimal version digits
+			and a zero byte. It reports <code>dex</code> and <code>application/x-dex</code>.
+			Version numbers are not restricted to a particular Android release. This
+			identifies a possible format, not runtime compatibility or valid bytecode.
+		</para>
+		<para>
+			EMF detection requires the <code>EMR_HEADER</code> type and the
+			<ulink url="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/b55cbd24-612d-47fe-81c9-1da6a682246f">EMF
+			signature</ulink> at byte 40, including the initial space in <code> EMF</code>.
+			A leading type field without that signature is not sufficient.
+		</para>
+		<para>
+			Timestamped-data detection requires the complete
+			<ulink url="https://www.rfc-editor.org/rfc/rfc5544.html#section-2">CMS content-type
+			identifier</ulink> <code>1.2.840.113549.1.9.16.1.31</code> at the start of the envelope.
+			BER definite and indefinite sequence lengths are supported, including DER encoding.
+			The identifier must fit within the 24-byte decoded header. A match reports
+			<code>tsd</code> and <code>application/timestamped-data</code>; other CMS identifiers
+			are not timestamped data. Detection does not validate timestamp evidence, signatures
+			or the complete envelope, and does not retrieve external content.
+		</para>
+		<para>
+			Excel 2-4 detection requires a complete
+			<ulink url="https://www.openoffice.org/sc/excelfileformat.pdf#page=135">BOF
+			(Beginning of File) record</ulink> with a supported document type. Worksheets,
+			charts and macro sheets are reported as <code>xls</code>. Excel 3 and 4
+			workspaces are reported as <code>xlw</code> with media types
+			<code>application/vnd.ms-excel.workspace.3</code> and
+			<code>application/vnd.ms-excel.workspace.4</code>. Unused BOF fields do not
+			restrict detection. A recognized header does not validate the rest of the file.
 		</para>
 		<para>
 			XAR archives are reported as <code>xar</code> with media type
 			<code>application/x-xar</code>, not Xara graphics. Encoded XPM images are
 			reported as <code>xpm</code> with media type <code>image/x-xpixmap</code>.
+			OpenEXR headers are reported as <code>exr</code> with media type
+			<code>image/x-exr</code>. The signature does not establish
+			<ulink url="https://www.iana.org/assignments/media-types/image/aces">ACES
+			conformance</ulink>. TIFF and BigTIFF headers are recognized in both byte orders.
+		</para>
+		<para>
+			DXB detection requires the complete 19-byte header, including the control bytes.
+			Snappy streams are recognized by the
+			<ulink url="https://github.com/google/snappy/blob/main/framing_format.txt">stream
+			identifier chunk</ulink>, not just the <code>sNaPpY</code> text.
 		</para>
 		<para>
 			Explicitly typed, base64 <code>data:</code> URIs accept non-empty payloads,
 			including one- and two-byte values. The media type retains parameters such as
 			<code>charset=UTF-8</code>; the format name excludes them. Non-base64 data URIs
 			and percent-encoded payload characters are not supported.
+			A media type supplied in the URI overrides the inferred media type without
+			changing a recognized format name. It does not establish that the payload
+			conforms to that type.
 		</para>
 		<para>
 			Malformed padding, mixed standard and URL-safe alphabets, and line-wrapped
@@ -106,6 +192,24 @@ String decoded = new String(asset.decode(note), StandardCharsets.UTF_8);
 // asset.format() = "plain"
 // asset.mediaType() = "text/plain;charset=UTF-8"]]>
 			</programlisting>
+		</para>
+		<para>
+			PEM text can also appear inside base64. This example uses public elliptic-curve
+			parameters for <code>prime256v1</code>, not a private key:
+			<programlisting language="java"><![CDATA[
+String parameters = "-----BEGIN EC PARAMETERS-----\n"
+    + "BggqhkjOPQMBBw==\n"
+    + "-----END EC PARAMETERS-----\n";
+String encoded = Base64.getEncoder().encodeToString(
+    parameters.getBytes(StandardCharsets.US_ASCII));
+EmbeddedAsset asset = new CursorAssetDetector().detect(encoded).get(0);
+String decoded = new String(asset.decode(encoded), StandardCharsets.US_ASCII);
+// asset.format() = "pem-parameters"
+// asset.mediaType() = "application/x-x509-ec-parameters"
+// decoded equals parameters]]>
+			</programlisting>
+			The media type distinguishes EC parameters from DSA parameters. Decoding the
+			outer base64 returns the PEM text. Detection does not validate the parameters.
 		</para>
 	</section>
 
