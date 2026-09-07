@@ -100,6 +100,18 @@ String phoneReplaced = new Pseudonymizer().rewrite(phoneDocument).text();
 			</programlisting>
 		</para>
 		<para>
+			An international candidate starts with <code>+</code> and an assigned
+			calling code without leading zeros. For example, <code>+01</code> is
+			not treated as <code>+1</code>. Zeros within the national number are
+			preserved. <code>InternationalPhonePrefixTest</code> checks this example:
+			<programlisting language="java"><![CDATA[
+Document internationalPhones = new PiiAnnotator(PiiPacks.contact())
+    .annotate(Document.of("Invalid +014155550123; call +14155550123."));
+String internationalMasked = Masker.mask(internationalPhones, PiiAnnotator.PII, '*');
+// "Invalid +014155550123; call ************."]]>
+			</programlisting>
+		</para>
+		<para>
 			A <code>MaskPolicy</code> controls how the covered characters are
 			replaced while staying length preserving. <code>keepingFormat()</code>
 			leaves separators visible so the kind of value stays recognizable, and

@@ -91,9 +91,9 @@ final class PhoneNumberLengths {
   }
 
   /**
-   * Judges whether a digit string is a plausible international phone number: some
-   * leading one to three digits form an assigned calling code, and the remaining
-   * digits have a national number length some territory under that code assigns.
+   * Checks whether the leading one to three digits form an assigned calling code and
+   * the remaining digits have an allowed national length. Calling codes cannot start
+   * with zero.
    *
    * @param digits The number's digits without the leading {@code +} or any formatting.
    *               Must not be {@code null}.
@@ -101,6 +101,9 @@ final class PhoneNumberLengths {
    *         exists.
    */
   static boolean plausibleInternational(String digits) {
+    if (digits.isEmpty() || digits.charAt(0) == '0') {
+      return false;
+    }
     int code = 0;
     for (int i = 0; i < MAX_CALLING_CODE_DIGITS && i < digits.length(); i++) {
       code = code * 10 + (digits.charAt(i) - '0');
