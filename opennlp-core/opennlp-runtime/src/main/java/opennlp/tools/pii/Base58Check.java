@@ -21,23 +21,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 /**
- * The <a href="https://en.bitcoin.it/wiki/Base58Check_encoding">Base58Check</a> encoding
- * of Bitcoin's legacy addresses: base 58 without the characters that look alike, over a
- * payload whose last four bytes are the leading four bytes of the double SHA-256 of the
- * rest.
- *
- * <p>The checksum is what makes an address safe to detect. Four checksum bytes over a
- * 21-byte payload leave about one candidate in four thousand million passing by chance, so
- * an arbitrary run of base 58 characters of the right length is rejected rather than
- * reported.</p>
+ * Checks the <a href="https://en.bitcoin.it/wiki/Base58Check_encoding">Base58Check</a>
+ * encoding of legacy Bitcoin addresses. The decoded bytes contain a version byte,
+ * a 20-byte hash and the first four bytes of their double SHA-256 checksum.
  */
 final class Base58Check {
 
-  /**
-   * The base 58 alphabet: no zero, capital O, capital I, or lowercase l. Fixed by the
-   * encoding rather than by a registry, so unlike the tables this package copies from
-   * registrars it carries no revision and cannot go stale.
-   */
+  /** The base 58 alphabet excludes zero, uppercase O/I and lowercase l. */
   private static final String ALPHABET =
       "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -63,8 +53,8 @@ final class Base58Check {
     }
   }
 
+  /** Prevents construction of this utility class. */
   private Base58Check() {
-    // This class holds static methods only and is never instantiated.
   }
 
   /**
@@ -78,7 +68,7 @@ final class Base58Check {
   }
 
   /**
-   * Reads the version byte of a Base58Check payload whose checksum holds.
+   * Reads the version byte of a Base58Check payload with a valid checksum.
    *
    * @param text The text being scanned.
    * @param start The first character of the candidate.
@@ -110,7 +100,7 @@ final class Base58Check {
    * @return The decoded bytes, or {@code null} if a character is not a base 58 digit.
    */
   private static byte[] decode(CharSequence text, int start, int end) {
-    // Base 58 carries less than eight bits per character, so the output never grows.
+    // Each base 58 character requires less than one decoded byte.
     final byte[] reversed = new byte[end - start + 1];
     int length = 0;
     for (int i = start; i < end; i++) {
@@ -129,7 +119,7 @@ final class Base58Check {
         carry >>>= 8;
       }
     }
-    // A leading alphabet zero, that is the character 1, stands for one zero byte.
+    // Each leading character 1 represents a zero byte.
     for (int i = start; i < end && text.charAt(i) == ALPHABET.charAt(0); i++) {
       reversed[length++] = 0;
     }
@@ -145,7 +135,7 @@ final class Base58Check {
    *
    * @param data The bytes to hash.
    * @param length The number of leading bytes to hash.
-   * @return The digest. Never {@code null}.
+   * @return The digest.
    */
   private static byte[] sha256(byte[] data, int length) {
     try {

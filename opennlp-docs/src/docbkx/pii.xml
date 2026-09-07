@@ -215,8 +215,30 @@ String masked = Masker.mask(bearer, PiiAnnotator.PII, '*');
 			<listitem>
 				<para>
 					<code>CryptoPiiExtractor</code>: Bitcoin addresses, legacy
-					Base58Check and segwit bech32 or bech32m, and Ethereum addresses
-					with the EIP-55 checksum where the case carries one.
+					Base58Check and segwit bech32 or bech32m, and Ethereum addresses.
+					Bitcoin candidates require a valid checksum and mainnet encoding;
+					testnet and regtest forms are excluded. Segwit versions 0 through 16
+					are supported, including program-length and padding checks.
+					Ethereum candidates require <code>0x</code> or <code>0X</code> and
+					40 ASCII hexadecimal digits. Mixed-case values require the
+					<ulink url="https://eips.ethereum.org/EIPS/eip-55">EIP-55 checksum</ulink>;
+					single-case values are accepted without that check. The zero address
+					is excluded. An Ethereum address does not identify its network.
+					Detection does not verify ownership, use or balances, and single-case
+					hexadecimal identifiers may be false positives.
+					Word boundaries use Unicode letters and digits; punctuation, including
+					underscores, separates candidates. Normalization preserves Base58 case,
+					lowercases segwit text and applies EIP-55 capitalization to Ethereum.
+					Masking uses the original text and offsets:
+					<programlisting language="java"><![CDATA[
+String address = "0X5AAEB6053F3E94C9B9A09F33669435E7EF1BEAED";
+Document result = new PiiAnnotator(PiiPacks.crypto()).annotate(
+    Document.of("Address: " + address + "."));
+String normalized = result.get(PiiAnnotator.PII).getFirst().value().normalized();
+// "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+String masked = Masker.mask(result, PiiAnnotator.PII, '*');
+// "Address: " + "*".repeat(address.length()) + "."]]>
+					</programlisting>
 				</para>
 			</listitem>
 			<listitem>

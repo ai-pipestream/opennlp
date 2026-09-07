@@ -23,41 +23,32 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for cryptocurrency addresses: forward scans over the
- * text, no regular expressions, recognizing Bitcoin and Ethereum addresses. A wallet
- * address links a person to a public transaction history, which is why it is treated as
- * personal data; this extractor is opt-in.
+ * Extracts Bitcoin and Ethereum address candidates. This detector is opt-in.
  *
  * <p>Recognized forms:</p>
  * <ul>
  *   <li>Bitcoin, legacy: 26 to 35
  *   <a href="https://en.bitcoin.it/wiki/Base58Check_encoding">Base58Check</a> characters
- *   starting with {@code 1} for a public key hash or {@code 3} for a script hash, whose
- *   four-byte double SHA-256 checksum must hold and whose version byte must be one of the
- *   two the main network assigns.</li>
- *   <li>Bitcoin, segwit: the prefix {@code bc1} and a data part whose 30-bit BCH checksum
- *   must hold, under
+ *   starting with {@code 1} for a public key hash or {@code 3} for a script hash.
+ *   The decoded address must contain a mainnet version byte, a 20-byte hash and a valid
+ *   four-byte double SHA-256 checksum.</li>
+ *   <li>Bitcoin, segwit: the prefix {@code bc1}, witness version 0 through 16 and a
+ *   2-to-40-byte program. Version 0 requires a 20-byte or 32-byte program. The checksum uses
  *   <a href="https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki">BIP-173</a>
  *   bech32 for witness version zero and
  *   <a href="https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki">BIP-350</a>
- *   bech32m for later versions, which covers taproot. As BIP-173 requires, a mixed-case
- *   address is rejected.</li>
- *   <li>Ethereum: {@code 0x} and 40 hexadecimal digits. A mixed-case candidate must satisfy
+ *   bech32m for later versions. Padding bits must be zero, with at most four unused bits.
+ *   All-lowercase and all-uppercase forms are accepted; mixed-case forms are rejected.</li>
+ *   <li>Ethereum: {@code 0x} or {@code 0X} and 40 ASCII hexadecimal digits.
+ *   A mixed-case candidate must satisfy
  *   the <a href="https://eips.ethereum.org/EIPS/eip-55">EIP-55</a> capitalization checksum;
- *   an all-lowercase or all-uppercase candidate carries no checksum information and is
- *   accepted on its form alone.</li>
+ *   all-lowercase and all-uppercase candidates are accepted without a checksum check.</li>
  * </ul>
  *
- * <p>Only main network addresses are reported: the test network version bytes and the
- * {@code tb1} prefix are not, since a test address identifies nobody. The Ethereum zero
- * address is not reported either.</p>
- *
- * <p>The checksums are what make these types safe to detect. Without them a run of the
- * right length would have to be reported on its shape alone, and every 40-digit
- * hexadecimal identifier in a text would become a wallet; with them, a candidate that is
- * not an address is rejected with near certainty. This is also why an all-lowercase
- * Ethereum candidate, the one form that carries no checksum, is the weakest recognition
- * this extractor performs.</p>
+ * <p>Bitcoin testnet and regtest addresses and the Ethereum zero address are excluded.
+ * An Ethereum address does not identify its network. Detection does not verify ownership,
+ * transactions, balances or whether an address is used. Single-case Ethereum values may
+ * also be hexadecimal identifiers unrelated to a wallet.</p>
  *
  * <p>Normalized forms: a legacy Bitcoin address keeps its characters, since Base58Check is
  * case sensitive; a segwit address is lowercased, the form BIP-173 recommends; an Ethereum
@@ -67,7 +58,8 @@ import java.util.Set;
  * <p>Both types are reported by default; the {@link #CryptoPiiExtractor(Set)} constructor
  * limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Word boundaries use Unicode letters and digits. Punctuation, including underscores,
+ * separates candidates. Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -229,13 +221,12 @@ public final class CryptoPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests whether a candidate mixes letter cases, which BIP-173 rejects because the two
-   * cases encode the same address and a mixture cannot be checksummed.
+   * Checks for mixed case, which BIP-173 excludes independently of the checksum.
    *
    * @param text The text being scanned.
    * @param start The first character of the candidate.
    * @param end The exclusive end of the candidate.
-   * @return {@code true} if the candidate holds both an uppercase and a lowercase letter.
+   * @return {@code true} if the candidate contains both uppercase and lowercase letters.
    */
   private boolean mixedCase(CharSequence text, int start, int end) {
     boolean upper = false;
@@ -290,7 +281,7 @@ public final class CryptoPiiExtractor implements PiiExtractor {
    * of the lowercase address is {@code 8} or greater.
    *
    * @param lowercase The 40 lowercase hexadecimal digits of the address.
-   * @return The capitalized digits. Never {@code null}.
+   * @return The capitalized digits.
    */
   private String eip55(String lowercase) {
     final byte[] hash = Keccak256.digest(lowercase.getBytes(StandardCharsets.US_ASCII));
@@ -310,7 +301,7 @@ public final class CryptoPiiExtractor implements PiiExtractor {
    * @param start The first character to compare.
    * @param end The exclusive end of the range to compare.
    * @param value The string to compare with; must be as long as the range.
-   * @return {@code true} if the range holds exactly that string.
+   * @return {@code true} if the range equals the string.
    */
   private boolean contentEquals(CharSequence text, int start, int end, String value) {
     for (int i = start; i < end; i++) {
