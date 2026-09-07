@@ -23,17 +23,13 @@ import java.util.Arrays;
 import java.util.function.Consumer;
 
 /**
- * Reads a CFSA2 finite-state automaton and enumerates the byte sequences it accepts.
+ * Loads CFSA2 automata and supplies accepted byte sequences.
  *
- * <p>CFSA2 is the compact automaton format defined by the morfologik project; the {@code .dict}
- * files distributed for many languages are CFSA2 automata paired with a plain {@code .info}
- * metadata file. This reader is written from the published format and adds no third-party
- * dependency. It exposes the raw accepted byte sequences; interpreting them as morphological
- * entries (surface form, separator, encoded base form, separator, tag) is left to the caller,
- * which also owns the character encoding declared by the dictionary.</p>
+ * <p>The <a href="https://github.com/morfologik/morfologik-stemming/blob/2.2.0/morfologik-fsa/src/main/java/morfologik/fsa/CFSA2.java">format description</a>
+ * specifies the encoding. Reachable nodes and arcs are validated on load.
+ * No third-party dependency is needed.</p>
  *
- * <p>Instances hold only immutable state, so {@link #forEachSequence(Consumer)} may be called
- * concurrently.</p>
+ * <p>Instances are immutable and support concurrent traversal.</p>
  */
 public final class CFSA2Reader implements FsaSequenceReader {
 
@@ -49,13 +45,16 @@ public final class CFSA2Reader implements FsaSequenceReader {
   private static final int TERMINAL_NODE = 0;
   private static final int NO_ARC = 0;
 
-  /** Guards against runaway recursion on a malformed automaton. */
-  private static final int MAX_SEQUENCE_LENGTH = 8192;
+  /** Header flags defined by the Morfologik FSA format. */
+  private static final int KNOWN_FLAGS = 0x030f;
+
+  /** Maximum byte count of an unsigned 32-bit variable-length integer. */
+  private static final int MAX_VINT_BYTES = 5;
 
   private final byte[] arcs;
   private final byte[] labelMapping;
   private final boolean hasNumbers;
-  private final int rootNode;
+  private final FsaTraversal traversal;
 
   /**
    * Initializes the reader over the automaton's arc block.
@@ -63,12 +62,15 @@ public final class CFSA2Reader implements FsaSequenceReader {
    * @param arcs         The arc block, the automaton bytes after the header and label table.
    * @param labelMapping The label table indexed by an arc's label index.
    * @param hasNumbers   Whether each node is prefixed with a perfect-hash number to skip.
+   * @throws IllegalArgumentException If the encoded automaton is malformed.
    */
   private CFSA2Reader(byte[] arcs, byte[] labelMapping, boolean hasNumbers) {
     this.arcs = arcs;
     this.labelMapping = labelMapping;
     this.hasNumbers = hasNumbers;
-    this.rootNode = destinationNode(firstArc(TERMINAL_NODE));
+    final int rootNode = destinationNode(firstArc(TERMINAL_NODE));
+    this.traversal = new FsaTraversal(rootNode, arcs.length,
+        this::firstArc, this::nextArc, this::destinationNode, this::arcLabel, this::isFinal);
   }
 
   /**
@@ -78,7 +80,7 @@ public final class CFSA2Reader implements FsaSequenceReader {
    *           {@code null}.
    * @return A reader over the automaton.
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
-   * @throws IOException Thrown on IO errors, or if the stream is not a CFSA2 automaton.
+   * @throws IOException If reading fails or the encoded automaton is malformed.
    */
   public static CFSA2Reader read(InputStream in) throws IOException {
     if (in == null) {
@@ -92,8 +94,9 @@ public final class CFSA2Reader implements FsaSequenceReader {
    *
    * @param bytes The whole automaton, magic header included.
    * @return A reader over the automaton.
+   * @throws IllegalArgumentException If {@code bytes} is null.
    * @throws IOException Thrown if {@code bytes} is not a CFSA2 automaton or its header is
-   *                     truncated.
+   *                     truncated, or reachable nodes or arcs are malformed.
    */
   static CFSA2Reader fromBytes(byte[] bytes) throws IOException {
     FsaSequenceReader.requireFsaHeader(bytes);
@@ -105,6 +108,9 @@ public final class CFSA2Reader implements FsaSequenceReader {
           + Integer.toHexString(bytes[4] & 0xff) + "; only CFSA2 (0xc6) is read");
     }
     final int flags = ((bytes[5] & 0xff) << 8) | (bytes[6] & 0xff);
+    if ((flags & ~KNOWN_FLAGS) != 0) {
+      throw new IOException("unrecognized CFSA2 flags: 0x" + Integer.toHexString(flags));
+    }
     final int labelMappingSize = bytes[7] & 0xff;
     final int arcsStart = HEADER_SIZE + labelMappingSize;
     if (arcsStart > bytes.length) {
@@ -112,106 +118,113 @@ public final class CFSA2Reader implements FsaSequenceReader {
     }
     final byte[] labelMapping = Arrays.copyOfRange(bytes, HEADER_SIZE, arcsStart);
     final byte[] arcs = Arrays.copyOfRange(bytes, arcsStart, bytes.length);
-    return new CFSA2Reader(arcs, labelMapping, (flags & FLAG_NUMBERS) != 0);
+    try {
+      return new CFSA2Reader(arcs, labelMapping, (flags & FLAG_NUMBERS) != 0);
+    } catch (IllegalArgumentException e) {
+      throw new IOException("malformed CFSA2 automaton: " + e.getMessage(), e);
+    }
   }
 
   /**
    * {@inheritDoc}
    *
-   * <p>Sequences are produced in the automaton's stored, lexicographic order.</p>
-   *
-   * @throws IllegalStateException Thrown if a path exceeds {@value #MAX_SEQUENCE_LENGTH} bytes,
-   *                               which indicates a malformed automaton.
+   * <p>Sequences are produced in stored order with a per-call path buffer.</p>
    */
   @Override
   public void forEachSequence(Consumer<byte[]> action) {
     if (action == null) {
       throw new IllegalArgumentException("action must not be null");
     }
-    enumerate(rootNode, new GrowableByteSequence(), action);
+    traversal.forEachSequence(action);
   }
 
   /**
-   * Walks every arc reachable from {@code node} depth first, reporting each accepting path.
+   * Tests whether an arc accepts a sequence.
    *
-   * @param node   The offset of the node to descend into.
-   * @param path   The labels collected on the way down; pushed and popped in place.
-   * @param action The action to run for each accepted sequence.
-   * @throws IllegalStateException Thrown if the path grows past {@value #MAX_SEQUENCE_LENGTH}
-   *                               bytes.
+   * @param arc The validated arc offset.
+   * @return Whether the arc is final.
    */
-  private void enumerate(int node, GrowableByteSequence path, Consumer<byte[]> action) {
-    if (path.length() > MAX_SEQUENCE_LENGTH) {
-      throw new IllegalStateException(
-          "CFSA2 sequence exceeds " + MAX_SEQUENCE_LENGTH + " bytes; automaton may be malformed");
-    }
-    for (int arc = firstArc(node); arc != NO_ARC; arc = nextArc(arc)) {
-      path.push(arcLabel(arc));
-      if ((arcs[arc] & BIT_FINAL_ARC) != 0) {
-        action.accept(path.toByteArray());
-      }
-      final int destination = destinationNode(arc);
-      if (destination != TERMINAL_NODE) {
-        enumerate(destination, path, action);
-      }
-      path.pop();
-    }
+  private boolean isFinal(int arc) {
+    return (flags(arc) & BIT_FINAL_ARC) != 0;
   }
 
   /**
+   * Locates a node's first arc.
+   *
    * @param node The offset of a node.
    * @return The offset of that node's first arc, skipping the entry count if the automaton
    *         carries one.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int firstArc(int node) {
-    return hasNumbers ? skipVInt(node) : node;
+    final int first = hasNumbers ? skipVInt(node) : node;
+    FsaTraversal.requireRange(first, 1, arcs.length);
+    return first;
   }
 
   /**
+   * Locates the next arc at the same node.
+   *
    * @param arc The offset of an arc.
    * @return The offset of the following arc of the same node, or {@value #NO_ARC} if {@code arc}
    *         is the last one.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int nextArc(int arc) {
-    return (arcs[arc] & BIT_LAST_ARC) != 0 ? NO_ARC : skipArc(arc);
+    final int end = skipArc(arc);
+    return (flags(arc) & BIT_LAST_ARC) != 0 ? NO_ARC : end;
   }
 
   /**
+   * Returns an arc's unsigned label.
+   *
    * @param arc The offset of an arc.
    * @return The arc's label, taken from the header's label table when the flags byte indexes it,
    *         otherwise stored inline after the flags byte.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
-  private byte arcLabel(int arc) {
-    final int index = arcs[arc] & LABEL_INDEX_MASK;
-    return index > 0 ? labelMapping[index] : arcs[arc + 1];
+  private int arcLabel(int arc) {
+    final int index = flags(arc) & LABEL_INDEX_MASK;
+    if (index > 0) {
+      FsaTraversal.requireRange(index, 1, labelMapping.length);
+      return labelMapping[index] & 0xff;
+    }
+    FsaTraversal.requireRange(arc, 2, arcs.length);
+    return arcs[arc + 1] & 0xff;
   }
 
   /**
+   * Resolves an arc's target node.
+   *
    * @param arc The offset of an arc.
    * @return The offset of the node the arc points at, which is either the node laid out directly
    *         after the arc's own node or an explicit variable-length address;
    *         {@value #TERMINAL_NODE} if the arc ends a word without continuing.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int destinationNode(int arc) {
-    if ((arcs[arc] & BIT_TARGET_NEXT) != 0) {
+    if ((flags(arc) & BIT_TARGET_NEXT) != 0) {
       int last = arc;
-      while ((arcs[last] & BIT_LAST_ARC) == 0) {
+      while ((flags(last) & BIT_LAST_ARC) == 0) {
         last = skipArc(last);
       }
       return skipArc(last);
     }
-    return readVInt(arc + ((arcs[arc] & LABEL_INDEX_MASK) == 0 ? 2 : 1));
+    return readVInt(arc + ((flags(arc) & LABEL_INDEX_MASK) == 0 ? 2 : 1));
   }
 
   /**
+   * Locates the byte after an arc.
+   *
    * @param offset The offset of an arc.
    * @return The offset just past that arc, that is, the start of whatever follows it.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int skipArc(int offset) {
-    final int flag = arcs[offset++];
-    if ((flag & LABEL_INDEX_MASK) == 0) {
-      offset++;
-    }
+    final int flag = flags(offset);
+    final int prefix = (flag & LABEL_INDEX_MASK) == 0 ? 2 : 1;
+    FsaTraversal.requireRange(offset, prefix, arcs.length);
+    offset += prefix;
     if ((flag & BIT_TARGET_NEXT) == 0) {
       offset = skipVInt(offset);
     }
@@ -224,25 +237,50 @@ public final class CFSA2Reader implements FsaSequenceReader {
    *
    * @param offset The offset of the first byte of the integer.
    * @return The decoded value.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int readVInt(int offset) {
-    byte b = arcs[offset];
-    int value = b & 0x7f;
-    for (int shift = 7; b < 0; shift += 7) {
-      b = arcs[++offset];
-      value |= (b & 0x7f) << shift;
+    final int end = skipVInt(offset);
+    int value = 0;
+    for (int i = offset; i < end; i++) {
+      value |= (arcs[i] & 0x7f) << ((i - offset) * 7);
+    }
+    if (value < 0) {
+      throw new IllegalArgumentException("CFSA2 target exceeds the address range");
     }
     return value;
   }
 
   /**
+   * Locates the byte after a 32-bit variable-length integer.
+   *
    * @param offset The offset of the first byte of a variable-length integer.
    * @return The offset just past that integer.
+   * @throws IllegalArgumentException If the encoded data is invalid.
    */
   private int skipVInt(int offset) {
-    while (arcs[offset] < 0) {
-      offset++;
+    for (int i = 0; i < MAX_VINT_BYTES; i++) {
+      FsaTraversal.requireRange(offset, i + 1, arcs.length);
+      final int value = arcs[offset + i] & 0xff;
+      if (i == MAX_VINT_BYTES - 1 && (value & 0xf0) != 0) {
+        break;
+      }
+      if ((value & 0x80) == 0) {
+        return offset + i + 1;
+      }
     }
-    return offset + 1;
+    throw new IllegalArgumentException("CFSA2 variable-length integer exceeds 32 bits");
+  }
+
+  /**
+   * Returns an arc's flags.
+   *
+   * @param arc The arc offset.
+   * @return The unsigned flags byte.
+   * @throws IllegalArgumentException If the offset is outside the data.
+   */
+  private int flags(int arc) {
+    FsaTraversal.requireRange(arc, 1, arcs.length);
+    return arcs[arc] & 0xff;
   }
 }

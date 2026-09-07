@@ -17,17 +17,18 @@
 
 package opennlp.tools.formats;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Properties;
 
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
@@ -41,7 +42,7 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>This reader adds no third-party dependency. The base form (lemma) is stored relative to the
  * surface form to save space; all four encoders are decoded here. Each is a run of control bytes
- * offset by {@code 'A'}, followed by literal bytes to append:</p>
+ * offset by {@code 'A'} modulo 256, followed by bytes to append:</p>
  * <ul>
  *   <li>{@code NONE}: the encoded bytes are the base form verbatim.</li>
  *   <li>{@code SUFFIX} ({@code K}): drop {@code K} bytes from the end of the form, then append.</li>
@@ -50,12 +51,19 @@ import opennlp.tools.util.StringUtil;
  *   <li>{@code INFIX} ({@code I},{@code L},{@code K}): drop {@code L} bytes at offset {@code I} and
  *       {@code K} from the end of the form, then append.</li>
  * </ul>
+ * <p>A removal count of 255 replaces the complete surface form with the appended bytes.
+ * An infix position of 255 is an ordinary byte offset. Control bytes may equal the field
+ * separator. See the
+ * <a href="https://github.com/morfologik/morfologik-stemming/tree/2.2.0/morfologik-stemming/src/main/java/morfologik/stemming">Morfologik encoders</a>
+ * for the format.</p>
  *
- * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
- * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
- * unreachable. The fold uses {@link Locale#ROOT} so that the keys come out the same on every
- * JVM; the default locale of, for example, a Turkish JVM would fold {@code 'I'} to the dotless
- * {@code 'ı'} and store keys no lookup can reach.</p>
+ * <p>Surface forms are lower-cased with {@link Locale#ROOT} to match
+ * {@link DictionaryLemmatizer} lookup. Tags and lemmas retain their decoded contents,
+ * including {@code #}, tabs and line breaks. Invalid character data is rejected on load.</p>
+ *
+ * <p>Loading expands every entry into an in-memory lookup map. Lookup uses that map,
+ * not the compressed automaton. Budget heap for the decoded forms, tags and lemmas,
+ * including temporary collections during loading; file size alone is not a memory estimate.</p>
  *
  * <p>Dictionary data is supplied by the caller; none is bundled with OpenNLP. This class is
  * stateless, so its methods may be called concurrently.</p>
@@ -78,19 +86,17 @@ public final class MorfologikDictionaryReader {
     INFIX
   }
 
-  /** Value the encoders add to every control byte so that all of them stay printable. */
+  /** Offset added to a control value before conversion to a byte. */
   private static final int CONTROL_OFFSET = 'A';
 
-  /** Separates the word, the postag, and the lemmas in the text {@link DictionaryLemmatizer} reads. */
-  private static final String FIELD_SEPARATOR = "\t";
-
-  /** Separates alternative lemmas of one word and postag. */
-  private static final String LEMMA_SEPARATOR = "#";
+  /** Removal count for replacement of the complete surface form. */
+  private static final int REPLACE_FORM = 255;
 
   private static final String KEY_SEPARATOR = "fsa.dict.separator";
   private static final String KEY_ENCODING = "fsa.dict.encoding";
   private static final String KEY_ENCODER = "fsa.dict.encoder";
 
+  /** Prevents utility-class instantiation. */
   private MorfologikDictionaryReader() {
   }
 
@@ -107,7 +113,8 @@ public final class MorfologikDictionaryReader {
    * @throws IllegalArgumentException Thrown if {@code dictionary}, {@code encoding}, or
    *                                  {@code charset} is {@code null}.
    * @throws IOException Thrown on IO errors, if the stream is not a supported FSA automaton, or
-   *                     if an entry cannot be split into a form and encoded base.
+   *                     if an entry has no form separator, incomplete controls, invalid removal ranges
+   *                     or invalid character data.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, byte separator,
       BaseFormEncoding encoding, Charset charset) throws IOException {
@@ -121,28 +128,40 @@ public final class MorfologikDictionaryReader {
       throw new IllegalArgumentException("charset must not be null");
     }
 
+    return readEntries(dictionary, separator, encoding, charset).toLemmatizer();
+  }
+
+  /**
+   * Collects decoded entries from an FSA stream.
+   *
+   * @param dictionary The automaton stream.
+   * @param separator The separator byte.
+   * @param encoding The base-form encoder.
+   * @param charset The dictionary charset.
+   * @return The collected entries.
+   * @throws IOException If the dictionary cannot be read or contains invalid entries.
+   */
+  private static LemmatizerEntries readEntries(InputStream dictionary, byte separator,
+      BaseFormEncoding encoding, Charset charset) throws IOException {
     final FsaSequenceReader automaton = FsaSequenceReader.read(dictionary);
-    final Map<String, LinkedHashSet<String>> entries = new LinkedHashMap<>();
+    final LemmatizerEntries entries = new LemmatizerEntries();
+    final CharsetDecoder decoder = charset.newDecoder();
     try {
-      automaton.forEachSequence(sequence -> addEntry(sequence, separator, encoding, charset, entries));
+      automaton.forEachSequence(sequence -> addEntry(sequence, separator, encoding, decoder, entries));
     } catch (UncheckedIOException e) {
       throw e.getCause();
     }
 
-    final StringBuilder adapted = new StringBuilder();
-    for (final Map.Entry<String, LinkedHashSet<String>> entry : entries.entrySet()) {
-      adapted.append(entry.getKey())
-          .append(FIELD_SEPARATOR)
-          .append(String.join(LEMMA_SEPARATOR, entry.getValue()))
-          .append('\n');
-    }
-    final byte[] bytes = adapted.toString().getBytes(StandardCharsets.UTF_8);
-    return new DictionaryLemmatizer(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
+    return entries;
   }
 
   /**
    * Reads a morfologik dictionary into a {@link DictionaryLemmatizer}, taking the separator,
-   * charset, and encoder from the dictionary's {@code .info} metadata.
+   * charset, and encoder from the dictionary's UTF-8 {@code .info} metadata.
+   * The separator character must encode as a single byte in the dictionary charset.
+   * Optional {@code fsa.dict.input-conversion} pairs apply in metadata order after
+   * lower-casing each query token. Dictionary lookup remains case-insensitive.
+   * Tags and lemmas are unchanged. Spelling options do not affect lemmatizer lookup.
    *
    * @param dictionary The FSA5 or CFSA2 automaton, referenced by an open {@link InputStream}.
    *                   Must not be {@code null}.
@@ -151,9 +170,9 @@ public final class MorfologikDictionaryReader {
    *                   {@code fsa.dict.separator}, {@code fsa.dict.encoding}, and
    *                   {@code fsa.dict.encoder}.
    * @return A {@link DictionaryLemmatizer} over the decoded entries.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or a required metadata
-   *                                  key is missing or invalid.
-   * @throws IOException Thrown on IO errors or invalid dictionary content.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}, a required metadata
+   *                                  key is missing or a metadata value is invalid.
+   * @throws IOException Thrown on IO errors, invalid dictionary content or invalid UTF-8 metadata.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, InputStream info)
       throws IOException {
@@ -164,7 +183,7 @@ public final class MorfologikDictionaryReader {
       throw new IllegalArgumentException("info must not be null");
     }
     final Properties properties = new Properties();
-    properties.load(info);
+    properties.load(new InputStreamReader(info, StandardCharsets.UTF_8.newDecoder()));
 
     final String separator = required(properties, KEY_SEPARATOR);
     if (separator.length() != 1) {
@@ -172,8 +191,38 @@ public final class MorfologikDictionaryReader {
     }
     final Charset charset = Charset.forName(required(properties, KEY_ENCODING));
     final BaseFormEncoding encoding =
-        BaseFormEncoding.valueOf(StringUtil.toUpperCase(required(properties, KEY_ENCODER)));
-    return read(dictionary, (byte) separator.charAt(0), encoding, charset);
+        BaseFormEncoding.valueOf(StringUtil.toUpperCase(required(properties, KEY_ENCODER).trim()));
+    final byte separatorByte = separatorByte(separator, charset);
+    final String inputConversion = properties.getProperty(MorfologikInputConversion.PROPERTY);
+    final MorfologikInputConversion conversion = inputConversion == null ? null
+        : MorfologikInputConversion.parse(inputConversion);
+    final LemmatizerEntries entries = readEntries(dictionary, separatorByte, encoding, charset);
+    if (conversion == null || conversion.isEmpty()) {
+      return entries.toLemmatizer();
+    }
+    final DictionaryLemmatizer lemmatizer = conversion.newLemmatizer();
+    entries.copyTo(lemmatizer);
+    return lemmatizer;
+  }
+
+  /**
+   * Encodes the metadata separator in the dictionary charset.
+   *
+   * @param separator The single separator character.
+   * @param charset The dictionary encoding.
+   * @return The separator byte.
+   * @throws IllegalArgumentException If the separator cannot encode as a single byte.
+   */
+  private static byte separatorByte(String separator, Charset charset) {
+    try {
+      final ByteBuffer encoded = charset.newEncoder().encode(CharBuffer.wrap(separator));
+      if (encoded.remaining() != 1) {
+        throw new IllegalArgumentException(KEY_SEPARATOR + " must encode as one byte in " + charset);
+      }
+      return encoded.get();
+    } catch (CharacterCodingException e) {
+      throw new IllegalArgumentException(KEY_SEPARATOR + " cannot be encoded in " + charset, e);
+    }
   }
 
   /**
@@ -201,37 +250,43 @@ public final class MorfologikDictionaryReader {
    *                  trailing separator is read as an empty tag.
    * @param separator The byte separating the three fields.
    * @param encoding  The base-form encoder the dictionary declares.
-   * @param charset   The character encoding of the dictionary bytes.
-   * @param entries   Collects the lemmas seen per {@code form + tag} key, in first-seen order.
+   * @param decoder   Converts fields to text, reporting malformed or unmappable bytes.
+   * @param entries   Collects lemmas for each form and tag in first-seen order.
    * @throws UncheckedIOException Thrown if the sequence has no separator or its encoded base is
-   *                              malformed; the caller unwraps it, since the automaton walk
-   *                              cannot propagate a checked exception.
+   *                              malformed, or a field contains invalid character data.
+   *                              The public read method unwraps this exception.
    */
   private static void addEntry(byte[] sequence, byte separator, BaseFormEncoding encoding,
-      Charset charset, Map<String, LinkedHashSet<String>> entries) {
+      CharsetDecoder decoder, LemmatizerEntries entries) {
     final int firstSeparator = indexOf(sequence, separator, 0);
     if (firstSeparator < 0) {
       throw new UncheckedIOException(new IOException(
-          "morfologik entry has no separator: " + new String(sequence, charset)));
+          "morfologik entry has no separator"));
     }
-    final int secondSeparator = indexOf(sequence, separator, firstSeparator + 1);
+    final int secondSeparator = indexOf(sequence, separator,
+        firstSeparator + 1 + controlBytes(encoding));
     final int baseEnd = secondSeparator < 0 ? sequence.length : secondSeparator;
 
     final byte[] form = Arrays.copyOfRange(sequence, 0, firstSeparator);
     final byte[] encodedBase = Arrays.copyOfRange(sequence, firstSeparator + 1, baseEnd);
-    final String tag = secondSeparator < 0 ? ""
-        : new String(sequence, secondSeparator + 1, sequence.length - secondSeparator - 1, charset);
-
     final byte[] base;
     try {
       base = decodeBaseForm(form, encodedBase, encoding);
     } catch (IllegalArgumentException e) {
       throw new UncheckedIOException(new IOException(
-          "malformed morfologik entry: " + new String(sequence, charset), e));
+          "malformed morfologik entry", e));
     }
 
-    final String key = new String(form, charset).toLowerCase(Locale.ROOT) + FIELD_SEPARATOR + tag;
-    entries.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(new String(base, charset));
+    try {
+      final String surface = decoder.decode(ByteBuffer.wrap(form)).toString();
+      final String lemma = decoder.decode(ByteBuffer.wrap(base)).toString();
+      final String tag = secondSeparator < 0 ? ""
+          : decoder.decode(ByteBuffer.wrap(sequence, secondSeparator + 1,
+              sequence.length - secondSeparator - 1)).toString();
+      entries.add(surface, tag, lemma);
+    } catch (CharacterCodingException e) {
+      throw new UncheckedIOException(new IOException("invalid morfologik character data", e));
+    }
   }
 
   /**
@@ -241,30 +296,43 @@ public final class MorfologikDictionaryReader {
    * @param encoded  The encoded base bytes: control bytes followed by literal bytes to append.
    * @param encoding The encoder that produced {@code encoded}.
    * @return The decoded base form bytes.
-   * @throws IllegalArgumentException Thrown if {@code encoded} is too short for the encoder or the
-   *                                  control bytes address positions outside {@code form}.
+   * @throws IllegalArgumentException Thrown if {@code encoded} is too short for the encoder,
+   *                                  or removal ranges overlap or exceed {@code form}.
    */
   static byte[] decodeBaseForm(byte[] form, byte[] encoded, BaseFormEncoding encoding) {
+    final int prefixBytes = controlBytes(encoding);
+    require(encoded, prefixBytes, encoding);
     switch (encoding) {
       case NONE:
         return encoded.clone();
       case SUFFIX: {
-        require(encoded, 1, encoding);
-        final int keep = bounded(form.length - control(encoded[0]), form);
-        return join(form, 0, keep, encoded, 1);
+        final int suffix = control(encoded[0]);
+        final int keep = suffix == REPLACE_FORM ? 0 : bounded(form.length - suffix, form);
+        return join(form, 0, keep, encoded, prefixBytes);
       }
       case PREFIX: {
-        require(encoded, 2, encoding);
-        final int start = bounded(control(encoded[0]), form);
-        final int end = bounded(form.length - control(encoded[1]), form);
-        return join(form, Math.min(start, end), end, encoded, 2);
+        final int prefix = control(encoded[0]);
+        final int suffix = control(encoded[1]);
+        if (prefix == REPLACE_FORM || suffix == REPLACE_FORM) {
+          return Arrays.copyOfRange(encoded, prefixBytes, encoded.length);
+        }
+        final int start = bounded(prefix, form);
+        final int end = bounded(form.length - suffix, form);
+        requireOrdered(start, end);
+        return join(form, start, end, encoded, prefixBytes);
       }
       case INFIX: {
-        require(encoded, 3, encoding);
-        final int cut = bounded(control(encoded[0]), form);
-        final int resume = bounded(cut + control(encoded[1]), form);
-        final int end = bounded(form.length - control(encoded[2]), form);
-        return join3(form, cut, Math.max(resume, cut), Math.max(end, resume), encoded, 3);
+        final int position = control(encoded[0]);
+        final int length = control(encoded[1]);
+        final int suffix = control(encoded[2]);
+        if (length == REPLACE_FORM || suffix == REPLACE_FORM) {
+          return Arrays.copyOfRange(encoded, prefixBytes, encoded.length);
+        }
+        final int cut = bounded(position, form);
+        final int resume = bounded(cut + length, form);
+        final int end = bounded(form.length - suffix, form);
+        requireOrdered(resume, end);
+        return join3(form, cut, resume, end, encoded, prefixBytes);
       }
       default:
         throw new IllegalArgumentException("unknown encoder: " + encoding);
@@ -272,11 +340,41 @@ public final class MorfologikDictionaryReader {
   }
 
   /**
+   * Counts the control bytes preceding the appended bytes.
+   *
+   * @param encoding The encoder.
+   * @return The control byte count.
+   */
+  private static int controlBytes(BaseFormEncoding encoding) {
+    return switch (encoding) {
+      case NONE -> 0;
+      case SUFFIX -> 1;
+      case PREFIX -> 2;
+      case INFIX -> 3;
+    };
+  }
+
+  /**
+   * Converts a control byte to an unsigned removal count or position.
+   *
    * @param b A control byte of an encoded base form.
    * @return The number of bytes it stands for.
    */
   private static int control(byte b) {
-    return (b & 0xff) - CONTROL_OFFSET;
+    return (b - CONTROL_OFFSET) & 0xff;
+  }
+
+  /**
+   * Checks that removed ranges do not overlap.
+   *
+   * @param start The start of the retained range.
+   * @param end The end of the retained range.
+   * @throws IllegalArgumentException If {@code start} exceeds {@code end}.
+   */
+  private static void requireOrdered(int start, int end) {
+    if (start > end) {
+      throw new IllegalArgumentException("encoded base removal ranges overlap");
+    }
   }
 
   /**

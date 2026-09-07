@@ -18,16 +18,12 @@
 package opennlp.tools.formats;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Locale;
-import java.util.Map;
 
 import opennlp.tools.lemmatizer.DictionaryLemmatizer;
 import opennlp.tools.util.StringUtil;
@@ -38,32 +34,26 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>This is the layout published by PoliMorf, the successor grammatical dictionary of Polish
  * (BSD 2-Clause), and emitted by exporting a morfologik dictionary to text; it is otherwise
- * language-agnostic. {@link DictionaryLemmatizer} expects the opposite column order,
- * {@code word\tpostag\tlemma}, and a single row per {@code (word, postag)} key with alternative
- * lemmas joined by {@code #}. This reader performs that adaptation: it re-orders the columns and
- * merges every lemma seen for the same form and tag into one entry, preserving first-seen order.
+ * language-agnostic. This reader groups distinct lemmas by form and tag in first-seen order.
+ * A {@code #} in a lemma is retained, not treated as an alternative separator.
+ * Columns after the tag are ignored.
  * Dictionary data is supplied by the caller; none is bundled with OpenNLP.</p>
  *
- * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
- * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
- * unreachable. The fold uses {@link Locale#ROOT} so that the keys come out the same on every
- * JVM; the default locale of, for example, a Turkish JVM would fold {@code 'I'} to the dotless
- * {@code 'ı'} and store keys no lookup can reach. Tags are kept verbatim and must match the
- * tags the caller's tagger emits.</p>
+ * <p>Surface forms are lower-cased with {@link Locale#ROOT} to match
+ * {@link DictionaryLemmatizer} lookup. Tags are unchanged and must match the part-of-speech
+ * tags supplied for lookup. Invalid character data is rejected on load.</p>
  *
  * <p>This class is stateless, so its methods may be called concurrently.</p>
  */
 public final class PoliMorfDictionaryReader {
 
-  /** Separates the columns of both the source table and the text {@link DictionaryLemmatizer} reads. */
-  private static final String FIELD_SEPARATOR = "\t";
-
-  /** Separates alternative lemmas of one word and postag. */
-  private static final String LEMMA_SEPARATOR = "#";
+  /** Separates columns in the source table. */
+  private static final char FIELD_SEPARATOR = '\t';
 
   /** The number of columns a non-blank row must carry. */
   private static final int MIN_FIELDS = 3;
 
+  /** Prevents utility-class instantiation. */
   private PoliMorfDictionaryReader() {
   }
 
@@ -74,8 +64,7 @@ public final class PoliMorfDictionaryReader {
    *                   {@code null}.
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
    * @throws IllegalArgumentException Thrown if {@code dictionary} is {@code null}.
-   * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
-   *                     fewer than three tab-separated fields.
+   * @throws IOException On IO errors, missing tab-separated fields or invalid character data.
    */
   public static DictionaryLemmatizer read(InputStream dictionary) throws IOException {
     return read(dictionary, StandardCharsets.UTF_8);
@@ -92,8 +81,7 @@ public final class PoliMorfDictionaryReader {
    * @return A {@link DictionaryLemmatizer} over the adapted entries.
    * @throws IllegalArgumentException Thrown if {@code dictionary} or {@code charset} is
    *                                  {@code null}.
-   * @throws IOException Thrown if IO errors occur while reading, or a non-blank line carries
-   *                     fewer than three tab-separated fields.
+   * @throws IOException On IO errors, missing tab-separated fields or invalid character data.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, Charset charset)
       throws IOException {
@@ -104,10 +92,9 @@ public final class PoliMorfDictionaryReader {
       throw new IllegalArgumentException("charset must not be null");
     }
 
-    // Maps "form<TAB>tag" to its alternative lemmas. Map and set both keep insertion order, so
-    // the adapted dictionary comes out the same for the same input.
-    final Map<String, LinkedHashSet<String>> entries = new LinkedHashMap<>();
-    try (BufferedReader reader = new BufferedReader(new InputStreamReader(dictionary, charset))) {
+    final LemmatizerEntries entries = new LemmatizerEntries();
+    try (BufferedReader reader =
+        new BufferedReader(new InputStreamReader(dictionary, charset.newDecoder()))) {
       String line;
       int lineNumber = 0;
       while ((line = reader.readLine()) != null) {
@@ -115,29 +102,21 @@ public final class PoliMorfDictionaryReader {
         if (isBlank(line)) {
           continue;
         }
-        final String[] fields = line.split(FIELD_SEPARATOR, -1);
-        if (fields.length < MIN_FIELDS) {
+        final int firstTab = line.indexOf(FIELD_SEPARATOR);
+        final int secondTab = firstTab < 0 ? -1 : line.indexOf(FIELD_SEPARATOR, firstTab + 1);
+        if (secondTab < 0) {
           throw new IOException("PoliMorf line " + lineNumber
               + " has fewer than " + MIN_FIELDS + " tab-separated fields: " + line);
         }
-        final String form = fields[0].toLowerCase(Locale.ROOT);
-        final String lemma = fields[1];
-        final String tag = fields[2];
-        entries.computeIfAbsent(form + FIELD_SEPARATOR + tag, key -> new LinkedHashSet<>())
-            .add(lemma);
+        final int thirdTab = line.indexOf(FIELD_SEPARATOR, secondTab + 1);
+        final String form = line.substring(0, firstTab);
+        final String lemma = line.substring(firstTab + 1, secondTab);
+        final String tag = line.substring(secondTab + 1, thirdTab < 0 ? line.length() : thirdTab);
+        entries.add(form, tag, lemma);
       }
     }
 
-    final StringBuilder adapted = new StringBuilder();
-    for (final Map.Entry<String, LinkedHashSet<String>> entry : entries.entrySet()) {
-      adapted.append(entry.getKey())
-          .append(FIELD_SEPARATOR)
-          .append(String.join(LEMMA_SEPARATOR, entry.getValue()))
-          .append('\n');
-    }
-
-    final byte[] bytes = adapted.toString().getBytes(StandardCharsets.UTF_8);
-    return new DictionaryLemmatizer(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
+    return entries.toLemmatizer();
   }
 
   /**
