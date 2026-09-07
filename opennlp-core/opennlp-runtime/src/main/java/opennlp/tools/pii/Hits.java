@@ -23,31 +23,26 @@ import java.util.List;
 import opennlp.tools.util.Span;
 
 /**
- * The candidate collection and overlap resolution shared by the PII extractors: each
- * scanner reports every candidate it finds, and one pass reduces them to the
- * non-overlapping set that is reported.
+ * Candidate storage and non-overlapping selection for built-in and composite extractors.
  *
- * <p>The rule is leftmost, then longest, then the more specific type, so an extractor
- * that scans each type independently reports the same mentions whatever order its
- * scanners ran in.</p>
+ * <p>Candidates are ordered by start offset, descending length, type rank and insertion
+ * order. An accepted span excludes overlapping candidates.</p>
  */
 final class Hits {
 
   /**
-   * One candidate found by a scanner, held until overlap resolution decides which
-   * candidates survive.
+   * A candidate and the values used to sort it.
    *
    * @param start The candidate start offset in the scanned text, inclusive.
    * @param end The candidate end offset in the scanned text, exclusive.
-   * @param priority The type priority that breaks exact-span ties; a lower value is the
-   *                 more specific type.
-   * @param mention The mention to report if this candidate survives.
+   * @param priority The type rank for candidates with equal offsets.
+   * @param mention The candidate mention.
    */
   record Hit(int start, int end, int priority, PiiMention mention) {
   }
 
+  /** Prevents construction. */
   private Hits() {
-    // This class holds static methods only and is never instantiated.
   }
 
   /**
@@ -60,16 +55,26 @@ final class Hits {
    * @param normalized The normalized form of the mention.
    */
   static void add(List<Hit> hits, int start, int end, String type, String normalized) {
-    hits.add(new Hit(start, end, PiiTypePriority.rank(type),
-        new PiiMention(new Span(start, end), type, normalized)));
+    add(hits, new PiiMention(new Span(start, end), type, normalized));
   }
 
   /**
-   * Resolves overlapping candidates: leftmost first, then longest, then the more
-   * specific type.
+   * Adds an existing mention without copying it.
+   *
+   * @param hits The candidate collector.
+   * @param mention The non-null candidate.
+   */
+  static void add(List<Hit> hits, PiiMention mention) {
+    hits.add(new Hit(mention.span().getStart(), mention.span().getEnd(),
+        PiiTypePriority.rank(mention.type()), mention));
+  }
+
+  /**
+   * Selects non-overlapping candidates by start, length and type rank. Stable sorting
+   * preserves insertion order for equal offsets and ranks.
    *
    * @param hits The raw candidates; this list is sorted in place.
-   * @return The surviving mentions in text order. Never {@code null}.
+   * @return The selected mentions in text order.
    */
   static List<PiiMention> resolve(List<Hit> hits) {
     hits.sort((a, b) -> {

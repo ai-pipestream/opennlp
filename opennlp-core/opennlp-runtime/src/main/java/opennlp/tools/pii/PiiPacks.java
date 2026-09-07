@@ -20,36 +20,27 @@ package opennlp.tools.pii;
 import java.util.Set;
 
 /**
- * Ready-made {@link PiiExtractor} combinations, one per kind of concern a caller usually
- * has: payment data, contact data, network addresses, credentials, wallet addresses, and
- * national and device identifiers.
+ * Factories for contact, payment, network, credential, wallet, national and device
+ * detectors.
  *
- * <p>A pack saves the caller from naming individual extractors and type sets, and it makes
- * the choice explicit in the code that reads the text: {@code PiiPacks.payment()} says what
- * is being looked for where a bare {@code new CursorPiiExtractor()} would not.</p>
+ * <p>Each factory creates a stateless extractor that can be shared between threads.
+ * Use {@link CompositePiiExtractor} to combine packs. Equal-span candidates use
+ * {@link PiiTypePriority}, then pack order when ranks are equal.</p>
  *
- * <p>Every pack returns a new extractor, and every returned extractor is stateless and safe
- * to share between threads, so a caller may keep one in a static field. Combine packs with
- * {@link CompositePiiExtractor}; exact-span ties use {@link PiiTypePriority}, then pack
- * order only if both types have the same priority.</p>
- *
- * <p>Nothing here changes what the default {@link CursorPiiExtractor} reports. The national
- * packs in particular are opt-in by construction: only {@link #usIdentity()},
- * {@link #euIdentity()}, {@link #caIdentity()}, and {@link #allStructured()} ever report
- * a national identifier.</p>
+ * <p>Packs are opt-in and do not change the default {@link CursorPiiExtractor} selection.</p>
  *
  * @since 3.0.0
  */
 public final class PiiPacks {
 
+  /** Prevents construction. */
   private PiiPacks() {
-    // This class holds static factories only and is never instantiated.
   }
 
   /**
    * Payment data: payment card numbers, IBANs, and ABA routing numbers.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor payment() {
     return new CompositePiiExtractor(
@@ -60,7 +51,7 @@ public final class PiiPacks {
   /**
    * Contact data: email addresses and phone numbers.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor contact() {
     return new CursorPiiExtractor(Set.of(PiiMention.TYPE_EMAIL, PiiMention.TYPE_PHONE));
@@ -69,7 +60,7 @@ public final class PiiPacks {
   /**
    * Network addresses: IPv4, IPv6, and MAC addresses.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor network() {
     return new NetworkPiiExtractor();
@@ -79,7 +70,7 @@ public final class PiiPacks {
    * Credentials: AWS access keys, GitHub tokens, JSON Web Tokens, and credentials embedded
    * in a URL.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor secrets() {
     return new SecretsPiiExtractor();
@@ -88,7 +79,7 @@ public final class PiiPacks {
   /**
    * Wallet addresses: Bitcoin and Ethereum.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor crypto() {
     return new CryptoPiiExtractor();
@@ -98,7 +89,7 @@ public final class PiiPacks {
    * United States national identifiers: Social Security numbers and Individual Taxpayer
    * Identification Numbers.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor usIdentity() {
     return new UsIdentityPiiExtractor();
@@ -108,7 +99,7 @@ public final class PiiPacks {
    * European national identifiers: United Kingdom NHS numbers and German tax identification
    * numbers.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor euIdentity() {
     return new EuIdentityPiiExtractor();
@@ -117,7 +108,7 @@ public final class PiiPacks {
   /**
    * Canadian national identifiers: context-labeled Social Insurance Numbers.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor caIdentity() {
     return new CaIdentityPiiExtractor();
@@ -126,20 +117,16 @@ public final class PiiPacks {
   /**
    * Device identifiers: context-labeled International Mobile Equipment Identities.
    *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor device() {
     return new DevicePiiExtractor();
   }
 
   /**
-   * Every structured type this package recognizes, that is every pack at once.
+   * Enables all structured detectors. Use a specific pack to limit the enabled types.
    *
-   * <p>This is the widest recognition available and therefore the one with the most false
-   * positives: the weakly evidenced types, a routing number and an NHS number above all, are
-   * in it. Prefer the narrower packs where the kind of data to find is known.</p>
-   *
-   * @return A new extractor. Never {@code null}.
+   * @return A new extractor.
    */
   public static PiiExtractor allStructured() {
     return new CompositePiiExtractor(

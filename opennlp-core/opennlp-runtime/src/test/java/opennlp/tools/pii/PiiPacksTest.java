@@ -17,29 +17,44 @@
 
 package opennlp.tools.pii;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.document.Document;
+import opennlp.tools.util.Span;
+
 public class PiiPacksTest {
 
-  /** A text carrying one mention of every type the packs recognize. */
+  /** Input containing all supported types; credential tokens are synthetic. */
   private static final String EVERYTHING = "mail jane@example.com call (555) 123-4567 "
       + "iban DE89 3704 0044 0532 0130 00 card 4111 1111 1111 1111 routing 021000021 "
       + "host 10.1.2.3 peer 2001:db8::1 mac 00:1b:44:11:3a:b7 "
       + "key AKIAIOSFODNN7EXAMPLE url https://u:p@example.com/ "
+      + "github ghp_" + "a".repeat(36) + " jwt eyJhbGciOiJIUzI1NiJ9.e30.YQ "
       + "btc 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa eth 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed "
       + "ssn 123-45-6789 itin 900-70-1234 nhs 943 476 5919 idnr 65929970489 "
       + "SIN: 046 454 286 IMEI: 490154203237518";
 
+  /**
+   * Provides the named detector factories.
+   *
+   * @return The pack names and factories.
+   */
   private static Stream<Arguments> packs() {
     return Stream.of(
         Arguments.of("payment", (Supplier<PiiExtractor>) PiiPacks::payment),
@@ -106,10 +121,12 @@ public class PiiPacksTest {
         typesOf(PiiPacks.network()));
   }
 
+  /** Checks all supported credential types in the fixture. */
   @Test
   void testSecretsPackReportsCredentialTypesOnly() {
     Assertions.assertEquals(
-        Set.of(PiiMention.TYPE_AWS_ACCESS_KEY, PiiMention.TYPE_URL_CREDENTIAL),
+        Set.of(PiiMention.TYPE_AWS_ACCESS_KEY, PiiMention.TYPE_URL_CREDENTIAL,
+            PiiMention.TYPE_GITHUB_TOKEN, PiiMention.TYPE_JWT),
         typesOf(PiiPacks.secrets()));
   }
 
@@ -143,18 +160,72 @@ public class PiiPacksTest {
     Assertions.assertEquals(Set.of(PiiMention.TYPE_IMEI), typesOf(PiiPacks.device()));
   }
 
+  /**
+   * Checks that the fixture exercises all public type constants.
+   *
+   * @throws IllegalAccessException If a public constant cannot be read.
+   */
   @Test
-  void testAllStructuredPackReportsEveryType() {
+  void testAllStructuredPackReportsEveryType() throws IllegalAccessException {
     final Set<String> types = typesOf(PiiPacks.allStructured());
 
-    Assertions.assertEquals(Set.of(
-        PiiMention.TYPE_EMAIL, PiiMention.TYPE_PHONE, PiiMention.TYPE_IBAN,
-        PiiMention.TYPE_CARD, PiiMention.TYPE_ABA_ROUTING, PiiMention.TYPE_IPV4,
-        PiiMention.TYPE_IPV6, PiiMention.TYPE_MAC, PiiMention.TYPE_AWS_ACCESS_KEY,
-        PiiMention.TYPE_URL_CREDENTIAL, PiiMention.TYPE_BTC_ADDRESS,
-        PiiMention.TYPE_ETH_ADDRESS, PiiMention.TYPE_US_SSN, PiiMention.TYPE_US_ITIN,
-        PiiMention.TYPE_UK_NHS, PiiMention.TYPE_DE_STEUER_ID, PiiMention.TYPE_CA_SIN,
-        PiiMention.TYPE_IMEI), types);
+    Assertions.assertEquals(PiiTestSupport.declaredTypes(), types);
+  }
+
+  /**
+   * Checks a shared built-in pack with distinct texts on concurrent threads.
+   *
+   * @param name The pack name.
+   * @param pack The extractor factory.
+   * @throws Exception If a worker fails or does not finish within the time limit.
+   */
+  @ParameterizedTest
+  @MethodSource("packs")
+  @Timeout(60)
+  void testConcurrentPack(String name, Supplier<PiiExtractor> pack) throws Exception {
+    final PiiExtractor shared = pack.get();
+    final CountDownLatch ready = new CountDownLatch(4);
+    final List<Callable<Void>> calls = new ArrayList<>();
+    for (int worker = 0; worker < 4; worker++) {
+      final String text = "😀 ".repeat(worker + 1) + EVERYTHING;
+      final List<PiiMention> expected = shared.extract(text);
+      Assertions.assertFalse(expected.isEmpty(), name);
+      calls.add(() -> {
+        ready.countDown();
+        Assertions.assertTrue(ready.await(10, TimeUnit.SECONDS));
+        for (int run = 0; run < 16; run++) {
+          Assertions.assertEquals(expected, shared.extract(text), name);
+          Assertions.assertEquals(expected, shared.extract(new StringBuilder(text)), name);
+        }
+        return null;
+      });
+    }
+    try (var executor = Executors.newFixedThreadPool(4)) {
+      for (final var result : executor.invokeAll(calls, 30, TimeUnit.SECONDS)) {
+        result.get();
+      }
+    }
+  }
+
+  /**
+   * Checks the manual's IMEI selection when payment and device packs overlap.
+   *
+   * @param reverse Whether to reverse the pack order.
+   */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void testImeiPriorityExample(boolean reverse) {
+    final PiiExtractor selected = reverse
+        ? new CompositePiiExtractor(PiiPacks.device(), PiiPacks.payment())
+        : new CompositePiiExtractor(PiiPacks.payment(), PiiPacks.device());
+    final Document deviceDocument = new PiiAnnotator(selected)
+        .annotate(Document.of("IMEI: 490154203237518."));
+
+    Assertions.assertEquals(List.of(new PiiMention(new Span(6, 21), PiiMention.TYPE_IMEI,
+        "490154203237518")), deviceDocument.get(PiiAnnotator.PII).stream()
+        .map(annotation -> annotation.value()).toList());
+    Assertions.assertEquals("IMEI: ***************.",
+        Masker.mask(deviceDocument, PiiAnnotator.PII, '*'));
   }
 
   /**
@@ -231,12 +302,12 @@ public class PiiPacksTest {
   }
 
   /**
-   * Extracts the fixture and returns its mention types.
+   * Extracts the fixture's mention types.
    *
    * @param extractor The extractor under test.
    * @return The reported type set.
    */
-  private static Set<String> typesOf(PiiExtractor extractor) {
+  private Set<String> typesOf(PiiExtractor extractor) {
     return extractor.extract(EVERYTHING).stream().map(PiiMention::type)
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }

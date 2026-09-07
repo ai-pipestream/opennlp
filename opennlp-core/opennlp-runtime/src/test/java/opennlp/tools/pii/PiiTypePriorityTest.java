@@ -17,13 +17,21 @@
 
 package opennlp.tools.pii;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import opennlp.tools.util.Span;
 
 public class PiiTypePriorityTest {
 
@@ -49,12 +57,105 @@ public class PiiTypePriorityTest {
       PiiMention.TYPE_ABA_ROUTING,
       PiiMention.TYPE_PHONE);
 
+  /**
+   * Provides the expected type ranks.
+   *
+   * @return The type and rank.
+   */
+  private static Stream<Arguments> rankedTypes() {
+    return IntStream.range(0, ALL_TYPES.size())
+        .mapToObj(index -> Arguments.of(ALL_TYPES.get(index), index));
+  }
+
+  /**
+   * Checks the numeric rank of a built-in type.
+   *
+   * @param type The mention type.
+   * @param rank The expected rank.
+   */
+  @ParameterizedTest
+  @MethodSource("rankedTypes")
+  void testEveryNamedTypeHasItsOwnRank(String type, int rank) {
+    Assertions.assertEquals(rank, PiiTypePriority.rank(type));
+  }
+
+  /**
+   * Checks that all public type constants have an expected rank.
+   *
+   * @throws IllegalAccessException If a public constant cannot be read.
+   */
   @Test
-  void testEveryNamedTypeHasItsOwnRank() {
-    for (int i = 0; i < ALL_TYPES.size(); i++) {
-      Assertions.assertEquals(i, PiiTypePriority.rank(ALL_TYPES.get(i)), ALL_TYPES.get(i));
-    }
+  void testCoversPublicTypeConstants() throws IllegalAccessException {
+    Assertions.assertEquals(PiiTestSupport.declaredTypes(), Set.copyOf(ALL_TYPES));
+    Assertions.assertEquals(ALL_TYPES.size(), Set.copyOf(ALL_TYPES).size());
     Assertions.assertEquals(ALL_TYPES.size(), PiiTypePriority.UNRANKED);
+  }
+
+  /**
+   * Provides the ordered combinations of distinct built-in types.
+   *
+   * @return The preferred type and the alternative.
+   */
+  private static Stream<Arguments> typeChoices() {
+    return IntStream.range(0, ALL_TYPES.size()).boxed().flatMap(preferred ->
+        IntStream.range(preferred + 1, ALL_TYPES.size())
+            .mapToObj(alternative -> Arguments.of(ALL_TYPES.get(preferred), ALL_TYPES.get(alternative))));
+  }
+
+  /**
+   * Checks type selection in internal scans and composites in both insertion orders.
+   *
+   * @param preferred The type with the lower rank.
+   * @param alternative The alternative type.
+   */
+  @ParameterizedTest
+  @MethodSource("typeChoices")
+  void testSelectionUsesTheCompletePriorityOrder(String preferred, String alternative) {
+    final Span span = new Span(0, 5);
+    final PiiMention accepted = new PiiMention(span, preferred, "accepted");
+    final PiiMention rejected = new PiiMention(span, alternative, "rejected");
+    for (final List<PiiMention> candidates : List.of(List.of(accepted, rejected),
+        List.of(rejected, accepted))) {
+      final List<Hits.Hit> hits = new ArrayList<>();
+      for (final PiiMention candidate : candidates) {
+        Hits.add(hits, span.getStart(), span.getEnd(), candidate.type(), candidate.normalized());
+      }
+      Assertions.assertEquals(List.of(accepted), Hits.resolve(hits));
+      final PiiExtractor a = text -> List.of(candidates.get(0));
+      final PiiExtractor b = text -> List.of(candidates.get(1));
+      final CompositePiiExtractor composite = new CompositePiiExtractor(a, b);
+      Assertions.assertEquals(List.of(accepted), composite.extract("value"));
+      Assertions.assertSame(accepted, composite.extract("value").getFirst());
+      Assertions.assertEquals(List.of(accepted),
+          new CompositePiiExtractor(new CompositePiiExtractor(a), b).extract("value"));
+    }
+  }
+
+  /**
+   * Checks candidate and delegate order for equal spans and equal ranks.
+   *
+   * @param leadingType The initial candidate type.
+   * @param followingType The following candidate type.
+   */
+  @ParameterizedTest
+  @CsvSource({"email,email", "custom-a,custom-b", "custom,custom"})
+  void testEqualRanksPreserveInsertionOrder(String leadingType, String followingType) {
+    final Span span = new Span(0, 5);
+    final PiiMention leading = new PiiMention(span, leadingType, "leading");
+    final PiiMention following = new PiiMention(span, followingType, "following");
+    for (final List<PiiMention> candidates : List.of(List.of(leading, following),
+        List.of(following, leading))) {
+      final List<Hits.Hit> hits = new ArrayList<>();
+      for (final PiiMention candidate : candidates) {
+        Hits.add(hits, 0, 5, candidate.type(), candidate.normalized());
+      }
+      Assertions.assertEquals(List.of(candidates.getFirst()), Hits.resolve(hits));
+      Assertions.assertSame(candidates.getFirst(),
+          new CompositePiiExtractor(text -> candidates).extract("value").getFirst());
+      Assertions.assertSame(candidates.getFirst(), new CompositePiiExtractor(
+          text -> List.of(candidates.get(0)), text -> List.of(candidates.get(1)))
+          .extract("value").getFirst());
+    }
   }
 
   @ParameterizedTest

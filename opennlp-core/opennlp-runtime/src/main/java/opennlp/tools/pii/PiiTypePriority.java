@@ -21,35 +21,26 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The tie-break order over PII types, used when two candidates cover the very same span
- * and neither the leftmost nor the longest rule can separate them.
+ * Type priority for candidates with equal start and end offsets.
  *
- * <p>A lower rank wins. The order puts the types that carry their own evidence first,
- * that is types anchored by a fixed prefix or protected by a checksum over a long
- * candidate, and the types that are merely a run of digits last, because a digit run is
- * the form most easily produced by chance:</p>
+ * <p>Lower ranks take precedence. The order is:</p>
  *
  * <ol>
  *   <li>{@link PiiMention#TYPE_JWT}, {@link PiiMention#TYPE_AWS_ACCESS_KEY},
- *   {@link PiiMention#TYPE_GITHUB_TOKEN}, {@link PiiMention#TYPE_URL_CREDENTIAL}:
- *   prefix-anchored secrets.</li>
+ *   {@link PiiMention#TYPE_GITHUB_TOKEN}, {@link PiiMention#TYPE_URL_CREDENTIAL}.</li>
  *   <li>{@link PiiMention#TYPE_EMAIL}, {@link PiiMention#TYPE_IBAN},
- *   {@link PiiMention#TYPE_IMEI}, {@link PiiMention#TYPE_CARD}: the classic types plus
- *   context-labeled device identifiers. The IMEI rank precedes card because both use Luhn
- *   and an IMEI can occupy an identical card-shaped span.</li>
- *   <li>{@link PiiMention#TYPE_BTC_ADDRESS}, {@link PiiMention#TYPE_ETH_ADDRESS}:
- *   checksummed wallet addresses.</li>
+ *   {@link PiiMention#TYPE_IMEI}, {@link PiiMention#TYPE_CARD}.</li>
+ *   <li>{@link PiiMention#TYPE_BTC_ADDRESS}, {@link PiiMention#TYPE_ETH_ADDRESS}.</li>
  *   <li>{@link PiiMention#TYPE_MAC}, {@link PiiMention#TYPE_IPV6},
- *   {@link PiiMention#TYPE_IPV4}: network addresses, the more constrained form
- *   first.</li>
+ *   {@link PiiMention#TYPE_IPV4}.</li>
  *   <li>{@link PiiMention#TYPE_US_SSN}, {@link PiiMention#TYPE_US_ITIN},
  *   {@link PiiMention#TYPE_UK_NHS}, {@link PiiMention#TYPE_DE_STEUER_ID},
  *   {@link PiiMention#TYPE_CA_SIN},
- *   {@link PiiMention#TYPE_ABA_ROUTING}, {@link PiiMention#TYPE_PHONE}: digit runs.</li>
+ *   {@link PiiMention#TYPE_ABA_ROUTING}, {@link PiiMention#TYPE_PHONE}.</li>
  * </ol>
  *
- * <p>A type this class does not name ranks after every named one, so a custom extractor
- * never displaces a built-in type on an exact-span tie.</p>
+ * <p>IMEI precedes card so a context-labeled device identifier is not reported as a
+ * payment card on an equal span. Unlisted types rank after the built-in types.</p>
  *
  * @since 3.0.0
  */
@@ -86,14 +77,14 @@ public final class PiiTypePriority {
 
   private static final Map<String, Integer> RANKS = buildRanks();
 
+  /** Prevents construction. */
   private PiiTypePriority() {
-    // This class holds the lookup only and is never instantiated.
   }
 
   /**
    * Builds the immutable type-to-rank lookup.
    *
-   * @return The rank lookup. Never {@code null}.
+   * @return The rank lookup.
    */
   private static Map<String, Integer> buildRanks() {
     final Map<String, Integer> ranks = HashMap.newHashMap(ORDER.length);
@@ -104,12 +95,11 @@ public final class PiiTypePriority {
   }
 
   /**
-   * Looks up the tie-break rank of a type.
+   * Looks up the priority rank of a type.
    *
    * @param type The mention type, for example {@link PiiMention#TYPE_EMAIL}. Must not be
    *             {@code null}.
-   * @return The rank, lower being the more specific type, or {@link #UNRANKED} for a type
-   *         this class does not name.
+   * @return The rank, or {@link #UNRANKED} for an unlisted type.
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null}.
    */
   public static int rank(String type) {

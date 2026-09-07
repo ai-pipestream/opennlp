@@ -42,18 +42,6 @@ import java.util.List;
  */
 public final class CompositePiiExtractor implements PiiExtractor {
 
-  /**
-   * One candidate with its delegate order and type priority.
-   *
-   * @param start The candidate start offset, inclusive.
-   * @param end The candidate end offset, exclusive.
-   * @param order The index of the contributing individual extractor.
-   * @param priority The {@link PiiTypePriority} rank of the candidate's type.
-   * @param mention The candidate mention.
-   */
-  private record Hit(int start, int end, int order, int priority, PiiMention mention) {
-  }
-
   private final List<PiiExtractor> extractors;
 
   /**
@@ -112,9 +100,8 @@ public final class CompositePiiExtractor implements PiiExtractor {
     if (text == null) {
       throw new IllegalArgumentException("text must not be null");
     }
-    final List<Hit> hits = new ArrayList<>();
+    final List<Hits.Hit> hits = new ArrayList<>();
     final Deque<PiiExtractor> pending = new ArrayDeque<>(extractors);
-    int order = 0;
     while (!pending.isEmpty()) {
       final PiiExtractor extractor = pending.removeFirst();
       if (extractor instanceof CompositePiiExtractor composite) {
@@ -123,32 +110,10 @@ public final class CompositePiiExtractor implements PiiExtractor {
         }
       } else {
         for (final PiiMention mention : PiiExtraction.extract(extractor, text)) {
-          hits.add(new Hit(mention.span().getStart(), mention.span().getEnd(), order,
-              PiiTypePriority.rank(mention.type()), mention));
+          Hits.add(hits, mention);
         }
-        order++;
       }
     }
-    hits.sort((a, b) -> {
-      if (a.start() != b.start()) {
-        return Integer.compare(a.start(), b.start());
-      }
-      if (a.end() != b.end()) {
-        return Integer.compare(b.end(), a.end());
-      }
-      if (a.priority() != b.priority()) {
-        return Integer.compare(a.priority(), b.priority());
-      }
-      return Integer.compare(a.order(), b.order());
-    });
-    final List<PiiMention> mentions = new ArrayList<>();
-    int lastEnd = 0;
-    for (final Hit hit : hits) {
-      if (hit.start() >= lastEnd) {
-        mentions.add(hit.mention());
-        lastEnd = hit.end();
-      }
-    }
-    return mentions;
+    return Hits.resolve(hits);
   }
 }

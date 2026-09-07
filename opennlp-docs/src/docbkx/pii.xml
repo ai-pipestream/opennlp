@@ -425,6 +425,21 @@ PiiExtractor custom = new CompositePiiExtractor(
 			</programlisting>
 		</para>
 		<para>
+			A context-labeled IMEI can also match the payment-card detector.
+			On equal spans, the IMEI rank takes precedence regardless of pack order.
+			<code>PiiPacksTest</code> checks this example:
+			<programlisting language="java"><![CDATA[
+PiiExtractor deviceAndPayment =
+    new CompositePiiExtractor(PiiPacks.payment(), PiiPacks.device());
+Document deviceDocument = new PiiAnnotator(deviceAndPayment)
+    .annotate(Document.of("IMEI: 490154203237518."));
+String type = deviceDocument.get(PiiAnnotator.PII).getFirst().value().type();
+// "imei"
+String deviceMasked = Masker.mask(deviceDocument, PiiAnnotator.PII, '*');
+// "IMEI: ***************."]]>
+			</programlisting>
+		</para>
+		<para>
 			Grouping the same ordered extractors into nested composites does not
 			change their result. In this example, selecting the leftmost span rejects
 			the middle candidate but retains the final person mention:

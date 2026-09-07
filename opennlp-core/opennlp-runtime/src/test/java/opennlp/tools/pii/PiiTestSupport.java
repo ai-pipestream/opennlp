@@ -17,11 +17,34 @@
 
 package opennlp.tools.pii;
 
-/** Formatting for synthetic payment-data tests. */
+import java.lang.reflect.Modifier;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.junit.jupiter.api.Assertions;
+
+/** Shared data and formatting checks for PII tests. */
 final class PiiTestSupport {
 
   /** Prevents construction. */
   private PiiTestSupport() {
+  }
+
+  /**
+   * Collects the public type constants and checks for duplicate values.
+   *
+   * @return The type values.
+   * @throws IllegalAccessException If a public constant cannot be read.
+   */
+  static Set<String> declaredTypes() throws IllegalAccessException {
+    final Set<String> types = new HashSet<>();
+    for (final var field : PiiMention.class.getFields()) {
+      if (field.getType() == String.class && Modifier.isStatic(field.getModifiers())
+          && field.getName().startsWith("TYPE_")) {
+        Assertions.assertTrue(types.add((String) field.get(null)), field.getName());
+      }
+    }
+    return Set.copyOf(types);
   }
 
   /**
