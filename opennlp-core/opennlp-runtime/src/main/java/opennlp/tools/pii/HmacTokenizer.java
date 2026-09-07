@@ -162,11 +162,12 @@ public final class HmacTokenizer {
    * Rewrites a document's text, replacing every mention of its {@link PiiAnnotator#PII}
    * layer.
    *
-   * @param document The document to rewrite. Must not be {@code null} and must carry the
-   *                 {@link PiiAnnotator#PII} layer.
+   * @param document The document to rewrite. Must be non-null and have a
+   *                 {@link PiiAnnotator#PII} layer with matching annotation and mention
+   *                 offsets.
    * @return The rewrite. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or does
-   *         not carry the PII layer.
+   * @throws IllegalArgumentException Thrown if {@code document} is null, lacks the PII
+   *         layer, or contains a mention with offsets that differ from its annotation.
    */
   public PiiRewrite rewrite(Document document) {
     final List<PiiMention> mentions = PiiLayer.mentions(document);

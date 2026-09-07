@@ -192,8 +192,7 @@ public final class PiiRewrite {
    * Maps an offset in the original text to the matching offset in the rewritten text.
    *
    * <p>An offset in unreplaced text maps exactly. An offset inside a replaced value maps
-   * to the start of its label, since no finer answer exists: the characters it pointed at
-   * are gone.</p>
+   * to the start of its label.</p>
    *
    * @param offset The offset in the original text. Must be between {@code 0} and the
    *               length of the original text.
@@ -208,10 +207,9 @@ public final class PiiRewrite {
   /**
    * Maps a span of the original text to the matching span of the rewritten text.
    *
-   * <p>A span that contains a replaced value grows or shrinks with the label. A span that
-   * is contained in a replaced value collapses onto the whole label, so the returned span
-   * covers at least the label. Sentence and token spans, which never straddle a value
-   * partially, map exactly.</p>
+   * <p>A non-empty span that intersects a replaced value includes the complete label.
+   * Text outside replacements maps exactly. An empty span remains empty at the position
+   * returned by {@link #mapOffset(int)}.</p>
    *
    * @param span The span in the original text. Must not be {@code null} and must lie
    *             within the original text.
@@ -225,7 +223,7 @@ public final class PiiRewrite {
       throw new IllegalArgumentException("span must not be null");
     }
     final int start = map(span.getStart(), true);
-    final int end = Math.max(start, map(span.getEnd(), false));
+    final int end = span.length() == 0 ? start : Math.max(start, map(span.getEnd(), false));
     return new Span(start, end, span.getType(), span.getProb());
   }
 
@@ -233,16 +231,16 @@ public final class PiiRewrite {
    * Maps the spans of a layer's annotations onto the rewritten text, keeping each
    * annotation's value.
    *
-   * <p>An annotation wholly inside a replaced value maps to the whole replacement label.
-   * An annotation that crosses a replacement boundary expands or contracts with that
-   * label. Only a genuinely empty mapped span is left out.</p>
+   * <p>A non-empty annotation that intersects a replacement includes the complete label.
+   * Empty annotations are omitted. Values are unchanged, including any text or offsets
+   * stored in them. Use {@link #mentions()} to build a PII layer of replacement labels.</p>
    *
-   * @param annotations The annotations of the original text. Must not be {@code null} or
-   *                    contain {@code null}.
+   * @param annotations Positional annotations of the original text. The list, annotations
+   *                    and their spans must be non-null.
    * @param <T> The annotation value type.
    * @return The annotations with mapped spans, in the given order. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code annotations} is {@code null} or
-   *         contains {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code annotations}, an annotation, or an
+   *         annotation's span is null.
    * @throws IndexOutOfBoundsException Thrown if an annotation lies outside the original
    *         text.
    */

@@ -40,7 +40,8 @@ import opennlp.tools.document.Layers;
 public final class PiiAnnotator implements DocumentAnnotator {
 
   /**
-   * PII mentions; each annotation covers one mention and carries its {@link PiiMention}.
+   * PII mentions. Each annotation and its {@link PiiMention} have matching start and end
+   * offsets in the document text.
    */
   public static final LayerKey<PiiMention> PII = Layers.key("pii", PiiMention.class);
 

@@ -142,12 +142,13 @@ public final class PiiAuditReport {
   /**
    * Reports on a document's {@link PiiAnnotator#PII} layer.
    *
-   * @param document The document to report on. Must not be {@code null} and must carry the
-   *                 {@link PiiAnnotator#PII} layer.
+   * @param document The document to report on. Must be non-null and have a
+   *                 {@link PiiAnnotator#PII} layer with matching annotation and mention
+   *                 offsets.
    * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
    * @return The report. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if an argument is {@code null} or the document
-   *         does not carry the PII layer.
+   * @throws IllegalArgumentException Thrown if an argument is null, the document lacks
+   *         the PII layer, or a mention's offsets differ from its annotation's offsets.
    */
   public static PiiAuditReport of(Document document, HmacTokenizer tokenizer) {
     return of(PiiLayer.mentions(document), tokenizer);

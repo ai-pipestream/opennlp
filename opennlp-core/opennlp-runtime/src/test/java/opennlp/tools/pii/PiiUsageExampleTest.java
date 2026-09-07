@@ -42,6 +42,9 @@ public class PiiUsageExampleTest {
   private static final String TEXT =
       "Contact jane@example.com, call (555) 123-4567, or charge card 4111 1111 1111 1111.";
 
+  private static final String REPEATED_ADDRESSES =
+      "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+
   private final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
 
   /**
@@ -155,7 +158,7 @@ public class PiiUsageExampleTest {
    */
   @Test
   void testPseudonymizeKeepsTheTextReadable() {
-    final String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+    final String text = REPEATED_ADDRESSES;
 
     final PiiRewrite rewrite = new Pseudonymizer()
         .rewrite(text, new CursorPiiExtractor().extract(text));
@@ -163,6 +166,27 @@ public class PiiUsageExampleTest {
     Assertions.assertEquals("Contact EMAIL-1; EMAIL-1 replied to EMAIL-2.", rewrite.text());
     Assertions.assertEquals(rewrite.text().indexOf("EMAIL-2"),
         rewrite.mapOffset(text.indexOf("bob@example.com")));
+  }
+
+  /** Builds the manual's PII layer from replacement labels and their new offsets. */
+  @Test
+  void testBuildsLabelLayerAfterRewriting() {
+    final String text = REPEATED_ADDRESSES;
+    final PiiRewrite rewrite = new Pseudonymizer()
+        .rewrite(text, new CursorPiiExtractor().extract(text));
+    final Document labelled = Document.of(rewrite.text()).with(PiiAnnotator.PII,
+        rewrite.mentions().stream()
+            .map(mention -> new Annotation<>(mention.span(), mention)).toList());
+
+    Assertions.assertEquals("Contact EMAIL-1; EMAIL-1 replied to EMAIL-2.", labelled.text());
+    Assertions.assertEquals(List.of("EMAIL-1", "EMAIL-1", "EMAIL-2"),
+        labelled.get(PiiAnnotator.PII).stream().map(annotation -> annotation.value().normalized()).toList());
+    for (final Annotation<PiiMention> annotation : labelled.get(PiiAnnotator.PII)) {
+      Assertions.assertEquals(annotation.span(), annotation.value().span());
+      Assertions.assertEquals(annotation.value().normalized(),
+          rewrite.text().substring(annotation.span().getStart(), annotation.span().getEnd()));
+    }
+    Assertions.assertEquals(rewrite.text(), new Pseudonymizer().rewrite(labelled).text());
   }
 
   /**

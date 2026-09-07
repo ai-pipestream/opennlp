@@ -206,13 +206,10 @@ PiiExtractor custom = new CompositePiiExtractor(
 	<section xml:id="tools.pii.transforms">
 		<title>Pseudonymizing, tokenizing, and auditing</title>
 		<para>
-			Masking hides a value but also destroys the fact that two mentions were
-			the same value, which is what makes a redacted support ticket unreadable.
-			<code>Pseudonymizer</code> replaces each mention with a numbered label
-			instead, giving the same value the same label throughout the text. Labels
-			are rarely as long as what they replace, so the returned
-			<code>PiiRewrite</code> carries the new text together with a mapping for
-			moving other annotations onto it.
+			<code>Pseudonymizer</code> replaces mentions with numbered labels. Mentions
+			with the same type and normalized value use the same label within a text.
+			<code>PiiRewrite</code> provides the rewritten text, label locations and
+			offset mapping.
 			<programlisting language="java"><![CDATA[
 String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
 
@@ -221,8 +218,26 @@ PiiRewrite rewrite = new Pseudonymizer()
 // "Contact EMAIL-1; EMAIL-1 replied to EMAIL-2."
 
 int moved = rewrite.mapOffset(text.indexOf("bob@example.com"));
-List<Annotation<String>> tokens = rewrite.remap(originalTokens);]]>
+
+Document labelled = Document.of(rewrite.text()).with(PiiAnnotator.PII,
+    rewrite.mentions().stream()
+        .map(mention -> new Annotation<>(mention.span(), mention)).toList());]]>
 			</programlisting>
+		</para>
+		<para>
+			<code>mapSpan</code> expands a non-empty span intersecting a replacement
+			to include its complete label. Empty spans remain empty at their mapped
+			position. <code>remap</code> omits empty annotations and changes only the
+			spans of positional annotations. Their values are copied unchanged,
+			including any original text or offsets in those values. Build a new PII
+			layer from <code>rewrite.mentions()</code>, as above, to store the labels
+			instead of the original values.
+		</para>
+		<para>
+			Document-taking rewrite and audit methods require matching annotation and
+			PII mention offsets. They reject a mismatch with
+			<code>IllegalArgumentException</code>. A custom layer must use offsets
+			from the document text in both locations.
 		</para>
 		<para>
 			Labels number from one in every text, so they say nothing across
