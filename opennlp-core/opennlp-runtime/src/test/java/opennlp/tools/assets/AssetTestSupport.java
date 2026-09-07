@@ -39,6 +39,17 @@ final class AssetTestSupport {
   }
 
   /**
+   * Builds an original PEM envelope with placeholder bytes, not cryptographic data.
+   *
+   * @param label The opening and closing label.
+   * @return The ASCII envelope bytes.
+   */
+  static byte[] pem(String label) {
+    return ("-----BEGIN " + label + "-----\nAAAA\n-----END " + label + "-----\n")
+        .getBytes(StandardCharsets.US_ASCII);
+  }
+
+  /**
    * Builds DEX magic followed by zero-filled bytes, without executable contents.
    *
    * @param version The version text to insert, including malformed test values.

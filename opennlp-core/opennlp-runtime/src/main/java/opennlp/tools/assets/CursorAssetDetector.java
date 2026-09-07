@@ -65,6 +65,10 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int HEADER_ENCODED_LENGTH = 32;
   private static final int EMF_HEADER_ENCODED_LENGTH = 60;
   private static final int JPEG2000_HEADER_ENCODED_LENGTH = 48;
+  private static final int PEM_HEADER_ENCODED_LENGTH = 48;
+
+  /** Base64 prefix determined by the complete "-----BEGIN " text. */
+  private static final String PEM_PREFIX = "LS0tLS1CRUdJTi";
 
   private static final int DEX_VERSION_OFFSET = 4;
   private static final int DEX_MAGIC_LENGTH = 8;
@@ -575,8 +579,8 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Decodes the leading payload characters into header bytes.
-   * EMF candidates use up to 60 encoded characters, JPEG 2000 candidates use 48,
-   * and other headers use 32.
+   * EMF candidates use up to 60 encoded characters, JPEG 2000 and encoded PEM
+   * candidates use 48, and other headers use 32.
    *
    * @param text The text.
    * @param payload The scanned payload.
@@ -591,6 +595,8 @@ public final class CursorAssetDetector implements AssetDetector {
       limit = EMF_HEADER_ENCODED_LENGTH;
     } else if (matchesBase64Prefix(text, payload.start(), JPEG2000_PREFIX)) {
       limit = JPEG2000_HEADER_ENCODED_LENGTH;
+    } else if (matchesBase64Prefix(text, payload.start(), PEM_PREFIX)) {
+      limit = PEM_HEADER_ENCODED_LENGTH;
     } else {
       limit = HEADER_ENCODED_LENGTH;
     }

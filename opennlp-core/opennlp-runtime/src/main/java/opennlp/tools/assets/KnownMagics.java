@@ -135,22 +135,27 @@ final class KnownMagics {
 
   /** The remaining recognized formats. */
   private static final List<Entry> DERIVED = List.of(
-      // -----BEGIN CERTIFICATE--
-      e("2d2d2d2d2d424547494e2043455254494649434154452d2d", "pem-cert", "application/x-x509-cert"),
-      // -----BEGIN DSA PARAMETER
-      e("2d2d2d2d2d424547494e2044534120504152414d45544552", "pem-parameters",
+      // -----BEGIN CERTIFICATE-----
+      e("2d2d2d2d2d424547494e2043455254494649434154452d2d2d2d2d",
+          "pem-cert", "application/x-x509-cert"),
+      // -----BEGIN DSA PARAMETERS-----
+      e("2d2d2d2d2d424547494e2044534120504152414d45544552532d2d2d2d2d", "pem-parameters",
           "application/x-x509-dsa-parameters"),
-      // -----BEGIN DSA PRIVATE K
-      e("2d2d2d2d2d424547494e204453412050524956415445204b", "pem-key", "application/x-x509-key"),
-      // -----BEGIN EC PARAMETERS
-      e("2d2d2d2d2d424547494e20454320504152414d4554455253", "pem-parameters",
+      // -----BEGIN DSA PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e204453412050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN EC PARAMETERS-----
+      e("2d2d2d2d2d424547494e20454320504152414d45544552532d2d2d2d2d", "pem-parameters",
           "application/x-x509-ec-parameters"),
-      // -----BEGIN PRIVATE KEY--
-      e("2d2d2d2d2d424547494e2050524956415445204b45592d2d", "pem-key", "application/x-x509-key"),
-      // -----BEGIN PUBLIC KEY---
-      e("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d", "pem-key", "application/x-x509-key"),
-      // -----BEGIN RSA PRIVATE K
-      e("2d2d2d2d2d424547494e205253412050524956415445204b", "pem-key", "application/x-x509-key"),
+      // -----BEGIN PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e2050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN PUBLIC KEY-----
+      e("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN RSA PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e205253412050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
       // Binary DXF sentinel ends with CR, LF, SUB, and NUL bytes.
       e("4175746f4341442042696e617279204458460d0a1a00", "dxf", "image/vnd.dxf"),
       // MPX,Microsoft Project fo
@@ -178,8 +183,8 @@ final class KnownMagics {
       e("524946462400000043444441666d742018", "cda", "application/x-cdf"), // RIFF$...CDDAfmt .
       // ......F..1...t..
       e("0606edf5d81d46e5bd31efe7fe74b71d", "indd", "application/x-adobe-indesign"),
-      // -----BEGIN PKCS7
-      e("2d2d2d2d2d424547494e20504b435337", "p7s", "application/pkcs7-signature"),
+      // -----BEGIN PKCS7-----
+      e("2d2d2d2d2d424547494e20504b4353372d2d2d2d2d", "p7s", "application/pkcs7-signature"),
       e("457874656e646564204d6f64756c653a", "mod", "audio/x-mod"), // Extended Module:
       // StartFontMetrics
       e("5374617274466f6e744d657472696373", "afm", "application/x-font-adobe-metric"),

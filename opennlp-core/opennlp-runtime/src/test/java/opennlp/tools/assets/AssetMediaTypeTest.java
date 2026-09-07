@@ -61,8 +61,10 @@ public class AssetMediaTypeTest {
             "xls", "application/vnd.ms-excel.sheet.3"),
         Arguments.of(Arrays.copyOf(HexFormat.of().parseHex("0904060000001000"), 32),
             "xls", "application/vnd.ms-excel.sheet.4"),
-        Arguments.of(pem("DSA"), "pem-parameters", "application/x-x509-dsa-parameters"),
-        Arguments.of(pem("EC"), "pem-parameters", "application/x-x509-ec-parameters"));
+        Arguments.of(AssetTestSupport.pem("DSA PARAMETERS"),
+            "pem-parameters", "application/x-x509-dsa-parameters"),
+        Arguments.of(AssetTestSupport.pem("EC PARAMETERS"),
+            "pem-parameters", "application/x-x509-ec-parameters"));
   }
 
   /** @return All entries for checking metadata lookup, not format validity. */
@@ -192,17 +194,6 @@ public class AssetMediaTypeTest {
     final String encoded = Base64.getEncoder().encodeToString(header);
     assertTrue(detector.detect(encoded).isEmpty());
     assertTrue(detector.detect(DATA_URI + encoded).isEmpty());
-  }
-
-  /**
-   * Builds an original envelope with placeholder content, not valid parameters.
-   *
-   * @param kind The parameter algorithm label.
-   * @return The ASCII envelope bytes.
-   */
-  private static byte[] pem(String kind) {
-    return ("-----BEGIN " + kind + " PARAMETERS-----\nAAAA\n-----END "
-        + kind + " PARAMETERS-----\n").getBytes(StandardCharsets.US_ASCII);
   }
 
   /**
