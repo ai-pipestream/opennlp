@@ -20,12 +20,17 @@ package opennlp.tools.document;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.util.Span;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -146,12 +151,71 @@ public class PredicateManualExampleTest {
         new Annotation<>(new Span(0, 5), "alice"),
         new Annotation<>(new Span(6, 9), "met"),
         new Annotation<>(new Span(10, 13), "bob")));
-    final Document filtered = new FilterAnnotator<>(NORMALIZED_WORDS, CAPITALIZED_WORDS,
-        (source, word) -> Character.isUpperCase(
-            source.text().charAt(word.span().getStart())))
-        .annotate(document);
+    final Document filtered = capitalizedFilter().annotate(document);
 
     assertEquals(List.of("alice"),
         filtered.get(CAPITALIZED_WORDS).stream().map(Annotation::value).toList());
+  }
+
+  /** {@return capitalization examples with UTF-16 offsets and empty or partial spans} */
+  private static Stream<Arguments> capitalizationSpans() {
+    return Stream.of(
+        Arguments.of("", 0, 0, false),
+        Arguments.of("Alice", 0, 0, false),
+        Arguments.of("Alice", 5, 5, false),
+        Arguments.of("a A", 2, 2, false),
+        Arguments.of("Alice", 0, 5, true),
+        Arguments.of("alice", 0, 5, false),
+        Arguments.of("xAlice", 1, 6, true),
+        Arguments.of("𐐀lice", 0, 6, true),
+        Arguments.of("𐐨lice", 0, 6, false),
+        Arguments.of("𝐀lice", 0, 6, true),
+        Arguments.of("𐌰", 0, 2, false),
+        Arguments.of("Αλφα", 0, 4, true),
+        Arguments.of("ǅuro", 0, 4, false),
+        Arguments.of("\u0301Alice", 0, 6, false),
+        Arguments.of("𐐀", 0, 1, false),
+        Arguments.of("𐐀", 1, 2, false),
+        Arguments.of("𐐀", 0, 2, true),
+        Arguments.of("\ud801", 0, 1, false),
+        Arguments.of("x𐐀", 1, 3, true),
+        Arguments.of("😀Alice", 2, 7, true),
+        Arguments.of("😀Alice", 0, 2, false));
+  }
+
+  /**
+   * The manual filter selects by the complete initial code point inside an annotation.
+   *
+   * @param text The original document text.
+   * @param start The annotation start.
+   * @param end The annotation end.
+   * @param selected Whether the initial code point is uppercase.
+   */
+  @ParameterizedTest
+  @MethodSource("capitalizationSpans")
+  void testCapitalizationSpans(String text, int start, int end, boolean selected) {
+    final Annotation<String> word = new Annotation<>(new Span(start, end), "normalized");
+    final Document document = Document.of(text).with(NORMALIZED_WORDS, List.of(word));
+    final Document filtered = capitalizedFilter().annotate(document);
+
+    assertEquals(selected ? List.of(word) : List.of(), filtered.get(CAPITALIZED_WORDS));
+    assertEquals(List.of(word), filtered.get(NORMALIZED_WORDS));
+    assertEquals(text, filtered.text().toString());
+    if (selected) {
+      assertSame(word, filtered.get(CAPITALIZED_WORDS).getFirst());
+    }
+  }
+
+  /** {@return the document-aware capitalization filter shown in the manual} */
+  private DocumentAnnotator capitalizedFilter() {
+    return new FilterAnnotator<>(NORMALIZED_WORDS, CAPITALIZED_WORDS,
+        (source, word) -> {
+          final Span span = word.span();
+          if (span.length() == 0) {
+            return false;
+          }
+          final int initial = Character.codePointAt(source.text(), span.getStart());
+          return Character.charCount(initial) <= span.length() && Character.isUpperCase(initial);
+        });
   }
 }

@@ -20,6 +20,8 @@ package opennlp.tools.document;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
@@ -44,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests conditional branch selection and annotation filtering.
  */
 public class PredicateAnnotatorsTest {
+
+  private static final String LONG_TEXT_PREFIX = "Long lengthy phrase ";
+  private static final String SHORT_TEXT_PREFIX = "Short a ";
+  private static final String EXCLUDED_CATEGORY = "ads";
 
   /** Word annotations used as filter input. */
   private static final LayerKey<String> WORDS =
@@ -318,5 +324,111 @@ public class PredicateAnnotatorsTest {
     final IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, call, violation);
     assertEquals(expectedMessage, error.getMessage());
+  }
+
+  /**
+   * Filters document-level values without requiring positional spans.
+   *
+   * @param documentAware Whether the filter function receives the document.
+   */
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void testDocumentScopedFilter(boolean documentAware) {
+    final LayerKey<String> categories = LayerKey.document("test.categories", String.class);
+    final LayerKey<String> selected = LayerKey.document("test.categories.selected", String.class);
+    final List<Annotation<String>> source = List.of(Annotation.of("news"),
+        Annotation.of("sports"), Annotation.of(EXCLUDED_CATEGORY));
+    final Document document = Document.of("Sports results").with(categories, source);
+    final Predicate<Annotation<String>> keep = a -> !a.value().equals(EXCLUDED_CATEGORY);
+    final FilterAnnotator<String> filter = documentAware
+        ? new FilterAnnotator<>(categories, selected,
+            (input, a) -> input.get(categories).contains(a) && keep.test(a))
+        : new FilterAnnotator<>(categories, selected, keep);
+    final Document result = filter.annotate(document);
+
+    assertEquals(source.subList(0, 2), result.get(selected));
+    assertEquals(source, result.get(categories));
+    assertSame(source.getFirst(), result.get(selected).getFirst());
+    assertSame(source.get(1), result.get(selected).get(1));
+  }
+
+  /** {@return filter constructors combined with implicit and explicit false branches} */
+  private static Stream<Arguments> wrapperModes() {
+    return Stream.of(false, true).flatMap(aware -> Stream.of(false, true)
+        .map(explicit -> Arguments.of(aware, explicit)));
+  }
+
+  /**
+   * Concurrent pipelines retain each document's source text, annotations and selected output.
+   *
+   * @param documentAware Whether filter predicates receive the document.
+   * @param explicitFalse Whether the conditional has an explicit false branch.
+   * @throws Exception If a pipeline task fails.
+   */
+  @ParameterizedTest
+  @MethodSource("wrapperModes")
+  void testConcurrentPipelines(boolean documentAware, boolean explicitFalse) throws Exception {
+    final AtomicInteger conditionCalls = new AtomicInteger();
+    final Predicate<Document> condition = document -> {
+      conditionCalls.incrementAndGet();
+      return document.text().charAt(0) == 'L';
+    };
+    final DocumentAnnotator longWords = wordFilter(documentAware, true);
+    final ConditionalAnnotator conditional = explicitFalse
+        ? new ConditionalAnnotator(condition, longWords, wordFilter(documentAware, false))
+        : new ConditionalAnnotator(condition, longWords);
+    final DocumentAnalyzer analyzer = DocumentAnalyzer.builder().add(PRODUCER)
+        .add(conditional).build();
+    final List<Callable<Document>> tasks = new ArrayList<>();
+    final int taskCount = 200;
+    for (int i = 0; i < taskCount; i++) {
+      final String text = documentText(i);
+      tasks.add(() -> analyzer.analyze(text));
+    }
+
+    try (var executor = Executors.newFixedThreadPool(4)) {
+      final var results = executor.invokeAll(tasks);
+      for (int i = 0; i < results.size(); i++) {
+        final Document document = results.get(i).get();
+        final boolean longDocument = i % 2 == 0;
+        final String text = documentText(i);
+        final List<String> expected = longDocument ? List.of("Long", "lengthy", "phrase")
+            : explicitFalse ? List.of("a", Integer.toString(i)) : List.of();
+        assertEquals(text, document.text().toString());
+        assertEquals(expected, document.get(LONG_WORDS).stream().map(Annotation::value).toList());
+        assertTrue(document.layers().contains(LONG_WORDS));
+        assertEquals(longDocument ? 4 : 3, document.get(WORDS).size());
+        for (Annotation<String> annotation : document.get(LONG_WORDS)) {
+          assertEquals(annotation.value(), annotation.span().getCoveredText(document.text()).toString());
+          assertTrue(document.get(WORDS).stream().anyMatch(source -> source == annotation));
+        }
+      }
+    }
+    assertEquals(taskCount, conditionCalls.get());
+  }
+
+  /**
+   * Creates a word-length filter using the selected constructor.
+   *
+   * @param documentAware Whether the filter function also checks the original text.
+   * @param longWords Whether to select long words instead of short words.
+   * @return The filter.
+   */
+  private FilterAnnotator<String> wordFilter(boolean documentAware, boolean longWords) {
+    final Predicate<Annotation<String>> keep = longWords
+        ? a -> a.value().length() >= 4 : a -> a.value().length() < 4;
+    return documentAware ? new FilterAnnotator<>(WORDS, LONG_WORDS,
+        (document, a) -> a.span().getCoveredText(document.text()).toString().equals(a.value())
+            && keep.test(a)) : new FilterAnnotator<>(WORDS, LONG_WORDS, keep);
+  }
+
+  /**
+   * Constructs the document text for a concurrent request.
+   *
+   * @param index The request index.
+   * @return The text selecting the corresponding annotation branch.
+   */
+  private String documentText(int index) {
+    return (index % 2 == 0 ? LONG_TEXT_PREFIX : SHORT_TEXT_PREFIX) + index;
   }
 }
