@@ -28,6 +28,11 @@ public class BankingPiiExtractorTest {
 
   private final BankingPiiExtractor extractor = new BankingPiiExtractor();
 
+  /**
+   * Checks accepted numbers and their exact offsets and normalized forms.
+   *
+   * @param text The numeric input.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "011000015",
@@ -56,8 +61,9 @@ public class BankingPiiExtractorTest {
   }
 
   /**
-   * Verifies the check digit is applied: each fixture has an assigned routing symbol but
-   * one digit changed, so only the weighted sum can reject it.
+   * Checks rejection of invalid check digits with allocated routing prefixes.
+   *
+   * @param text The number with an invalid checksum.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -73,8 +79,9 @@ public class BankingPiiExtractorTest {
   }
 
   /**
-   * Verifies the routing symbol is checked: each fixture passes the check digit but names
-   * a range no institution is assigned.
+   * Checks reserved prefixes and the all-zero value despite a valid checksum.
+   *
+   * @param text The candidate with a reserved prefix or all-zero digits.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -87,10 +94,15 @@ public class BankingPiiExtractorTest {
       "810000009",
       "900000003",
       "000000000"})
-  void testRejectsUnassignedRoutingSymbols(String text) {
+  void testRejectsReservedPrefixesAndZero(String text) {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Checks lengths, separators and surrounding numeric or word characters.
+   *
+   * @param text The invalid numeric form.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "02100002",
@@ -107,6 +119,7 @@ public class BankingPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks a match within a sentence. */
   @Test
   void testSpanInSentence() {
     final String text = "Wire to routing 021000021, account 12345678.";
@@ -117,6 +130,7 @@ public class BankingPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /** Checks that matches retain their text order. */
   @Test
   void testTwoRoutingNumbersInOneText() {
     final String text = "from 021000021 to 121000358";
@@ -127,6 +141,11 @@ public class BankingPiiExtractorTest {
     Assertions.assertEquals("121000358", mentions.get(1).normalized());
   }
 
+  /**
+   * Checks text with no routing-number candidate.
+   *
+   * @param text The input text.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "nothing here",
@@ -138,6 +157,7 @@ public class BankingPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks the null-text boundary contract. */
   @Test
   void testRejectsNullText() {
     Assertions.assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));

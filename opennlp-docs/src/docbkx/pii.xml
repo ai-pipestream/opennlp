@@ -160,7 +160,13 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 			</listitem>
 			<listitem>
 				<para>
-					<code>BankingPiiExtractor</code>: ABA routing numbers.
+					<code>BankingPiiExtractor</code>: 9 contiguous ASCII digits with
+					a valid checksum and a prefix in <code>00-12</code>, <code>21-32</code>,
+					<code>61-72</code> or <code>80</code>, as allocated by the
+					<ulink url="https://www.aba.com/news-research/analysis-guides/routing-number-policy-procedures">ABA routing policy</ulink>.
+					The <code>00</code> range includes U.S. government checks. All-zero
+					values and digits separated by spaces or hyphens are rejected.
+					A match does not verify that a number is assigned to an institution.
 				</para>
 			</listitem>
 			<listitem>
@@ -183,6 +189,16 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 				</para>
 			</listitem>
 		</itemizedlist>
+		<para>
+			This synthetic routing number illustrates extraction and masking without
+			using a bank-directory entry:
+			<programlisting language="java"><![CDATA[
+Document payment = new PiiAnnotator(PiiPacks.payment())
+    .annotate(Document.of("Routing 001234561."));
+String masked = Masker.mask(payment, PiiAnnotator.PII, '*');
+// "Routing *********."]]>
+			</programlisting>
+		</para>
 		<para>
 			<code>CompositePiiExtractor</code> runs several extractors over one text
 			and merges the result. <code>PiiPacks</code> provides
