@@ -74,6 +74,9 @@ public final class BilstmPOSTrainer {
 
   /**
    * The hyperparameters of one training run. Floating-point settings must be finite.
+   * The four gate blocks per hidden layer and the combined word representation
+   * must fit positive integer array lengths. Training also checks the width added
+   * by pretrained vectors before allocating parameters.
    *
    * @param wordEmbeddingSize Dimension of the learned word embeddings.
    * @param charEmbeddingSize Dimension of the character embeddings.
@@ -136,6 +139,15 @@ public final class BilstmPOSTrainer {
           || hiddenSize <= 0) {
         throw new IllegalArgumentException("sizes must be positive");
       }
+      if (charHiddenSize > LstmLayer.MAX_HIDDEN_SIZE) {
+        throw new IllegalArgumentException(
+            "charHiddenSize must not exceed " + LstmLayer.MAX_HIDDEN_SIZE);
+      }
+      if (hiddenSize > LstmLayer.MAX_HIDDEN_SIZE) {
+        throw new IllegalArgumentException(
+            "hiddenSize must not exceed " + LstmLayer.MAX_HIDDEN_SIZE);
+      }
+      wordRepresentationSize(wordEmbeddingSize, charHiddenSize, 0);
       if (epochs <= 0 || batchSize <= 0) {
         throw new IllegalArgumentException("epochs and batchSize must be positive");
       }
@@ -332,7 +344,8 @@ public final class BilstmPOSTrainer {
    *         {@code null}.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
-   *         samples contain no token, or {@code wordVectors} violates its contract.
+   *         samples contain no token, {@code wordVectors} violates its contract,
+   *         or the combined word representation exceeds {@link Integer#MAX_VALUE}.
    * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
    *         or training arithmetic produces a non-finite value.
    */
@@ -362,7 +375,8 @@ public final class BilstmPOSTrainer {
    *         {@code null}.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if a parameter is {@code null}, the
-   *         samples contain no token, or {@code wordVectors} violates its contract.
+   *         samples contain no token, {@code wordVectors} violates its contract,
+   *         or the combined word representation exceeds {@link Integer#MAX_VALUE}.
    * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
    *         or training arithmetic produces a non-finite value.
    */
@@ -397,7 +411,7 @@ public final class BilstmPOSTrainer {
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if samples or settings are {@code null},
    *         the samples contain no token, or {@code wordVectors} violates its
-   *         contract.
+   *         contract, or the combined word representation exceeds {@link Integer#MAX_VALUE}.
    * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
    *         or training arithmetic produces a non-finite value.
    */
@@ -426,7 +440,8 @@ public final class BilstmPOSTrainer {
    * @return A trained {@link BilstmPOSModel}. Never {@code null}.
    * @throws IOException Thrown if reading the samples fails.
    * @throws IllegalArgumentException Thrown if {@code samples} or {@code settings} is
-   *         {@code null}, or the samples contain no token.
+   *         {@code null}, the samples contain no token, vector inputs are invalid,
+   *         or the combined word representation exceeds {@link Integer#MAX_VALUE}.
    * @throws IllegalStateException Thrown if training is interrupted, a worker fails,
    *         or training arithmetic produces a non-finite value.
    */
@@ -457,7 +472,8 @@ public final class BilstmPOSTrainer {
    * @param wordVectors The word vector source, or {@code null} to train without one.
    * @param lexicon Additional words to store vectors for, or {@code null} for none.
    * @return A trained {@link BilstmPOSModel}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code corpus} is empty.
+   * @throws IllegalArgumentException If {@code corpus} is empty, vector inputs are
+   *         invalid, or the combined word representation exceeds {@link Integer#MAX_VALUE}.
    * @throws IllegalStateException Thrown if a training worker fails or the training
    *         thread is interrupted, or training arithmetic produces a non-finite value.
    */
@@ -555,6 +571,25 @@ public final class BilstmPOSTrainer {
       }
     }
     return context.toModel();
+  }
+
+  /**
+   * Calculates the combined learned, character and pretrained input width.
+   *
+   * @param wordEmbeddingSize The validated learned embedding width.
+   * @param charHiddenSize The validated character encoder width per direction.
+   * @param pretrainedSize The pretrained width, or zero without pretrained vectors.
+   * @return The combined input width.
+   * @throws IllegalArgumentException If the sum exceeds {@link Integer#MAX_VALUE}.
+   */
+  private static int wordRepresentationSize(int wordEmbeddingSize, int charHiddenSize,
+      int pretrainedSize) {
+    final long size = (long) wordEmbeddingSize + 2L * charHiddenSize + pretrainedSize;
+    if (size > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "word representation size must not exceed " + Integer.MAX_VALUE);
+    }
+    return (int) size;
   }
 
   /**
@@ -972,8 +1007,9 @@ public final class BilstmPOSTrainer {
 
     /**
      * Builds the vocabularies and tag inventories from the corpus, initializes every
-     * parameter from the seeded init stream, collects the pretrained vector slice, and
-     * registers everything with a fresh optimizer.
+     * parameter from the seeded init stream, and registers them with a fresh optimizer.
+     * Pretrained vectors are collected first to validate the combined input width
+     * before parameter allocation.
      *
      * <p>The registration order is part of the contract between this method and
      * {@link Worker}, and the white-box gradient checks assert against it: 0 word
@@ -989,7 +1025,8 @@ public final class BilstmPOSTrainer {
      * @param lexicon Additional words to store vectors for, or {@code null} for none.
      * @return The initialized context. Never {@code null}.
      * @throws IllegalArgumentException If {@code lexicon} contains {@code null}
-     *         or {@code wordVectors} violates its contract.
+     *         or {@code wordVectors} violates its contract, or the combined word
+     *         representation exceeds {@link Integer#MAX_VALUE}.
      */
     static TrainingContext build(List<MultiTaskSample> corpus, Settings settings,
         Function<CharSequence, float[]> wordVectors,
@@ -1052,16 +1089,6 @@ public final class BilstmPOSTrainer {
         featsIds.put(featsTags[i], i);
       }
 
-      final Random initRandom = new Random(settings.seed());
-      final double[][] wordEmbeddings =
-          randomMatrix(words.size(), settings.wordEmbeddingSize(), 0.1d, initRandom);
-      final double[][] charEmbeddings =
-          randomMatrix(chars.size(), settings.charEmbeddingSize(), 0.1d, initRandom);
-      final LstmLayer charForward = new LstmLayer(settings.charEmbeddingSize(),
-          settings.charHiddenSize(), initRandom);
-      final LstmLayer charBackward = new LstmLayer(settings.charEmbeddingSize(),
-          settings.charHiddenSize(), initRandom);
-
       final LinkedHashMap<String, Integer> pretrainedIds;
       final float[][] pretrainedVectors;
       if (wordVectors != null) {
@@ -1088,6 +1115,19 @@ public final class BilstmPOSTrainer {
         pretrainedIds = null;
         pretrainedVectors = null;
       }
+      final int pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
+      final int inputSize = wordRepresentationSize(settings.wordEmbeddingSize(),
+          settings.charHiddenSize(), pretrainedSize);
+      final Random initRandom = new Random(settings.seed());
+      final double[][] wordEmbeddings =
+          randomMatrix(words.size(), settings.wordEmbeddingSize(), 0.1d, initRandom);
+      final double[][] charEmbeddings =
+          randomMatrix(chars.size(), settings.charEmbeddingSize(), 0.1d, initRandom);
+      final LstmLayer charForward = new LstmLayer(settings.charEmbeddingSize(),
+          settings.charHiddenSize(), initRandom);
+      final LstmLayer charBackward = new LstmLayer(settings.charEmbeddingSize(),
+          settings.charHiddenSize(), initRandom);
+
       final double[][] pretrainedTrainable;
       if (pretrainedVectors != null && settings.pretrainedTuning() > 0.0d) {
         pretrainedTrainable = new double[pretrainedVectors.length][];
@@ -1102,8 +1142,6 @@ public final class BilstmPOSTrainer {
       else {
         pretrainedTrainable = null;
       }
-      final int pretrainedSize = pretrainedVectors != null ? pretrainedVectors[0].length : 0;
-
       // The adapter starts as the identity, so a run with it begins from exactly the
       // frozen pass-through. It draws nothing from the init stream, so enabling it
       // leaves every other parameter's initialization unchanged.
@@ -1121,8 +1159,6 @@ public final class BilstmPOSTrainer {
         adapterBias = null;
       }
 
-      final int inputSize = settings.wordEmbeddingSize() + 2 * settings.charHiddenSize()
-          + pretrainedSize;
       final LstmLayer wordForward =
           new LstmLayer(inputSize, settings.hiddenSize(), initRandom);
       final LstmLayer wordBackward =

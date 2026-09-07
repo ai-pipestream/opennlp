@@ -516,6 +516,12 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</para>
 		<para>
 		Training settings must use finite numbers within their allowed ranges.
+		The gate widths and combined word input width must fit positive integer
+		array lengths. Training checks the width added by pretrained vectors before
+		allocating parameters. Invalid dimensions cause
+		<code>IllegalArgumentException</code>; valid dimensions still require enough
+		heap for the model and training state. <code>BilstmDimensionTest</code> checks
+		these limits, including vectors supplied only through an additional lexicon.
 		Pretrained vectors must have a consistent positive length and finite components,
 		including vectors requested for an additional lexicon. Invalid settings or
 		vectors cause <code>IllegalArgumentException</code>; vector errors identify

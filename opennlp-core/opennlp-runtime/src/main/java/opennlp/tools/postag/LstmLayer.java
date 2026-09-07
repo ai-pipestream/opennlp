@@ -35,6 +35,9 @@ import java.util.Random;
  */
 final class LstmLayer {
 
+  /** Largest hidden width that permits four gate blocks in an integer array length. */
+  static final int MAX_HIDDEN_SIZE = Integer.MAX_VALUE / 4;
+
   /** Gate-row block size for the cache-tiled gradient accumulation in backward. */
   private static final int ACCUMULATE_BLOCK = 32;
 
@@ -57,13 +60,11 @@ final class LstmLayer {
    * @param inputSize The number of input features per timestep. Must be positive.
    * @param hiddenSize The number of hidden units. Must be positive.
    * @param random The seeded source of init randomness. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a size is not positive or
-   *         {@code random} is {@code null}.
+   * @throws IllegalArgumentException If a size is not positive, {@code hiddenSize}
+   *         exceeds {@link #MAX_HIDDEN_SIZE}, or {@code random} is {@code null}.
    */
   LstmLayer(int inputSize, int hiddenSize, Random random) {
-    if (inputSize <= 0 || hiddenSize <= 0) {
-      throw new IllegalArgumentException("inputSize and hiddenSize must be positive");
-    }
+    validateDimensions(inputSize, hiddenSize);
     if (random == null) {
       throw new IllegalArgumentException("random must not be null");
     }
@@ -122,11 +123,13 @@ final class LstmLayer {
    *          not be {@code null}.
    * @param b The biases, length {@code 4 * hiddenSize}. Must not be {@code null}.
    * @return A layer over the given arrays. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if an array is {@code null} or its outer
+   * @throws IllegalArgumentException If a size is not positive, {@code hiddenSize}
+   *         exceeds {@link #MAX_HIDDEN_SIZE}, or an array is {@code null} or its outer
    *         length is not {@code 4 * hiddenSize}.
    */
   static LstmLayer ofWeights(int inputSize, int hiddenSize, double[][] w, double[][] u,
       double[] b) {
+    validateDimensions(inputSize, hiddenSize);
     if (w == null || u == null || b == null) {
       throw new IllegalArgumentException("weights must not be null");
     }
@@ -135,6 +138,22 @@ final class LstmLayer {
       throw new IllegalArgumentException("weight shapes do not match 4 * hiddenSize");
     }
     return new LstmLayer(inputSize, hiddenSize, w, u, b);
+  }
+
+  /**
+   * Checks input and gate widths before calculating array dimensions.
+   *
+   * @param inputSize The input width.
+   * @param hiddenSize The recurrent width.
+   * @throws IllegalArgumentException If a size is not positive or the gate width overflows.
+   */
+  private static void validateDimensions(int inputSize, int hiddenSize) {
+    if (inputSize <= 0 || hiddenSize <= 0) {
+      throw new IllegalArgumentException("inputSize and hiddenSize must be positive");
+    }
+    if (hiddenSize > MAX_HIDDEN_SIZE) {
+      throw new IllegalArgumentException("hiddenSize must not exceed " + MAX_HIDDEN_SIZE);
+    }
   }
 
   /**
