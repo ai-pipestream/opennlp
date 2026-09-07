@@ -239,7 +239,7 @@ final class KnownMagics {
       e("5745425654540a", "vtt", "text/vtt"), // WEBVTT.
       e("5745425654540d", "vtt", "text/vtt"), // WEBVTT.
       e("57454256545420", "vtt", "text/vtt"), // WEBVTT
-      e("894844460d0a1a", "hdf", "application/x-hdf"), // .HDF...
+      e("894844460d0a1a0a", "hdf", "application/x-hdf"), // .HDF....
       e("000002000110", "wb1", "application/x-quattro-pro"),
       e("000002000210", "wb2", "application/x-quattro-pro"),
       e("000002000404", "wks", "application/vnd.lotus-1-2-3"),
@@ -335,8 +335,8 @@ final class KnownMagics {
       e("6465780a", "dex", "application/x-dex"), // dex.
       e("69636e73", "icns", "image/icns"), // icns
       e("78617221", "xar", "application/x-xar"), // xar!
-      e("8a4d4e47", "mng", "video/x-mng"), // .MNG
-      e("8b4a4e47", "jng", "video/x-jng"), // .JNG
+      e("8a4d4e470d0a1a0a", "mng", "video/x-mng"), // .MNG....
+      e("8b4a4e470d0a1a0a", "jng", "image/x-jng"), // .JNG....
       e("b168de3a", "dcx", "image/vnd.zbrush.dcx"),
       e("bebafeca", "macho-fat", "application/x-mach-o-universal"),
       e("bfbafeca", "macho-fat", "application/x-mach-o-universal"),

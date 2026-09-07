@@ -29,8 +29,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import opennlp.tools.util.Span;
-
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -184,18 +182,6 @@ public class AssetPcapngSignatureTest {
    * @throws IllegalArgumentException If the transport is unsupported.
    */
   private void assertIdentified(byte[] bytes, String transport) {
-    final String encoded = AssetTestSupport.encode(bytes, transport);
-    final String prefix = "Capture: [";
-    final String payloadPrefix = transport.equals("uri") ? DATA_URI : "";
-    final String text = prefix + encoded + "]";
-    final List<EmbeddedAsset> assets = detector.detect(text);
-    assertEquals(1, assets.size());
-    final EmbeddedAsset asset = assets.get(0);
-    assertEquals(FORMAT, asset.format());
-    assertEquals(MEDIA_TYPE, asset.mediaType());
-    assertEquals(bytes.length, asset.decodedLength());
-    assertEquals(new Span(prefix.length(), text.length() - 1), asset.span());
-    assertEquals(new Span(prefix.length() + payloadPrefix.length(), text.length() - 1), asset.payload());
-    assertArrayEquals(bytes, asset.decode(text));
+    AssetTestSupport.assertIdentified(detector, bytes, FORMAT, MEDIA_TYPE, transport);
   }
 }

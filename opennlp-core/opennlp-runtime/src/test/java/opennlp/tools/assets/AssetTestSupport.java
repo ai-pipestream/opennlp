@@ -21,8 +21,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Base64;
 
+import opennlp.tools.util.Span;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 /** Header fixtures and encodings for format detection, not complete image files. */
 final class AssetTestSupport {
+
+  private static final String DATA_URI = "data:;base64,";
 
   /** Prevents construction of the fixture utility. */
   private AssetTestSupport() {
@@ -71,8 +78,35 @@ final class AssetTestSupport {
       case "url" -> Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
       case "mime64" -> Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(bytes);
       case "mime76" -> Base64.getMimeEncoder(76, new byte[] {'\r', '\n'}).encodeToString(bytes);
-      case "uri" -> "data:;base64," + Base64.getEncoder().encodeToString(bytes);
+      case "uri" -> DATA_URI + Base64.getEncoder().encodeToString(bytes);
       default -> throw new IllegalArgumentException("transport is unsupported");
     };
+  }
+
+  /**
+   * Checks format inference, source spans, decoded length and exact bytes.
+   *
+   * @param detector The detector to exercise.
+   * @param bytes The input bytes.
+   * @param format The expected format name.
+   * @param mediaType The expected media type.
+   * @param transport The encoding to use.
+   * @throws IllegalArgumentException If the transport is unsupported.
+   */
+  static void assertIdentified(AssetDetector detector, byte[] bytes, String format,
+                              String mediaType, String transport) {
+    final String encoded = encode(bytes, transport);
+    final String prefix = "Attachment: [";
+    final int payloadOffset = transport.equals("uri") ? DATA_URI.length() : 0;
+    final String text = prefix + encoded + "]";
+    final var assets = detector.detect(text);
+    assertEquals(1, assets.size());
+    final EmbeddedAsset asset = assets.get(0);
+    assertEquals(format, asset.format());
+    assertEquals(mediaType, asset.mediaType());
+    assertEquals(bytes.length, asset.decodedLength());
+    assertEquals(new Span(prefix.length(), text.length() - 1), asset.span());
+    assertEquals(new Span(prefix.length() + payloadOffset, text.length() - 1), asset.payload());
+    assertArrayEquals(bytes, asset.decode(text));
   }
 }

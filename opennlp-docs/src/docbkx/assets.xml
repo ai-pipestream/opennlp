@@ -43,6 +43,15 @@
 			<code>xls</code> and <code>pem-parameters</code> can have several media types.
 		</para>
 		<para>
+			PNG, MNG, JNG and HDF5 detection requires the complete 8-byte signature
+			at the start of the payload, including the control bytes.
+			<ulink url="https://www.libpng.org/pub/mng/spec/jng.html">JNG</ulink>
+			is reported as <code>jng</code> with media type <code>image/x-jng</code>.
+			<ulink url="https://portal.hdfgroup.org/documentation/hdf5/latest/_f_m_t11.html">HDF5</ulink>
+			is reported as <code>hdf</code> with media type <code>application/x-hdf</code>.
+			HDF5 signatures after an initial user block are not searched.
+		</para>
+		<para>
 			Pcapng detection requires a
 			<ulink url="https://www.ietf.org/archive/id/draft-ietf-opsawg-pcapng-05.html#name-section-header-block">Section
 			Header Block</ulink> identifier and the byte-order magic at byte 8.
@@ -85,8 +94,9 @@
 			including one- and two-byte values. The media type retains parameters such as
 			<code>charset=UTF-8</code>; the format name excludes them. Non-base64 data URIs
 			and percent-encoded payload characters are not supported.
-			A media type supplied in the URI takes precedence over the detected format;
-			it does not establish that the payload conforms to that type.
+			A media type supplied in the URI overrides the inferred media type without
+			changing a recognized format name. It does not establish that the payload
+			conforms to that type.
 		</para>
 		<para>
 			Malformed padding, mixed standard and URL-safe alphabets, and line-wrapped
