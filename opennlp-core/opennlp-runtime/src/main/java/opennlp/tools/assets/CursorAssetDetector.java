@@ -65,6 +65,9 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int EMF_HEADER_ENCODED_LENGTH = 60;
   private static final int JPEG2000_HEADER_ENCODED_LENGTH = 48;
 
+  private static final int DEX_VERSION_OFFSET = 4;
+  private static final int DEX_MAGIC_LENGTH = 8;
+
   /** Base64 encoding of the JPEG 2000 signature box. */
   private static final String JPEG2000_PREFIX = "AAAADGpQICANCocK";
   private static final int JPEG2000_BOX_OFFSET = 12;
@@ -604,6 +607,7 @@ public final class CursorAssetDetector implements AssetDetector {
     if (known != null) {
       return switch (known.name()) {
         case "aiff" -> hasAiffFormType(header) ? known : null;
+        case "dex" -> hasDexMagic(header) ? known : null;
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
         case "jp2" -> jpeg2000Format(header, known);
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
@@ -623,6 +627,28 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return null;
+  }
+
+  /**
+   * Checks the 3 decimal version digits and zero terminator of DEX magic.
+   * The signature table checks the leading identifier. Version numbers are not
+   * restricted to those supported by a particular Android runtime.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the complete DEX magic is present.
+   * @see <a href="https://source.android.com/docs/core/runtime/dex-format#dex-file-magic">
+   *     DEX file magic</a>
+   */
+  private boolean hasDexMagic(byte[] header) {
+    if (header.length < DEX_MAGIC_LENGTH || header[DEX_MAGIC_LENGTH - 1] != 0) {
+      return false;
+    }
+    for (int i = DEX_VERSION_OFFSET; i < DEX_MAGIC_LENGTH - 1; i++) {
+      if (header[i] < '0' || header[i] > '9') {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

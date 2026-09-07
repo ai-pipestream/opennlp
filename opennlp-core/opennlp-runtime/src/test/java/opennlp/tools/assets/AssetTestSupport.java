@@ -19,6 +19,8 @@ package opennlp.tools.assets;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Base64;
 
 import opennlp.tools.util.Span;
@@ -27,13 +29,24 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Header fixtures and encodings for format detection, not complete image files. */
+/** Header fixtures and encodings for format detection, not complete files. */
 final class AssetTestSupport {
 
   private static final String DATA_URI = "data:;base64,";
 
   /** Prevents construction of the fixture utility. */
   private AssetTestSupport() {
+  }
+
+  /**
+   * Builds DEX magic followed by zero-filled bytes, without executable contents.
+   *
+   * @param version The version text to insert, including malformed test values.
+   * @param length The resulting byte count.
+   * @return The complete or truncated header fixture.
+   */
+  static byte[] dex(String version, int length) {
+    return Arrays.copyOf(("dex\n" + version + '\0').getBytes(StandardCharsets.US_ASCII), length);
   }
 
   /**

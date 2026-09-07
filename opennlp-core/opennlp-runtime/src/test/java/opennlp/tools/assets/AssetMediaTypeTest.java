@@ -101,6 +101,10 @@ public class AssetMediaTypeTest {
       ByteBuffer.wrap(bytes).putInt(12, 20).putInt(16, 0x66747970)
           .putInt(20, 0x6a703220).putInt(28, 0x6a703220);
     }
+    if ("dex".equals(entry.format().name())) {
+      final byte[] magic = AssetTestSupport.dex("035", 8);
+      System.arraycopy(magic, 0, bytes, 0, magic.length);
+    }
     final String encoded = Base64.getEncoder().encodeToString(bytes);
     assertAsset(encoded, bytes, entry.format().name(), entry.format().mediaType());
     assertAsset(DATA_URI + encoded, bytes, entry.format().name(), entry.format().mediaType());

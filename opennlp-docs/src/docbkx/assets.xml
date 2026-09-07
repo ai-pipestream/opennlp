@@ -79,6 +79,14 @@
 			do not validate block lengths or packet contents.
 		</para>
 		<para>
+			DEX detection requires the complete 8-byte
+			<ulink url="https://source.android.com/docs/core/runtime/dex-format#dex-file-magic">file
+			magic</ulink>: <code>dex</code>, a newline, 3 ASCII decimal version digits
+			and a zero byte. It reports <code>dex</code> and <code>application/x-dex</code>.
+			Version numbers are not restricted to a particular Android release. This
+			identifies a possible format, not runtime compatibility or valid bytecode.
+		</para>
+		<para>
 			EMF detection requires the <code>EMR_HEADER</code> type and the
 			<ulink url="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/b55cbd24-612d-47fe-81c9-1da6a682246f">EMF
 			signature</ulink> at byte 40, including the initial space in <code> EMF</code>.

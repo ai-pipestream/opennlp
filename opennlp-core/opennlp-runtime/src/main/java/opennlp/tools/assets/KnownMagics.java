@@ -71,7 +71,8 @@ import java.util.Set;
  * FORM prefix, Excel document types after matching a BOF prefix, EMF signatures
  * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
  * matching a Section Header Block prefix. JPEG 2000 formats use the brand in the
- * file-type box after the shared signature box.</p>
+ * file-type box after the shared signature box. DEX requires 3 decimal version
+ * digits and a zero terminator after the prefix.</p>
  *
  * @since 3.0.0
  */
@@ -334,7 +335,7 @@ final class KnownMagics {
       e("53445058", "dpx", "image/x-dpx"), // SDPX
       e("5543321a", "uc2", "application/x-uc2-compressed"), // UC2.
       e("58504453", "dpx", "image/x-dpx"), // XPDS
-      e("6465780a", "dex", "application/x-dex"), // dex.
+      e("6465780a", "dex", "application/x-dex"),
       e("69636e73", "icns", "image/icns"), // icns
       e("78617221", "xar", "application/x-xar"), // xar!
       e("8a4d4e470d0a1a0a", "mng", "video/x-mng"), // .MNG....
