@@ -349,26 +349,33 @@ lemmatizer.lemmatize(new String[] {"psa"}, new String[] {"adj:sg:nom:m2:pos"}); 
 		<section xml:id="tools.lemmatizer.morfologik">
 			<title>Reading morfologik dictionaries</title>
 			<para>
-				Many languages publish a morphological dictionary as a compact finite-state
-				automaton (a <code>.dict</code> file) paired with a <code>.info</code> metadata
-				file. <code>MorfologikDictionaryReader</code> reads both automaton formats,
-				FSA5 and CFSA2, with no third-party dependency, and decodes each entry, which is
-				a surface form, a base form stored relative to it, and a tag, into a
-				<code>DictionaryLemmatizer</code>. The four base-form encoders (none, suffix,
-				prefix, infix) are all decoded. The separator, character encoding, and encoder
-				are read from the <code>.info</code> file, or passed explicitly. The dictionary
-				data is supplied by the caller and never bundled.
-				<code>MorfologikDictionaryReaderTest</code> asserts the behavior shown here.
+				<code>MorfologikDictionaryReader</code> loads FSA5 and CFSA2
+				<code>.dict</code> files into a <code>DictionaryLemmatizer</code>, without a
+				third-party dependency. Supply a dictionary and <code>.info</code> metadata
+				file, or specify the separator, character encoding and base-form encoder
+				explicitly. Dictionary data is not bundled with OpenNLP.
+			</para>
+			<para>
+				The supported encoders are <code>NONE</code>, <code>SUFFIX</code>,
+				<code>PREFIX</code> and <code>INFIX</code>. Removal counts use bytes, not
+				characters. Encoded control values wrap modulo 256; a removal count of 255
+				replaces the complete surface form. Control bytes equal to the separator are
+				part of the encoded base, not field boundaries. Incomplete controls and
+				overlapping or out-of-range removals cause <code>IOException</code> on load.
+			</para>
+			<para>
+				For a dictionary containing <code>mice</code> with tag <code>NN</code> and
+				lemma <code>mouse</code>:
 				<programlisting language="java"><![CDATA[
 // dict is a .dict automaton stream, info is its .info metadata stream
 Lemmatizer lemmatizer = MorfologikDictionaryReader.read(dict, info);
 
 lemmatizer.lemmatize(new String[] {"mice"}, new String[] {"NN"});  // ["mouse"]]]>
 				</programlisting>
-				The companion <code>PoliMorfDictionaryReader</code> covers the same job for a
-				plain tab-separated table rather than an automaton, so a permissively licensed
-				dictionary such as PoliMorf and an existing automaton dictionary both reach the
-				same lemmatizer.
+			</para>
+			<para>
+				Use <code>PoliMorfDictionaryReader</code> to load a tab-separated
+				PoliMorf table into a <code>DictionaryLemmatizer</code>.
 			</para>
 		</section>
 </chapter>

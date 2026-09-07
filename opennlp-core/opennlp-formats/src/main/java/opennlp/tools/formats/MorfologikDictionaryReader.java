@@ -41,7 +41,7 @@ import opennlp.tools.util.StringUtil;
  *
  * <p>This reader adds no third-party dependency. The base form (lemma) is stored relative to the
  * surface form to save space; all four encoders are decoded here. Each is a run of control bytes
- * offset by {@code 'A'}, followed by literal bytes to append:</p>
+ * offset by {@code 'A'} modulo 256, followed by bytes to append:</p>
  * <ul>
  *   <li>{@code NONE}: the encoded bytes are the base form verbatim.</li>
  *   <li>{@code SUFFIX} ({@code K}): drop {@code K} bytes from the end of the form, then append.</li>
@@ -50,6 +50,11 @@ import opennlp.tools.util.StringUtil;
  *   <li>{@code INFIX} ({@code I},{@code L},{@code K}): drop {@code L} bytes at offset {@code I} and
  *       {@code K} from the end of the form, then append.</li>
  * </ul>
+ * <p>A removal count of 255 replaces the complete surface form with the appended bytes.
+ * An infix position of 255 is an ordinary byte offset. Control bytes may equal the field
+ * separator. See the
+ * <a href="https://github.com/morfologik/morfologik-stemming/tree/2.2.0/morfologik-stemming/src/main/java/morfologik/stemming">Morfologik encoders</a>
+ * for the format.</p>
  *
  * <p>Surface forms are lower-cased on load because {@link DictionaryLemmatizer} lower-cases the
  * queried token before lookup, so an entry keyed on a mixed-case form would otherwise be
@@ -78,8 +83,11 @@ public final class MorfologikDictionaryReader {
     INFIX
   }
 
-  /** Value the encoders add to every control byte so that all of them stay printable. */
+  /** Offset added to a control value before conversion to a byte. */
   private static final int CONTROL_OFFSET = 'A';
+
+  /** Removal count for replacement of the complete surface form. */
+  private static final int REPLACE_FORM = 255;
 
   /** Separates the word, the postag, and the lemmas in the text {@link DictionaryLemmatizer} reads. */
   private static final String FIELD_SEPARATOR = "\t";
@@ -91,6 +99,7 @@ public final class MorfologikDictionaryReader {
   private static final String KEY_ENCODING = "fsa.dict.encoding";
   private static final String KEY_ENCODER = "fsa.dict.encoder";
 
+  /** Prevents utility-class instantiation. */
   private MorfologikDictionaryReader() {
   }
 
@@ -107,7 +116,7 @@ public final class MorfologikDictionaryReader {
    * @throws IllegalArgumentException Thrown if {@code dictionary}, {@code encoding}, or
    *                                  {@code charset} is {@code null}.
    * @throws IOException Thrown on IO errors, if the stream is not a supported FSA automaton, or
-   *                     if an entry cannot be split into a form and encoded base.
+   *                     if an entry has no form separator, incomplete controls or invalid removal ranges.
    */
   public static DictionaryLemmatizer read(InputStream dictionary, byte separator,
       BaseFormEncoding encoding, Charset charset) throws IOException {
@@ -214,7 +223,8 @@ public final class MorfologikDictionaryReader {
       throw new UncheckedIOException(new IOException(
           "morfologik entry has no separator: " + new String(sequence, charset)));
     }
-    final int secondSeparator = indexOf(sequence, separator, firstSeparator + 1);
+    final int secondSeparator = indexOf(sequence, separator,
+        firstSeparator + 1 + controlBytes(encoding));
     final int baseEnd = secondSeparator < 0 ? sequence.length : secondSeparator;
 
     final byte[] form = Arrays.copyOfRange(sequence, 0, firstSeparator);
@@ -241,30 +251,43 @@ public final class MorfologikDictionaryReader {
    * @param encoded  The encoded base bytes: control bytes followed by literal bytes to append.
    * @param encoding The encoder that produced {@code encoded}.
    * @return The decoded base form bytes.
-   * @throws IllegalArgumentException Thrown if {@code encoded} is too short for the encoder or the
-   *                                  control bytes address positions outside {@code form}.
+   * @throws IllegalArgumentException Thrown if {@code encoded} is too short for the encoder,
+   *                                  or removal ranges overlap or exceed {@code form}.
    */
   static byte[] decodeBaseForm(byte[] form, byte[] encoded, BaseFormEncoding encoding) {
+    final int prefixBytes = controlBytes(encoding);
+    require(encoded, prefixBytes, encoding);
     switch (encoding) {
       case NONE:
         return encoded.clone();
       case SUFFIX: {
-        require(encoded, 1, encoding);
-        final int keep = bounded(form.length - control(encoded[0]), form);
-        return join(form, 0, keep, encoded, 1);
+        final int suffix = control(encoded[0]);
+        final int keep = suffix == REPLACE_FORM ? 0 : bounded(form.length - suffix, form);
+        return join(form, 0, keep, encoded, prefixBytes);
       }
       case PREFIX: {
-        require(encoded, 2, encoding);
-        final int start = bounded(control(encoded[0]), form);
-        final int end = bounded(form.length - control(encoded[1]), form);
-        return join(form, Math.min(start, end), end, encoded, 2);
+        final int prefix = control(encoded[0]);
+        final int suffix = control(encoded[1]);
+        if (prefix == REPLACE_FORM || suffix == REPLACE_FORM) {
+          return Arrays.copyOfRange(encoded, prefixBytes, encoded.length);
+        }
+        final int start = bounded(prefix, form);
+        final int end = bounded(form.length - suffix, form);
+        requireOrdered(start, end);
+        return join(form, start, end, encoded, prefixBytes);
       }
       case INFIX: {
-        require(encoded, 3, encoding);
-        final int cut = bounded(control(encoded[0]), form);
-        final int resume = bounded(cut + control(encoded[1]), form);
-        final int end = bounded(form.length - control(encoded[2]), form);
-        return join3(form, cut, Math.max(resume, cut), Math.max(end, resume), encoded, 3);
+        final int position = control(encoded[0]);
+        final int length = control(encoded[1]);
+        final int suffix = control(encoded[2]);
+        if (length == REPLACE_FORM || suffix == REPLACE_FORM) {
+          return Arrays.copyOfRange(encoded, prefixBytes, encoded.length);
+        }
+        final int cut = bounded(position, form);
+        final int resume = bounded(cut + length, form);
+        final int end = bounded(form.length - suffix, form);
+        requireOrdered(resume, end);
+        return join3(form, cut, resume, end, encoded, prefixBytes);
       }
       default:
         throw new IllegalArgumentException("unknown encoder: " + encoding);
@@ -272,11 +295,41 @@ public final class MorfologikDictionaryReader {
   }
 
   /**
+   * Counts the control bytes preceding the appended bytes.
+   *
+   * @param encoding The encoder.
+   * @return The control byte count.
+   */
+  private static int controlBytes(BaseFormEncoding encoding) {
+    return switch (encoding) {
+      case NONE -> 0;
+      case SUFFIX -> 1;
+      case PREFIX -> 2;
+      case INFIX -> 3;
+    };
+  }
+
+  /**
+   * Converts a control byte to an unsigned removal count or position.
+   *
    * @param b A control byte of an encoded base form.
    * @return The number of bytes it stands for.
    */
   private static int control(byte b) {
-    return (b & 0xff) - CONTROL_OFFSET;
+    return (b - CONTROL_OFFSET) & 0xff;
+  }
+
+  /**
+   * Checks that removed ranges do not overlap.
+   *
+   * @param start The start of the retained range.
+   * @param end The end of the retained range.
+   * @throws IllegalArgumentException If {@code start} exceeds {@code end}.
+   */
+  private static void requireOrdered(int start, int end) {
+    if (start > end) {
+      throw new IllegalArgumentException("encoded base removal ranges overlap");
+    }
   }
 
   /**
