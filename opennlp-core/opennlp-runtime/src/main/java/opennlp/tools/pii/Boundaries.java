@@ -18,17 +18,14 @@
 package opennlp.tools.pii;
 
 /**
- * The word boundary tests shared by the PII scanners, so that nothing is ever reported
- * from inside a longer run of letters and digits.
+ * Unicode letter/digit boundary checks shared by PII scanners.
  *
- * <p>Boundaries are judged on whole code points, not on UTF-16 units, so a candidate that
- * follows or precedes a character outside the basic plane is judged by that character and
- * not by half of it.</p>
+ * <p>Word boundaries use complete code points, including supplementary characters.</p>
  */
 final class Boundaries {
 
+  /** Prevents construction of this utility class. */
   private Boundaries() {
-    // This class holds static tests only and is never instantiated.
   }
 
   /**
@@ -77,9 +74,8 @@ final class Boundaries {
   }
 
   /**
-   * Checks that a candidate ending at {@code end} is not followed by one of the
-   * characters that would make it a piece of a longer structured value, for example a
-   * further dotted group of an address or a version string.
+   * Checks the word boundary and rejects a following separator run continued by a
+   * Unicode letter or digit. A terminal separator run can be sentence punctuation.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.
@@ -90,7 +86,10 @@ final class Boundaries {
     if (!onEnd(text, end)) {
       return false;
     }
-    return end + 1 >= text.length() || text.charAt(end) != separator
-        || !Ascii.isLetterOrDigit(text.charAt(end + 1));
+    int p = end;
+    while (p < text.length() && text.charAt(p) == separator) {
+      p++;
+    }
+    return p == end || onEnd(text, p);
   }
 }

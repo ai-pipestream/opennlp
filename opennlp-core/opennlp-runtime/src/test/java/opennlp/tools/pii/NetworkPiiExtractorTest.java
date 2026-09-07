@@ -30,6 +30,12 @@ public class NetworkPiiExtractorTest {
 
   private final NetworkPiiExtractor extractor = new NetworkPiiExtractor();
 
+  /**
+   * Checks accepted IPv4 values and exact spans.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected dotted decimal form.
+   */
   @ParameterizedTest
   @CsvSource({
       "192.168.1.1, 192.168.1.1",
@@ -53,6 +59,11 @@ public class NetworkPiiExtractorTest {
     Assertions.assertEquals(text.length(), mentions.get(0).span().getEnd());
   }
 
+  /**
+   * Checks invalid octets, lengths, boundaries and reserved IPv4 values.
+   *
+   * @param text The rejected form.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "256.1.1.1",
@@ -81,6 +92,7 @@ public class NetworkPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_IPV4.equals(m.type())), text);
   }
 
+  /** Checks the original IPv4 span in surrounding prose. */
   @Test
   void testIpv4SpanInSentence() {
     final String text = "The host at 192.0.2.44, port 8080, timed out.";
@@ -91,6 +103,7 @@ public class NetworkPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /** Checks consecutive addresses separated by whitespace. */
   @Test
   void testTwoAdjacentIpv4AddressesAreBothFound() {
     final String text = "route 10.1.2.3 10.1.2.4";
@@ -101,6 +114,7 @@ public class NetworkPiiExtractorTest {
     Assertions.assertEquals("10.1.2.4", mentions.get(1).normalized());
   }
 
+  /** Checks that a CIDR prefix length remains outside the address span. */
   @Test
   void testIpv4WithCidrPrefixReportsTheAddressOnly() {
     final String text = "block 198.51.100.14/24 now";
@@ -110,6 +124,12 @@ public class NetworkPiiExtractorTest {
     Assertions.assertEquals("198.51.100.14", mentions.get(0).normalized());
   }
 
+  /**
+   * Checks accepted IPv6 forms, normalized groups and exact spans.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected hexadecimal form.
+   */
   @ParameterizedTest
   @CsvSource({
       "2001:0db8:0000:0000:0000:ff00:0042:8329, 2001:db8::ff00:42:8329",
@@ -137,25 +157,24 @@ public class NetworkPiiExtractorTest {
   }
 
   /**
-   * Verifies that the same address written in several accepted forms normalizes to one
-   * string, which is what makes the normalized form usable for comparison.
+   * Checks equivalent forms of the same IPv6 value.
+   *
+   * @param form The alternate form.
    */
-  @Test
-  void testEquivalentIpv6FormsShareOneNormalizedForm() {
-    final List<String> forms = List.of(
-        "2001:0db8:0000:0000:0000:0000:0000:0001",
-        "2001:db8:0:0:0:0:0:1",
-        "2001:db8::0:1",
-        "2001:db8::1",
-        "2001:0DB8::1");
-
-    for (final String form : forms) {
-      final List<PiiMention> mentions = extractor.extract(form);
-      Assertions.assertEquals(1, mentions.size(), form);
-      Assertions.assertEquals("2001:db8::1", mentions.get(0).normalized(), form);
-    }
+  @ParameterizedTest
+  @ValueSource(strings = {"2001:0db8:0000:0000:0000:0000:0000:0001", "2001:db8:0:0:0:0:0:1",
+      "2001:db8::0:1", "2001:db8::1", "2001:0DB8::1"})
+  void testEquivalentIpv6FormsShareOneNormalizedForm(String form) {
+    final List<PiiMention> mentions = extractor.extract(form);
+    Assertions.assertEquals(1, mentions.size(), form);
+    Assertions.assertEquals("2001:db8::1", mentions.get(0).normalized(), form);
   }
 
+  /**
+   * Checks malformed IPv6 and the detector's short-form exclusions.
+   *
+   * @param text The rejected form.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "12:34:56",
@@ -180,6 +199,7 @@ public class NetworkPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_IPV6.equals(m.type())), text);
   }
 
+  /** Checks the original IPv6 span in surrounding prose. */
   @Test
   void testIpv6SpanInSentence() {
     final String text = "Peer 2001:db8::dead:beef went away.";
@@ -190,6 +210,12 @@ public class NetworkPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /**
+   * Checks accepted MAC groupings, normalized pairs and exact spans.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected colon-separated form.
+   */
   @ParameterizedTest
   @CsvSource({
       "00:1B:44:11:3A:B7, 00:1b:44:11:3a:b7",
@@ -211,6 +237,11 @@ public class NetworkPiiExtractorTest {
     Assertions.assertEquals(text.length(), mentions.get(0).span().getEnd());
   }
 
+  /**
+   * Checks malformed groupings, invalid digits and reserved MAC values.
+   *
+   * @param text The rejected form.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "00:1b:44:11:3a",
@@ -231,12 +262,14 @@ public class NetworkPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_MAC.equals(m.type())), text);
   }
 
+  /** Checks that the detector does not extract a suffix of a longer address. */
   @Test
   void testMacIsNotReportedFromInsideALongerAddress() {
     final String text = "aa:00:1b:44:11:3a:b7";
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks ordered, disjoint spans across all supported types. */
   @Test
   void testFindsAllThreeTypesInOneLogLine() {
     final String text = "host 10.1.2.3 mac 00:1b:44:11:3a:b7 peer 2001:db8::1 done";
@@ -253,6 +286,7 @@ public class NetworkPiiExtractorTest {
     }
   }
 
+  /** Checks type selection without changing recognition rules. */
   @Test
   void testTypeSubsetLimitsWhatIsReported() {
     final String text = "host 10.1.2.3 mac 00:1b:44:11:3a:b7 peer 2001:db8::1";
@@ -268,6 +302,11 @@ public class NetworkPiiExtractorTest {
             .stream().map(PiiMention::type).toList());
   }
 
+  /**
+   * Checks ordinary text without matching network addresses.
+   *
+   * @param text The input without a match.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "no address here",
@@ -280,6 +319,7 @@ public class NetworkPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks constructor and extraction argument validation. */
   @Test
   void testRejectsUnrecognizedTypeAndMissingArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -291,6 +331,7 @@ public class NetworkPiiExtractorTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> extractor.extract(null));
   }
 
+  /** Checks original-text offsets after supplementary characters. */
   @Test
   void testSurrogatePairsDoNotShiftSpans() {
     final String text = "\uD83D\uDE00 host 192.0.2.1 \uD83D\uDE00";

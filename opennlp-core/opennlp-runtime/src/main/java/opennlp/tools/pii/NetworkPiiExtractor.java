@@ -22,52 +22,42 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for network addresses: forward scans over the
- * text, no regular expressions, recognizing IPv4 addresses, IPv6 addresses, and MAC
- * addresses. Addresses identify devices and subscribers and are personal data under most
- * privacy regimes, which is why they are found here rather than in the default extractor;
- * this extractor is opt-in.
+ * Extracts IPv4, IPv6 and 48-bit MAC address candidates. This detector is opt-in.
  *
  * <p>Recognized forms:</p>
  * <ul>
- *   <li>IPv4: four dot-separated decimal octets of {@code 0} to {@code 255}, as
- *   <a href="https://datatracker.ietf.org/doc/html/rfc791">RFC 791</a> addresses are
- *   written. An octet with a leading zero is rejected, since a leading zero means octal
- *   in some resolvers and decimal in others, and a fifth dotted group rejects the
- *   candidate, so a dotted version or a hostname is not reported.</li>
+ *   <li>IPv4: four decimal octets from {@code 0} to {@code 255}, following the
+ *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.2">RFC 3986</a>
+ *   literal syntax. Leading zeros and further dotted groups are rejected.</li>
  *   <li>IPv6: the text representation of
  *   <a href="https://datatracker.ietf.org/doc/html/rfc4291#section-2.2">RFC 4291</a>,
  *   with at most one {@code ::} run and an optional embedded IPv4 part in the last 32
  *   bits.</li>
- *   <li>MAC: six colon-separated or six hyphen-separated pairs of hexadecimal digits, or
- *   the three dot-separated quadruples that network equipment prints, as
- *   <a href="https://standards.ieee.org/products-programs/regauth/">IEEE 802</a> 48-bit
- *   addresses are written. The separator must be the same throughout.</li>
+ *   <li>MAC: six hexadecimal pairs separated by colons or hyphens, or three dotted
+ *   groups of four hexadecimal digits. The separator must be consistent.</li>
  * </ul>
  *
- * <p>Two rules keep the ordinary shapes of technical text out of the results. An IPv6
- * candidate whose every group is one or two hexadecimal digits is only reported in the
- * full eight-group form, because short groups joined by colons are also how clock times,
- * timestamps, and namespace operators are written; a compressed candidate must therefore
- * show a group of three or more digits or an embedded IPv4 part. The unspecified and
- * broadcast addresses and the all-zero and broadcast MAC addresses are never reported,
- * since none of them identifies anything.</p>
+ * <p>IPv6 without an embedded IPv4 part must spell out at least two groups and either
+ * contain a group of three or more digits or spell out all eight groups. This filter
+ * limits matches in times and namespace expressions, but also omits valid short forms
+ * such as {@code ::1} and {@code 2001::}.</p>
  *
- * <p>A dotted quad remains genuinely ambiguous: a four-part software version is written
- * exactly like an address, and no test on the characters can separate the two. Such a
- * version is reported as an IPv4 address.</p>
+ * <p>The unspecified IPv4/IPv6 addresses, limited IPv4 broadcast address and all-zero
+ * or broadcast MAC addresses are excluded. Matching checks syntax, not assignment or
+ * reachability. A four-part software version can also match IPv4 syntax.</p>
  *
- * <p>Normalized forms: an IPv4 address keeps its dotted decimal form, an IPv6 address is
- * put in the lowercase compressed form recommended by
- * <a href="https://datatracker.ietf.org/doc/html/rfc5952">RFC 5952</a> with an embedded
- * IPv4 part folded into hexadecimal groups, and a MAC address becomes lowercase pairs
- * separated by colons, so the same address written in any accepted form normalizes to one
- * string.</p>
+ * <p>IPv4 retains dotted decimal form. IPv6 uses lowercase hexadecimal groups and
+ * <a href="https://datatracker.ietf.org/doc/html/rfc5952#section-4.2">RFC 5952</a>
+ * zero compression, selecting the first longest run. Embedded IPv4 is rendered as
+ * hexadecimal groups. MAC normalization uses lowercase colon-separated pairs.</p>
+
+ * <p>Matches do not continue Unicode words or dotted names and numbers. A trailing
+ * IPv6 {@code ::} remains part of the span before brackets, punctuation or whitespace.</p>
  *
  * <p>All three types are reported by default; the {@link #NetworkPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -89,8 +79,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   private static final int MAC_QUADS = 3;
 
   /**
-   * The shortest group of three or more hexadecimal digits that lets a compressed IPv6
-   * candidate be told from a clock time or a namespace operator.
+   * Minimum hexadecimal group length used by the compressed IPv6 false-positive filter.
    */
   private static final int IPV6_STRONG_GROUP_DIGITS = 3;
 
@@ -127,8 +116,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to a non-overlapping set, leftmost and longest first.</p>
+   * <p>Enabled types are scanned separately and their candidates are resolved together.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -157,7 +145,8 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   private void scanIpv4(CharSequence text, List<Hits.Hit> hits) {
     final int[] octets = new int[IPV4_OCTETS];
     for (int i = 0; i < text.length(); i++) {
-      if (!Ascii.isDigit(text.charAt(i)) || !Boundaries.onNumberStart(text, i)) {
+      if (!Ascii.isDigit(text.charAt(i)) || !Boundaries.onNumberStart(text, i)
+          || continuesDottedValue(text, i)) {
         continue;
       }
       final int end = parseIpv4(text, i, octets);
@@ -217,8 +206,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for the two IPv4 addresses that identify no host: the unspecified address and
-   * the limited broadcast address.
+   * Tests for the unspecified and limited broadcast IPv4 addresses.
    *
    * @param octets The four octet values.
    * @return {@code true} if the address must not be reported.
@@ -241,7 +229,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
    * @param written The number of groups the text spelled out, not counting the groups an
    *                embedded IPv4 part contributed.
    * @param longestGroup The digit count of the longest group the text spelled out.
-   * @param embeddedIpv4 Whether the last 32 bits were written as a dotted quad.
+   * @param embeddedIpv4 Indicates that the last 32 bits were written as a dotted quad.
    */
   private record Ipv6(int end, int[] groups, int written, int longestGroup,
                       boolean embeddedIpv4) {
@@ -261,7 +249,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
         continue;
       }
       final Ipv6 candidate = parseIpv6(text, i);
-      if (candidate == null || !Boundaries.onEnd(text, candidate.end())
+      if (candidate == null || !Boundaries.onEndBefore(text, candidate.end(), '.')
           || !plausibleIpv6(candidate)) {
         continue;
       }
@@ -295,6 +283,9 @@ public final class NetworkPiiExtractor implements PiiExtractor {
       p += 2;
     }
     while (p < text.length()) {
+      if (head.size() + tail.size() >= IPV6_GROUPS) {
+        return null;
+      }
       final List<Integer> target = compressed ? tail : head;
       if ((!head.isEmpty() || compressed) && Ascii.isDigit(text.charAt(p))) {
         final int quadEnd = parseIpv4(text, p, octets);
@@ -313,6 +304,10 @@ public final class NetworkPiiExtractor implements PiiExtractor {
         value = value * 16 + Ascii.hexValue(text.charAt(p));
         digits++;
         p++;
+      }
+      if (digits == 0 && compressed && tail.isEmpty() && text.charAt(p) != ':') {
+        // A trailing :: may end before surrounding punctuation or whitespace.
+        break;
       }
       if (digits == 0 || (p < text.length() && Ascii.isHexDigit(text.charAt(p)))) {
         return null;
@@ -341,7 +336,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
     if (compressed ? total >= IPV6_GROUPS : total != IPV6_GROUPS) {
       return null;
     }
-    // Nothing may follow an embedded quad: it holds the last 32 bits of the address.
+    // An embedded IPv4 part supplies the final 32 bits.
     if (embedded && p < text.length() && text.charAt(p) == ':') {
       return null;
     }
@@ -356,14 +351,19 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Judges whether an IPv6 candidate carries enough evidence to be reported: an embedded
-   * IPv4 part, or at least two groups of which one is three or more digits long, or the
-   * full eight groups.
+   * Excludes the unspecified address and applies the IPv6 false-positive filter.
    *
    * @param candidate The candidate read from the text.
    * @return {@code true} if the candidate is reported.
    */
   private boolean plausibleIpv6(Ipv6 candidate) {
+    boolean allZero = true;
+    for (final int group : candidate.groups()) {
+      allZero &= group == 0;
+    }
+    if (allZero) {
+      return false;
+    }
     if (candidate.embeddedIpv4()) {
       return true;
     }
@@ -379,7 +379,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
    * groups replaced by {@code ::}.
    *
    * @param groups The eight 16-bit groups.
-   * @return The normalized form. Never {@code null}.
+   * @return The normalized form.
    */
   private String formatIpv6(int[] groups) {
     int runStart = -1;
@@ -502,8 +502,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for the two MAC addresses that identify no device: the all-zero address and
-   * the broadcast address.
+   * Tests for the all-zero and broadcast MAC addresses.
    *
    * @param bytes The six address bytes.
    * @return {@code true} if the address must not be reported.
@@ -527,15 +526,30 @@ public final class NetworkPiiExtractor implements PiiExtractor {
    * @return {@code true} if the candidate may start here.
    */
   private boolean onGroupStart(CharSequence text, int start) {
-    if (!Boundaries.onWordStart(text, start)) {
+    if (!Boundaries.onWordStart(text, start) || continuesDottedValue(text, start)) {
       return false;
     }
     if (start == 0) {
       return true;
     }
     final char previous = text.charAt(start - 1);
-    return (previous != ':' && previous != '-' && previous != '.')
+    return (previous != ':' && previous != '-')
         || start < 2 || !Ascii.isHexDigit(text.charAt(start - 2));
+  }
+
+  /**
+   * Checks for a preceding dotted name or number, including repeated dots.
+   *
+   * @param text The text being scanned.
+   * @param start The candidate start.
+   * @return {@code true} if a Unicode letter or digit precedes the joining dots.
+   */
+  private boolean continuesDottedValue(CharSequence text, int start) {
+    int p = start;
+    while (p > 0 && text.charAt(p - 1) == '.') {
+      p--;
+    }
+    return p < start && p > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, p));
   }
 
   /**

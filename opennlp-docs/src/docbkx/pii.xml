@@ -141,6 +141,25 @@ String masked = Masker.mask(overlaps, List.of(right, left),
 			<listitem>
 				<para>
 					<code>NetworkPiiExtractor</code>: IPv4, IPv6, and MAC addresses.
+					It rejects matches inside longer dotted names and numeric values,
+					including Unicode continuations. Trailing IPv6 <code>::</code>
+					is retained before brackets, whitespace and sentence punctuation.
+					The unspecified IPv4/IPv6 addresses, limited IPv4 broadcast address,
+					and all-zero or broadcast MAC addresses are excluded.
+					IPv6 without an embedded IPv4 part must spell out at least two groups
+					and either spell out all eight groups or include a group of at least
+					three digits. This false-positive filter omits some valid short forms,
+					including <code>::1</code> and <code>2001::</code>.
+					Normalization uses lowercase hexadecimal IPv6 with the first longest
+					run of at least two zero groups compressed, and lowercase
+					colon-separated MAC pairs.
+					Matching does not check assignment or reachability.
+					<programlisting language="java"><![CDATA[
+Document addresses = new PiiAnnotator(PiiPacks.network()).annotate(Document.of(
+    "Peer [2001:db8::], host 192.0.2.1, MAC 02-1B-44-11-3A-B7."));
+String masked = Masker.mask(addresses, PiiAnnotator.PII, '*');
+// "Peer [**********], host *********, MAC *****************."]]>
+					</programlisting>
 				</para>
 			</listitem>
 			<listitem>
