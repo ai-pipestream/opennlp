@@ -65,9 +65,27 @@ public final class CursorAssetDetector implements AssetDetector {
   private static final int HEADER_ENCODED_LENGTH = 32;
   private static final int EMF_HEADER_ENCODED_LENGTH = 60;
   private static final int JPEG2000_HEADER_ENCODED_LENGTH = 48;
+  private static final int PEM_HEADER_ENCODED_LENGTH = 48;
+
+  /** Base64 prefix determined by the complete "-----BEGIN " text. */
+  private static final String PEM_PREFIX = "LS0tLS1CRUdJTi";
 
   private static final int DEX_VERSION_OFFSET = 4;
   private static final int DEX_MAGIC_LENGTH = 8;
+
+  private static final int DWF_VERSION_OFFSET = 6;
+  private static final int DWF_DECIMAL_OFFSET = 8;
+  private static final int DWF_HEADER_LENGTH = 12;
+
+  private static final int WEBVTT_MAGIC_LENGTH = 6;
+  private static final int UTF8_BOM_LENGTH = 3;
+
+  private static final String CALENDAR_OPENING = "begin:vcalendar";
+  private static final String CALENDAR_FORMAT_NAME = "ics";
+  private static final KnownMagics.Format CALENDAR_FORMAT =
+      new KnownMagics.Format(CALENDAR_FORMAT_NAME, "text/calendar");
+
+  private final SvgHeader svgHeader = new SvgHeader();
 
   private static final int BER_SEQUENCE_TAG = 0x30;
   private static final int BER_OBJECT_IDENTIFIER_TAG = 0x06;
@@ -244,7 +262,7 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return start;
     }
-    final KnownMagics.Format sniffed = formatOf(header);
+    final KnownMagics.Format sniffed = formatOf(header, text, payload);
     final String inferredType = sniffed == null ? null : sniffed.mediaType();
     final String mediaType = declared.indexOf('/') > 0 ? declared : inferredType;
     if (mediaType == null) {
@@ -268,7 +286,8 @@ public final class CursorAssetDetector implements AssetDetector {
       return;
     }
     boolean magic = matchesBase64Prefix(text, payload.start(), RIFF_PREFIX)
-        || startsWithSequence(text, payload.start());
+        || startsWithSequence(text, payload.start()) || startsWithCalendar(text, payload.start())
+        || startsWithXml(text, payload.start());
     if (!magic) {
       for (final String prefix : KnownMagics.PREFIXES) {
         if (matchesBase64Prefix(text, payload.start(), prefix)) {
@@ -284,7 +303,7 @@ public final class CursorAssetDetector implements AssetDetector {
     if (header == null) {
       return;
     }
-    final KnownMagics.Format format = formatOf(header);
+    final KnownMagics.Format format = formatOf(header, text, payload);
     if (format == null) {
       return;
     }
@@ -572,8 +591,8 @@ public final class CursorAssetDetector implements AssetDetector {
 
   /**
    * Decodes the leading payload characters into header bytes.
-   * EMF candidates use up to 60 encoded characters, JPEG 2000 candidates use 48,
-   * and other headers use 32.
+   * EMF candidates use up to 60 encoded characters, JPEG 2000 and encoded PEM
+   * candidates use 48, and other headers use 32.
    *
    * @param text The text.
    * @param payload The scanned payload.
@@ -588,6 +607,8 @@ public final class CursorAssetDetector implements AssetDetector {
       limit = EMF_HEADER_ENCODED_LENGTH;
     } else if (matchesBase64Prefix(text, payload.start(), JPEG2000_PREFIX)) {
       limit = JPEG2000_HEADER_ENCODED_LENGTH;
+    } else if (matchesBase64Prefix(text, payload.start(), PEM_PREFIX)) {
+      limit = PEM_HEADER_ENCODED_LENGTH;
     } else {
       limit = HEADER_ENCODED_LENGTH;
     }
@@ -612,20 +633,33 @@ public final class CursorAssetDetector implements AssetDetector {
    * checking additional format fields where required.
    *
    * @param header The decoded leading bytes.
+   * @param text The source text, used to inspect calendar and XML headers.
+   * @param payload The scanned payload.
    * @return The format and media type, or {@code null} for an unknown header.
    */
-  private KnownMagics.Format formatOf(byte[] header) {
+  private KnownMagics.Format formatOf(byte[] header, CharSequence text, Payload payload) {
     final KnownMagics.Format known = KnownMagics.formatOf(header);
     if (known != null) {
       return switch (known.name()) {
         case "aiff" -> hasAiffFormType(header) ? known : null;
         case "dex" -> hasDexMagic(header) ? known : null;
+        case "dwf" -> hasDwfHeader(header) ? known : null;
         case "emf" -> carries(header, EMF_SIGNATURE_OFFSET, EMF_SIGNATURE) ? known : null;
+        case CALENDAR_FORMAT_NAME -> hasCalendarOpening(text, payload) ? known : null;
         case "jp2" -> jpeg2000Format(header, known);
         case "pcapng" -> hasPcapngByteOrderMagic(header) ? known : null;
+        case SvgHeader.FORMAT_NAME -> svgHeader.matches(text, payload.start(), payload.end()) ? known : null;
+        case "vtt" -> hasWebVttBoundary(header) ? known : null;
         case "xls" -> excelFormat(header, known);
+        case "xml" -> svgHeader.matches(text, payload.start(), payload.end()) ? SvgHeader.FORMAT : known;
         default -> known;
       };
+    }
+    if (startsWithCalendar(text, payload.start()) && hasCalendarOpening(text, payload)) {
+      return CALENDAR_FORMAT;
+    }
+    if (svgHeader.isCandidate(header) && svgHeader.matches(text, payload.start(), payload.end())) {
+      return SvgHeader.FORMAT;
     }
     if (carries(header, 0, RIFF_MAGIC)) {
       if (carries(header, FORM_TYPE_OFFSET, "WEBP")) {
@@ -639,6 +673,72 @@ public final class CursorAssetDetector implements AssetDetector {
       }
     }
     return hasTimestampedDataType(header) ? TIMESTAMPED_DATA_FORMAT : null;
+  }
+
+  /**
+   * Checks a case-insensitive calendar opening line, removing CRLF/SPACE and CRLF/TAB continuations.
+   * Reads the encoded payload incrementally without allocating the complete decoded content.
+   * Calendar properties and components are not validated.
+   *
+   * @param text The encoded source text.
+   * @param payload The validated payload bounds.
+   * @return Whether the first unfolded line is BEGIN:VCALENDAR followed by CRLF.
+   * @see <a href="https://www.rfc-editor.org/rfc/rfc5545.html#section-3.1">Content lines</a>
+   */
+  private boolean hasCalendarOpening(CharSequence text, Payload payload) {
+    final Base64PayloadInputStream input = new Base64PayloadInputStream(
+        text, payload.start(), payload.end(), Integer.MAX_VALUE);
+    int matched = 0;
+    boolean afterCr = false;
+    boolean afterLf = false;
+    int value;
+    while ((value = input.read()) >= 0) {
+      if (afterCr) {
+        if (value != '\n') {
+          return false;
+        }
+        afterCr = false;
+        afterLf = true;
+        continue;
+      }
+      if (afterLf) {
+        if (value != ' ' && value != '\t') {
+          return matched == CALENDAR_OPENING.length();
+        }
+        afterLf = false;
+        continue;
+      }
+      if (value == '\r') {
+        afterCr = true;
+      } else {
+        if (matched == CALENDAR_OPENING.length()) {
+          return false;
+        }
+        final char expected = CALENDAR_OPENING.charAt(matched);
+        if (value != expected && !(expected >= 'a' && expected <= 'z'
+            && value == expected - ('a' - 'A'))) {
+          return false;
+        }
+        matched++;
+      }
+    }
+    return afterLf && matched == CALENDAR_OPENING.length();
+  }
+
+  /**
+   * Checks the byte after a matched WebVTT identifier, with or without a UTF-8 BOM.
+   * Header text, cue syntax and UTF-8 content are not validated.
+   *
+   * @param header The decoded header with a matched WebVTT prefix.
+   * @return Whether the identifier ends at EOF or precedes TAB, LF, CR or SPACE.
+   * @see <a href="https://www.w3.org/TR/2026/CRD-webvtt1-20260520/#iana-text-vtt">WebVTT magic</a>
+   */
+  private boolean hasWebVttBoundary(byte[] header) {
+    final int end = header[0] == 'W' ? WEBVTT_MAGIC_LENGTH : WEBVTT_MAGIC_LENGTH + UTF8_BOM_LENGTH;
+    return header.length == end || switch (header[end]) {
+      case '\t', '\n', '\r', ' ' -> true;
+      default -> false;
+    };
   }
 
   /**
@@ -727,10 +827,36 @@ public final class CursorAssetDetector implements AssetDetector {
    *     DEX file magic</a>
    */
   private boolean hasDexMagic(byte[] header) {
-    if (header.length < DEX_MAGIC_LENGTH || header[DEX_MAGIC_LENGTH - 1] != 0) {
-      return false;
-    }
-    for (int i = DEX_VERSION_OFFSET; i < DEX_MAGIC_LENGTH - 1; i++) {
+    return header.length >= DEX_MAGIC_LENGTH && header[DEX_MAGIC_LENGTH - 1] == 0
+        && hasDecimalDigits(header, DEX_VERSION_OFFSET, DEX_MAGIC_LENGTH - 1);
+  }
+
+  /**
+   * Checks the complete DWF version field and closing parenthesis after the matched prefix.
+   * Drawing records and package contents are not validated.
+   *
+   * @param header The decoded leading bytes.
+   * @return Whether the header has the form {@code (DWF Vdd.dd)} with ASCII decimal digits.
+   * @see <a href="https://github.com/kveretennicov/dwf-toolkit/blob/fd1e8097b158ab3afef335484d7a111ab8da3d74/develop/global/src/dwf/whiptk/dwfhead.cpp">
+   *     Autodesk DWF header reader and writer</a>
+   */
+  private boolean hasDwfHeader(byte[] header) {
+    return header.length >= DWF_HEADER_LENGTH
+        && header[DWF_DECIMAL_OFFSET] == '.' && header[DWF_HEADER_LENGTH - 1] == ')'
+        && hasDecimalDigits(header, DWF_VERSION_OFFSET, DWF_DECIMAL_OFFSET)
+        && hasDecimalDigits(header, DWF_DECIMAL_OFFSET + 1, DWF_HEADER_LENGTH - 1);
+  }
+
+  /**
+   * Checks an available header field for ASCII decimal digits.
+   *
+   * @param header The decoded leading bytes.
+   * @param start The first field byte.
+   * @param end The exclusive field end, within the header.
+   * @return Whether all field bytes are ASCII decimal digits.
+   */
+  private boolean hasDecimalDigits(byte[] header, int start, int end) {
+    for (int i = start; i < end; i++) {
       if (header[i] < '0' || header[i] > '9') {
         return false;
       }
@@ -906,6 +1032,41 @@ public final class CursorAssetDetector implements AssetDetector {
   private boolean startsWithSequence(CharSequence text, int at) {
     return at + 1 < text.length() && text.charAt(at) == 'M'
         && text.charAt(at + 1) >= 'A' && text.charAt(at + 1) <= 'P';
+  }
+
+  /**
+   * Checks for a decoded B or b, including a line continuation after the first letter.
+   * The first byte uses Q or Y followed by g through v in either base64 alphabet.
+   *
+   * @param text The encoded text.
+   * @param at The payload start.
+   * @return Whether the payload can contain a calendar opening line.
+   */
+  private boolean startsWithCalendar(CharSequence text, int at) {
+    return at + 1 < text.length() && (text.charAt(at) == 'Q' || text.charAt(at) == 'Y')
+        && text.charAt(at + 1) >= 'g' && text.charAt(at + 1) <= 'v';
+  }
+
+  /**
+   * Selects possible XML prefixes before decoding an untyped bare payload.
+   *
+   * @param text The encoded text.
+   * @param at The payload start.
+   * @return Whether the first decoded byte can begin XML or a byte-order mark.
+   */
+  private boolean startsWithXml(CharSequence text, int at) {
+    if (at + 1 >= text.length()) {
+      return false;
+    }
+    final int first = Base64PayloadInputStream.digit(text.charAt(at));
+    final int second = Base64PayloadInputStream.digit(text.charAt(at + 1));
+    if (first < 0 || second < 0) {
+      return false;
+    }
+    return switch ((first << 2) | (second >>> 4)) {
+      case '<', ' ', '\t', '\r', '\n', 0, 0xef, 0xfe, 0xff -> true;
+      default -> false;
+    };
   }
 
   /**
