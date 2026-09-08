@@ -31,17 +31,16 @@ import opennlp.tools.document.Layers;
  * Scans document text with a {@link PiiExtractor} and writes one {@link #PII} annotation
  * per mention.
  *
- * <p>The extractor works on the raw text, so this annotator requires no other layer and
- * can run anywhere in a pipeline. Combine the layer with {@link Masker} to produce a
- * redacted copy of the text.</p>
+ * <p>The annotator uses raw text and requires no input layers. Pass the output layer
+ * to {@link Masker} to produce a redacted copy.</p>
  *
  * @since 3.0.0
  */
 public final class PiiAnnotator implements DocumentAnnotator {
 
   /**
-   * PII mentions. Each annotation and its {@link PiiMention} have matching start and end
-   * offsets in the document text.
+   * PII mentions. An annotation and the contained {@link PiiMention} have matching
+   * start and end offsets in the document text.
    */
   public static final LayerKey<PiiMention> PII = Layers.key("pii", PiiMention.class);
 

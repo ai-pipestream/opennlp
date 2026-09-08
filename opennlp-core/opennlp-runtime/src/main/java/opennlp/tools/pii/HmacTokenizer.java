@@ -26,22 +26,21 @@ import javax.crypto.spec.SecretKeySpec;
 import opennlp.tools.document.Document;
 
 /**
- * Replaces PII mentions with keyed tokens that stay the same across documents.
+ * Replaces PII mentions with HMAC tokens that are stable across documents for a given key.
  *
  * <p>A token contains the type with ASCII letters uppercased, followed by hexadecimal
  * digits from <a href="https://datatracker.ietf.org/doc/html/rfc2104">HMAC</a>-SHA-256.
  * The MAC input is the UTF-8 encoding of the case-sensitive type, a zero byte and the
  * mention's {@link PiiMention#normalized() normalized form}. Types and values must
- * contain well-formed UTF-16. Unpaired surrogates are rejected rather than replaced
- * during encoding.</p>
+ * contain valid UTF-16. Unpaired surrogates are rejected before encoding.</p>
  *
  * <p>Use at least 32 random key bytes and keep the key separate from the data. Tokens
  * made with the same key are linkable pseudonymous data and require access control.
- * Changing the key changes the tokens. Truncated tokens can collide; use a longer token
- * when comparing large collections.</p>
+ * Changing the key changes the tokens. Truncation increases collision risk; use longer
+ * tokens for large collections.</p>
  *
- * <p>Tokens rarely have the length of the values they replace, so offsets move; see
- * {@link PiiRewrite} for mapping annotations onto the rewritten text.</p>
+ * <p>Tokens can change text length. {@link PiiRewrite} maps annotations to output
+ * offsets.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -49,10 +48,10 @@ import opennlp.tools.document.Document;
  */
 public final class HmacTokenizer {
 
-  /** The MAC algorithm, required of every Java platform. */
+  /** The HMAC algorithm. */
   private static final String ALGORITHM = "HmacSha256";
 
-  /** How many hexadecimal digits of the MAC a token shows unless asked otherwise. */
+  /** Default token length in hexadecimal digits. */
   private static final int DEFAULT_LENGTH = 16;
 
   /** Minimum key length recommended for HMAC-SHA-256. */
@@ -65,11 +64,11 @@ public final class HmacTokenizer {
   private final int length;
 
   /**
-   * Initializes a tokenizer producing sixteen hexadecimal digits (64 bits) per token.
+   * Initializes a tokenizer producing 16 hexadecimal digits (64 bits) per token.
    *
    * @param key The secret key. Must contain at least 32 bytes. The bytes are copied.
-   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or shorter than
-   *         32 bytes.
+   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or the key
+   *         length is below 32 bytes.
    */
   public HmacTokenizer(byte[] key) {
     this(key, DEFAULT_LENGTH);
@@ -77,13 +76,13 @@ public final class HmacTokenizer {
 
   /**
    * Initializes a tokenizer with an explicit token length. Shorter tokens increase
-   * collision risk. The default is sixteen hexadecimal digits.
+   * collision risk. The default is 16 hexadecimal digits.
    *
    * @param key The secret key. Must contain at least 32 bytes. The bytes are copied.
    * @param length The number of hexadecimal digits to show. Must be between {@code 4} and
    *               {@code 64}, the full width of a SHA-256 MAC.
-   * @throws IllegalArgumentException Thrown if {@code key} is {@code null} or shorter than
-   *         32 bytes, or {@code length} is out of range.
+   * @throws IllegalArgumentException Thrown if {@code key} is {@code null}, the key length
+   *         is below 32 bytes, or {@code length} is out of range.
    */
   public HmacTokenizer(byte[] key, int length) {
     if (key == null) {
@@ -102,10 +101,10 @@ public final class HmacTokenizer {
   /**
    * Tokenizes one mention.
    *
-   * @param mention The mention. Must not be {@code null}. Its type and normalized value
-   *                must contain well-formed UTF-16.
-   * @return The token, for example {@code EMAIL-3f2a1c9d7e4b6a20}. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code mention} is {@code null}, or its
+   * @param mention The mention. Must not be {@code null}. Type and normalized value must
+   *                contain valid UTF-16.
+   * @return The non-null token, for example {@code EMAIL-3f2a1c9d7e4b6a20}.
+   * @throws IllegalArgumentException Thrown if {@code mention} is {@code null}, or the
    *         type or normalized value contains an unpaired surrogate.
    */
   public String token(PiiMention mention) {
@@ -116,18 +115,16 @@ public final class HmacTokenizer {
   }
 
   /**
-   * Tokenizes a value of a given type, for looking up which token a known value produced.
+   * Tokenizes a known normalized value and case-sensitive type.
    *
-   * <p>The value is expected in the normalized form the extractors report, since that is
-   * what {@link #token(PiiMention)} tokenizes: an unformatted card number rather than a
-   * grouped one. The type takes part in the MAC, so one value under two types yields two
-   * unrelated tokens.</p>
+   * <p>Supply the same normalized value used by {@link #token(PiiMention)}, such as card
+   * digits without separators. The type is included in the MAC input.</p>
    *
    * @param type The mention type, for example {@link PiiMention#TYPE_EMAIL}. Must not be
-   *             {@code null} or blank, and must contain well-formed UTF-16.
+   *             {@code null} or blank, and must contain valid UTF-16.
    * @param value The normalized value. Must not be {@code null} or empty, and must
-   *              contain well-formed UTF-16.
-   * @return The token. Never {@code null}.
+   *              contain valid UTF-16.
+   * @return The non-null token.
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null} or blank, or
    *         {@code value} is {@code null} or empty, or either contains an unpaired surrogate.
    */
@@ -148,16 +145,16 @@ public final class HmacTokenizer {
   }
 
   /**
-   * Rewrites a text, replacing each mention with its token.
+   * Replaces each mention with a token.
    *
    * @param text The original text. Must not be {@code null}.
    * @param mentions The mentions to replace, as reported by a {@link PiiExtractor}. Must
-   *                 not be {@code null} or contain {@code null}, every span must lie
-   *                 within {@code text}, and no two spans may overlap. Mention types and
-   *                 normalized values must contain well-formed UTF-16.
-   * @return The rewrite. Never {@code null}.
+   *                 not be {@code null} or contain {@code null}. All spans must be
+   *                 within {@code text} and must not overlap. Mention types and
+   *                 normalized values must contain valid UTF-16.
+   * @return The non-null rewrite result.
    * @throws IllegalArgumentException Thrown if an argument is {@code null}, a mention is
-   *         {@code null}, a span lies outside the text, two spans overlap, or a mention's
+   *         {@code null}, a span lies outside the text, spans overlap, or a mention's
    *         type or normalized value contains an unpaired surrogate.
    */
   public PiiRewrite rewrite(CharSequence text, List<PiiMention> mentions) {
@@ -165,16 +162,15 @@ public final class HmacTokenizer {
   }
 
   /**
-   * Rewrites a document's text, replacing every mention of its {@link PiiAnnotator#PII}
-   * layer.
+   * Replaces the mentions from a document's {@link PiiAnnotator#PII} layer.
    *
    * @param document The document to rewrite. Must be non-null and have a
    *                 {@link PiiAnnotator#PII} layer with matching annotation and mention
-   *                 offsets. Mention types and normalized values must contain well-formed UTF-16.
-   * @return The rewrite. Never {@code null}.
+   *                 offsets. Mention types and normalized values must contain valid UTF-16.
+   * @return The non-null rewrite result.
    * @throws IllegalArgumentException Thrown if {@code document} is null, lacks the PII
-   *         layer, contains a mention with offsets that differ from its annotation, or a
-   *         mention's type or normalized value contains an unpaired surrogate.
+   *         layer, contains overlapping mentions, an annotation and mention have different
+   *         offsets, or a mention's type or normalized value contains an unpaired surrogate.
    */
   public PiiRewrite rewrite(Document document) {
     final List<PiiMention> mentions = PiiLayer.mentions(document);
@@ -182,7 +178,7 @@ public final class HmacTokenizer {
   }
 
   /**
-   * Checks for UTF-16 code units that do not form a valid surrogate pair.
+   * Checks for unmatched UTF-16 surrogates.
    *
    * @param value The non-null text to check.
    * @return Whether the text contains an unpaired surrogate.
@@ -220,7 +216,8 @@ public final class HmacTokenizer {
    * Authenticates a message with a separate {@link Mac} instance for each call.
    *
    * @param message The message to authenticate.
-   * @return The MAC, thirty two bytes.
+   * @return The 32-byte MAC.
+   * @throws IllegalStateException If the MAC algorithm is unavailable.
    */
   private byte[] mac(byte[] message) {
     try {

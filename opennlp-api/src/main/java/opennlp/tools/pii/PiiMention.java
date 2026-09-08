@@ -20,13 +20,11 @@ package opennlp.tools.pii;
 import opennlp.tools.util.Span;
 
 /**
- * One mention of personally identifiable information in a text: the {@link Span} it
- * covers in the original text, its type, and a normalized form with formatting removed.
+ * A mention of personally identifiable information: an original-text {@link Span},
+ * a type, and an extractor-defined normalized value.
  *
- * <p>The type is an open string so extractors can introduce new types without an API
- * change; the constants on this record name the commonly reported types. The normalized
- * form is the mention with its formatting removed, in a shape suitable for comparison
- * and lookup; which shape that is per type is defined by the reporting extractor.</p>
+ * <p>Types are open strings. The constants name the built-in types; custom extractors
+ * can use additional names. The reporting extractor defines normalization.</p>
  *
  * @param span The location of the mention in the original text. Must not be
  *             {@code null}.
@@ -52,7 +50,7 @@ public record PiiMention(Span span, String type, String normalized) {
 
   /**
    * An <a href="https://datatracker.ietf.org/doc/html/rfc791">IPv4</a> address in dotted
-   * quad notation.
+   * decimal notation.
    */
   public static final String TYPE_IPV4 = "ipv4";
 
@@ -81,7 +79,7 @@ public record PiiMention(Span span, String type, String normalized) {
   public static final String TYPE_GITHUB_TOKEN = "github-token";
 
   /**
-   * A <a href="https://datatracker.ietf.org/doc/html/rfc7519">JSON Web Token</a> in its
+   * A <a href="https://datatracker.ietf.org/doc/html/rfc7519">JSON Web Token</a> in
    * compact serialization.
    */
   public static final String TYPE_JWT = "jwt";

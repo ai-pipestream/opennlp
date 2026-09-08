@@ -29,7 +29,7 @@ import java.util.TreeMap;
 import opennlp.tools.document.Document;
 
 /**
- * Reports mention counts, distinct-value counts and sampled keyed tokens by type.
+ * Reports mention counts, distinct-value counts and sampled HMAC tokens by type.
  *
  * <p>The report stores types, counts and tokens, without normalized values or offsets.
  * Custom types should be labels, not personal data, because they appear in the report.
@@ -37,7 +37,7 @@ import opennlp.tools.document.Document;
  * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text.
  * They remain linkable pseudonymous data and require access control.</p>
  *
- * <p>{@link #toString()} doubles backslashes and uses UTF-16 hexadecimal escapes for
+ * <p>{@link #toString()} escapes backslashes and uses UTF-16 hexadecimal escapes for
  * colons, commas, square brackets, control characters, Unicode formatting characters,
  * line and paragraph separators, and unpaired surrogates. Accessors return the original
  * types and tokens.</p>
@@ -77,8 +77,8 @@ public final class PiiAuditReport {
    *
    * @param mentions The mentions to report on. Must not be {@code null} or contain
    *                 {@code null}; may be empty.
-   * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
-   * @return The report. Never {@code null}.
+   * @param tokenizer Creates tokens for distinct values. Must not be {@code null}.
+   * @return The non-null report.
    * @throws IllegalArgumentException Thrown if an argument or a mention is {@code null},
    *         or a sampled mention's type or normalized value contains an unpaired surrogate.
    */
@@ -92,10 +92,10 @@ public final class PiiAuditReport {
    *
    * @param mentions The mentions to report on. Must not be {@code null} or contain
    *                 {@code null}; may be empty.
-   * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
+   * @param tokenizer Creates tokens for distinct values. Must not be {@code null}.
    * @param samplesPerType How many tokens to keep per type. Must not be negative; zero
    *                       reports counts only.
-   * @return The report. Never {@code null}.
+   * @return The non-null report.
    * @throws IllegalArgumentException Thrown if an argument is {@code null}, a mention is
    *         {@code null}, {@code samplesPerType} is negative, or a sampled mention's type
    *         or normalized value contains an unpaired surrogate.
@@ -149,10 +149,10 @@ public final class PiiAuditReport {
    * @param document The document to report on. Must be non-null and have a
    *                 {@link PiiAnnotator#PII} layer with matching annotation and mention
    *                 offsets.
-   * @param tokenizer Derives the token for each distinct value. Must not be {@code null}.
-   * @return The report. Never {@code null}.
+   * @param tokenizer Creates tokens for distinct values. Must not be {@code null}.
+   * @return The non-null report.
    * @throws IllegalArgumentException Thrown if an argument is null, the document lacks
-   *         the PII layer, a mention's offsets differ from its annotation's offsets, or a
+   *         the PII layer, a mention and annotation have different offsets, or a
    *         sampled mention's type or normalized value contains an unpaired surrogate.
    */
   public static PiiAuditReport of(Document document, HmacTokenizer tokenizer) {
@@ -162,8 +162,8 @@ public final class PiiAuditReport {
   /**
    * Returns how many mentions of each type were found.
    *
-   * @return The counts by type, in type order. Never {@code null}; immutable. A type that
-   *         was not found is absent rather than zero.
+   * @return The non-null, immutable counts in type order. Types with no matches are
+   *         not included.
    */
   public Map<String, Integer> counts() {
     return counts;
@@ -172,8 +172,7 @@ public final class PiiAuditReport {
   /**
    * Returns the distinct-value count per type, comparing exact normalized forms.
    *
-   * @return The distinct value counts by type, in type order. Never {@code null};
-   *         immutable.
+   * @return The non-null, immutable distinct-value counts in type order.
    */
   public Map<String, Integer> distinctCounts() {
     return distinctCounts;
@@ -182,7 +181,7 @@ public final class PiiAuditReport {
   /**
    * Returns the types that were found.
    *
-   * @return The types, in type order. Never {@code null}; immutable.
+   * @return The non-null, immutable types in type order.
    */
   public Set<String> types() {
     return counts.keySet();
@@ -201,8 +200,8 @@ public final class PiiAuditReport {
    * Returns the kept tokens for one type, in the order the values were first seen.
    *
    * @param type The mention type. Must not be {@code null}.
-   * @return The tokens, at most as many as the report was asked to keep. Never
-   *         {@code null}; empty for a type that was not found. Immutable.
+   * @return The non-null, immutable token list, limited by the configured sample count.
+   *         Empty for a type with no matches.
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null}.
    */
   public List<String> samples(String type) {
@@ -280,7 +279,7 @@ public final class PiiAuditReport {
   }
 
   /**
-   * Appends one UTF-16 code unit as a four-digit hexadecimal escape.
+   * Appends a UTF-16 code unit as a 4-digit hexadecimal escape.
    *
    * @param unit The code unit to display.
    * @param out The report output.

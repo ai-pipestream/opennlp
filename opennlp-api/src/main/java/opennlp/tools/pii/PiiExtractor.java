@@ -20,9 +20,8 @@ package opennlp.tools.pii;
 import java.util.List;
 
 /**
- * The interface for extractors of personally identifiable information, which find PII
- * mentions in a text and report each as a {@link PiiMention} with its span in the
- * original text.
+ * Extracts personally identifiable information as {@link PiiMention} values with
+ * original-text spans.
  *
  * <p>Thread safety is implementation specific.</p>
  *

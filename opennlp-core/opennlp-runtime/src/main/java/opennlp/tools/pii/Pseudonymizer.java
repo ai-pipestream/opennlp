@@ -31,11 +31,11 @@ import opennlp.tools.document.Document;
  * letters in the type, so custom types such as {@code id} and {@code ID} share a sequence
  * of numbers but receive distinct labels.</p>
  *
- * <p>Numbering restarts with every rewrite. Matching labels in separate documents do not
+ * <p>Numbering restarts for each rewrite. Matching labels in separate documents do not
  * establish a shared identity. Use {@link HmacTokenizer} for cross-document tokens.</p>
  *
- * <p>Labels are rarely as long as the values they replace, so offsets move; see
- * {@link PiiRewrite} for mapping annotations onto the rewritten text.</p>
+ * <p>Labels can change text length. {@link PiiRewrite} maps annotations to output
+ * offsets.</p>
  *
  * <p>Instances are immutable and safe to share between threads: the counters that number
  * the labels live for the duration of one {@code rewrite} call.</p>
@@ -44,7 +44,12 @@ import opennlp.tools.document.Document;
  */
 public final class Pseudonymizer {
 
-  /** One unambiguous map key for a mention identity. */
+  /**
+   * Identifies mentions that share a label.
+   *
+   * @param type The case-sensitive mention type.
+   * @param normalized The normalized value.
+   */
   private record Identity(String type, String normalized) {
   }
 
@@ -52,7 +57,7 @@ public final class Pseudonymizer {
   private final String suffix;
 
   /**
-   * Initializes a pseudonymizer producing bare labels such as {@code EMAIL-1}.
+   * Initializes a pseudonymizer producing labels such as {@code EMAIL-1}.
    */
   public Pseudonymizer() {
     this("", "");
@@ -75,15 +80,15 @@ public final class Pseudonymizer {
   }
 
   /**
-   * Rewrites a text, replacing each mention with its label.
+   * Replaces each mention with a numbered label.
    *
    * @param text The original text. Must not be {@code null}.
    * @param mentions The mentions to replace, as reported by a {@link PiiExtractor}. Must
-   *                 not be {@code null} or contain {@code null}, every span must lie
-   *                 within {@code text}, and no two spans may overlap.
-   * @return The rewrite. Never {@code null}.
+   *                 not be {@code null} or contain {@code null}. All spans must be
+   *                 within {@code text} and must not overlap.
+   * @return The non-null rewrite result.
    * @throws IllegalArgumentException Thrown if an argument is {@code null}, a mention is
-   *         {@code null}, a span lies outside the text, or two spans overlap.
+   *         {@code null}, a span lies outside the text, or spans overlap.
    */
   public PiiRewrite rewrite(CharSequence text, List<PiiMention> mentions) {
     final Map<Identity, String> labels = new HashMap<>();
@@ -93,15 +98,15 @@ public final class Pseudonymizer {
   }
 
   /**
-   * Rewrites a document's text, replacing every mention of its {@link PiiAnnotator#PII}
-   * layer.
+   * Replaces the mentions from a document's {@link PiiAnnotator#PII} layer.
    *
    * @param document The document to rewrite. Must be non-null and have a
    *                 {@link PiiAnnotator#PII} layer with matching annotation and mention
    *                 offsets.
-   * @return The rewrite. Never {@code null}.
+   * @return The non-null rewrite result.
    * @throws IllegalArgumentException Thrown if {@code document} is null, lacks the PII
-   *         layer, or contains a mention with offsets that differ from its annotation.
+   *         layer, contains overlapping mentions, or a mention and annotation have
+   *         different offsets.
    */
   public PiiRewrite rewrite(Document document) {
     final List<PiiMention> mentions = PiiLayer.mentions(document);

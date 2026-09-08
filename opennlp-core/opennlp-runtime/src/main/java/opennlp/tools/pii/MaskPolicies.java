@@ -20,19 +20,14 @@ package opennlp.tools.pii;
 import java.util.function.Function;
 
 /**
- * Masking defaults per PII type, so that a redaction reveals as little as the type allows
- * while staying as useful as custom is.
+ * Default masking policies by mention type.
  *
- * <p>What is customary differs sharply by type. A payment card is quoted by its last four
- * digits on every receipt, and reconciling a charge is impossible without them, so
- * {@link #forType(String)} keeps them. A secret has no such custom and no readable part:
- * an access key or a token is masked whole, formatting included, because even its shape
- * says which system it opens. In between sit the values whose shape is harmless and
- * whose content is not, an email address or an IP address, where separators stay visible
- * so a reader can see what kind of value was there.</p>
+ * <p>Card and IBAN policies preserve separators and the final 4 letters or digits.
+ * Contact, network, national and device identifiers and routing numbers preserve
+ * separators. Credentials, wallet addresses and unlisted types are fully masked.</p>
  *
- * <p>These are defaults, not rules. A jurisdiction, a contract, or a threat model may
- * demand more; build the policy directly with {@link MaskPolicy} where it does.</p>
+ * <p>Defaults can expose sensitive information. Use {@link MaskPolicy#of(char)} when
+ * full masking is required.</p>
  *
  * @since 3.0.0
  */
@@ -41,11 +36,11 @@ public final class MaskPolicies {
   /** The character the defaults mask with. */
   private static final char MASK = '*';
 
-  /** How many trailing digits the payment types keep, the receipt custom. */
+  /** Number of trailing letters or digits preserved for card and IBAN values. */
   private static final int ACCOUNT_TAIL = 4;
 
+  /** Prevents construction. */
   private MaskPolicies() {
-    // This class holds static factories only and is never instantiated.
   }
 
   /**
@@ -53,8 +48,7 @@ public final class MaskPolicies {
    *
    * @param type The mention type, for example {@link PiiMention#TYPE_CARD}. Must not be
    *             {@code null}.
-   * @return The policy. Never {@code null}. A type this class does not name is masked
-   *         whole, the cautious answer for a type whose sensitivity is unknown.
+   * @return The non-null policy. Unlisted types are fully masked.
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null}.
    */
   public static MaskPolicy forType(String type) {
@@ -66,7 +60,7 @@ public final class MaskPolicies {
    *
    * @param type The mention type. Must not be {@code null}.
    * @param mask The replacement character. Must not be a surrogate.
-   * @return The policy. Never {@code null}.
+   * @return The non-null policy.
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null} or
    *         {@code mask} is a surrogate character.
    */
@@ -92,7 +86,7 @@ public final class MaskPolicies {
    * {@link Masker#mask(opennlp.tools.document.Document, opennlp.tools.document.LayerKey,
    * Function)}.
    *
-   * @return The function from a mention to its default policy. Never {@code null}.
+   * @return The non-null function assigning a default policy to a mention.
    */
   public static Function<PiiMention, MaskPolicy> byType() {
     return byType(MASK);
@@ -102,7 +96,7 @@ public final class MaskPolicies {
    * Returns the type-aware defaults as a function with an explicit mask character.
    *
    * @param mask The replacement character. Must not be a surrogate.
-   * @return The function from a mention to its default policy. Never {@code null}.
+   * @return The non-null function assigning a default policy to a mention.
    * @throws IllegalArgumentException Thrown if {@code mask} is a surrogate character.
    */
   public static Function<PiiMention, MaskPolicy> byType(char mask) {
