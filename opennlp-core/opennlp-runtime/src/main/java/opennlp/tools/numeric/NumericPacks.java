@@ -43,11 +43,13 @@ import opennlp.tools.temporal.TemporalAnnotator;
  * <p>Regional variants select number notation and currency-symbol defaults from JDK locale
  * data through
  * {@link CursorMoneyExtractor#forRegion(Locale)} and
- * {@link NumberNotation#forLocale(Locale)}.</p>
+ * {@link NumberNotation#forLocale(Locale)}. Locale selection does not translate
+ * month names or relative-date words.</p>
  *
  * <p>The analyzers use stateless extractors and can be shared between threads. To add steps
  * such as {@link MoneyConversionAnnotator}, start with the modifiable list from
- * {@link #annotators()} or {@link #annotators(Locale)}.</p>
+ * {@link #annotators()} or {@link #annotators(Locale)}. An extended pipeline requires
+ * concurrent-call support from the added annotators and providers.</p>
  *
  * @since 3.0.0
  */

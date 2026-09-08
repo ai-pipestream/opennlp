@@ -39,12 +39,7 @@ import opennlp.tools.temporal.DocumentDateAnnotator;
 import opennlp.tools.temporal.TemporalAnnotator;
 import opennlp.tools.temporal.TemporalExpression;
 
-/**
- * Tests the ready-made numeric pipelines: which layers each pack provides, that the
- * regional variants read numbers and currencies the way their region writes them, and that
- * the full pipeline orders the temporal annotators so a dateline resolves the relative
- * expressions behind it.
- */
+/** Tests numeric pipeline composition, notation and reference dates. */
 public class NumericPacksTest {
 
   @Test
@@ -70,10 +65,7 @@ public class NumericPacksTest {
     Assertions.assertEquals("%", quantities.get(1).value().unit());
   }
 
-  /**
-   * Verifies that the temporal pack wires the election: the dateline both elects the
-   * document date and resolves the relative expression behind it.
-   */
+  /** The absolute date supplies the reference for relative-date resolution. */
   @Test
   void testTemporalPackElectsTheDateAndResolvesRelatives() {
     final Document document =
@@ -90,11 +82,7 @@ public class NumericPacksTest {
     Assertions.assertEquals("2026-07-13", temporals.get(1).value().value());
   }
 
-  /**
-   * Verifies the fixed-reference pack on a text that dates itself nowhere. The relative
-   * expression resolves, but it does not masquerade as the absolute mention from which a
-   * document date may be elected.
-   */
+  /** A configured reference resolves relative dates without adding an absolute mention. */
   @Test
   void testTemporalPackWithAFixedReferenceResolvesWithoutADateline() {
     final Document document =
@@ -125,11 +113,7 @@ public class NumericPacksTest {
         document.get(QuantityAnnotator.QUANTITIES).get(0).value().unit());
   }
 
-  /**
-   * Verifies the regional full pipeline on a German document: dots group digits, so the
-   * amount and the quantity are read at their real magnitude, where the default pipeline
-   * reports neither rather than reporting them wrongly.
-   */
+  /** The regional pipeline accepts German notation; the default pipeline rejects it. */
   @Test
   void testRegionalFullPipelineReadsTheRegionsNotation() {
     final String text = "Berlin, 14 July 2026. Der Kaufer zahlte 2.400.000 EUR "
@@ -146,10 +130,7 @@ public class NumericPacksTest {
     Assertions.assertTrue(unitedStates.get(QuantityAnnotator.QUANTITIES).isEmpty());
   }
 
-  /**
-   * Verifies that a region resolves the currency of an ambiguous symbol as well as the
-   * notation, so an Australian document prices dollars in Australian dollars.
-   */
+  /** The Australian locale assigns AUD to the dollar sign. */
   @Test
   void testRegionalMoneyPackResolvesTheAmbiguousSymbol() {
     final Document document =
@@ -168,10 +149,7 @@ public class NumericPacksTest {
         .compareTo(document.get(QuantityAnnotator.QUANTITIES).get(0).value().value()));
   }
 
-  /**
-   * Verifies that the annotator list is the extension seam it is documented to be: the
-   * same order the full pipeline runs, and usable as the front of a longer pipeline.
-   */
+  /** The factory list provides the required layers in execution order. */
   @Test
   void testAnnotatorListIsTheFullPipelineInOrder() {
     final List<DocumentAnnotator> annotators = NumericPacks.annotators();
@@ -189,14 +167,17 @@ public class NumericPacksTest {
         .analyze("Chicago, 14 July 2026. It cost $5 yesterday.").layers().size());
   }
 
-  /** Verifies that callers can append to the extension list as documented. */
+  /** Duplicate output layers are rejected when building the analyzer. */
   @Test
-  void testAnnotatorListCanBeExtendedAsDocumented() {
+  void testAnnotatorListRejectsDuplicateProvider() {
     final List<DocumentAnnotator> annotators = NumericPacks.annotators();
 
     annotators.add(new MoneyAnnotator(new CursorMoneyExtractor()));
 
     Assertions.assertEquals(5, annotators.size());
+    final DocumentAnalyzer.Builder builder = DocumentAnalyzer.builder();
+    annotators.forEach(builder::add);
+    Assertions.assertThrows(IllegalArgumentException.class, builder::build);
   }
 
   @Test
