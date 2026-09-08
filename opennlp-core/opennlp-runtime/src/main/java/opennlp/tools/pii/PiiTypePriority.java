@@ -21,9 +21,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Type priority for candidates with equal start and end offsets.
+ * Sort order for candidates with equal start and end offsets.
  *
- * <p>Lower ranks take precedence. The order is:</p>
+ * <p>Lower ranks sort first without removing other candidates. The order is:</p>
  *
  * <ol>
  *   <li>{@link PiiMention#TYPE_JWT}, {@link PiiMention#TYPE_AWS_ACCESS_KEY},
@@ -39,8 +39,8 @@ import java.util.Map;
  *   {@link PiiMention#TYPE_ABA_ROUTING}, {@link PiiMention#TYPE_PHONE}.</li>
  * </ol>
  *
- * <p>IMEI precedes card so a context-labeled device identifier is not reported as a
- * payment card on an equal span. Unlisted types rank after the built-in types.</p>
+ * <p>On an equal span, IMEI sorts before card and both mentions are retained.
+ * Unlisted types rank after the built-in types.</p>
  *
  * @since 3.0.0
  */

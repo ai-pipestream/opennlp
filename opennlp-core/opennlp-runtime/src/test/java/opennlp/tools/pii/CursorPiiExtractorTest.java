@@ -25,6 +25,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.util.Span;
+
 public class CursorPiiExtractorTest {
 
   private final CursorPiiExtractor extractor = new CursorPiiExtractor();
@@ -368,17 +370,17 @@ public class CursorPiiExtractorTest {
     Assertions.assertEquals(normalized, extractor.extract(text).get(0).normalized());
   }
 
+  /** Checks an IBAN and the contained phone candidate. */
   @Test
   void testIban() {
     final String text = "Wire it to DE89 3704 0044 0532 0130 00 by Friday.";
     final List<PiiMention> mentions = extractor.extract(text);
 
-    Assertions.assertEquals(1, mentions.size());
-    final PiiMention mention = mentions.get(0);
-    Assertions.assertEquals(PiiMention.TYPE_IBAN, mention.type());
-    Assertions.assertEquals("DE89370400440532013000", mention.normalized());
-    Assertions.assertEquals("DE89 3704 0044 0532 0130 00", text.substring(
-        mention.span().getStart(), mention.span().getEnd()));
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(11, 38), PiiMention.TYPE_IBAN,
+            "DE89370400440532013000"),
+        new PiiMention(new Span(26, 38), PiiMention.TYPE_PHONE, "0532013000")),
+        mentions);
   }
 
   /** Verifies that the current SWIFT registry entry for Yemen is recognized. */
@@ -472,23 +474,31 @@ public class CursorPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty());
   }
 
+  /** Checks ordered retention of a contained phone and a later phone. */
   @Test
-  void testOverlapsResolveToTheMoreSpecificType() {
+  void testOverlappingIbanAndPhoneAreRetainedInTextOrder() {
     final List<PiiMention> mentions =
         extractor.extract("Pay DE89 3704 0044 0532 0130 00 or call +1 555 123 4567.");
 
-    Assertions.assertEquals(2, mentions.size());
-    Assertions.assertEquals(PiiMention.TYPE_IBAN, mentions.get(0).type());
-    Assertions.assertEquals(PiiMention.TYPE_PHONE, mentions.get(1).type());
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(4, 31), PiiMention.TYPE_IBAN,
+            "DE89370400440532013000"),
+        new PiiMention(new Span(19, 31), PiiMention.TYPE_PHONE, "0532013000"),
+        new PiiMention(new Span(40, 55), PiiMention.TYPE_PHONE, "+15551234567")),
+        mentions);
   }
 
+  /** Checks that a phone candidate inside an email remains available. */
   @Test
-  void testPhoneDigitsInsideEmailNotReported() {
+  void testPhoneDigitsInsideEmailAreRetained() {
     final List<PiiMention> mentions =
         extractor.extract("mail +15551234567@voip.example.com please");
 
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(PiiMention.TYPE_EMAIL, mentions.get(0).type());
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(5, 34), PiiMention.TYPE_EMAIL,
+            "+15551234567@voip.example.com"),
+        new PiiMention(new Span(5, 17), PiiMention.TYPE_PHONE, "+15551234567")),
+        mentions);
   }
 
   @Test
@@ -689,10 +699,8 @@ public class CursorPiiExtractorTest {
   }
 
   /**
-   * Verifies overlap resolution between an IBAN and a phone candidate over the same
-   * digits: alone, the formatted tail of the digit groups is reported as a phone
-   * number, but once a valid IBAN prefix precedes it, the leftmost candidate, the
-   * IBAN, wins and the phone candidate inside it is dropped.
+   * Verifies that an IBAN and a contained phone candidate are both retained with their
+   * original spans and normalized values.
    */
   @Test
   void testOverlappingIbanAndPhoneCandidates() {
@@ -705,11 +713,11 @@ public class CursorPiiExtractorTest {
 
     final List<PiiMention> withIban =
         extractor.extract("Wire to DE89 3704 0044 0532 0130 00 today.");
-    Assertions.assertEquals(1, withIban.size());
-    Assertions.assertEquals(PiiMention.TYPE_IBAN, withIban.get(0).type());
-    Assertions.assertEquals(8, withIban.get(0).span().getStart());
-    Assertions.assertEquals(35, withIban.get(0).span().getEnd());
-    Assertions.assertEquals("DE89370400440532013000", withIban.get(0).normalized());
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(8, 35), PiiMention.TYPE_IBAN,
+            "DE89370400440532013000"),
+        new PiiMention(new Span(23, 35), PiiMention.TYPE_PHONE, "0532013000")),
+        withIban);
   }
 
   /**
@@ -782,20 +790,18 @@ public class CursorPiiExtractorTest {
    * separators: the greedy candidate ends in a trailing three-digit group, forming a
    * nineteen-digit candidate that is in range but fails the Luhn check, and the scan
    * then accepts the sixteen-digit candidate at the previous separator boundary. The
-   * card is reported on its own span and the trailing group stays outside it.
+   * card uses the original span, and the phone candidate spanning the trailing group is
+   * retained separately.
    */
   @Test
-  void testSeparatedCardBacksOffThroughLuhnFailingPrefix() {
+  void testSeparatedCardBackoffRetainsTheOverlappingPhone() {
     final String text = "Card 4111 1111 1111 1111 123 on file";
     final List<PiiMention> mentions = extractor.extract(text);
 
-    Assertions.assertEquals(1, mentions.size());
-    final PiiMention mention = mentions.get(0);
-    Assertions.assertEquals(PiiMention.TYPE_CARD, mention.type());
-    Assertions.assertEquals(5, mention.span().getStart());
-    Assertions.assertEquals(24, mention.span().getEnd());
-    Assertions.assertEquals("4111 1111 1111 1111", text.substring(5, 24));
-    Assertions.assertEquals("4111111111111111", mention.normalized());
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(5, 24), PiiMention.TYPE_CARD, "4111111111111111"),
+        new PiiMention(new Span(15, 28), PiiMention.TYPE_PHONE, "11111111123")),
+        mentions);
   }
 
   /**

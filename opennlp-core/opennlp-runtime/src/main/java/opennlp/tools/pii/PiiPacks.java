@@ -24,8 +24,9 @@ import java.util.Set;
  * detectors.
  *
  * <p>Each factory creates a stateless extractor that can be shared between threads.
- * Use {@link CompositePiiExtractor} to combine packs. Equal-span candidates use
- * {@link PiiTypePriority}, then pack order when ranks are equal.</p>
+ * Use {@link CompositePiiExtractor} to combine packs. Overlapping detections are
+ * retained. Equal spans are ordered by {@link PiiTypePriority}, then pack order
+ * when ranks are equal.</p>
  *
  * <p>Packs are opt-in and do not change the default {@link CursorPiiExtractor} selection.</p>
  *
@@ -124,7 +125,8 @@ public final class PiiPacks {
   }
 
   /**
-   * Enables all structured detectors. Use a specific pack to limit the enabled types.
+   * Enables all structured detectors, retaining overlapping detections from all packs.
+   * Use a specific pack to limit the enabled types.
    *
    * @return A new extractor.
    */

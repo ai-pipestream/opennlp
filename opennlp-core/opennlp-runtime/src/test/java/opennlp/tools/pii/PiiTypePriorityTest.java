@@ -103,30 +103,32 @@ public class PiiTypePriorityTest {
   }
 
   /**
-   * Checks type selection in internal scans and composites in both insertion orders.
+   * Checks retained mention ordering in internal scans and composites.
    *
    * @param preferred The type with the lower rank.
    * @param alternative The alternative type.
    */
   @ParameterizedTest
   @MethodSource("typeChoices")
-  void testSelectionUsesTheCompletePriorityOrder(String preferred, String alternative) {
+  void testRetainedMentionsUseTheCompletePriorityOrder(String preferred, String alternative) {
     final Span span = new Span(0, 5);
-    final PiiMention accepted = new PiiMention(span, preferred, "accepted");
-    final PiiMention rejected = new PiiMention(span, alternative, "rejected");
-    for (final List<PiiMention> candidates : List.of(List.of(accepted, rejected),
-        List.of(rejected, accepted))) {
+    final PiiMention higherPriority = new PiiMention(span, preferred, "higher");
+    final PiiMention lowerPriority = new PiiMention(span, alternative, "lower");
+    for (final List<PiiMention> candidates : List.of(List.of(higherPriority, lowerPriority),
+        List.of(lowerPriority, higherPriority))) {
       final List<Hits.Hit> hits = new ArrayList<>();
       for (final PiiMention candidate : candidates) {
         Hits.add(hits, span.getStart(), span.getEnd(), candidate.type(), candidate.normalized());
       }
-      Assertions.assertEquals(List.of(accepted), Hits.resolve(hits));
+      Assertions.assertEquals(List.of(higherPriority, lowerPriority), Hits.resolve(hits));
       final PiiExtractor a = text -> List.of(candidates.get(0));
       final PiiExtractor b = text -> List.of(candidates.get(1));
       final CompositePiiExtractor composite = new CompositePiiExtractor(a, b);
-      Assertions.assertEquals(List.of(accepted), composite.extract("value"));
-      Assertions.assertSame(accepted, composite.extract("value").getFirst());
-      Assertions.assertEquals(List.of(accepted),
+      final List<PiiMention> expected = List.of(higherPriority, lowerPriority);
+      Assertions.assertEquals(expected, composite.extract("value"));
+      Assertions.assertSame(higherPriority, composite.extract("value").get(0));
+      Assertions.assertSame(lowerPriority, composite.extract("value").get(1));
+      Assertions.assertEquals(expected,
           new CompositePiiExtractor(new CompositePiiExtractor(a), b).extract("value"));
     }
   }
@@ -149,13 +151,87 @@ public class PiiTypePriorityTest {
       for (final PiiMention candidate : candidates) {
         Hits.add(hits, 0, 5, candidate.type(), candidate.normalized());
       }
-      Assertions.assertEquals(List.of(candidates.getFirst()), Hits.resolve(hits));
-      Assertions.assertSame(candidates.getFirst(),
-          new CompositePiiExtractor(text -> candidates).extract("value").getFirst());
-      Assertions.assertSame(candidates.getFirst(), new CompositePiiExtractor(
+      Assertions.assertEquals(candidates, Hits.resolve(hits));
+      final List<PiiMention> withinDelegate =
+          new CompositePiiExtractor(text -> candidates).extract("value");
+      Assertions.assertEquals(candidates, withinDelegate);
+      Assertions.assertSame(candidates.get(0), withinDelegate.get(0));
+      Assertions.assertSame(candidates.get(1), withinDelegate.get(1));
+      final List<PiiMention> acrossDelegates = new CompositePiiExtractor(
           text -> List.of(candidates.get(0)), text -> List.of(candidates.get(1)))
-          .extract("value").getFirst());
+          .extract("value");
+      Assertions.assertEquals(candidates, acrossDelegates);
+      Assertions.assertSame(candidates.get(0), acrossDelegates.get(0));
+      Assertions.assertSame(candidates.get(1), acrossDelegates.get(1));
     }
+  }
+
+  /** Checks that equal mentions collapse to the first original object. */
+  @Test
+  void testExactlyEqualMentionsCollapseToTheFirstCandidate() {
+    final PiiMention first = new PiiMention(new Span(0, 5), PiiMention.TYPE_EMAIL,
+        "value");
+    final PiiMention duplicate = new PiiMention(new Span(0, 5), PiiMention.TYPE_EMAIL,
+        "value");
+    final List<Hits.Hit> hits = new ArrayList<>();
+    Hits.add(hits, first);
+    Hits.add(hits, duplicate);
+
+    final List<PiiMention> resolved = Hits.resolve(hits);
+
+    Assertions.assertEquals(List.of(first), resolved);
+    Assertions.assertSame(first, resolved.getFirst());
+  }
+
+  /** Checks that equal mentions retain the first span probability. */
+  @Test
+  void testEqualMentionsWithDifferentProbabilitiesRetainTheFirstObject() {
+    final PiiMention first = new PiiMention(new Span(0, 5, "source", 0.1),
+        PiiMention.TYPE_EMAIL, "value");
+    final PiiMention duplicate = new PiiMention(new Span(0, 5, "source", 0.9),
+        PiiMention.TYPE_EMAIL, "value");
+    final List<Hits.Hit> hits = new ArrayList<>();
+    Hits.add(hits, first);
+    Hits.add(hits, duplicate);
+
+    final List<PiiMention> resolved = Hits.resolve(hits);
+
+    Assertions.assertEquals(List.of(first), resolved);
+    Assertions.assertSame(first, resolved.getFirst());
+    Assertions.assertEquals(0.1, resolved.getFirst().span().getProb());
+  }
+
+  /** Checks exact-duplicate handling for an allowed empty span. */
+  @Test
+  void testEqualEmptyMentionsCollapseToTheFirstObject() {
+    final PiiMention first = new PiiMention(new Span(0, 0), "marker", "value");
+    final PiiMention duplicate = new PiiMention(new Span(0, 0), "marker", "value");
+    final List<Hits.Hit> hits = new ArrayList<>();
+    Hits.add(hits, first);
+    Hits.add(hits, duplicate);
+
+    final List<PiiMention> resolved = Hits.resolve(hits);
+
+    Assertions.assertEquals(List.of(first), resolved);
+    Assertions.assertSame(first, resolved.getFirst());
+  }
+
+  /** Checks that span type metadata remains part of mention identity. */
+  @Test
+  void testEqualOffsetsWithDifferentSpanTypesRemainDistinct() {
+    final PiiMention first = new PiiMention(new Span(0, 5, "source-a"),
+        PiiMention.TYPE_EMAIL, "value");
+    final PiiMention second = new PiiMention(new Span(0, 5, "source-b"),
+        PiiMention.TYPE_EMAIL, "value");
+    final List<Hits.Hit> hits = new ArrayList<>();
+    Hits.add(hits, first);
+    Hits.add(hits, second);
+
+    final List<PiiMention> resolved = Hits.resolve(hits);
+
+    Assertions.assertEquals(List.of(first, second), resolved);
+    Assertions.assertSame(first, resolved.get(0));
+    Assertions.assertSame(second, resolved.get(1));
   }
 
   @ParameterizedTest

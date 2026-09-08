@@ -36,7 +36,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import opennlp.tools.document.Document;
 import opennlp.tools.util.Span;
 
-/** Tests global overlap resolution through nested composites. */
+/** Tests overlap retention through nested composites. */
 class PiiCompositionTest {
 
   /**
@@ -107,10 +107,11 @@ class PiiCompositionTest {
         new CompositePiiExtractor(fixed(middle), fixed(bob)));
     final Document result = new PiiAnnotator(combined).annotate(Document.of(prefix + "Amy Bob"));
 
-    Assertions.assertEquals(List.of(amy, bob), result.get(PiiAnnotator.PII).stream()
+    Assertions.assertEquals(List.of(amy, middle, bob), result.get(PiiAnnotator.PII).stream()
         .map(annotation -> annotation.value()).toList());
-    Assertions.assertEquals(prefix + "*** ***", Masker.mask(result, PiiAnnotator.PII, '*'));
-    Assertions.assertEquals(prefix + "PERSON-1 PERSON-2", new Pseudonymizer().rewrite(result).text());
+    Assertions.assertEquals(prefix + "*******", Masker.mask(result, PiiAnnotator.PII, '*'));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new Pseudonymizer().rewrite(result));
   }
 
   /** Checks delegate invocation order and preserves the configured nested view. */
@@ -129,7 +130,8 @@ class PiiCompositionTest {
     final CompositePiiExtractor right = new CompositePiiExtractor(delegates.subList(2, 4));
     final CompositePiiExtractor outer = new CompositePiiExtractor(left, right);
 
-    Assertions.assertEquals("custom-0", outer.extract("x").getFirst().type());
+    Assertions.assertEquals(List.of("custom-0", "custom-1", "custom-2", "custom-3"),
+        outer.extract("x").stream().map(PiiMention::type).toList());
     Assertions.assertEquals(List.of(0, 1, 2, 3), calls);
     Assertions.assertEquals(List.of(left, right), outer.extractors());
     Assertions.assertSame(left, outer.extractors().getFirst());
@@ -167,6 +169,7 @@ class PiiCompositionTest {
       final String text = "a" + worker + "b" + worker;
       final List<PiiMention> expected = List.of(
           new PiiMention(first, "custom", text.substring(0, 2)),
+          new PiiMention(middle, "custom", text.substring(1, 3)),
           new PiiMention(last, "custom", text.substring(2, 4)));
       calls.add(() -> {
         ready.countDown();

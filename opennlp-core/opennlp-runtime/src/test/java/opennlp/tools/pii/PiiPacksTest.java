@@ -18,6 +18,7 @@
 package opennlp.tools.pii;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -69,18 +70,26 @@ public class PiiPacksTest {
         Arguments.of("allStructured", (Supplier<PiiExtractor>) PiiPacks::allStructured));
   }
 
+  /**
+   * Checks the documented start, end and type ordering.
+   *
+   * @param name The pack name.
+   * @param pack The extractor factory.
+   */
   @ParameterizedTest
   @MethodSource("packs")
-  void testEveryPackReportsNonOverlappingMentionsInTextOrder(String name,
+  void testEveryPackReportsMentionsInDefinedOrder(String name,
       Supplier<PiiExtractor> pack) {
     final List<PiiMention> mentions = pack.get().extract(EVERYTHING);
 
     Assertions.assertFalse(mentions.isEmpty(), name);
-    int lastEnd = 0;
-    for (final PiiMention mention : mentions) {
-      Assertions.assertTrue(mention.span().getStart() >= lastEnd, name + ": " + mention);
-      lastEnd = mention.span().getEnd();
-    }
+    final List<PiiMention> ordered = new ArrayList<>(mentions);
+    ordered.sort(Comparator
+        .comparingInt((PiiMention mention) -> mention.span().getStart())
+        .thenComparing((first, second) -> Integer.compare(
+            second.span().getEnd(), first.span().getEnd()))
+        .thenComparingInt(mention -> PiiTypePriority.rank(mention.type())));
+    Assertions.assertEquals(ordered, mentions, name);
   }
 
   @ParameterizedTest
@@ -208,7 +217,7 @@ public class PiiPacksTest {
   }
 
   /**
-   * Checks the manual's IMEI selection when payment and device packs overlap.
+   * Checks IMEI and card retention when payment and device packs overlap.
    *
    * @param reverse Whether to reverse the pack order.
    */
@@ -221,8 +230,10 @@ public class PiiPacksTest {
     final Document deviceDocument = new PiiAnnotator(selected)
         .annotate(Document.of("IMEI: 490154203237518."));
 
-    Assertions.assertEquals(List.of(new PiiMention(new Span(6, 21), PiiMention.TYPE_IMEI,
-        "490154203237518")), deviceDocument.get(PiiAnnotator.PII).stream()
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(6, 21), PiiMention.TYPE_IMEI, "490154203237518"),
+        new PiiMention(new Span(6, 21), PiiMention.TYPE_CARD, "490154203237518")),
+        deviceDocument.get(PiiAnnotator.PII).stream()
         .map(annotation -> annotation.value()).toList());
     Assertions.assertEquals("IMEI: ***************.",
         Masker.mask(deviceDocument, PiiAnnotator.PII, '*'));
@@ -266,39 +277,39 @@ public class PiiPacksTest {
         mentions.stream().map(PiiMention::type).toList());
   }
 
+  /** Checks that repeating a pack does not repeat equal mentions. */
+  @Test
+  void testRepeatingAPackDoesNotInflateResults() {
+    final String text = "mail jane@example.com call (555) 123-4567";
+    final List<PiiMention> expected = PiiPacks.contact().extract(text);
+
+    Assertions.assertEquals(expected,
+        new CompositePiiExtractor(PiiPacks.contact(), PiiPacks.contact()).extract(text));
+  }
+
   /**
-   * Verifies that widening the search never loses a span: every stretch of text a narrow pack
-   * flags is still flagged by the widest pack. The type may differ, since a wider search can
-   * claim the same characters for a more specific type, an NHS number rather than the phone
-   * number it also looks like.
+   * Verifies that a broader search retains all exact mentions reported by a narrow pack.
    */
   @ParameterizedTest
   @MethodSource("packs")
-  void testAllStructuredFlagsEverySpanTheNarrowPacksFlag(String name,
+  void testAllStructuredRetainsEveryMentionTheNarrowPacksReport(String name,
       Supplier<PiiExtractor> pack) {
     final List<PiiMention> wide = PiiPacks.allStructured().extract(EVERYTHING);
 
     for (final PiiMention mention : pack.get().extract(EVERYTHING)) {
-      final boolean covered = wide.stream().anyMatch(
-          other -> other.span().getStart() < mention.span().getEnd()
-              && mention.span().getStart() < other.span().getEnd());
-      Assertions.assertTrue(covered, name + ": " + mention);
+      Assertions.assertTrue(wide.contains(mention), name + ": " + mention);
     }
   }
 
-  /**
-   * Verifies the reclassification the previous test allows for, on the fixture that provokes
-   * it: a validly grouped NHS number is a validly formatted phone number too, and the wide
-   * pack reports the more specific type.
-   */
+  /** Checks that a shared span retains both NHS-number and phone interpretations. */
   @Test
-  void testWidePackPrefersTheMoreSpecificTypeOnASharedSpan() {
+  void testWidePackRetainsBothTypesOnASharedSpan() {
     final String text = "record 943 476 5919 today";
 
     Assertions.assertEquals(PiiMention.TYPE_PHONE,
         PiiPacks.contact().extract(text).get(0).type());
-    Assertions.assertEquals(PiiMention.TYPE_UK_NHS,
-        PiiPacks.allStructured().extract(text).get(0).type());
+    Assertions.assertEquals(List.of(PiiMention.TYPE_UK_NHS, PiiMention.TYPE_PHONE),
+        PiiPacks.allStructured().extract(text).stream().map(PiiMention::type).toList());
   }
 
   /**

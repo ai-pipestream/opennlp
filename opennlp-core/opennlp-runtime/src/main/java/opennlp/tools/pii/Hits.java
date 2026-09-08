@@ -18,15 +18,17 @@
 package opennlp.tools.pii;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import opennlp.tools.util.Span;
 
 /**
- * Candidate storage and non-overlapping selection for built-in and composite extractors.
+ * Candidate storage and ordering for built-in and composite extractors.
  *
  * <p>Candidates are ordered by start offset, descending length, type rank and insertion
- * order. An accepted span excludes overlapping candidates.</p>
+ * order. Overlapping mentions are retained; equal mentions are combined.</p>
  */
 final class Hits {
 
@@ -70,11 +72,12 @@ final class Hits {
   }
 
   /**
-   * Selects non-overlapping candidates by start, length and type rank. Stable sorting
-   * preserves insertion order for equal offsets and ranks.
+   * Sorts candidates by start, length and type rank, retaining overlaps. Stable sorting
+   * preserves insertion order for equal offsets and ranks. Duplicates compare by
+   * {@link PiiMention#equals(Object)}; the first original mention is retained.
    *
    * @param hits The raw candidates; this list is sorted in place.
-   * @return The selected mentions in text order.
+   * @return The distinct mentions in text order.
    */
   static List<PiiMention> resolve(List<Hit> hits) {
     hits.sort((a, b) -> {
@@ -87,11 +90,10 @@ final class Hits {
       return Integer.compare(a.priority(), b.priority());
     });
     final List<PiiMention> mentions = new ArrayList<>();
-    int lastEnd = 0;
+    final Set<PiiMention> seen = new HashSet<>();
     for (final Hit hit : hits) {
-      if (hit.start() >= lastEnd) {
+      if (seen.add(hit.mention())) {
         mentions.add(hit.mention());
-        lastEnd = hit.end();
       }
     }
     return mentions;

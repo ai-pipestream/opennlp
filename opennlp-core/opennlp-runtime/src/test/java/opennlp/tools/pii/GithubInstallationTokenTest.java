@@ -219,9 +219,12 @@ class GithubInstallationTokenTest {
     final String credential = "user:" + value;
     final String prefix = "https://";
     final String text = prefix + credential + "@example.invalid/repo.git";
-    Assertions.assertEquals(List.of(new PiiMention(
-        new Span(prefix.length(), prefix.length() + credential.length()),
-        PiiMention.TYPE_URL_CREDENTIAL, credential)), ALL.extract(text));
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(prefix.length(), prefix.length() + credential.length()),
+            PiiMention.TYPE_URL_CREDENTIAL, credential),
+        new PiiMention(new Span(prefix.length() + "user:".length(),
+            prefix.length() + credential.length()), PiiMention.TYPE_GITHUB_TOKEN, value)),
+        ALL.extract(text));
     Assertions.assertEquals(List.of(value), GITHUB.extract(text).stream()
         .map(PiiMention::normalized).toList());
   }

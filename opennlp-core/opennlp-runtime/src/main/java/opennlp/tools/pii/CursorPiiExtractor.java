@@ -60,10 +60,9 @@ import java.util.Set;
  *   it.</li>
  * </ul>
  *
- * <p>When candidates overlap, the leftmost wins, then the longest, then the more
- * specific type in the order email, IBAN, card, phone; the reported mentions never
- * overlap. All candidates are checked against word boundaries so nothing is reported
- * from inside a longer alphanumeric run.</p>
+ * <p>Overlapping candidates are retained in start-offset order, with longer spans first
+ * at the same start. Equal spans use the type order email, IBAN, card, phone.
+ * Candidates must satisfy the word-boundary checks.</p>
  *
  * <p>Normalized forms: email domains are lowercased while mailbox local-part case is
  * preserved, IBANs keep their uppercase letters and digits with separators removed,
@@ -136,8 +135,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to the non-overlapping set this class describes.</p>
+   * <p>Enabled types are scanned independently and overlapping candidates are retained.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {

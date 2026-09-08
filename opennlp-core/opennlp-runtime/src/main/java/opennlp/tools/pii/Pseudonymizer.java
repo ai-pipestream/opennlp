@@ -37,6 +37,9 @@ import opennlp.tools.document.Document;
  * <p>Labels can change text length. {@link PiiRewrite} maps annotations to output
  * offsets.</p>
  *
+ * <p>Text replacement rejects overlapping mentions. Use {@link Masker} to redact
+ * their combined spans.</p>
+ *
  * <p>Instances are immutable and safe to share between threads: the counters that number
  * the labels live for the duration of one {@code rewrite} call.</p>
  *

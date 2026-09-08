@@ -136,9 +136,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to a non-overlapping set, leftmost and longest first. A token inside a URL
-   * credential is therefore reported once, as the credential that contains it.</p>
+   * <p>Enabled types are scanned independently and overlapping candidates are retained.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {

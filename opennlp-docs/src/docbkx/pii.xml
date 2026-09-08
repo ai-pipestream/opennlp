@@ -408,11 +408,13 @@ String masked = Masker.mask(payment, PiiAnnotator.PII, '*');
 			<code>network()</code>, <code>secrets()</code>, <code>crypto()</code>,
 			<code>usIdentity()</code>, <code>euIdentity()</code>,
 			<code>caIdentity()</code>, <code>device()</code>, and
-			<code>allStructured()</code> for all supported structured types. The
-			leftmost candidate wins an overlap, then the longest, then the type with
-			the lower <code>PiiTypePriority</code> rank. Delegate order breaks equal
-			ranks. Nested composites contribute their individual extractors before
-			overlaps are resolved, in depth-first, left-to-right order.
+			<code>allStructured()</code> for all supported structured types.
+			Overlapping mentions retain their original types, normalized values and
+			offsets. Results are ordered by start offset, descending span length,
+			<code>PiiTypePriority</code> rank, then delegate order. Equal mentions,
+			as defined by <code>PiiMention.equals</code>, are combined using the
+			first original object. Nested composites contribute their individual
+			extractors in depth-first, left-to-right order.
 			<programlisting language="java"><![CDATA[
 String text = "Deploy from 10.0.0.7 using AKIAIOSFODNN7EXAMPLE, ask jane@example.com.";
 
@@ -426,23 +428,24 @@ PiiExtractor custom = new CompositePiiExtractor(
 		</para>
 		<para>
 			A context-labeled IMEI can also match the payment-card detector.
-			On equal spans, the IMEI rank takes precedence regardless of pack order.
+			Both detections are retained. IMEI sorts before card regardless of pack order.
 			<code>PiiPacksTest</code> checks this example:
 			<programlisting language="java"><![CDATA[
 PiiExtractor deviceAndPayment =
     new CompositePiiExtractor(PiiPacks.payment(), PiiPacks.device());
 Document deviceDocument = new PiiAnnotator(deviceAndPayment)
     .annotate(Document.of("IMEI: 490154203237518."));
-String type = deviceDocument.get(PiiAnnotator.PII).getFirst().value().type();
-// "imei"
+List<String> types = deviceDocument.get(PiiAnnotator.PII).stream()
+    .map(annotation -> annotation.value().type()).toList();
+// List.of("imei", "card")
 String deviceMasked = Masker.mask(deviceDocument, PiiAnnotator.PII, '*');
 // "IMEI: ***************."]]>
 			</programlisting>
 		</para>
 		<para>
 			Grouping the same ordered extractors into nested composites does not
-			change their result. In this example, selecting the leftmost span rejects
-			the middle candidate but retains the final person mention:
+			change their result. This example retains all 3 mentions and masks their
+			combined spans, including the space:
 			<programlisting language="java"><![CDATA[
 PiiExtractor first = text -> List.of(new PiiMention(new Span(0, 3), "person", "Amy"));
 PiiExtractor middle = text -> List.of(new PiiMention(new Span(1, 5), "custom", "my B"));
@@ -451,21 +454,42 @@ PiiExtractor combined = new CompositePiiExtractor(first,
     new CompositePiiExtractor(middle, last));
 Document people = new PiiAnnotator(combined).annotate(Document.of("Amy Bob"));
 String masked = Masker.mask(people, PiiAnnotator.PII, '*');
-// "*** ***"]]>
+// "*******"]]>
 			</programlisting>
 		</para>
 		<para>
 			Custom extractors must return a non-null list with non-null mentions
 			inside the input text. <code>CompositePiiExtractor</code> and
 			<code>PiiAnnotator</code> reject invalid results with
-			<code>IllegalArgumentException</code>, including candidates that would
-			otherwise be removed during overlap resolution. Exceptions raised by an
-			extractor propagate unchanged.
+			<code>IllegalArgumentException</code>. Overlapping results are accepted.
+			Exceptions raised by an extractor propagate unchanged.
+		</para>
+		<para>
+			Adding detectors preserves the coverage of existing detections. In this
+			URL, the credentials and email overlap. Both remain available, so full
+			masking covers the credentials and the email domain:
+			<programlisting language="java"><![CDATA[
+String address = "https://john:pass@example.com/path";
+Document link = new PiiAnnotator(PiiPacks.allStructured()).annotate(Document.of(address));
+List<PiiMention> matches = link.get(PiiAnnotator.PII).stream()
+    .map(annotation -> annotation.value()).toList();
+// url-credential [8, 17), email [13, 29)
+String maskedLink = Masker.mask(link, PiiAnnotator.PII, '*');
+// "https://*********************/path"]]>
+			</programlisting>
 		</para>
 	</section>
 
 	<section xml:id="tools.pii.transforms">
 		<title>Pseudonymizing, tokenizing, and auditing</title>
+		<para>
+			Text replacement requires non-overlapping mentions.
+			<code>Pseudonymizer</code> and <code>HmacTokenizer.rewrite</code>
+			reject overlapping spans with <code>IllegalArgumentException</code>.
+			Use <code>Masker</code> to redact combined spans without selecting a
+			subset. <code>HmacTokenizer.token</code> can tokenize retained mentions
+			individually, and audit reports accept overlapping detections.
+		</para>
 		<para>
 			<code>Pseudonymizer</code> replaces mentions with numbered labels. Mentions
 			with the same type and normalized value use the same label within a text.
@@ -544,6 +568,7 @@ String to = tokenizer.rewrite(second).text();   // "To " + stable]]>
 		</para>
 		<para>
 			<code>PiiAuditReport</code> reports mention counts, distinct-value counts
+			for retained detections, including overlaps,
 			and up to three sampled tokens per type by default. It stores types,
 			counts and tokens, without normalized values or offsets. Custom types
 			should be labels, not personal data, because they appear in the report.

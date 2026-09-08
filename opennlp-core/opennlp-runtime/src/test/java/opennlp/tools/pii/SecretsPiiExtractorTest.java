@@ -28,6 +28,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.util.Span;
+
 public class SecretsPiiExtractorTest {
 
   /** Counts character reads so scanner complexity can be asserted without wall-clock timing. */
@@ -433,19 +435,22 @@ public class SecretsPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_URL_CREDENTIAL.equals(m.type())), text);
   }
 
-  /** Checks that containing URL credentials take precedence over embedded tokens. */
+  /** Checks that URL credentials and their embedded token are both retained. */
   @Test
-  void testUrlCredentialContainingATokenIsReportedOnce() {
+  void testUrlCredentialContainingATokenRetainsBothMentions() {
     final String text = "https://oauth2:ghp_1234567890abcdefghijklmnopqrstuvwxyz@github.com/x.git";
     final List<PiiMention> mentions = extractor.extract(text);
 
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(PiiMention.TYPE_URL_CREDENTIAL, mentions.get(0).type());
-    Assertions.assertEquals("oauth2:ghp_1234567890abcdefghijklmnopqrstuvwxyz",
-        mentions.get(0).normalized());
+    final String credential = "oauth2:ghp_1234567890abcdefghijklmnopqrstuvwxyz";
+    final String token = "ghp_1234567890abcdefghijklmnopqrstuvwxyz";
+    Assertions.assertEquals(List.of(
+        new PiiMention(new Span(8, 8 + credential.length()),
+            PiiMention.TYPE_URL_CREDENTIAL, credential),
+        new PiiMention(new Span(15, 15 + token.length()),
+            PiiMention.TYPE_GITHUB_TOKEN, token)), mentions);
   }
 
-  /** Checks independent scans produce ordered, non-overlapping mentions. */
+  /** Checks independent scans produce mentions in text order. */
   @Test
   void testFindsSeveralSecretsInOneText() {
     final String text = "key AKIAIOSFODNN7EXAMPLE token ghp_1234567890abcdefghijklmnopqrstuvwxyz "

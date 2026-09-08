@@ -33,8 +33,8 @@ import opennlp.tools.document.Document;
  *
  * <p>The report stores types, counts and tokens, without normalized values or offsets.
  * Custom types should be labels, not personal data, because they appear in the report.
- * Tokens come from {@link HmacTokenizer} and match the tokens in a
- * {@link HmacTokenizer#rewrite(CharSequence, List) tokenized} copy of the text.
+ * Samples use {@link HmacTokenizer#token(PiiMention)} for the retained mentions,
+ * including overlaps. Counts include each retained detection.
  * They remain linkable pseudonymous data and require access control.</p>
  *
  * <p>{@link #toString()} escapes backslashes and uses UTF-16 hexadecimal escapes for

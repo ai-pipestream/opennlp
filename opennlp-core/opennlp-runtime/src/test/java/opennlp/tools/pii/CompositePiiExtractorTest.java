@@ -83,91 +83,104 @@ public class CompositePiiExtractorTest {
     Assertions.assertEquals(single, composed);
   }
 
+  /** Checks that an exact duplicate deduplicates to the original candidate object. */
   @Test
   void testDeduplicatesTheSameMentionReportedTwice() {
-    final PiiExtractor extractor = new CompositePiiExtractor(
-        new CursorPiiExtractor(Set.of(PiiMention.TYPE_EMAIL)),
-        new CursorPiiExtractor(Set.of(PiiMention.TYPE_EMAIL)));
+    final PiiMention first = new PiiMention(new Span(9, 25), PiiMention.TYPE_EMAIL,
+        "jane@example.com");
+    final PiiMention duplicate = new PiiMention(new Span(9, 25), PiiMention.TYPE_EMAIL,
+        "jane@example.com");
+    final PiiExtractor extractor = new CompositePiiExtractor(new Fixed(first),
+        new Fixed(duplicate));
 
     final List<PiiMention> mentions = extractor.extract("write to jane@example.com now");
 
     Assertions.assertEquals(1, mentions.size());
     Assertions.assertEquals("jane@example.com", mentions.get(0).normalized());
-  }
-
-  @Test
-  void testLeftmostCandidateWins() {
-    final PiiExtractor extractor = new CompositePiiExtractor(
-        new Fixed(mention(4, 12, PiiMention.TYPE_EMAIL)),
-        new Fixed(mention(0, 8, PiiMention.TYPE_CARD)));
-
-    final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
-
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(0, mentions.get(0).span().getStart());
-    Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(0).type());
-  }
-
-  @Test
-  void testLongestCandidateWinsAtTheSameStart() {
-    final PiiExtractor extractor = new CompositePiiExtractor(
-        new Fixed(mention(2, 6, PiiMention.TYPE_PHONE)),
-        new Fixed(mention(2, 10, PiiMention.TYPE_CARD)));
-
-    final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
-
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(10, mentions.get(0).span().getEnd());
-    Assertions.assertEquals(PiiMention.TYPE_CARD, mentions.get(0).type());
+    Assertions.assertSame(first, mentions.getFirst());
   }
 
   /**
-   * Verifies that the more specific type wins an exact-span tie whichever delegate reported
-   * it, so a composite does not depend on the order it was assembled in.
+   * Checks overlapping candidates in both delegate orders.
+   *
+   * @param reverse Whether to place the earlier candidate in the earlier delegate.
+   */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void testCrossingCandidatesAreRetainedInTextOrder(boolean reverse) {
+    final PiiMention later = mention(4, 12, PiiMention.TYPE_EMAIL);
+    final PiiMention earlier = mention(0, 8, PiiMention.TYPE_CARD);
+    final PiiExtractor extractor = reverse
+        ? new CompositePiiExtractor(new Fixed(earlier), new Fixed(later))
+        : new CompositePiiExtractor(new Fixed(later), new Fixed(earlier));
+
+    final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
+
+    Assertions.assertEquals(List.of(earlier, later), mentions);
+  }
+
+  /** Checks descending end-offset ordering among candidates with a shared start. */
+  @Test
+  void testLongestCandidateSortsFirstAtTheSameStart() {
+    final PiiMention shorter = mention(2, 6, PiiMention.TYPE_PHONE);
+    final PiiMention longer = mention(2, 10, PiiMention.TYPE_CARD);
+    final PiiExtractor extractor = new CompositePiiExtractor(
+        new Fixed(shorter), new Fixed(longer));
+
+    final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
+
+    Assertions.assertEquals(List.of(longer, shorter), mentions);
+  }
+
+  /**
+   * Verifies that the more specific type sorts first for an exact-span tie regardless
+   * of delegate order.
    */
   @Test
-  void testTypePriorityWinsAnExactSpanTieWhateverTheDelegateOrder() {
+  void testTypePriorityOrdersAnExactSpanTieForEitherDelegateOrder() {
     final PiiMention phone = mention(2, 10, PiiMention.TYPE_PHONE);
     final PiiMention card = mention(2, 10, PiiMention.TYPE_CARD);
 
-    Assertions.assertEquals(PiiMention.TYPE_CARD,
+    Assertions.assertEquals(List.of(card, phone),
         new CompositePiiExtractor(new Fixed(phone), new Fixed(card))
-            .extract("0123456789abcdef").get(0).type());
-    Assertions.assertEquals(PiiMention.TYPE_CARD,
+            .extract("0123456789abcdef"));
+    Assertions.assertEquals(List.of(card, phone),
         new CompositePiiExtractor(new Fixed(card), new Fixed(phone))
-            .extract("0123456789abcdef").get(0).type());
+            .extract("0123456789abcdef"));
   }
 
   /**
-   * Verifies that the delegate order settles a tie between types of equal priority, which is
-   * the case for types this package does not name.
+   * Verifies that delegate order determines the ordering of equal-priority candidates.
    */
   @Test
-  void testEarlierDelegateWinsATieBetweenEquallyRankedTypes() {
+  void testDelegateOrderOrdersEquallyRankedTypes() {
     final PiiMention first = mention(2, 10, "custom-first");
     final PiiMention second = mention(2, 10, "custom-second");
 
-    Assertions.assertEquals("custom-first",
+    Assertions.assertEquals(List.of(first, second),
         new CompositePiiExtractor(new Fixed(first), new Fixed(second))
-            .extract("0123456789abcdef").get(0).type());
-    Assertions.assertEquals("custom-second",
+            .extract("0123456789abcdef"));
+    Assertions.assertEquals(List.of(second, first),
         new CompositePiiExtractor(new Fixed(second), new Fixed(first))
-            .extract("0123456789abcdef").get(0).type());
+            .extract("0123456789abcdef"));
   }
 
+  /** Checks type ordering within one delegate while retaining both mentions. */
   @Test
-  void testTypePriorityBreaksAnExactSpanTieWithinOneExtractor() {
+  void testTypePriorityOrdersAnExactSpanTieWithinOneExtractor() {
+    final PiiMention phone = mention(0, 8, PiiMention.TYPE_PHONE);
+    final PiiMention iban = mention(0, 8, PiiMention.TYPE_IBAN);
     final PiiExtractor extractor = new CompositePiiExtractor(
-        new Fixed(mention(0, 8, PiiMention.TYPE_PHONE), mention(0, 8, PiiMention.TYPE_IBAN)));
+        new Fixed(phone, iban));
 
     final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
 
-    Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(PiiMention.TYPE_IBAN, mentions.get(0).type());
+    Assertions.assertEquals(List.of(iban, phone), mentions);
   }
 
+  /** Checks that adjacent candidates remain distinct. */
   @Test
-  void testAdjacentCandidatesBothSurvive() {
+  void testAdjacentCandidatesAreRetained() {
     final PiiExtractor extractor = new CompositePiiExtractor(
         new Fixed(mention(0, 4, PiiMention.TYPE_CARD)),
         new Fixed(mention(4, 8, PiiMention.TYPE_PHONE)));
@@ -179,20 +192,19 @@ public class CompositePiiExtractorTest {
     Assertions.assertEquals(4, mentions.get(1).span().getStart());
   }
 
+  /** Checks retention across a chain of pairwise overlaps. */
   @Test
-  void testReportedMentionsNeverOverlap() {
+  void testTransitiveOverlapChainRetainsEveryMentionInOrder() {
+    final PiiMention first = mention(0, 6, PiiMention.TYPE_CARD);
+    final PiiMention last = mention(10, 16, PiiMention.TYPE_CARD);
+    final PiiMention crossing = mention(4, 12, PiiMention.TYPE_PHONE);
+    final PiiMention contained = mention(5, 7, PiiMention.TYPE_IPV4);
     final PiiExtractor extractor = new CompositePiiExtractor(
-        new Fixed(mention(0, 6, PiiMention.TYPE_CARD), mention(10, 16, PiiMention.TYPE_CARD)),
-        new Fixed(mention(4, 12, PiiMention.TYPE_PHONE)),
-        new Fixed(mention(5, 7, PiiMention.TYPE_IPV4)));
+        new Fixed(first, last), new Fixed(crossing), new Fixed(contained));
 
     final List<PiiMention> mentions = extractor.extract("0123456789abcdef");
 
-    int lastEnd = 0;
-    for (final PiiMention mention : mentions) {
-      Assertions.assertTrue(mention.span().getStart() >= lastEnd, mention.toString());
-      lastEnd = mention.span().getEnd();
-    }
+    Assertions.assertEquals(List.of(first, crossing, contained, last), mentions);
   }
 
   @Test

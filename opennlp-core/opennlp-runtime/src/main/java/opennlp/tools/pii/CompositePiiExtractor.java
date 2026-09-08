@@ -24,13 +24,14 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * Combines PII extractors into one non-overlapping result in text order.
+ * Combines PII extractors into a result in text order, retaining overlapping mentions.
  *
- * <p>Candidates are selected by start offset, then descending length, then
- * {@link PiiTypePriority type priority}, then delegate order. A candidate overlapping an
- * accepted mention is omitted without truncating its span.</p>
+ * <p>Candidates are ordered by start offset, then descending length, then
+ * {@link PiiTypePriority type priority}, then delegate order. Duplicates compare by
+ * {@link PiiMention#equals(Object)}; the first original mention is retained.
+ * Different types or normalized values on the same span remain separate.</p>
  *
- * <p>Nested composites contribute their individual extractors to the same overlap pass,
+ * <p>Nested composites contribute their individual extractors to the same ordering pass,
  * in depth-first, left-to-right order. Grouping the same ordered extractors does not
  * change the result. Other extractors contribute their returned mentions; their internal
  * filtering is unchanged. {@link #extractors()} retains the configured nested structure.</p>
@@ -47,7 +48,7 @@ public final class CompositePiiExtractor implements PiiExtractor {
   /**
    * Initializes a composite over the given extractors.
    *
-   * @param extractors The extractors to merge, in the order that breaks overlap ties.
+   * @param extractors The extractors to merge, in order for equal offsets and type ranks.
    *                   Must not be {@code null} or empty and must not contain
    *                   {@code null}.
    * @throws IllegalArgumentException Thrown if {@code extractors} is {@code null} or
@@ -60,7 +61,7 @@ public final class CompositePiiExtractor implements PiiExtractor {
   /**
    * Initializes a composite over the given extractors.
    *
-   * @param extractors The extractors to merge, in the order that breaks overlap ties.
+   * @param extractors The extractors to merge, in order for equal offsets and type ranks.
    *                   Must not be {@code null} or empty and must not contain
    *                   {@code null}.
    * @throws IllegalArgumentException Thrown if {@code extractors} is {@code null} or
@@ -90,7 +91,7 @@ public final class CompositePiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Scans the individual extractors and resolves all their candidates together.</p>
+   * <p>Retains overlapping detections and removes equal duplicates.</p>
    *
    * @throws IllegalArgumentException Thrown if {@code text} is null, or a delegate
    *         returns a null result, a null mention or a mention outside the input text.

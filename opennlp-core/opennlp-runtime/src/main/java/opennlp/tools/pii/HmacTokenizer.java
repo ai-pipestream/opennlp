@@ -42,6 +42,9 @@ import opennlp.tools.document.Document;
  * <p>Tokens can change text length. {@link PiiRewrite} maps annotations to output
  * offsets.</p>
  *
+ * <p>Text replacement rejects overlapping mentions. Use {@link #token(PiiMention)}
+ * to tokenize those detections individually, or {@link Masker} for redaction.</p>
+ *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
  * @since 3.0.0

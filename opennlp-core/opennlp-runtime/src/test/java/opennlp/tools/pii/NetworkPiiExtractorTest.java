@@ -26,6 +26,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.util.Span;
+
 public class NetworkPiiExtractorTest {
 
   private final NetworkPiiExtractor extractor = new NetworkPiiExtractor();
@@ -125,7 +127,7 @@ public class NetworkPiiExtractorTest {
   }
 
   /**
-   * Checks accepted IPv6 forms, normalized groups and exact spans.
+   * Checks accepted IPv6 forms, normalized groups and exact retained mentions.
    *
    * @param text The candidate text.
    * @param normalized The expected hexadecimal form.
@@ -149,11 +151,13 @@ public class NetworkPiiExtractorTest {
   void testAcceptsIpv6Addresses(String text, String normalized) {
     final List<PiiMention> mentions = extractor.extract(text);
 
-    Assertions.assertEquals(1, mentions.size(), text);
-    Assertions.assertEquals(PiiMention.TYPE_IPV6, mentions.get(0).type(), text);
-    Assertions.assertEquals(normalized, mentions.get(0).normalized(), text);
-    Assertions.assertEquals(0, mentions.get(0).span().getStart());
-    Assertions.assertEquals(text.length(), mentions.get(0).span().getEnd());
+    final PiiMention ipv6 = new PiiMention(new Span(0, text.length()),
+        PiiMention.TYPE_IPV6, normalized);
+    final int ipv4Start = text.indexOf("192.0.2.128");
+    final List<PiiMention> expected = ipv4Start < 0 ? List.of(ipv6) : List.of(ipv6,
+        new PiiMention(new Span(ipv4Start, text.length()), PiiMention.TYPE_IPV4,
+            "192.0.2.128"));
+    Assertions.assertEquals(expected, mentions, text);
   }
 
   /**
