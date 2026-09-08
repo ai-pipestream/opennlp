@@ -38,11 +38,13 @@ import java.util.Set;
  *   group is one of the ranges the
  *   <a href="https://www.irs.gov/irm/part21/irm_21-006-001r">
  *   IRS</a> assigns, {@code 50} to {@code 65}, {@code 70} to {@code 88}, {@code 90} to
- *   {@code 92}, and {@code 94} to {@code 99}.</li>
+ *   {@code 92}, and {@code 94} to {@code 99}. Serials include {@code 0000}, per
+ *   <a href="https://www.irs.gov/pub/irs-pdf/p4164.pdf#page=253">IRS Publication 4164,
+ *   table 13-16</a>.</li>
  * </ul>
  *
- * <p>This detector rejects a zero serial for either type. A match checks format and
- * number ranges, not assignment to a person. Normalization uses hyphens between groups.</p>
+ * <p>A match checks format and number ranges, not assignment to a person.
+ * Normalization uses hyphens between groups.</p>
  *
  * <p>Both types are reported by default; the {@link #UsIdentityPiiExtractor(Set)} constructor
  * limits extraction to a subset.</p>
@@ -158,7 +160,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
    *         if the number fails this detector's range checks.
    */
   private String classify(int area, int group, int serial) {
-    if (group == 0 || serial == 0) {
+    if (group == 0) {
       return null;
     }
     if (area >= ITIN_AREA_FIRST) {
@@ -169,7 +171,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
       }
       return null;
     }
-    return area == 0 || area == SSN_AREA_UNUSED ? null : PiiMention.TYPE_US_SSN;
+    return area == 0 || area == SSN_AREA_UNUSED || serial == 0 ? null : PiiMention.TYPE_US_SSN;
   }
 
   /**

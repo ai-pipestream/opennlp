@@ -102,6 +102,8 @@ public class UsIdentityPiiExtractorTest {
   @ParameterizedTest
   @CsvSource({
       "900-70-1234, 900-70-1234",
+      "900-70-0000, 900-70-0000",
+      "'900 70 0000', 900-70-0000",
       "999-88-9999, 999-88-9999",
       "912-50-1234, 912-50-1234",
       "923-99-1234, 923-99-1234",
@@ -118,7 +120,7 @@ public class UsIdentityPiiExtractorTest {
   }
 
   /**
-   * Checks excluded ITIN groups and this detector's zero-serial rejection.
+   * Checks excluded ITIN groups.
    *
    * @param text The rejected candidate.
    */
@@ -129,8 +131,7 @@ public class UsIdentityPiiExtractorTest {
       "900-69-1234",
       "900-89-1234",
       "900-93-1234",
-      "999-00-1234",
-      "900-70-0000"})
+      "999-00-1234"})
   void testRejectsAreasAboveEightHundredNinetyNineOutsideTheIrsGroups(String text) {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }

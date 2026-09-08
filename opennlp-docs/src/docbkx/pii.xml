@@ -332,9 +332,18 @@ String masked = Masker.mask(result, PiiAnnotator.PII, '*');
 				<para>
 					<code>UsIdentityPiiExtractor</code>: United States Social Security
 					and taxpayer number candidates in <code>3-2-4</code> digit groups.
-					The detector checks number ranges and rejects a zero final group for
-					both types. It requires matching single ASCII spaces or hyphens;
-					compact digits and other separators are rejected.
+					The detector checks number ranges. Social Security numbers require a
+					final group from <code>0001</code> to <code>9999</code>; ITINs permit
+					<code>0000</code> to <code>9999</code>, as specified in
+					<ulink url="https://www.irs.gov/pub/irs-pdf/p4164.pdf#page=253">IRS Publication 4164, table 13-16</ulink>.
+					It requires matching single ASCII spaces or hyphens; compact digits
+					and other separators are rejected. This example masks a grouped ITIN:
+					<programlisting language="java"><![CDATA[
+Document taxpayer = new PiiAnnotator(PiiPacks.usIdentity())
+    .annotate(Document.of("Tax ID 900-50-0000."));
+String masked = Masker.mask(taxpayer, PiiAnnotator.PII, '*');
+// "Tax ID ***********."]]>
+					</programlisting>
 				</para>
 			</listitem>
 			<listitem>
