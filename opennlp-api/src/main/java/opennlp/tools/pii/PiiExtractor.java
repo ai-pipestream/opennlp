@@ -20,9 +20,8 @@ package opennlp.tools.pii;
 import java.util.List;
 
 /**
- * The interface for extractors of personally identifiable information, which find PII
- * mentions in a text and report each as a {@link PiiMention} with its span in the
- * original text.
+ * Extracts personally identifiable information as {@link PiiMention} values with
+ * original-text spans.
  *
  * <p>Thread safety is implementation specific.</p>
  *
@@ -35,8 +34,8 @@ public interface PiiExtractor {
    * Extracts all PII mentions from a text.
    *
    * @param text The text to scan. Must not be {@code null}.
-   * @return The mentions in text order, non-overlapping. Never {@code null}; empty when
-   *         the text contains no PII mention.
+   * @return Non-null mentions in text order and within the input text. Mentions may
+   *         overlap. The list is non-null and empty when no PII mention is found.
    * @throws IllegalArgumentException Thrown if {@code text} is {@code null}.
    */
   List<PiiMention> extract(CharSequence text);

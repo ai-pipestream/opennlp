@@ -20,21 +20,13 @@ package opennlp.tools.pii;
 /**
  * The <a href="https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki">BIP-173</a>
  * bech32 and <a href="https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki">
- * BIP-350</a> bech32m encodings of Bitcoin's segwit addresses: a human-readable prefix, the
- * separator {@code 1}, and a data part whose last six characters are a BCH checksum over
- * the prefix and the data.
- *
- * <p>The checksum spans 30 bits, so an arbitrary run of charset characters is rejected
- * rather than reported. Which of the two constants the checksum must meet depends on the
- * witness version the data part starts with: version zero uses bech32 and every later
- * version uses bech32m, which is what keeps the two encodings apart.</p>
+ * BIP-350</a> bech32m encodings of Bitcoin segwit addresses. The final 6 characters
+ * encode a checksum over the prefix and data. Witness version 0 uses bech32; versions
+ * 1 through 16 use bech32m.
  */
 final class Bech32 {
 
-  /**
-   * The bech32 charset, in value order, as BIP-173 defines it. Fixed by the encoding rather
-   * than by a registry, so it carries no revision and cannot go stale.
-   */
+  /** The bech32 character set in value order. */
   private static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
   private static final int ASCII_RANGE = 128;
@@ -46,10 +38,10 @@ final class Bech32 {
   private static final int[] GENERATOR =
       {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
 
-  /** The residue a bech32 string leaves. */
+  /** The checksum constant for a bech32 string. */
   private static final int BECH32_RESIDUE = 1;
 
-  /** The residue a bech32m string leaves. */
+  /** The checksum constant for a bech32m string. */
   private static final int BECH32M_RESIDUE = 0x2bc830a3;
 
   private static final int CHECKSUM_LENGTH = 6;
@@ -68,8 +60,8 @@ final class Bech32 {
     }
   }
 
+  /** Prevents construction of this utility class. */
   private Bech32() {
-    // This class holds static methods only and is never instantiated.
   }
 
   /**
@@ -83,7 +75,7 @@ final class Bech32 {
   }
 
   /**
-   * Reads the witness version of a bech32 or bech32m address whose checksum holds.
+   * Checks witness version, program length, padding and the version-specific checksum.
    *
    * @param text The text being scanned.
    * @param start The first character of the data part, that is the character after the
@@ -145,10 +137,10 @@ final class Bech32 {
   }
 
   /**
-   * Computes the BCH residue of a value sequence.
+   * Computes the BCH checksum result for a value sequence.
    *
    * @param values The expanded prefix followed by the data values.
-   * @return The residue.
+   * @return The checksum result.
    */
   private static int polymod(int[] values) {
     int checksum = 1;

@@ -15,6 +15,7 @@
 email	User@Example.COM	User@example.com	Contact User@Example.COM now
 phone	+44 20 7946 0958	+442079460958	Call +44 20 7946 0958 today
 iban	DE89 3704 0044 0532 0130 00	DE89370400440532013000	IBAN DE89 3704 0044 0532 0130 00 received
+phone	0532 0130 00	0532013000	IBAN DE89 3704 0044 0532 0130 00 received
 card	4111 1111 1111 1111	4111111111111111	Card 4111 1111 1111 1111 charged
 ipv4	192.168.1.20	192.168.1.20	Host 192.168.1.20 connected
 ipv6	2001:0DB8::1	2001:db8::1	Peer 2001:0DB8::1 connected
@@ -27,9 +28,12 @@ btc-address	BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4	bc1qw508d6qejxtdg4y5r3zar
 eth-address	0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed	0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed	Wallet 0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed paid
 aba-routing	021000021	021000021	Routing 021000021 confirmed
 url-credential	user:secret	user:secret	Clone https://user:secret@example.com/repo
+email	secret@example.com	secret@example.com	Clone https://user:secret@example.com/repo
 us-ssn	123-45-6789	123-45-6789	SSN 123-45-6789 recorded
 us-itin	900-70-1234	900-70-1234	ITIN 900-70-1234 recorded
 uk-nhs	943 476 5919	9434765919	NHS 943 476 5919 recorded
+phone	943 476 5919	9434765919	NHS 943 476 5919 recorded
 de-steuer-id	65929970489	65929970489	IdNr 65929970489 recorded
 ca-sin	046 454 286	046454286	SIN: 046 454 286 recorded
 imei	490154203237518	490154203237518	IMEI: 490154203237518 recorded
+card	490154203237518	490154203237518	IMEI: 490154203237518 recorded

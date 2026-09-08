@@ -24,54 +24,53 @@ import java.util.Set;
 /**
  * A deterministic {@link PiiExtractor}: forward scans over the text, no regular
  * expressions, recognizing email addresses, phone numbers, IBANs, and payment card
- * numbers. IBANs and card numbers are checksum validated and phone numbers must show a
- * {@code +} prefix or visible formatting, so a random digit run is rejected rather than
- * reported.
+ * numbers. IBANs and card numbers are checksum validated. Phone numbers require a
+ * {@code +} prefix or visible formatting.
  *
  * <p>Recognized forms:</p>
  * <ul>
  *   <li>Email: a local part of ASCII letters, digits, and {@code . _ % + -} followed by
- *   {@code @} and a dotted domain of at most {@link #DOMAIN_MAX_LENGTH} characters whose
- *   final label is an
+ *   {@code @} and a dotted domain of at most {@link #DOMAIN_MAX_LENGTH} characters. The
+ *   final label must be an
  *   <a href="https://data.iana.org/TLD/tlds-alpha-by-domain.txt">IANA-registered</a>
  *   top-level domain, including punycode forms. Private-use suffixes such as
  *   {@code .internal} or {@code .local} are not reported. The ASCII local part is limited
  *   to 64 characters and the complete mailbox to 254 characters.</li>
- *   <li>Phone: an international form with {@code +} whose digits split into an
- *   assigned calling code and a national number of a length some territory under that
- *   code assigns, or a domestic form with 10 or 11 digits that shows formatting
- *   evidence, at least one space, hyphen, or parenthesis between the digits. A bare
- *   digit run is never a phone number. Dots are not accepted as separators, which
- *   keeps decimal numbers out.</li>
- *   <li>IBAN: two uppercase letters, two check digits, and more uppercase letters or
+ *   <li>Phone: an international form with {@code +} and digits that split into an
+ *   assigned calling code and a national number length used by a territory under that
+ *   code, or a domestic form with 10 or 11 digits and at least one space, hyphen, or
+ *   parenthesis between digits. An unformatted digit run is not a phone number. Dots
+ *   are excluded as separators to avoid decimal numbers.</li>
+ *   <li>IBAN: 2 uppercase letters, 2 check digits, and more uppercase letters or
  *   digits, optionally in space-separated groups, validated with the
  *   <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
  *   mod-97 check. The country code must be in the ISO 13616 registry and the candidate
- *   must have exactly the length that registry entry assigns, so a checksum-passing run
- *   with an unregistered country or a wrong length is rejected.</li>
+ *   must match the length assigned by that registry entry, so a checksum-passing run
+ *   with an unregistered country or invalid length is rejected.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
  *   validated with the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a>
- *   check and required to start with a digit between 2 and 6,
- *   the range that covers the major card networks. When the full run fails the check,
+ *   check and required to start with a digit between 2 and 6 or with
+ *   <a href="https://www.unionpayintl.com/en/mediaCenter/brandCenter/brandEmbodiment/">
+ *   UnionPay's 81 prefix</a>. The prefix is checked after removing separators.
+ *   When the full run fails the check,
  *   shorter separator-delimited prefixes are tried longest first, so a trailing
  *   separated digit group, such as an expiry date, does not hide the card before
  *   it.</li>
  * </ul>
  *
- * <p>When candidates overlap, the leftmost wins, then the longest, then the more
- * specific type in the order email, IBAN, card, phone; the reported mentions never
- * overlap. All candidates are checked against word boundaries so nothing is reported
- * from inside a longer alphanumeric run.</p>
+ * <p>Overlapping candidates are retained in start-offset order, with longer spans first
+ * at the same start. Equal spans use the type order email, IBAN, card, phone.
+ * Candidates must satisfy the word-boundary checks.</p>
  *
  * <p>Normalized forms: email domains are lowercased while mailbox local-part case is
  * preserved, IBANs keep their uppercase letters and digits with separators removed,
  * and phone and card numbers keep digits only, with a leading {@code +} preserved for
  * phone numbers.</p>
  *
- * <p>All four types are reported by default; the {@link #CursorPiiExtractor(Set)}
+ * <p>All supported types are reported by default; the {@link #CursorPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>The extractor stores no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
@@ -85,6 +84,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private static final int IBAN_ROTATION = 4;
   private static final int CARD_MIN_DIGITS = 13;
   private static final int CARD_MAX_DIGITS = 19;
+  private static final char UNIONPAY_LEADING_DIGIT = '8';
   private static final int PHONE_MAX_DIGITS = 15;
   private static final int PHONE_DOMESTIC_MIN_DIGITS = 10;
   private static final int PHONE_DOMESTIC_MAX_DIGITS = 11;
@@ -102,28 +102,28 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private final Set<String> types;
 
   /**
-   * Initializes an extractor that reports all four types.
+   * Initializes an extractor that reports all supported types.
    */
   public CursorPiiExtractor() {
     this.types = ALL_TYPES;
   }
 
   /**
-   * Initializes an extractor limited to a subset of the types, for a caller that wants
-   * only payment data masked, for example, without flagging every email address.
+   * Initializes an extractor for selected contact and payment types.
    *
-   * @param types The types to report, drawn from the {@code TYPE_*} constants on
-   *              {@link PiiMention}. Must not be {@code null} or empty and must not
-   *              contain a type this extractor does not recognize.
+   * @param types The types to report: {@link PiiMention#TYPE_EMAIL},
+   *              {@link PiiMention#TYPE_PHONE}, {@link PiiMention#TYPE_IBAN} or
+   *              {@link PiiMention#TYPE_CARD}. Must be non-null and non-empty,
+   *              without null or unrecognized entries.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty,
-   *         or contains an unrecognized type.
+   *         or contains a null or unrecognized type.
    */
   public CursorPiiExtractor(Set<String> types) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
     for (final String type : types) {
-      if (!ALL_TYPES.contains(type)) {
+      if (type == null || !ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
     }
@@ -133,8 +133,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to the non-overlapping set this class describes.</p>
+   * <p>Enabled types are scanned independently and overlapping candidates are retained.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -158,7 +157,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds email addresses by expanding around each {@code @}.
+   * Finds email addresses by expanding around each {@code @}. Checks the domain
+   * boundary before removing terminal punctuation.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -179,14 +179,16 @@ public final class CursorPiiExtractor implements PiiExtractor {
       while (end < text.length() && isDomainChar(text.charAt(end))) {
         end++;
       }
+      if (!Boundaries.onEnd(text, end)) {
+        continue;
+      }
       while (end > i + 1 && (text.charAt(end - 1) == '.' || text.charAt(end - 1) == '-')) {
         end--;
       }
       if (end == i + 1
           || end - start > EMAIL_MAX_LENGTH
           || !validDomain(text, i + 1, end)
-          || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))
-          || !Boundaries.onEnd(text, end)) {
+          || (start > 0 && Character.isLetterOrDigit(Character.codePointBefore(text, start)))) {
         continue;
       }
       final StringBuilder normalized = new StringBuilder(end - start);
@@ -220,7 +222,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks a domain: at most {@link #DOMAIN_MAX_LENGTH} characters, at least two labels,
+   * Checks a domain: at most {@link #DOMAIN_MAX_LENGTH} characters, at least 2 labels,
    * each 1 to 63 characters without a leading or trailing hyphen, and a final label that
    * is an {@link IanaTlds IANA-registered} top-level domain.
    *
@@ -255,9 +257,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds IBANs: a run of uppercase letters and digits in optional space-separated
-   * groups, accepted at the group boundary whose length equals the country's
-   * {@link IbanLengths registry entry} and whose mod-97 check passes.
+   * Finds uppercase IBAN candidates with a registered country/length and a passing
+   * MOD 97 checksum. Spaces may separate groups after the 4-character header.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -309,11 +310,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds payment card numbers: a digit run with optional single space or hyphen
-   * separators, an accepted leading digit, and a passing Luhn check. Candidates are
-   * tried longest first at separator boundaries until the Luhn check passes, so a card
-   * directly followed by another separated digit group, such as an expiry date, is
-   * still found instead of being swallowed into one over-long rejected candidate.
+   * Finds card numbers with an accepted prefix and a passing Luhn check. Single
+   * spaces and hyphens may separate digits, including prefix digits. Candidates
+   * are tried longest first at separator boundaries.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -321,7 +320,8 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private void scanCards(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
       final char first = text.charAt(i);
-      if (first < '2' || first > '6' || !Boundaries.onNumberStart(text, i)) {
+      if (((first < '2' || first > '6') && first != UNIONPAY_LEADING_DIGIT)
+          || !Boundaries.onNumberStart(text, i)) {
         continue;
       }
       final StringBuilder digits = new StringBuilder();
@@ -349,8 +349,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
         final int end = groupEnds.get(g)[0];
         final int length = groupEnds.get(g)[1];
         if (length < CARD_MIN_DIGITS || length > CARD_MAX_DIGITS
+            || (first == UNIONPAY_LEADING_DIGIT && digits.charAt(1) != '1')
             || !Boundaries.onEnd(text, end)
-            || !luhnValid(digits, length)) {
+            || !Luhn.valid(digits, length)) {
           continue;
         }
         final String candidate = digits.substring(0, length);
@@ -363,13 +364,9 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds phone numbers: an international form starting with {@code +} and validated
-   * against {@link PhoneNumberLengths}, or a domestic form whose digits are visibly
-   * formatted with spaces, hyphens, or parentheses. Candidates are tried longest first
-   * at separator boundaries until the length and form checks pass, exactly like the
-   * card scan, so a phone directly followed by another separated digit group, such as
-   * an extension or a count, is still found instead of being swallowed into one
-   * over-long rejected candidate.
+   * Finds international and formatted domestic phone candidates. International lengths
+   * use {@link PhoneNumberLengths}. When a longer run fails, separator-delimited prefixes
+   * are tried longest first. Paired parentheses are included in the selected span.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -379,23 +376,21 @@ public final class CursorPiiExtractor implements PiiExtractor {
     for (int i = 0; i < text.length(); i++) {
       final char c = text.charAt(i);
       final boolean plus = c == '+';
-      // A position where a reported phone just ended is a fresh start boundary even
-      // though the character before it is a digit of that phone.
+      // Adjacent phones may start at the preceding phone's exclusive end.
       if ((!plus && !Ascii.isDigit(c) && c != '(')
           || (i != lastEnd && !Boundaries.onNumberStart(text, i))
           || (i > 0 && text.charAt(i - 1) == '+')) {
         continue;
       }
       int digits = 0;
-      int lastDigit = -1;
+      int candidateEnd = i;
       int open = 0;
       int close = 0;
       boolean separated = false;
       boolean previousSeparator = false;
       final StringBuilder digitRun = new StringBuilder();
-      // Each entry is a candidate cut at a separator boundary: the exclusive text end,
-      // the digit count, whether the digits were visibly separated, and the
-      // parenthesis counts up to the cut, so every prefix is judged by its own form.
+      // Candidate cuts store the exclusive end, digit count, formatting flag and
+      // parenthesis counts.
       final List<int[]> groups = new ArrayList<>();
       int p = plus ? i + 1 : i;
       while (p < text.length() && digits <= PHONE_MAX_DIGITS) {
@@ -406,11 +401,11 @@ public final class CursorPiiExtractor implements PiiExtractor {
           }
           digits++;
           digitRun.append(ch);
-          lastDigit = p;
+          candidateEnd = p + 1;
           previousSeparator = false;
           p++;
         } else if ((ch == ' ' || ch == '-') && !previousSeparator) {
-          groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
+          groups.add(new int[] {candidateEnd, digits, separated ? 1 : 0, open, close});
           previousSeparator = true;
           p++;
         } else if (ch == '(' && open == 0) {
@@ -419,13 +414,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
           p++;
         } else if (ch == ')' && close == 0 && open == 1) {
           close++;
+          candidateEnd = p + 1;
           previousSeparator = false;
           p++;
         } else {
           break;
         }
       }
-      groups.add(new int[] {lastDigit + 1, digits, separated ? 1 : 0, open, close});
+      groups.add(new int[] {candidateEnd, digits, separated ? 1 : 0, open, close});
       for (int g = groups.size() - 1; g >= 0; g--) {
         final int end = groups.get(g)[0];
         final int count = groups.get(g)[1];
@@ -455,16 +451,14 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Computes the mod-97 remainder that
-   * <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
-   * prescribes for a compact IBAN candidate. The four leading characters are read last,
-   * which is the rearrangement the check prescribes.
+   * Computes the <a href="https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB%20EN/Bottom%20Menu/IBAN/Communique">
+   * MOD 97 remainder</a> after moving the 4-character header to the end and converting
+   * uppercase letters to decimal values 10 through 35.
    *
    * @param compact The candidate characters without spaces, uppercase letters and digits
    *                only.
-   * @param length The number of leading characters that form the candidate; must be
-   *               longer than the four characters that are rotated.
-   * @return The remainder; {@code 1} for a valid IBAN.
+   * @param length The candidate length, at least 5.
+   * @return The remainder; {@code 1} indicates a passing checksum.
    */
   private int mod97(CharSequence compact, int length) {
     int remainder = 0;
@@ -477,31 +471,6 @@ public final class CursorPiiExtractor implements PiiExtractor {
       }
     }
     return remainder;
-  }
-
-  /**
-   * Applies the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a> check
-   * to a digit sequence.
-   *
-   * @param digits The digits to check.
-   * @param length The number of leading digits that form the candidate.
-   * @return {@code true} if the checksum passes.
-   */
-  private boolean luhnValid(CharSequence digits, int length) {
-    int sum = 0;
-    boolean twice = false;
-    for (int i = length - 1; i >= 0; i--) {
-      int d = digits.charAt(i) - '0';
-      if (twice) {
-        d *= 2;
-        if (d > 9) {
-          d -= 9;
-        }
-      }
-      sum += d;
-      twice = !twice;
-    }
-    return sum % 10 == 0;
   }
 
   /**

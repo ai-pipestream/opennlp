@@ -19,16 +19,16 @@ package opennlp.tools.pii;
 
 /**
  * Length plausibility of international phone numbers by
- * <a href="https://www.itu.int/rec/T-REC-E.164">ITU-T E.164</a> calling code: for every
+ * <a href="https://www.itu.int/rec/T-REC-E.164">ITU-T E.164</a> calling code: for each
  * assigned calling code, the set of national number lengths any territory under that
  * code assigns.
  *
  * <p>The table is derived from the {@code PhoneNumberMetadata.xml} of the
  * <a href="https://github.com/google/libphonenumber">libphonenumber</a> project
- * (Apache License 2.0), revision {@code 2b03a9082e13} of 2026-07-31: per calling code, the
- * union of the {@code possibleLengths national} values of every number type of every
- * territory sharing the code. Local-only lengths are left out, since a number in
- * international form always carries its full national part.</p>
+ * (Apache License 2.0), revision {@code 4ad67e90c65e} of 2026-08-28: per calling code, the
+ * union of the {@code possibleLengths national} values across number types and
+ * territories sharing the code. Local-only lengths are omitted because international
+ * form includes the complete national part.</p>
  */
 final class PhoneNumberLengths {
 
@@ -43,13 +43,13 @@ final class PhoneNumberLengths {
       0xF00, 56, 0xE00, 57, 0xD00, 58, 0x400, 60, 0x700, 61, 0x17E0, 62, 0x3FF80, 63, 0x3F40, 64,
       0x7E0, 65, 0xD00, 66, 0x2700, 81, 0x3FF00, 82, 0x7F60, 84, 0x780, 86, 0x1F80, 90, 0x3480,
       91, 0x3F00, 92, 0x1F00, 93, 0x200, 94, 0x200, 95, 0x7C0, 98, 0x4F0, 211, 0x200, 212, 0x200,
-      213, 0x300, 216, 0x100, 218, 0x200, 220, 0x80, 221, 0x200, 222, 0x100, 223, 0x100, 224,
+      213, 0x300, 216, 0x100, 218, 0x200, 220, 0x280, 221, 0x200, 222, 0x100, 223, 0x100, 224,
       0x300, 225, 0x400, 226, 0x100, 227, 0x100, 228, 0x100, 229, 0x500, 230, 0x580, 231, 0x380,
       232, 0x100, 233, 0x300, 234, 0x7C00, 235, 0x100, 236, 0x100, 237, 0x300, 238, 0x80, 239,
       0x80, 240, 0x200, 241, 0x180, 242, 0x200, 243, 0x780, 244, 0x200, 245, 0x280, 246, 0x80,
       247, 0x60, 248, 0x80, 249, 0x200, 250, 0x300, 251, 0x200, 252, 0x3C0, 253, 0x100, 254,
       0x780, 255, 0x200, 256, 0x200, 257, 0x100, 258, 0x300, 260, 0x200, 261, 0x200, 262, 0x200,
-      263, 0x7E0, 264, 0x300, 265, 0x280, 266, 0x100, 267, 0x580, 268, 0x300, 269, 0x80, 290,
+      263, 0x680, 264, 0x300, 265, 0x280, 266, 0x100, 267, 0x580, 268, 0x300, 269, 0x80, 290,
       0x30, 291, 0x80, 297, 0x80, 298, 0x40, 299, 0x40, 350, 0x100, 351, 0x200, 352, 0xFF0, 353,
       0x780, 354, 0x280, 355, 0x3C0, 356, 0x100, 357, 0x100, 358, 0x1FE0, 359, 0x13C0, 370,
       0x100, 371, 0x100, 372, 0x580, 373, 0x100, 374, 0x100, 375, 0xFC0, 376, 0x340, 377, 0x300,
@@ -74,7 +74,7 @@ final class PhoneNumberLengths {
   /** The longest national number a mask bit can express. */
   private static final int MAX_NATIONAL_LENGTH = 31;
 
-  /** One slot per possible calling code, that is per value of at most three digits. */
+  /** Array size covering calling codes of up to 3 digits. */
   private static final int CODE_TABLE_SIZE = 1000;
 
   /** Length bitmask per calling code; {@code 0} marks an unassigned code. */
@@ -86,21 +86,23 @@ final class PhoneNumberLengths {
     }
   }
 
+  /** Prevents construction. */
   private PhoneNumberLengths() {
-    // This class holds the lookup only and is never instantiated.
   }
 
   /**
-   * Judges whether a digit string is a plausible international phone number: some
-   * leading one to three digits form an assigned calling code, and the remaining
-   * digits have a national number length some territory under that code assigns.
+   * Checks whether the leading 1 to 3 digits form an assigned calling code and
+   * the remaining digits have an allowed national length. Calling codes cannot start
+   * with zero.
    *
    * @param digits The number's digits without the leading {@code +} or any formatting.
    *               Must not be {@code null}.
-   * @return {@code true} if a calling code split with a plausible national length
-   *         exists.
+   * @return {@code true} if a calling code split with an allowed national length exists.
    */
   static boolean plausibleInternational(String digits) {
+    if (digits.isEmpty() || digits.charAt(0) == '0') {
+      return false;
+    }
     int code = 0;
     for (int i = 0; i < MAX_CALLING_CODE_DIGITS && i < digits.length(); i++) {
       code = code * 10 + (digits.charAt(i) - '0');

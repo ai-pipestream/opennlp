@@ -22,13 +22,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+
+import opennlp.tools.util.Span;
 
 /** Verifies exact spans, types, and normalized forms from the positive golden corpus. */
 public class GoldenTruePositiveTest {
@@ -39,24 +44,18 @@ public class GoldenTruePositiveTest {
   private static final PiiExtractor EXTRACTOR = PiiPacks.allStructured();
 
   /**
-   * Verifies one exact positive-corpus row.
+   * Verifies the complete ordered result for one positive-fixture source.
    *
-   * @param type The expected mention type.
-   * @param covered The expected covered source text.
-   * @param normalized The expected normalized form.
    * @param text The source text.
+   * @param expected The expected mentions.
    */
   @ParameterizedTest
   @MethodSource("examples")
-  void testGoldenExample(String type, String covered, String normalized, String text) {
+  void testGoldenExample(String text, List<PiiMention> expected) {
     final List<PiiMention> mentions = EXTRACTOR.extract(text);
 
-    Assertions.assertEquals(1, mentions.size(), text);
-    final PiiMention mention = mentions.get(0);
-    Assertions.assertEquals(type, mention.type(), text);
-    Assertions.assertEquals(covered,
-        text.substring(mention.span().getStart(), mention.span().getEnd()), text);
-    Assertions.assertEquals(normalized, mention.normalized(), text);
+    Assertions.assertEquals(expected.size(), mentions.size(), text);
+    Assertions.assertEquals(expected, mentions, text);
   }
 
   /**
@@ -72,11 +71,24 @@ public class GoldenTruePositiveTest {
     }
     try (BufferedReader reader = new BufferedReader(
         new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-      return reader.lines()
+      final Map<String, List<PiiMention>> grouped = new LinkedHashMap<>();
+      reader.lines()
           .filter(line -> !line.isBlank() && line.charAt(0) != '#')
           .map(GoldenTruePositiveTest::parse)
-          .toList()
-          .stream();
+          .forEach(fields -> {
+            final String covered = fields[1];
+            final String text = fields[3];
+            final int start = text.indexOf(covered);
+            if (start < 0 || text.indexOf(covered, start + 1) >= 0) {
+              throw new IllegalArgumentException(
+                  "covered text must occur once in source text: " + covered);
+            }
+            grouped.computeIfAbsent(text, ignored -> new ArrayList<>())
+                .add(new PiiMention(new Span(start, start + covered.length()),
+                    fields[0], fields[2]));
+          });
+      return grouped.entrySet().stream()
+          .map(entry -> Arguments.of(entry.getKey(), List.copyOf(entry.getValue())));
     }
   }
 
@@ -84,9 +96,9 @@ public class GoldenTruePositiveTest {
    * Parses one four-field corpus row without a regular expression.
    *
    * @param line The row.
-   * @return The test arguments.
+   * @return The parsed fields.
    */
-  private static Arguments parse(String line) {
+  private static String[] parse(String line) {
     final String[] fields = new String[4];
     int start = 0;
     for (int field = 0; field < fields.length - 1; field++) {
@@ -98,6 +110,6 @@ public class GoldenTruePositiveTest {
       start = end + 1;
     }
     fields[fields.length - 1] = line.substring(start);
-    return Arguments.of((Object[]) fields);
+    return fields;
   }
 }

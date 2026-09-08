@@ -18,7 +18,6 @@
 package opennlp.tools.pii;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import org.junit.jupiter.api.Assertions;
@@ -27,10 +26,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.util.StringUtil;
+
 public class CryptoPiiExtractorTest {
 
   private final CryptoPiiExtractor extractor = new CryptoPiiExtractor();
 
+  /**
+   * Checks mainnet Base58Check addresses and their original spans.
+   *
+   * @param text The address candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
@@ -49,9 +55,9 @@ public class CryptoPiiExtractorTest {
   }
 
   /**
-   * Verifies the checksum is what carries the recognition: each fixture differs from a
-   * valid address in one character, which is a form no test on the alphabet or the length
-   * can reject.
+   * Rejects addresses with an altered checksum despite valid length and alphabet.
+   *
+   * @param text The invalid address.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -64,6 +70,11 @@ public class CryptoPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Rejects invalid encodings, adjoining identifiers and Bitcoin testnet addresses.
+   *
+   * @param text The excluded candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf",
@@ -79,6 +90,11 @@ public class CryptoPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_BTC_ADDRESS.equals(m.type())), text);
   }
 
+  /**
+   * Checks mainnet bech32 and bech32m addresses.
+   *
+   * @param text The address candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
@@ -94,15 +110,21 @@ public class CryptoPiiExtractorTest {
     Assertions.assertEquals(text, mentions.get(0).normalized());
   }
 
+  /** Checks normalization of uppercase segwit text. */
   @Test
   void testUppercaseSegwitAddressNormalizesToLowercase() {
     final String address = "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4";
     final List<PiiMention> mentions = extractor.extract(address);
 
     Assertions.assertEquals(1, mentions.size());
-    Assertions.assertEquals(address.toLowerCase(Locale.ROOT), mentions.get(0).normalized());
+    Assertions.assertEquals(StringUtil.toLowerCase(address), mentions.get(0).normalized());
   }
 
+  /**
+   * Rejects invalid segwit checksums, mixed case, lengths and network prefixes.
+   *
+   * @param text The excluded address candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5",
@@ -122,8 +144,10 @@ public class CryptoPiiExtractorTest {
   }
 
   /**
-   * Verifies the EIP-55 addresses the specification lists as examples, in the mixed-case
-   * checksummed form.
+   * Checks the example addresses from <a href="https://eips.ethereum.org/EIPS/eip-55">
+   * EIP-55</a>, including single-case forms.
+   *
+   * @param text The example address.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -144,6 +168,12 @@ public class CryptoPiiExtractorTest {
     Assertions.assertEquals(text.length(), mentions.get(0).span().getEnd());
   }
 
+  /**
+   * Checks capitalization normalization across accepted display forms.
+   *
+   * @param text The original address text.
+   * @param normalized The expected EIP-55 form.
+   */
   @ParameterizedTest
   @CsvSource({
       "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed, 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
@@ -160,8 +190,9 @@ public class CryptoPiiExtractorTest {
   }
 
   /**
-   * Verifies that a mixed-case candidate whose capitalization does not match the EIP-55
-   * checksum is rejected: it is how a mistyped or altered address shows itself.
+   * Rejects mixed-case candidates with incorrect checksum capitalization.
+   *
+   * @param text The invalid address.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -173,6 +204,11 @@ public class CryptoPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Rejects invalid prefixes, lengths, alphabets and the Ethereum zero address.
+   *
+   * @param text The excluded candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beae",
@@ -188,6 +224,7 @@ public class CryptoPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_ETH_ADDRESS.equals(m.type())), text);
   }
 
+  /** Checks original-text spans for both address types in a sentence. */
   @Test
   void testSpansInSentence() {
     final String text = "Send to 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa or "
@@ -201,6 +238,7 @@ public class CryptoPiiExtractorTest {
         mentions.get(1).span().getStart(), mentions.get(1).span().getEnd()));
   }
 
+  /** Checks scanning continues after the first address. */
   @Test
   void testTwoAddressesSideBySideAreBothFound() {
     final String text = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa 3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy";
@@ -211,6 +249,7 @@ public class CryptoPiiExtractorTest {
     Assertions.assertEquals(PiiMention.TYPE_BTC_ADDRESS, mentions.get(1).type());
   }
 
+  /** Checks extraction is limited to selected address types. */
   @Test
   void testTypeSubsetLimitsWhatIsReported() {
     final String text = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa and "
@@ -224,6 +263,11 @@ public class CryptoPiiExtractorTest {
             .stream().map(PiiMention::type).toList());
   }
 
+  /**
+   * Checks empty input, ordinary text and incomplete candidates.
+   *
+   * @param text The input without a supported address.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "no address here",
@@ -237,8 +281,7 @@ public class CryptoPiiExtractorTest {
   }
 
   /**
-   * Verifies that a 40-digit hexadecimal identifier without the {@code 0x} prefix, the
-   * shape of a Git object name, is not reported.
+   * Rejects a 40-digit Git object name without an Ethereum prefix.
    */
   @Test
   void testGitObjectNameIsNotAnAddress() {
@@ -246,6 +289,7 @@ public class CryptoPiiExtractorTest {
         extractor.extract("commit da39a3ee5e6b4b0d3255bfef95601890afd80709").isEmpty());
   }
 
+  /** Checks constructor and extraction argument validation. */
   @Test
   void testRejectsUnrecognizedTypeAndMissingArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

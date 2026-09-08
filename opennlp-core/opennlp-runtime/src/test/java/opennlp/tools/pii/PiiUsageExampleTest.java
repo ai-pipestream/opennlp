@@ -18,6 +18,7 @@
 package opennlp.tools.pii;
 
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
+import opennlp.tools.document.LayerKey;
+import opennlp.tools.util.Span;
 
 /**
  * Demonstrates the end-to-end PII flow on one realistic text that contains an email
@@ -39,6 +42,9 @@ public class PiiUsageExampleTest {
    */
   private static final String TEXT =
       "Contact jane@example.com, call (555) 123-4567, or charge card 4111 1111 1111 1111.";
+
+  private static final String REPEATED_ADDRESSES =
+      "Contact jane@example.com; jane@example.com replied to bob@example.com.";
 
   private final PiiAnnotator annotator = new PiiAnnotator(new CursorPiiExtractor());
 
@@ -114,6 +120,23 @@ public class PiiUsageExampleTest {
         masked);
   }
 
+  /** Checks the manual's example of overlapping custom span layers. */
+  @Test
+  void testMaskOverlappingLayers() {
+    final LayerKey<String> left = LayerKey.of("left", String.class);
+    final LayerKey<String> right = LayerKey.of("right", String.class);
+    final Document overlaps = Document.of("123456")
+        .with(left, List.of(new Annotation<>(new Span(0, 4), "1234")))
+        .with(right, List.of(new Annotation<>(new Span(2, 6), "3456")));
+    final MaskPolicy policy = MaskPolicy.of('*').keepingTrailing(2);
+
+    Assertions.assertEquals("****56", Masker.mask(overlaps, List.of(right, left), policy));
+    Assertions.assertEquals("****56", Masker.mask(overlaps, List.of(left, right), policy));
+    Assertions.assertEquals("123456", overlaps.text());
+    Assertions.assertEquals(new Span(0, 4), overlaps.get(left).getFirst().span());
+    Assertions.assertEquals(new Span(2, 6), overlaps.get(right).getFirst().span());
+  }
+
   /**
    * Turns on a detector that is off by default. The opt-in packs are composed with the
    * default extractor, and the result reports every type in one pass.
@@ -136,7 +159,7 @@ public class PiiUsageExampleTest {
    */
   @Test
   void testPseudonymizeKeepsTheTextReadable() {
-    final String text = "Contact jane@example.com; jane@example.com replied to bob@example.com.";
+    final String text = REPEATED_ADDRESSES;
 
     final PiiRewrite rewrite = new Pseudonymizer()
         .rewrite(text, new CursorPiiExtractor().extract(text));
@@ -144,6 +167,61 @@ public class PiiUsageExampleTest {
     Assertions.assertEquals("Contact EMAIL-1; EMAIL-1 replied to EMAIL-2.", rewrite.text());
     Assertions.assertEquals(rewrite.text().indexOf("EMAIL-2"),
         rewrite.mapOffset(text.indexOf("bob@example.com")));
+  }
+
+  /** Builds the manual's PII layer from replacement labels and their new offsets. */
+  @Test
+  void testBuildsLabelLayerAfterRewriting() {
+    final String text = REPEATED_ADDRESSES;
+    final PiiRewrite rewrite = new Pseudonymizer()
+        .rewrite(text, new CursorPiiExtractor().extract(text));
+    final Document labelled = Document.of(rewrite.text()).with(PiiAnnotator.PII,
+        rewrite.mentions().stream()
+            .map(mention -> new Annotation<>(mention.span(), mention)).toList());
+
+    Assertions.assertEquals("Contact EMAIL-1; EMAIL-1 replied to EMAIL-2.", labelled.text());
+    Assertions.assertEquals(List.of("EMAIL-1", "EMAIL-1", "EMAIL-2"),
+        labelled.get(PiiAnnotator.PII).stream().map(annotation -> annotation.value().normalized()).toList());
+    for (final Annotation<PiiMention> annotation : labelled.get(PiiAnnotator.PII)) {
+      Assertions.assertEquals(annotation.span(), annotation.value().span());
+      Assertions.assertEquals(annotation.value().normalized(),
+          rewrite.text().substring(annotation.span().getStart(), annotation.span().getEnd()));
+    }
+    Assertions.assertEquals(rewrite.text(), new Pseudonymizer().rewrite(labelled).text());
+  }
+
+  /** Checks the manual's custom type numbering example. */
+  @Test
+  void testNumberingForCustomTypes() {
+    final List<PiiMention> custom = List.of(
+        new PiiMention(new Span(0, 1), "id", "a"),
+        new PiiMention(new Span(2, 3), "ID", "b"));
+
+    Assertions.assertEquals("ID-1 ID-2", new Pseudonymizer().rewrite("a b", custom).text());
+  }
+
+  /** Checks the manual's generated-key example across documents and audit samples. */
+  @Test
+  void testStableTokensAcrossDocuments() {
+    final byte[] key = new byte[32];
+    new SecureRandom().nextBytes(key);
+    final HmacTokenizer tokenizer = new HmacTokenizer(key);
+    final PiiAnnotator emailAnnotator = new PiiAnnotator(new CursorPiiExtractor());
+    final Document first = emailAnnotator.annotate(Document.of("From jane@example.com"));
+    final Document second = emailAnnotator.annotate(Document.of("To jane@example.com"));
+    final String stable = tokenizer.token(PiiMention.TYPE_EMAIL, "jane@example.com");
+
+    Assertions.assertEquals("From " + stable, tokenizer.rewrite(first).text());
+    Assertions.assertEquals("To " + stable, tokenizer.rewrite(second).text());
+    final PiiAuditReport report = PiiAuditReport.of(first, tokenizer);
+    Assertions.assertEquals(1, report.total());
+    Assertions.assertEquals(1, report.counts().get(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(1, report.distinctCounts().get(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(List.of(stable), report.samples(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(List.of(stable),
+        PiiAuditReport.of(second, tokenizer).samples(PiiMention.TYPE_EMAIL));
+    Assertions.assertEquals(stable,
+        new HmacTokenizer(key).token(PiiMention.TYPE_EMAIL, "jane@example.com"));
   }
 
   /**

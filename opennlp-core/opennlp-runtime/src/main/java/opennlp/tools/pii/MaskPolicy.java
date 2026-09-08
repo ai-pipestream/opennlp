@@ -18,15 +18,13 @@
 package opennlp.tools.pii;
 
 /**
- * How {@link Masker} replaces the characters of a masked span. The base policy from
- * {@link #of(char)} masks every character; {@link #keepingFormat()} leaves separators
- * and punctuation visible so the shape of the value survives; {@link #keepingTrailing(int)}
- * leaves the trailing letters or digits readable, the customary style for payment card
- * receipts.
+ * Configures how {@link Masker} replaces characters within a span.
+ * {@link #of(char)} masks the complete span. {@link #keepingFormat()} preserves
+ * non-alphanumeric characters, and {@link #keepingTrailing(int)} preserves trailing
+ * letters or digits.
  *
- * <p>Every policy is length preserving in UTF-16 units: a masked code point outside the
- * basic plane becomes two mask characters, so the spans of every other layer remain
- * valid for the masked text.</p>
+ * <p>Masking preserves UTF-16 length: a supplementary code point uses 2 mask characters.
+ * Other layer offsets remain valid for the masked text.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -38,6 +36,13 @@ public final class MaskPolicy {
   private final boolean keepFormat;
   private final int keepTrailing;
 
+  /**
+   * Initializes a policy with validated options.
+   *
+   * @param mask The replacement character.
+   * @param keepFormat Whether non-alphanumeric characters remain visible.
+   * @param keepTrailing The trailing letter or digit count to retain.
+   */
   private MaskPolicy(char mask, boolean keepFormat, int keepTrailing) {
     this.mask = mask;
     this.keepFormat = keepFormat;
@@ -45,10 +50,10 @@ public final class MaskPolicy {
   }
 
   /**
-   * Creates the base policy: every character of the span becomes the mask character.
+   * Creates a policy that masks the complete span.
    *
    * @param mask The replacement character. Must not be a surrogate.
-   * @return The policy. Never {@code null}.
+   * @return The non-null policy.
    * @throws IllegalArgumentException Thrown if {@code mask} is a surrogate character.
    */
   public static MaskPolicy of(char mask) {
@@ -59,26 +64,24 @@ public final class MaskPolicy {
   }
 
   /**
-   * Returns a policy that masks only letters and digits, leaving separators such as
-   * spaces, hyphens, parentheses, {@code @}, and dots visible. A phone number keeps its
-   * grouping and an email address keeps its {@code @} and dots, which makes the kind of
-   * value recognizable without revealing it.
+   * Returns a policy that masks only Unicode letters and digits. Spaces, punctuation,
+   * symbols and other non-alphanumeric characters remain visible.
    *
-   * @return A new policy; this instance is unchanged. Never {@code null}.
+   * @return A new non-null policy; this instance is unchanged.
    */
   public MaskPolicy keepingFormat() {
     return new MaskPolicy(mask, true, keepTrailing);
   }
 
   /**
-   * Returns a policy that leaves the last {@code count} letters or digits of each span
-   * readable, masking the rest under this policy's other rules. Counting is by code
-   * point, so the kept tail is never half a character.
+   * Returns a policy that preserves the final {@code count} letters or digits of each
+   * span. The remaining positions follow the other policy options. Counting uses
+   * complete code points.
    *
    * @param count The number of trailing letters or digits to keep. Must not be
-   *              negative. A span with fewer letters or digits stays fully readable in
+   *              negative. A span with fewer letters or digits remains readable in
    *              those positions.
-   * @return A new policy; this instance is unchanged. Never {@code null}.
+   * @return A new non-null policy; this instance is unchanged.
    * @throws IllegalArgumentException Thrown if {@code count} is negative.
    */
   public MaskPolicy keepingTrailing(int count) {
@@ -96,6 +99,19 @@ public final class MaskPolicy {
    *         units.
    */
   String apply(String spanText) {
+    final StringBuilder out = new StringBuilder(spanText);
+    apply(spanText, out, 0);
+    return out.toString();
+  }
+
+  /**
+   * Masks positions selected from an original span without restoring prior redactions.
+   *
+   * @param spanText The original text covered by the span.
+   * @param out The document text with any earlier redactions applied.
+   * @param offset The span's start in {@code out}.
+   */
+  void apply(String spanText, StringBuilder out, int offset) {
     int alphanumeric = 0;
     for (int i = 0; i < spanText.length(); ) {
       final int cp = spanText.codePointAt(i);
@@ -105,31 +121,18 @@ public final class MaskPolicy {
       i += Character.charCount(cp);
     }
     final int firstKept = alphanumeric - keepTrailing;
-    final StringBuilder out = new StringBuilder(spanText.length());
     int seen = 0;
     for (int i = 0; i < spanText.length(); ) {
       final int cp = spanText.codePointAt(i);
       final int units = Character.charCount(cp);
-      if (Character.isLetterOrDigit(cp)) {
-        if (seen >= firstKept) {
-          out.appendCodePoint(cp);
-        } else {
-          out.append(mask);
-          if (units == 2) {
-            out.append(mask);
-          }
-        }
-        seen++;
-      } else if (keepFormat) {
-        out.appendCodePoint(cp);
-      } else {
-        out.append(mask);
+      final boolean redact = Character.isLetterOrDigit(cp) ? seen++ < firstKept : !keepFormat;
+      if (redact) {
+        out.setCharAt(offset + i, mask);
         if (units == 2) {
-          out.append(mask);
+          out.setCharAt(offset + i + 1, mask);
         }
       }
       i += units;
     }
-    return out.toString();
   }
 }

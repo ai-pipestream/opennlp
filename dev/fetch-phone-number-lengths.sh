@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Regenerates PhoneNumberLengths from libphonenumber's live metadata.
 # Set PHONE_METADATA_SOURCE, PHONE_METADATA_REVISION, and PHONE_METADATA_DATE
 # together to reproduce a downloaded snapshot without network access.
@@ -42,13 +57,17 @@ python3 - "$TMP_SOURCE" "$TMP_OUT" "$REVISION" "$SNAPSHOT_DATE" <<'PY'
 import re
 import sys
 import xml.etree.ElementTree as ET
+from datetime import date
 from pathlib import Path
 
 source_path, out_path = Path(sys.argv[1]), Path(sys.argv[2])
 revision, snapshot_date = sys.argv[3], sys.argv[4]
 if not re.fullmatch(r"[0-9a-f]{7,40}", revision):
     raise SystemExit("invalid libphonenumber revision")
-if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", snapshot_date):
+try:
+    if date.fromisoformat(snapshot_date).isoformat() != snapshot_date:
+        raise ValueError("date must use YYYY-MM-DD")
+except ValueError:
     raise SystemExit("invalid libphonenumber snapshot date")
 
 root = ET.parse(source_path).getroot()
@@ -56,13 +75,21 @@ if root.tag != "phoneNumberMetadata":
     raise SystemExit(f"unexpected metadata root: {root.tag!r}")
 
 def expand_lengths(value):
+    """Read comma-separated lengths and inclusive [min-max] ranges."""
     lengths = set()
-    for match in re.finditer(r"(\d+)(?:-(\d+))?", value):
-        low = int(match.group(1))
-        high = int(match.group(2) or match.group(1))
-        if low > high or low < 1 or high > 31:
-            raise SystemExit(f"invalid national number length range: {match.group(0)!r}")
-        lengths.update(range(low, high + 1))
+    for token in value.split(","):
+        is_range = token.startswith("[") and token.endswith("]")
+        endpoints = token[1:-1].split("-") if is_range else [token]
+        if (len(endpoints) != (2 if is_range else 1)
+                or any(not part.isascii() or not part.isdecimal() for part in endpoints)):
+            raise ValueError(f"invalid length syntax: {token!r}")
+        low, high = int(endpoints[0]), int(endpoints[-1])
+        if low < 1 or high > 31 or (is_range and high - low < 2):
+            raise ValueError(f"invalid length range: {token!r}")
+        current = set(range(low, high + 1))
+        if lengths.intersection(current):
+            raise ValueError(f"duplicate length: {token!r}")
+        lengths.update(current)
     return lengths
 
 by_code = {}
@@ -71,14 +98,21 @@ if len(territories) < 200:
     raise SystemExit(f"metadata contained only {len(territories)} territories")
 for territory in territories:
     code_text = territory.get("countryCode", "")
-    if not code_text.isascii() or not code_text.isdigit():
+    if (not code_text.isascii() or not code_text.isdigit()
+            or code_text.startswith("0") or len(code_text) > 3):
         raise SystemExit(f"invalid calling code: {code_text!r}")
     code = int(code_text)
     if not 1 <= code <= 999:
         raise SystemExit(f"calling code out of range: {code}")
     lengths = set()
     for possible in territory.findall(".//possibleLengths"):
-        lengths.update(expand_lengths(possible.get("national", "")))
+        national = possible.get("national", "")
+        try:
+            lengths.update(expand_lengths(national))
+        except ValueError as error:
+            raise SystemExit(
+                f"calling code {code} has invalid national lengths {national!r}: {error}"
+            ) from error
     if not lengths:
         raise SystemExit(f"calling code {code} has no national lengths")
     by_code.setdefault(code, set()).update(lengths)

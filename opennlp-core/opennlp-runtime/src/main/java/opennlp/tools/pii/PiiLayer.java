@@ -24,22 +24,22 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 
 /**
- * Reads the mentions of a document's {@link PiiAnnotator#PII} layer, with the checks every
- * document-taking method in this package promises.
+ * Retrieves validated mentions from a document's {@link PiiAnnotator#PII} layer.
  */
 final class PiiLayer {
 
+  /** Prevents construction of this utility class. */
   private PiiLayer() {
-    // This class holds one static reader only and is never instantiated.
   }
 
   /**
-   * Reads the PII mentions of a document.
+   * Retrieves the PII mentions of a document.
    *
-   * @param document The document. Must not be {@code null} and must carry the layer.
-   * @return The mentions in the order they are annotated. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code document} is {@code null} or does
-   *         not carry the PII layer.
+   * @param document The document. Must be non-null and have a PII layer with matching
+   *                 annotation and mention offsets.
+   * @return The mentions in annotation order.
+   * @throws IllegalArgumentException Thrown if {@code document} is null, lacks the PII
+   *         layer, or contains a mention with offsets that do not match the annotation.
    */
   static List<PiiMention> mentions(Document document) {
     if (document == null) {
@@ -52,7 +52,12 @@ final class PiiLayer {
     final List<Annotation<PiiMention>> annotations = document.get(PiiAnnotator.PII);
     final List<PiiMention> mentions = new ArrayList<>(annotations.size());
     for (final Annotation<PiiMention> annotation : annotations) {
-      mentions.add(annotation.value());
+      final PiiMention mention = annotation.value();
+      if (annotation.span().getStart() != mention.span().getStart()
+          || annotation.span().getEnd() != mention.span().getEnd()) {
+        throw new IllegalArgumentException("PII mention offsets must match annotation offsets");
+      }
+      mentions.add(mention);
     }
     return mentions;
   }

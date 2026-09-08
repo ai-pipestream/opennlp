@@ -18,19 +18,15 @@
 package opennlp.tools.pii;
 
 /**
- * The country entries of the
+ * Country codes and IBAN lengths from the
  * <a href="https://www.swift.com/standards/data-standards/iban-international-bank-account-number">
  * ISO 13616 IBAN registry</a>. Country-length projection SHA-256:
  * {@code 0eb634a364ca9ba6b2f5541d3fcd18ff63300e5a027c634f0b8db83af5e994be}.
- * The registry defines which two-letter country codes issue IBANs and the exact length
- * each country assigns. The mod-97 check alone passes about one in 97 random
- * candidates, so validating the country and its registered length is what keeps
- * arbitrary letter-digit runs from being reported as IBANs.
  */
 final class IbanLengths {
 
   /**
-   * The registry as compact 4-character entries, country code then two length digits,
+   * The registry as compact 4-character entries, country code then 2 length digits,
    * sorted by country code.
    */
   private static final String REGISTRY =
@@ -42,7 +38,7 @@ final class IbanLengths {
 
   private static final int TABLE_SIZE = 26 * 26;
 
-  /** Registered length per country code pair, {@code 0} where no country is registered. */
+  /** Registered length indexed by a 2-letter country code; {@code 0} marks no entry. */
   private static final byte[] LENGTHS = new byte[TABLE_SIZE];
 
   static {
@@ -53,15 +49,15 @@ final class IbanLengths {
     }
   }
 
+  /** Prevents construction. */
   private IbanLengths() {
-    // This class holds static lookups only and is never instantiated.
   }
 
   /**
    * Looks up the registered IBAN length of a country.
    *
    * @param first The first country code letter, {@code A} to {@code Z}.
-   * @param second The second country code letter, {@code A} to {@code Z}.
+   * @param second The trailing country code letter, {@code A} to {@code Z}.
    * @return The length the registry assigns, or {@code 0} if the country is not
    *         registered.
    */

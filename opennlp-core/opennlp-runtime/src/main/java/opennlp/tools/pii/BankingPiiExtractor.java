@@ -21,31 +21,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A deterministic {@link PiiExtractor} for United States bank account routing: forward
- * scans over the text, no regular expressions, recognizing
- * <a href="https://en.wikipedia.org/wiki/ABA_routing_transit_number">ABA routing transit
- * numbers</a>. This extractor is opt-in.
+ * Extracts ABA routing-number candidates as 9 contiguous ASCII digits.
  *
- * <p>A candidate is nine digits standing on their own, with a routing symbol in one of the
- * assigned ranges, {@code 01} to {@code 12} for the Federal Reserve districts, {@code 21}
- * to {@code 32} for thrift institutions, {@code 61} to {@code 72} for electronic
- * transactions, and {@code 80} for traveler's checks, and a passing check digit under the
- * weights three, seven, and one that the ABA prescribes.</p>
+ * <p>Accepts prefixes {@code 00-12}, {@code 21-32}, {@code 61-72} and {@code 80} from
+ * the <a href="https://www.aba.com/news-research/analysis-guides/routing-number-policy-procedures">
+ * ABA Routing Number Policy, section IV</a>, and validates the check digit. The
+ * {@code 00} prefix includes U.S. government checks. Zero-only values are rejected.</p>
  *
- * <p>Both tests together still leave a routing number weakly evidenced: about one nine-digit
- * run in ten passes the check digit by chance and about two prefixes in five are assigned,
- * so roughly one arbitrary nine-digit run in twenty five is reported. A run that looks like
- * a routing number is a routing number as far as any character test can tell, so a caller
- * that scans text full of nine-digit identifiers should expect false positives and use the
- * surrounding context, not this extractor alone, to act on them. This is why routing
- * numbers are not part of the default extractor.</p>
+ * <p>A format match does not establish assignment or identify the number's owner.
+ * Other numeric identifiers may match, so use the surrounding context to assess results.
+ * This detector is opt-in through {@link PiiPacks#payment()} or
+ * {@link PiiPacks#allStructured()}, and is not part of the default
+ * {@link CursorPiiExtractor}.</p>
  *
- * <p>Only the plain nine-digit form is recognized, the form a payment instruction and a
- * cheque carry; a run broken up by spaces or hyphens is not a routing number.</p>
- *
- * <p>Normalized form: the nine digits as written.</p>
- *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Spaces and hyphens within a candidate are not accepted. Normalization preserves the
+ * detected digits. Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -53,19 +43,15 @@ public final class BankingPiiExtractor implements PiiExtractor {
 
   private static final int ROUTING_DIGITS = 9;
 
-  /** The weights of the ABA check digit, repeating over the nine digits. */
+  /** The repeating weights of the ABA check digit. */
   private static final int[] WEIGHTS = {3, 7, 1};
 
   private static final int CHECK_MODULUS = 10;
 
   /**
-   * The assigned routing symbol ranges as inclusive pairs: the Federal Reserve districts,
-   * the thrift institutions, the electronic transaction ranges, and traveler's checks. The
-   * assignment scheme as of 2026-08-10; unlike the check digit, which is arithmetic, this
-   * table records what the registrar has handed out and a range added later leaves the
-   * numbers in it unreported until the table is updated.
+   * Allocated routing-prefix ranges from section IV of the linked ABA policy, inclusive.
    */
-  private static final int[][] ASSIGNED_PREFIXES = {{1, 12}, {21, 32}, {61, 72}, {80, 80}};
+  private static final int[][] ALLOCATED_PREFIXES = {{0, 12}, {21, 32}, {61, 72}, {80, 80}};
 
   /**
    * Initializes an extractor for ABA routing numbers.
@@ -76,7 +62,7 @@ public final class BankingPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Reports one mention per accepted nine-digit run, in text order.</p>
+   * <p>Reports one mention per accepted 9-digit run, in text order.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -92,7 +78,7 @@ public final class BankingPiiExtractor implements PiiExtractor {
       if (!onNumberEnd(text, end) || !allDigits(text, i, end)) {
         continue;
       }
-      if (!assignedPrefix(text, i) || !checkDigitValid(text, i)) {
+      if (!allocatedPrefix(text, i) || !checkDigitValid(text, i)) {
         continue;
       }
       Hits.add(hits, i, end, PiiMention.TYPE_ABA_ROUTING,
@@ -104,12 +90,12 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that every character of a range is an ASCII digit.
+   * Checks that a range contains only ASCII digits.
    *
    * @param text The text being scanned.
    * @param start The first character of the range.
    * @param end The exclusive end of the range.
-   * @return {@code true} if the range holds digits only.
+   * @return {@code true} if the range contains only ASCII digits.
    */
   private boolean allDigits(CharSequence text, int start, int end) {
     for (int i = start; i < end; i++) {
@@ -121,8 +107,8 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a numeric candidate ends at {@code end} and does not continue into a
-   * decimal fraction or a comma-grouped number.
+   * Checks the end boundary for a numeric candidate, including decimal and comma-grouped
+   * continuations.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.
@@ -140,16 +126,16 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks the routing symbol, the first two digits, against the assigned ranges.
+   * Checks the leading 2 digits in the allocated prefix ranges.
    *
    * @param text The text being scanned.
    * @param start The first digit of the candidate.
-   * @return {@code true} if the routing symbol is assigned.
+   * @return {@code true} if the prefix is allocated by the policy.
    */
-  private boolean assignedPrefix(CharSequence text, int start) {
+  private boolean allocatedPrefix(CharSequence text, int start) {
     final int prefix =
         (text.charAt(start) - '0') * 10 + (text.charAt(start + 1) - '0');
-    for (final int[] range : ASSIGNED_PREFIXES) {
+    for (final int[] range : ALLOCATED_PREFIXES) {
       if (prefix >= range[0] && prefix <= range[1]) {
         return true;
       }
@@ -158,18 +144,17 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Applies the ABA check digit: the weighted sum of the nine digits under the repeating
-   * weights three, seven, and one must be a multiple of ten.
+   * Checks the repeating 3, 7, 1 checksum weights and excludes a zero-only candidate.
    *
    * @param text The text being scanned.
    * @param start The first digit of the candidate.
-   * @return {@code true} if the check digit holds.
+   * @return {@code true} if the weighted sum is a positive multiple of 10.
    */
   private boolean checkDigitValid(CharSequence text, int start) {
     int sum = 0;
     for (int i = 0; i < ROUTING_DIGITS; i++) {
       sum += WEIGHTS[i % WEIGHTS.length] * (text.charAt(start + i) - '0');
     }
-    return sum % CHECK_MODULUS == 0;
+    return sum > 0 && sum % CHECK_MODULUS == 0;
   }
 }

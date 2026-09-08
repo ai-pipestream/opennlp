@@ -27,14 +27,11 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.util.Span;
 
 /**
- * The result of replacing PII mentions with labels: the rewritten text, where each label
- * now is, and a mapping from offsets in the original text to offsets in the rewritten one.
+ * Replacement text, label spans and a mapping from original to output offsets.
  *
- * <p>Unlike {@link Masker}, which is length preserving and therefore leaves every other
- * layer's spans valid, a label is rarely as long as the value it replaces. Offsets shift,
- * so annotations from the original text have to be moved before they can be used with the
- * rewritten text. {@link #mapOffset(int)}, {@link #mapSpan(Span)}, and
- * {@link #remap(List)} do that moving.</p>
+ * <p>Replacement labels can change text length. Use {@link #mapOffset(int)},
+ * {@link #mapSpan(Span)} or {@link #remap(List)} to map original annotations to the
+ * output text. {@link Masker} instead preserves text length.</p>
  *
  * <p>Produced by {@link Pseudonymizer} and {@link HmacTokenizer}. Instances are immutable
  * and safe to share between threads.</p>
@@ -53,14 +50,14 @@ public final class PiiRewrite {
   private final int originalLength;
 
   /**
-   * Initializes an immutable rewrite from its text and parallel offset tables.
+   * Initializes an immutable rewrite result from output text and offset tables.
    *
-   * @param text The rewritten text.
-   * @param mentions The rewritten mentions.
-   * @param originalStarts Original mention starts.
-   * @param originalEnds Original mention ends.
-   * @param rewrittenStarts Rewritten mention starts.
-   * @param rewrittenEnds Rewritten mention ends.
+   * @param text The output text.
+   * @param mentions The output mentions.
+   * @param originalStarts Original start offsets.
+   * @param originalEnds Original exclusive end offsets.
+   * @param rewrittenStarts Output start offsets.
+   * @param rewrittenEnds Output exclusive end offsets.
    * @param cumulativeShifts Offset shift after each mention.
    * @param originalLength The original text length.
    */
@@ -78,17 +75,17 @@ public final class PiiRewrite {
   }
 
   /**
-   * Replaces every mention with the label the labeler assigns to it.
+   * Replaces each mention with the label assigned by the labeler.
    *
    * @param text The original text. Must not be {@code null}.
    * @param mentions The mentions to replace. Must not be {@code null} or contain
-   *                 {@code null}, every span must lie within {@code text}, and no two
-   *                 spans may overlap. Order does not matter.
+   *                 {@code null}. All spans must be within {@code text} and must not
+   *                 overlap. Order does not matter.
    * @param labeler Assigns the replacement for a mention. Must not be {@code null} and
    *                must not return {@code null} or an empty label.
-   * @return The rewrite. Never {@code null}.
+   * @return The non-null rewrite result.
    * @throws IllegalArgumentException Thrown if an argument is {@code null}, a mention is
-   *         {@code null}, a span lies outside the text, two spans overlap, or the labeler
+   *         {@code null}, a span lies outside the text, spans overlap, or the labeler
    *         returns {@code null} or an empty label.
    */
   static PiiRewrite replace(CharSequence text, List<PiiMention> mentions,
@@ -145,6 +142,8 @@ public final class PiiRewrite {
    * @param text The source text.
    * @param mentions The mentions to validate and order.
    * @return A mutable copy sorted by start offset.
+   * @throws IllegalArgumentException If a mention is null, outside the text or overlaps
+   *         another mention.
    */
   private static List<PiiMention> ordered(CharSequence text, List<PiiMention> mentions) {
     final List<PiiMention> ordered = new ArrayList<>(mentions.size());
@@ -168,32 +167,30 @@ public final class PiiRewrite {
   }
 
   /**
-   * Returns the rewritten text.
+   * Returns the output text.
    *
-   * @return The text with every mention replaced by its label. Never {@code null}.
+   * @return The non-null text with mentions replaced by labels.
    */
   public String text() {
     return text;
   }
 
   /**
-   * Returns where the labels are in the rewritten text, in text order. The
-   * {@link PiiMention#normalized() normalized form} of each is the label itself, so the
-   * list can be annotated onto the rewritten text as a {@link PiiAnnotator#PII} layer
-   * without revealing anything that was replaced.
+   * Returns replacement labels with output spans, in text order. The
+   * {@link PiiMention#normalized() normalized value} is the replacement label.
+   * Use this list to build a {@link PiiAnnotator#PII} layer on the output text.
    *
-   * @return The labels as mentions of the rewritten text. Never {@code null}; immutable.
+   * @return The non-null, immutable label list.
    */
   public List<PiiMention> mentions() {
     return mentions;
   }
 
   /**
-   * Maps an offset in the original text to the matching offset in the rewritten text.
+   * Maps an original-text offset to an output offset.
    *
-   * <p>An offset in unreplaced text maps exactly. An offset inside a replaced value maps
-   * to the start of its label, since no finer answer exists: the characters it pointed at
-   * are gone.</p>
+   * <p>Offsets outside replacements include cumulative length shifts. An offset inside
+   * a replacement maps to the label start.</p>
    *
    * @param offset The offset in the original text. Must be between {@code 0} and the
    *               length of the original text.
@@ -206,16 +203,15 @@ public final class PiiRewrite {
   }
 
   /**
-   * Maps a span of the original text to the matching span of the rewritten text.
+   * Maps an original-text span to an output span.
    *
-   * <p>A span that contains a replaced value grows or shrinks with the label. A span that
-   * is contained in a replaced value collapses onto the whole label, so the returned span
-   * covers at least the label. Sentence and token spans, which never straddle a value
-   * partially, map exactly.</p>
+   * <p>A non-empty span that intersects a replaced value includes the complete label.
+   * Offsets outside replacements include cumulative length shifts. An empty span remains
+   * empty at the position returned by {@link #mapOffset(int)}.</p>
    *
    * @param span The span in the original text. Must not be {@code null} and must lie
    *             within the original text.
-   * @return The matching span of {@link #text()}. Never {@code null}.
+   * @return The non-null matching span of {@link #text()}.
    * @throws IllegalArgumentException Thrown if {@code span} is {@code null}.
    * @throws IndexOutOfBoundsException Thrown if {@code span} lies outside the original
    *         text.
@@ -225,24 +221,23 @@ public final class PiiRewrite {
       throw new IllegalArgumentException("span must not be null");
     }
     final int start = map(span.getStart(), true);
-    final int end = Math.max(start, map(span.getEnd(), false));
+    final int end = span.length() == 0 ? start : Math.max(start, map(span.getEnd(), false));
     return new Span(start, end, span.getType(), span.getProb());
   }
 
   /**
-   * Maps the spans of a layer's annotations onto the rewritten text, keeping each
-   * annotation's value.
+   * Maps annotation spans to the output text without changing annotation values.
    *
-   * <p>An annotation wholly inside a replaced value maps to the whole replacement label.
-   * An annotation that crosses a replacement boundary expands or contracts with that
-   * label. Only a genuinely empty mapped span is left out.</p>
+   * <p>A non-empty annotation that intersects a replacement includes the complete label.
+   * Empty annotations are omitted. Values are unchanged, including any text or offsets
+   * stored in them. Use {@link #mentions()} to build a PII layer of replacement labels.</p>
    *
-   * @param annotations The annotations of the original text. Must not be {@code null} or
-   *                    contain {@code null}.
+   * @param annotations Positional annotations of the original text. The list, annotations
+   *                    and their spans must be non-null.
    * @param <T> The annotation value type.
-   * @return The annotations with mapped spans, in the given order. Never {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code annotations} is {@code null} or
-   *         contains {@code null}.
+   * @return The non-null list of annotations with mapped spans, in the given order.
+   * @throws IllegalArgumentException Thrown if {@code annotations}, an annotation, or an
+   *         annotation's span is null.
    * @throws IndexOutOfBoundsException Thrown if an annotation lies outside the original
    *         text.
    */
@@ -268,8 +263,10 @@ public final class PiiRewrite {
    * span.
    *
    * @param offset The source offset.
-   * @param towardsStart Whether an interior offset maps to the label start rather than end.
-   * @return The rewritten offset.
+   * @param towardsStart Whether an interior offset maps to the label start; false selects
+   *                     the exclusive end.
+   * @return The output offset.
+   * @throws IndexOutOfBoundsException If the offset is outside the original text.
    */
   private int map(int offset, boolean towardsStart) {
     if (offset < 0 || offset > originalLength) {

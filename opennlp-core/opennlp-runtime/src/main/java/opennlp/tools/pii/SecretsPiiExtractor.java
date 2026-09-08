@@ -17,57 +17,64 @@
 
 package opennlp.tools.pii;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
 /**
- * A deterministic {@link PiiExtractor} for credentials that leak into text: forward scans
- * over the text, no regular expressions, recognizing AWS access key identifiers, GitHub
- * access tokens, JSON Web Tokens, and credentials embedded in a URL. Every form is
- * anchored by a fixed prefix or by a structure that must parse, so no candidate rests on
- * length alone. This extractor is opt-in.
+ * Extracts AWS access key identifiers, GitHub tokens, JWT candidates and URL credentials.
+ * This detector is opt-in.
  *
  * <p>Recognized forms:</p>
  * <ul>
  *   <li>AWS access key: the identifier prefixes {@code AKIA} for a long-term key and
- *   {@code ASIA} for a temporary one, followed by 16 uppercase letters and digits, as
+ *   {@code ASIA} for a temporary one, followed by 16 uppercase letters and digits. See
  *   <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html">
- *   the IAM identifier reference</a> describes. The prefixes that mark a user, role, or
- *   policy identifier rather than a key are not reported, since those are not
- *   secrets.</li>
+ *   the IAM identifier reference</a> for the prefix meanings. User, role and policy
+ *   identifiers and secret access key values are not reported.</li>
  *   <li>GitHub token: the prefixes {@code ghp_}, {@code gho_}, {@code ghu_},
- *   {@code ghs_}, and {@code ghr_} followed by at least 36 token characters, or
+ *   and {@code ghr_} followed by at least 36 token characters, or
  *   {@code github_pat_} followed by at least 82 token characters. Both forms accept
- *   letters, digits, and underscores and are capped at 255 characters, following the
- *   <a href="https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/">
- *   documented token formats</a>. The prefixes are case sensitive.</li>
- *   <li>JSON Web Token: three
+ *   ASCII letters, digits and underscores, with a scanner limit of 255 characters.
+ *   Installation tokens start with {@code ghs_} and accept at least 36 body characters:
+ *   ASCII letters, digits, underscores, hyphens and dots, without a fixed maximum length.
+ *   Trailing dots are excluded as punctuation.
+ *   Prefixes are case sensitive. Checksums, token contents and active status are not
+ *   verified. See the <a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github#githubs-token-formats">
+ *   token prefix reference</a> and <a href="https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/">
+ *   installation-token matching guidance</a>.</li>
+ *   <li>JWT candidate: 3 non-empty, unpadded
  *   <a href="https://datatracker.ietf.org/doc/html/rfc4648#section-5">base64url</a>
- *   segments separated by dots, the compact serialization of
- *   <a href="https://datatracker.ietf.org/doc/html/rfc7519">RFC 7519</a>. The first
- *   segment is decoded and must be a JSON object carrying the {@code alg} header that
- *   <a href="https://datatracker.ietf.org/doc/html/rfc7515">RFC 7515</a> requires, so a
- *   dotted run of base64url characters is not enough.</li>
+ *   segments separated by dots. Encodings must have valid lengths and zero unused bits.
+ *   The complete UTF-8 header must be a JSON object with one top-level {@code alg} member
+ *   containing a non-empty ASCII string. JSON whitespace, escaped names and nested
+ *   values are supported. Signatures, claims and other JOSE parameter semantics are not
+ *   verified. Unsigned tokens with empty signatures and 5-part encrypted tokens are
+ *   excluded. See <a href="https://datatracker.ietf.org/doc/html/rfc7515">RFC 7515</a>
+ *   and <a href="https://datatracker.ietf.org/doc/html/rfc7519">RFC 7519</a>.</li>
  *   <li>URL credential: the userinfo component of a URL, as
  *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1">RFC 3986</a>
- *   defines it, when it carries a password: a user name, a colon, and a non-empty
- *   password before the {@code @}. Only the credential is reported, not the whole URL, so
- *   masking it leaves the scheme and host readable. A userinfo without a password is not
- *   reported, since a bare user name in a URL is not a secret.</li>
+ *   defines it: a non-empty username, a colon and a non-empty password before {@code @}.
+ *   Schemes start with an ASCII letter and may include letters, digits, {@code +},
+ *   {@code -} and {@code .}. Percent escapes must contain 2 hexadecimal digits.
+ *   Only userinfo is reported; masking preserves the scheme, host and path. The scanner
+ *   does not validate the host or scheme-specific rules.</li>
  * </ul>
  *
- * <p>Normalized forms: every type keeps the credential exactly as written, since a
- * credential has no formatting to remove and comparing two occurrences character by
- * character is what a caller needs. A mention therefore carries the secret; use
- * {@link HmacTokenizer} or {@link PiiAuditReport} rather than the normalized form when
- * building an artifact that must not hold the secret itself.</p>
+ * <p>Normalized values preserve the original text, including URL percent escapes.
+ * These values can contain credentials. Use {@link HmacTokenizer} or
+ * {@link PiiAuditReport} when output must exclude the credential text.</p>
  *
- * <p>All four types are reported by default; the {@link #SecretsPiiExtractor(Set)}
+ * <p>AWS, GitHub and JWT candidates cannot start or end within a run of Unicode
+ * letters, digits or underscores. A hyphen also prevents a JWT candidate start.</p>
+ *
+ * <p>All supported types are reported by default; the {@link #SecretsPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -76,20 +83,13 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final Set<String> ALL_TYPES = Set.of(PiiMention.TYPE_AWS_ACCESS_KEY,
       PiiMention.TYPE_GITHUB_TOKEN, PiiMention.TYPE_JWT, PiiMention.TYPE_URL_CREDENTIAL);
 
-  /**
-   * The AWS identifier prefixes that mark an access key rather than a resource, from the IAM
-   * identifier reference as of 2026-08-10. Unlike a checksum, this table is a record of what
-   * a vendor issues today: a new key prefix means a value this scanner will not report until
-   * the table is updated, so the date matters.
-   */
+  /** Long-term and temporary AWS access key identifier prefixes. */
   private static final String[] AWS_KEY_PREFIXES = {"AKIA", "ASIA"};
 
-  /**
-   * The GitHub token prefixes of the 40-character form, from the token format announcement
-   * as of 2026-08-10. Read the note on {@link #AWS_KEY_PREFIXES} before relying on it.
-   */
-  private static final String[] GITHUB_PREFIXES = {"ghp_", "gho_", "ghu_", "ghs_", "ghr_"};
+  /** GitHub token prefixes using the alphanumeric/underscore body alphabet. */
+  private static final String[] GITHUB_PREFIXES = {"ghp_", "gho_", "ghu_", "ghr_"};
 
+  private static final String GITHUB_INSTALLATION_PREFIX = "ghs_";
   private static final String GITHUB_FINE_GRAINED_PREFIX = "github_pat_";
 
   private static final int AWS_BODY_LENGTH = 16;
@@ -98,52 +98,35 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private static final int GITHUB_MAX_LENGTH = 255;
 
   private static final int JWT_SEGMENTS = 3;
-  private static final int JWT_HEADER_MIN_LENGTH = 8;
-  private static final int JWT_PAYLOAD_MIN_LENGTH = 4;
-  private static final int JWT_SIGNATURE_MIN_LENGTH = 4;
-
-  /** The base64url prefix of a JSON object, that is of {@code {"}. */
-  private static final String JWT_HEADER_PREFIX = "eyJ";
-
-  /** As many header characters as any {@code alg} declaration needs to be visible in. */
-  private static final int JWT_HEADER_SCAN_LENGTH = 88;
-
-  /**
-   * The header parameter every JWS header must carry, as it is written in the JSON: with
-   * its quotes, so that a longer member name ending in those three letters, {@code notalg}
-   * for instance, is not mistaken for it.
-   */
-  private static final String JWT_ALGORITHM_PARAMETER = "\"alg\"";
 
   private static final String SCHEME_SEPARATOR = "://";
+  private static final int PERCENT_ESCAPE_LENGTH = 3;
 
   private final Set<String> types;
 
   /**
-   * Initializes an extractor that reports all four types.
+   * Initializes an extractor that reports all supported types.
    */
   public SecretsPiiExtractor() {
     this.types = ALL_TYPES;
   }
 
   /**
-   * Initializes an extractor limited to a subset of the types, for a caller that scans
-   * commit messages for cloud keys, for example, without flagging every signed token.
+   * Initializes an extractor for selected credential types.
    *
-   * @param types The types to report, drawn from
-   *              {@link PiiMention#TYPE_AWS_ACCESS_KEY},
+   * @param types The types to report: {@link PiiMention#TYPE_AWS_ACCESS_KEY},
    *              {@link PiiMention#TYPE_GITHUB_TOKEN}, {@link PiiMention#TYPE_JWT}, and
-   *              {@link PiiMention#TYPE_URL_CREDENTIAL}. Must not be {@code null} or
-   *              empty and must not contain a type this extractor does not recognize.
+   *              {@link PiiMention#TYPE_URL_CREDENTIAL}. Must be non-null and non-empty,
+   *              without null or unrecognized entries.
    * @throws IllegalArgumentException Thrown if {@code types} is {@code null} or empty, or
-   *         contains an unrecognized type.
+   *         contains a null or unrecognized type.
    */
   public SecretsPiiExtractor(Set<String> types) {
     if (types == null || types.isEmpty()) {
       throw new IllegalArgumentException("types must not be null or empty");
     }
     for (final String type : types) {
-      if (!ALL_TYPES.contains(type)) {
+      if (type == null || !ALL_TYPES.contains(type)) {
         throw new IllegalArgumentException("types contains an unrecognized type: " + type);
       }
     }
@@ -153,9 +136,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>Each enabled type is scanned for independently; overlapping candidates are then
-   * reduced to a non-overlapping set, leftmost and longest first. A token inside a URL
-   * credential is therefore reported once, as the credential that contains it.</p>
+   * <p>Enabled types are scanned independently and overlapping candidates are retained.</p>
    */
   @Override
   public List<PiiMention> extract(CharSequence text) {
@@ -186,7 +167,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    */
   private void scanAwsKeys(CharSequence text, List<Hits.Hit> hits) {
     for (int i = 0; i < text.length(); i++) {
-      if (text.charAt(i) != 'A' || !Boundaries.onWordStart(text, i)) {
+      if (text.charAt(i) != 'A' || !onTokenStart(text, i, false)) {
         continue;
       }
       for (final String prefix : AWS_KEY_PREFIXES) {
@@ -214,7 +195,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds GitHub access tokens in the short and the fine-grained form.
+   * Finds GitHub access tokens, including dotted installation tokens.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -224,55 +205,58 @@ public final class SecretsPiiExtractor implements PiiExtractor {
       if (text.charAt(i) != 'g' || !onTokenStart(text, i, false)) {
         continue;
       }
-      int end = -1;
-      if (startsWith(text, i, GITHUB_FINE_GRAINED_PREFIX)) {
-        end = tokenEnd(text, i + GITHUB_FINE_GRAINED_PREFIX.length(),
-            GITHUB_FINE_GRAINED_BODY_LENGTH, i);
+      int start = -1;
+      int minimumLength = GITHUB_BODY_LENGTH;
+      final boolean installation = startsWith(text, i, GITHUB_INSTALLATION_PREFIX);
+      if (installation) {
+        start = i + GITHUB_INSTALLATION_PREFIX.length();
+      } else if (startsWith(text, i, GITHUB_FINE_GRAINED_PREFIX)) {
+        start = i + GITHUB_FINE_GRAINED_PREFIX.length();
+        minimumLength = GITHUB_FINE_GRAINED_BODY_LENGTH;
       } else {
         for (final String prefix : GITHUB_PREFIXES) {
           if (startsWith(text, i, prefix)) {
-            end = tokenEnd(text, i + prefix.length(), GITHUB_BODY_LENGTH, i);
+            start = i + prefix.length();
             break;
           }
         }
       }
-      if (end < 0) {
+      if (start < 0) {
         continue;
       }
-      Hits.add(hits, i, end, PiiMention.TYPE_GITHUB_TOKEN, text.subSequence(i, end).toString());
-      // The loop increment resumes the scan at the exclusive match end.
+      final int end = tokenEnd(text, start, installation);
+      int candidateEnd = end;
+      if (installation) {
+        while (candidateEnd > start && text.charAt(candidateEnd - 1) == '.') {
+          candidateEnd--;
+        }
+      }
+      if (candidateEnd - start >= minimumLength
+          && (installation || candidateEnd - i <= GITHUB_MAX_LENGTH) && onTokenEnd(text, end)) {
+        Hits.add(hits, i, candidateEnd, PiiMention.TYPE_GITHUB_TOKEN,
+            text.subSequence(i, candidateEnd).toString());
+      }
+      // Skip the scanned run even when rejected, to avoid scanning embedded prefixes again.
       i = end - 1;
     }
   }
 
   /**
-   * Reads a variable-length GitHub token body and checks its bounds.
+   * Parses a GitHub token body using the alphabet for the prefix.
    *
    * @param text The text being scanned.
    * @param start The first body character.
-   * @param minimumLength The minimum number of body characters for this prefix.
-   * @param tokenStart The first character of the prefix.
-   * @return The exclusive end offset of the token, or {@code -1} if the body does not
-   *         have the prescribed form.
+   * @param installation Whether dots and hyphens are also body characters.
+   * @return The exclusive end offset of the body, including any terminal dots.
    */
-  private int tokenEnd(CharSequence text, int start, int minimumLength, int tokenStart) {
+  private int tokenEnd(CharSequence text, int start, boolean installation) {
     int end = start;
-    while (end < text.length() && end - tokenStart <= GITHUB_MAX_LENGTH) {
+    while (end < text.length()) {
       final char c = text.charAt(end);
-      if (!Ascii.isLetterOrDigit(c) && c != '_') {
+      if (!Ascii.isLetterOrDigit(c) && c != '_' && !(installation && (c == '.' || c == '-'))) {
         break;
       }
       end++;
-    }
-    if (end < text.length()) {
-      final char c = text.charAt(end);
-      if (Ascii.isLetterOrDigit(c) || c == '_') {
-        return -1;
-      }
-    }
-    if (end - start < minimumLength || end - tokenStart > GITHUB_MAX_LENGTH
-        || !onTokenEnd(text, end)) {
-      return -1;
     }
     return end;
   }
@@ -284,10 +268,8 @@ public final class SecretsPiiExtractor implements PiiExtractor {
    * @param hits The candidate collector.
    */
   private void scanJwts(CharSequence text, List<Hits.Hit> hits) {
-    final int[] minimum =
-        {JWT_HEADER_MIN_LENGTH, JWT_PAYLOAD_MIN_LENGTH, JWT_SIGNATURE_MIN_LENGTH};
     for (int i = 0; i < text.length(); i++) {
-      if (!startsWith(text, i, JWT_HEADER_PREFIX) || !onTokenStart(text, i, true)) {
+      if (!canStartJsonHeader(text.charAt(i)) || !onJwtStart(text, i)) {
         continue;
       }
       int p = i;
@@ -305,13 +287,13 @@ public final class SecretsPiiExtractor implements PiiExtractor {
         while (p < text.length() && isBase64UrlChar(text.charAt(p))) {
           p++;
         }
-        if (p - segmentStart < minimum[segment]) {
+        if (!isBase64UrlEncoding(text, segmentStart, p)) {
           segments = false;
         } else if (segment == 0) {
           headerEnd = p;
         }
       }
-      if (!segments || !onTokenEnd(text, p) || !isJwsHeader(text, i, headerEnd)) {
+      if (!segments || !onJwtEnd(text, p) || !isJwsHeader(text, i, headerEnd)) {
         continue;
       }
       Hits.add(hits, i, p, PiiMention.TYPE_JWT, text.subSequence(i, p).toString());
@@ -321,70 +303,103 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Decodes a candidate's first segment and checks that it is a JSON object carrying the
-   * {@code alg} header parameter, which is what tells a token from any other dotted run
-   * of base64url characters.
-   *
-   * <p>The parameter has to appear as a member name, quoted and followed by its colon.
-   * Looking for the three letters anywhere would accept a header whose only member is
-   * named {@code notalg} or {@code algorithm}, and a base64url segment that happens to
-   * decode to text containing them.</p>
+   * Converts the UTF-8 header and checks JSON syntax and the algorithm member.
    *
    * @param text The text being scanned.
    * @param start The first header character.
    * @param end The exclusive end of the header segment.
-   * @return {@code true} if the segment decodes to a JWS header.
+   * @return {@code true} if the header passes the candidate syntax checks.
    */
   private boolean isJwsHeader(CharSequence text, int start, int end) {
-    final int scanEnd = Math.min(end, start + JWT_HEADER_SCAN_LENGTH);
-    final byte[] header = decodeBase64Url(text, start, scanEnd);
-    if (header.length == 0 || header[0] != '{') {
+    final byte[] header = decodeBase64Url(text, start, end);
+    try {
+      return new JwsHeader(StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(header)))
+          .isValid();
+    } catch (CharacterCodingException e) {
       return false;
     }
-    for (int i = 0; i + JWT_ALGORITHM_PARAMETER.length() <= header.length; i++) {
-      boolean match = true;
-      for (int j = 0; j < JWT_ALGORITHM_PARAMETER.length(); j++) {
-        match &= header[i + j] == (byte) JWT_ALGORITHM_PARAMETER.charAt(j);
-      }
-      if (match && followedByColon(header, i + JWT_ALGORITHM_PARAMETER.length())) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
-   * Tests whether a member name is followed by its colon, across the whitespace JSON
-   * allows there.
+   * Checks the first base64url character for a JSON object or JSON whitespace byte.
    *
-   * @param header The decoded header bytes.
-   * @param from The first byte after the member name.
-   * @return {@code true} if a colon follows.
+   * @param c The first encoded character.
+   * @return {@code true} for an encoded opening brace, space, tab, CR or LF.
    */
-  private boolean followedByColon(byte[] header, int from) {
-    for (int i = from; i < header.length; i++) {
-      final byte b = header[i];
-      if (b == ':') {
-        return true;
-      }
-      if (b != ' ' && b != '\t' && b != '\n' && b != '\r') {
+  private boolean canStartJsonHeader(char c) {
+    return c == 'e' || c == 'I' || c == 'C' || c == 'D';
+  }
+
+  /**
+   * Checks a non-empty unpadded base64url run, including unused low bits.
+   *
+   * @param text The candidate text; the run contains only base64url characters.
+   * @param start The run start.
+   * @param end The exclusive run end.
+   * @return {@code true} for an encoding of a non-empty byte sequence.
+   */
+  private boolean isBase64UrlEncoding(CharSequence text, int start, int end) {
+    final int length = end - start;
+    if (length == 0 || length % 4 == 1) {
+      return false;
+    }
+    final int unusedMask = switch (length % 4) {
+      case 2 -> 0x0f;
+      case 3 -> 0x03;
+      default -> 0;
+    };
+    return (base64UrlValue(text.charAt(end - 1)) & unusedMask) == 0;
+  }
+
+  /**
+   * Rejects candidates inside a longer base64url or dotted value.
+   *
+   * @param text The text being scanned.
+   * @param start The candidate start.
+   * @return {@code true} if the candidate may start here.
+   */
+  private boolean onJwtStart(CharSequence text, int start) {
+    int p = start;
+    while (p > 0 && text.charAt(p - 1) == '.') {
+      p--;
+    }
+    return onTokenStart(text, start, true) && onTokenStart(text, p, true);
+  }
+
+  /**
+   * Rejects extra segments, padding and non-URL base64 continuations.
+   *
+   * @param text The text being scanned.
+   * @param end The exclusive candidate end.
+   * @return {@code true} if the candidate may end here.
+   */
+  private boolean onJwtEnd(CharSequence text, int end) {
+    if (!onTokenEnd(text, end)) {
+      return false;
+    }
+    if (end < text.length()) {
+      final char c = text.charAt(end);
+      if (c == '=' || c == '+' || c == '/') {
         return false;
       }
     }
-    return false;
+    int p = end;
+    while (p < text.length() && text.charAt(p) == '.') {
+      p++;
+    }
+    return onTokenEnd(text, p) && (p == text.length() || text.charAt(p) != '-');
   }
 
   /**
-   * Decodes base64url characters to bytes, ignoring a trailing group too short to form
-   * one more byte.
+   * Converts a checked, unpadded base64url run.
    *
    * @param text The text being scanned.
    * @param start The first character to decode.
    * @param end The exclusive end of the characters to decode.
-   * @return The decoded bytes. Never {@code null}.
+   * @return The decoded bytes.
    */
   private byte[] decodeBase64Url(CharSequence text, int start, int end) {
-    final byte[] decoded = new byte[(end - start) * 3 / 4 + 1];
+    final byte[] decoded = new byte[(int) ((long) (end - start) * 3 / 4)];
     int accumulator = 0;
     int bits = 0;
     int length = 0;
@@ -396,7 +411,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
         decoded[length++] = (byte) (accumulator >> bits & 0xFF);
       }
     }
-    return Arrays.copyOf(decoded, length);
+    return decoded;
   }
 
   /**
@@ -408,14 +423,23 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private void scanUrlCredentials(CharSequence text, List<Hits.Hit> hits) {
     // A scheme is at least one letter long, so no credential can start before offset 1.
     for (int i = 1; i + SCHEME_SEPARATOR.length() < text.length(); i++) {
-      if (!startsWith(text, i, SCHEME_SEPARATOR) || !Ascii.isLetter(text.charAt(i - 1))) {
+      if (!startsWith(text, i, SCHEME_SEPARATOR) || !hasScheme(text, i)) {
         continue;
       }
       final int start = i + SCHEME_SEPARATOR.length();
       int p = start;
       int colon = -1;
       while (p < text.length() && isUserinfoChar(text.charAt(p))) {
-        if (text.charAt(p) == ':' && colon < 0) {
+        final char c = text.charAt(p);
+        if (c == '%') {
+          if (text.length() - p < PERCENT_ESCAPE_LENGTH || !Ascii.isHexDigit(text.charAt(p + 1))
+              || !Ascii.isHexDigit(text.charAt(p + 2))) {
+            break;
+          }
+          p += PERCENT_ESCAPE_LENGTH;
+          continue;
+        }
+        if (c == ':' && colon < 0) {
           colon = p;
         }
         p++;
@@ -431,9 +455,32 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for a character allowed in the userinfo component of a URL: the unreserved
-   * characters, the sub-delimiters, the percent sign of an escape, and the colon that
-   * separates the user name from the password.
+   * Checks the complete scheme before an authority separator.
+   *
+   * @param text The text being scanned.
+   * @param end The offset of the scheme's colon.
+   * @return {@code true} for an ASCII scheme starting at an identifier boundary.
+   */
+  private boolean hasScheme(CharSequence text, int end) {
+    int start = end;
+    while (start > 0 && isSchemeChar(text.charAt(start - 1))) {
+      start--;
+    }
+    return start < end && Ascii.isLetter(text.charAt(start)) && onTokenStart(text, start, false);
+  }
+
+  /**
+   * Checks a noninitial character in a scheme.
+   *
+   * @param c The character to check.
+   * @return {@code true} for an ASCII letter, digit, plus sign, hyphen or dot.
+   */
+  private boolean isSchemeChar(char c) {
+    return Ascii.isLetterOrDigit(c) || c == '+' || c == '-' || c == '.';
+  }
+
+  /**
+   * Checks userinfo characters and percent signs. The scanner validates escape digits.
    *
    * @param c The character.
    * @return {@code true} if the character may appear in a userinfo component.
@@ -460,7 +507,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads the value of a base64url character.
+   * Returns the value of a base64url character.
    *
    * @param c The character, which must be a base64url character.
    * @return The value {@code 0} to {@code 63}.
@@ -479,8 +526,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a token ends at {@code end}: no letter, digit, or underscore follows, so
-   * a prefix of a longer identifier is never reported.
+   * Checks that no Unicode letter, digit or underscore follows the candidate.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.
@@ -492,8 +538,8 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a token does not begin inside a longer identifier. GitHub token bodies
-   * allow underscores; base64url additionally allows hyphens.
+   * Rejects starts after Unicode letters/digits or underscores. Base64url also excludes
+   * a preceding hyphen.
    *
    * @param text The text being scanned.
    * @param start The candidate start.
@@ -505,17 +551,17 @@ public final class SecretsPiiExtractor implements PiiExtractor {
       return true;
     }
     final char previous = text.charAt(start - 1);
-    return !Ascii.isLetterOrDigit(previous) && previous != '_'
+    return Boundaries.onWordStart(text, start) && previous != '_'
         && (!base64Url || previous != '-');
   }
 
   /**
-   * Tests whether a literal occurs at an offset.
+   * Checks whether text is present at an offset.
    *
    * @param text The text being scanned.
    * @param start The offset to compare at.
-   * @param literal The literal to look for.
-   * @return {@code true} if the text carries the literal at that offset.
+   * @param literal The text to compare.
+   * @return {@code true} if the text is present at that offset.
    */
   private boolean startsWith(CharSequence text, int start, String literal) {
     if (start + literal.length() > text.length()) {

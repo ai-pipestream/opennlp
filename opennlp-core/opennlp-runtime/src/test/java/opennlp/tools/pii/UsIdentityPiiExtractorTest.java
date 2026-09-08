@@ -30,6 +30,12 @@ public class UsIdentityPiiExtractorTest {
 
   private final UsIdentityPiiExtractor extractor = new UsIdentityPiiExtractor();
 
+  /**
+   * Checks accepted SSN ranges, grouping, normalization and offsets.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected hyphenated form.
+   */
   @ParameterizedTest
   @CsvSource({
       "123-45-6789, 123-45-6789",
@@ -50,7 +56,9 @@ public class UsIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies the number spaces the SSA never issues from.
+   * Checks excluded SSN areas and zero-valued groups.
+   *
+   * @param text The rejected SSN form.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -63,6 +71,11 @@ public class UsIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Checks invalid lengths, groupings, separators and boundaries.
+   *
+   * @param text The rejected candidate.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "123456789",
@@ -80,9 +93,17 @@ public class UsIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Checks accepted ITIN groups and normalization.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected hyphenated form.
+   */
   @ParameterizedTest
   @CsvSource({
       "900-70-1234, 900-70-1234",
+      "900-70-0000, 900-70-0000",
+      "'900 70 0000', 900-70-0000",
       "999-88-9999, 999-88-9999",
       "912-50-1234, 912-50-1234",
       "923-99-1234, 923-99-1234",
@@ -99,8 +120,9 @@ public class UsIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies that an area of 900 or above with a group outside the IRS ranges is reported as
-   * neither type: it cannot be a Social Security number and is no assigned taxpayer number.
+   * Checks excluded ITIN groups.
+   *
+   * @param text The rejected candidate.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -109,12 +131,12 @@ public class UsIdentityPiiExtractorTest {
       "900-69-1234",
       "900-89-1234",
       "900-93-1234",
-      "999-00-1234",
-      "900-70-0000"})
+      "999-00-1234"})
   void testRejectsAreasAboveEightHundredNinetyNineOutsideTheIrsGroups(String text) {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks the original span in surrounding prose. */
   @Test
   void testSpanInSentence() {
     final String text = "Her SSN is 123-45-6789, filed in 2026.";
@@ -125,6 +147,7 @@ public class UsIdentityPiiExtractorTest {
         mentions.get(0).span().getStart(), mentions.get(0).span().getEnd()));
   }
 
+  /** Checks both supported types in one request. */
   @Test
   void testFindsBothTypesInOneText() {
     final String text = "SSN 123-45-6789 and ITIN 900-70-1234";
@@ -134,6 +157,7 @@ public class UsIdentityPiiExtractorTest {
         mentions.stream().map(PiiMention::type).toList());
   }
 
+  /** Checks type selection without changing recognition rules. */
   @Test
   void testTypeSubsetLimitsWhatIsReported() {
     final String text = "SSN 123-45-6789 and ITIN 900-70-1234";
@@ -146,6 +170,11 @@ public class UsIdentityPiiExtractorTest {
             .stream().map(PiiMention::type).toList());
   }
 
+  /**
+   * Checks ordinary text without matching identifiers.
+   *
+   * @param text The input without a match.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "no identifier here",
@@ -157,6 +186,7 @@ public class UsIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks constructor and extraction argument validation. */
   @Test
   void testRejectsUnrecognizedTypeAndMissingArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

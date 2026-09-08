@@ -30,6 +30,12 @@ public class EuIdentityPiiExtractorTest {
 
   private final EuIdentityPiiExtractor extractor = new EuIdentityPiiExtractor();
 
+  /**
+   * Checks accepted NHS forms, normalized digits and offsets.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected compact digits.
+   */
   @ParameterizedTest
   @CsvSource({
       "9434765919, 9434765919",
@@ -52,8 +58,9 @@ public class EuIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies the modulus 11 check: each fixture differs from a valid number in one digit, or
-   * leaves the remainder that would need a check digit of ten.
+   * Checks incorrect NHS check digits, including a computed check value of 10.
+   *
+   * @param text The rejected number.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -68,8 +75,9 @@ public class EuIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies that a run of one repeated digit is not reported even where the check digit
-   * happens to hold, since such a run is a placeholder wherever it appears.
+   * Checks uniform digit rejection even when the checksum passes.
+   *
+   * @param text The uniform digits.
    */
   @ParameterizedTest
   @ValueSource(strings = {"0000000000", "1111111111"})
@@ -77,6 +85,11 @@ public class EuIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /**
+   * Checks invalid NHS lengths, groupings and boundaries.
+   *
+   * @param text The rejected form.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "943476591",
@@ -92,6 +105,12 @@ public class EuIdentityPiiExtractorTest {
             .noneMatch(m -> PiiMention.TYPE_UK_NHS.equals(m.type())), text);
   }
 
+  /**
+   * Checks accepted German tax number forms and normalized digits.
+   *
+   * @param text The candidate text.
+   * @param normalized The expected compact digits.
+   */
   @ParameterizedTest
   @CsvSource({
       "65929970489, 65929970489",
@@ -109,6 +128,11 @@ public class EuIdentityPiiExtractorTest {
     Assertions.assertEquals(normalized, mentions.get(0).normalized());
   }
 
+  /**
+   * Checks incorrect German tax number check digits.
+   *
+   * @param text The rejected number.
+   */
   @ParameterizedTest
   @ValueSource(strings = {"65929970488", "81095324716", "23746189574", "50123456783"})
   void testRejectsGermanTaxNumbersWithABrokenCheckDigit(String text) {
@@ -116,10 +140,9 @@ public class EuIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies the digit rules the tax office adds to the check digit. The first fixture is the
-   * number the checksum documentation uses as its example, which starts with a zero and so is
-   * not an issued number; the others have no repeated digit, two repeated digits, and three
-   * of one digit in direct succession.
+   * Checks a leading zero, absent or excess repeated digits, and three adjacent repeats.
+   *
+   * @param text The rejected number.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -131,15 +154,16 @@ public class EuIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks three repeated digits with two adjacent occurrences, at indices 2, 4 and 5. */
   @Test
-  void testAcceptsADigitAppearingThreeTimesApart() {
-    // 6592997048: the nine appears three times, no two of them in direct succession.
+  void testAcceptsThreeOccurrencesWithAnAdjacentPair() {
     final List<PiiMention> mentions = extractor.extract("65929970489");
 
     Assertions.assertEquals(1, mentions.size());
     Assertions.assertEquals(PiiMention.TYPE_DE_STEUER_ID, mentions.get(0).type());
   }
 
+  /** Checks original spans for both types in surrounding prose. */
   @Test
   void testSpansInSentence() {
     final String text = "NHS 943 476 5919 and IdNr 65929970489 recorded.";
@@ -153,8 +177,7 @@ public class EuIdentityPiiExtractorTest {
   }
 
   /**
-   * Verifies that an eleven-digit tax number is not also reported as the ten-digit number
-   * inside it.
+   * Checks that an NHS match is not extracted from inside a German tax number.
    */
   @Test
   void testTaxNumberIsNotAlsoReportedAsAnNhsNumber() {
@@ -164,6 +187,7 @@ public class EuIdentityPiiExtractorTest {
     Assertions.assertEquals(PiiMention.TYPE_DE_STEUER_ID, mentions.get(0).type());
   }
 
+  /** Checks type selection without changing recognition rules. */
   @Test
   void testTypeSubsetLimitsWhatIsReported() {
     final String text = "NHS 9434765919 and IdNr 65929970489";
@@ -176,6 +200,11 @@ public class EuIdentityPiiExtractorTest {
             .stream().map(PiiMention::type).toList());
   }
 
+  /**
+   * Checks ordinary text without matching identifiers.
+   *
+   * @param text The input without a match.
+   */
   @ParameterizedTest
   @ValueSource(strings = {
       "no identifier here",
@@ -187,6 +216,7 @@ public class EuIdentityPiiExtractorTest {
     Assertions.assertTrue(extractor.extract(text).isEmpty(), text);
   }
 
+  /** Checks constructor and extraction argument validation. */
   @Test
   void testRejectsUnrecognizedTypeAndMissingArguments() {
     Assertions.assertThrows(IllegalArgumentException.class,

@@ -21,23 +21,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A deterministic {@link PiiExtractor} for International Mobile Equipment Identities:
- * forward scans over the text, no regular expressions. This extractor is opt-in.
+ * Extracts labeled International Mobile Equipment Identity (IMEI) candidates.
  *
  * <p>An IMEI is reported only when an ASCII case-insensitive {@code IMEI} label directly
  * precedes it, separated only by whitespace or {@code :}, {@code #}, or {@code =}. The
- * candidate must contain exactly 15 digits and pass the Luhn check specified by
+ * label must not continue a Unicode letter or digit. The candidate must contain
+ * 15 ASCII digits and pass the Luhn check specified by
  * <a href="https://imeidb.gsma.com/imei/resources/documents/TS.06-v22.0.pdf">
  * GSMA TS.06</a>. Single spaces or hyphens may separate digit groups, but may not be
  * mixed.</p>
  *
- * <p>The label is deliberately required even though the check digit is strong enough to
- * reject most arbitrary 15-digit runs. Long numeric identifiers are common in logs and
- * business records, so the context prevents avoidable false positives.</p>
+ * <p>This detector is opt-in. Format and checksum validation do not establish that an
+ * identifier was assigned to a device. Normalization removes numeric separators.</p>
  *
- * <p>Normalized form: the 15 digits without separators.</p>
- *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -45,7 +42,6 @@ public final class DevicePiiExtractor implements PiiExtractor {
 
   private static final String LABEL = "imei";
   private static final int DIGITS = 15;
-  private static final int CHECK_MODULUS = 10;
 
   /** Initializes an extractor for IMEIs. */
   public DevicePiiExtractor() {
@@ -69,7 +65,7 @@ public final class DevicePiiExtractor implements PiiExtractor {
       }
       final StringBuilder normalized = new StringBuilder(DIGITS);
       final int end = readDigits(text, i, normalized);
-      if (end < 0 || !luhnValid(normalized)) {
+      if (end < 0 || !Luhn.valid(normalized, DIGITS)) {
         continue;
       }
       Hits.add(hits, i, end, PiiMention.TYPE_IMEI, normalized.toString());
@@ -91,17 +87,17 @@ public final class DevicePiiExtractor implements PiiExtractor {
       end--;
     }
     final int labelStart = end - LABEL.length();
-    return labelStart >= 0 && equalsAsciiIgnoreCase(text, labelStart, LABEL)
-        && (labelStart == 0 || !Ascii.isLetterOrDigit(text.charAt(labelStart - 1)));
+    return labelStart >= 0 && Ascii.equalsIgnoreCase(text, labelStart, LABEL)
+        && Boundaries.onWordStart(text, labelStart);
   }
 
   /**
-   * Reads 15 digits with optional consistent separators.
+   * Parses 15 digits with optional consistent separators.
    *
    * @param text The text being scanned.
    * @param start The first digit.
    * @param normalized The digit collector.
-   * @return The exclusive candidate end, or {@code -1} if its form is invalid.
+   * @return The exclusive candidate end, or {@code -1} if the form is invalid.
    */
   private int readDigits(CharSequence text, int start, StringBuilder normalized) {
     int p = start;
@@ -133,52 +129,12 @@ public final class DevicePiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Applies the Luhn check over a normalized candidate.
-   *
-   * @param digits The 15 digits.
-   * @return {@code true} if the check digit holds.
-   */
-  private boolean luhnValid(CharSequence digits) {
-    int sum = 0;
-    boolean doubled = false;
-    for (int i = digits.length() - 1; i >= 0; i--) {
-      int digit = digits.charAt(i) - '0';
-      if (doubled) {
-        digit *= 2;
-        if (digit > 9) {
-          digit -= 9;
-        }
-      }
-      sum += digit;
-      doubled = !doubled;
-    }
-    return sum % CHECK_MODULUS == 0;
-  }
-
-  /**
-   * Tests for punctuation permitted between a label and its value.
+   * Tests for punctuation permitted between a label and value.
    *
    * @param c The character.
    * @return {@code true} for accepted label separators.
    */
   private boolean isLabelSeparator(char c) {
     return Character.isWhitespace(c) || c == ':' || c == '#' || c == '=';
-  }
-
-  /**
-   * Compares an ASCII literal without allocating a folded copy.
-   *
-   * @param text The text being scanned.
-   * @param start The candidate literal start.
-   * @param literal The lowercase literal.
-   * @return {@code true} if the literal matches ignoring ASCII case.
-   */
-  private boolean equalsAsciiIgnoreCase(CharSequence text, int start, String literal) {
-    for (int i = 0; i < literal.length(); i++) {
-      if (Ascii.toLower(text.charAt(start + i)) != literal.charAt(i)) {
-        return false;
-      }
-    }
-    return true;
   }
 }

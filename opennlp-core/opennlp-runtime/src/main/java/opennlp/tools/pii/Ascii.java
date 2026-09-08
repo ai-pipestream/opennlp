@@ -18,20 +18,16 @@
 package opennlp.tools.pii;
 
 /**
- * ASCII character tests and case folding for the PII scanners, by arithmetic on the
- * character value rather than by locale-sensitive methods or by regular expressions.
- *
- * <p>Every value the scanners recognize is defined over ASCII by its standard, so a
- * locale-sensitive test would only add ways to be wrong: the Turkish dotless i, for
- * example, folds an {@code I} to something no standard accepts.</p>
+ * ASCII character classification and case conversion for PII scanners.
+ * Operations are locale-independent.
  */
 final class Ascii {
 
   /** The distance between an uppercase and the matching lowercase ASCII letter. */
   private static final int CASE_DISTANCE = 'a' - 'A';
 
+  /** Prevents construction. */
   private Ascii() {
-    // This class holds static tests only and is never instantiated.
   }
 
   /**
@@ -95,7 +91,7 @@ final class Ascii {
   }
 
   /**
-   * Reads the value of a hexadecimal digit.
+   * Gets the value of a hexadecimal digit.
    *
    * @param c The character.
    * @return The value {@code 0} to {@code 15}, or {@code -1} if {@code c} is not a
@@ -115,7 +111,7 @@ final class Ascii {
   }
 
   /**
-   * Folds an ASCII letter to lowercase, leaving every other character unchanged.
+   * Converts an ASCII letter to lowercase, leaving other characters unchanged.
    *
    * @param c The character.
    * @return The lowercase form of an ASCII letter, otherwise {@code c}.
@@ -125,7 +121,7 @@ final class Ascii {
   }
 
   /**
-   * Folds an ASCII letter to uppercase, leaving every other character unchanged.
+   * Converts an ASCII letter to uppercase, leaving other characters unchanged.
    *
    * @param c The character.
    * @return The uppercase form of an ASCII letter, otherwise {@code c}.
@@ -135,10 +131,10 @@ final class Ascii {
   }
 
   /**
-   * Folds the ASCII letters of a sequence to lowercase.
+   * Converts the ASCII letters of a sequence to lowercase.
    *
-   * @param value The sequence to fold. Must not be {@code null}.
-   * @return The folded sequence. Never {@code null}.
+   * @param value The sequence to convert. Must not be {@code null}.
+   * @return The non-null converted sequence.
    */
   static String toLower(CharSequence value) {
     final StringBuilder folded = new StringBuilder(value.length());
@@ -149,10 +145,10 @@ final class Ascii {
   }
 
   /**
-   * Folds the ASCII letters of a sequence to uppercase.
+   * Converts the ASCII letters of a sequence to uppercase.
    *
-   * @param value The sequence to fold. Must not be {@code null}.
-   * @return The folded sequence. Never {@code null}.
+   * @param value The sequence to convert. Must not be {@code null}.
+   * @return The non-null converted sequence.
    */
   static String toUpper(CharSequence value) {
     final StringBuilder folded = new StringBuilder(value.length());
@@ -160,5 +156,22 @@ final class Ascii {
       folded.append(toUpper(value.charAt(i)));
     }
     return folded.toString();
+  }
+
+  /**
+   * Compares ASCII text at a validated offset, ignoring ASCII letter case.
+   *
+   * @param text The non-null text.
+   * @param start The comparison start, with enough remaining text for {@code literal}.
+   * @param literal The non-null ASCII text to compare.
+   * @return {@code true} if the text range matches {@code literal} ignoring ASCII case.
+   */
+  static boolean equalsIgnoreCase(CharSequence text, int start, String literal) {
+    for (int i = 0; i < literal.length(); i++) {
+      if (toLower(text.charAt(start + i)) != toLower(literal.charAt(i))) {
+        return false;
+      }
+    }
+    return true;
   }
 }
