@@ -470,6 +470,17 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</programlisting>
 		</para>
 		<para>
+		Taggers created from the same <code>BilstmPOSModel</code> share a cache of
+		up to 100,000 token representations, including during concurrent requests.
+		Creating another tagger or calling <code>enableRepresentationCache</code>
+		again preserves cached entries. After the cache is full, uncached tokens
+		are computed without being stored. Reuse the model across requests to
+		reuse this work. Cache memory depends on token lengths and representation
+		width; it is released with the model and is not included in saved model
+		files. <code>BilstmRepresentationCacheTest</code> checks shared taggers,
+		concurrent limits, result copies and independent loaded models.
+		</para>
+		<para>
 		The <code>Settings</code> record controls the optional model components.
 		A linear-chain CRF output layer (<code>crf</code>) decodes whole tag sequences with Viterbi instead of
 		per-position argmax, a second stacked encoder layer
@@ -516,18 +527,52 @@ String[] tags = tagger.tag(new String[] {"the", "cat", "barks"});]]>
 		</para>
 		<para>
 		Training settings must use finite numbers within their allowed ranges.
+		The gate widths and combined word input width must fit positive integer
+		array lengths. Training checks the width added by pretrained vectors before
+		allocating parameters. Invalid dimensions cause
+		<code>IllegalArgumentException</code>; valid dimensions still require enough
+		heap for the model and training state. <code>BilstmDimensionTest</code> checks
+		these limits, including vectors supplied only through an additional lexicon.
 		Pretrained vectors must have a consistent positive length and finite components,
 		including vectors requested for an additional lexicon. Invalid settings or
 		vectors cause <code>IllegalArgumentException</code>; vector errors identify
 		the word and component index. Training copies provider arrays before storing
 		or fine-tuning them. Multi-task sample arrays must contain no null elements;
-		absent auxiliary taggings can use a null array. A literal <code>*UNK*</code>
+		absent auxiliary taggings can use a null array. <code>MultiTaskSample</code>
+		copies constructor inputs, returns copies from its accessors, and compares
+		samples by array contents. A stream can reuse its input buffers without
+		changing samples it has already returned. <code>BilstmSampleOwnershipTest</code>
+		compares training from reused buffers with independent samples.
+		A literal <code>*UNK*</code>
 		token uses the reserved unknown-word embedding.
 		</para>
 		<para>
 		Training clips gradients before each Adam update and calculates softmax
 		loss from score differences. Non-finite scores, loss, gradients or optimizer
 		updates stop training with <code>IllegalStateException</code>.
+		</para>
+		<para>
+		Tagging and <code>BilstmPOSModel.score</code> reject null token arrays or
+		elements with <code>IllegalArgumentException</code>. Empty token strings are
+		accepted. An empty array produces an empty tagging, but cannot be passed to
+		<code>score</code>. Both decoders and <code>score</code> throw
+		<code>IllegalStateException</code> if a computed tag score is not finite,
+		identifying the token and tag indices. This can result from arithmetic
+		overflow even when the model file contains only finite parameters.
+		</para>
+		<para>
+		For a CRF model, <code>topKSequences</code> returns one best tagging with
+		posterior probabilities for the assigned tags. These are token probabilities,
+		not the probability of the complete tag sequence. CRF calculations remove
+		common score offsets before computing probabilities; non-finite scores cause
+		<code>IllegalStateException</code>. <code>BilstmCrfUsageTest</code> checks
+		tagging and probabilities after model serialization and loading.
+		<programlisting language="java">
+<![CDATA[String[] tokens = {"the", "cat", "runs"};
+Sequence best = tagger.topKSequences(tokens)[0];
+String[] bestTags = best.getOutcomes().toArray(String[]::new);
+double[] tagProbabilities = best.getProbs();]]>
+		</programlisting>
 		</para>
 		<para>
 		Provide vectors with a lookup function. This example uses small arrays to
