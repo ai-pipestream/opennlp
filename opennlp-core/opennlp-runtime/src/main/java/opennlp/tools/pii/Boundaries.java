@@ -29,7 +29,7 @@ final class Boundaries {
   }
 
   /**
-   * Checks that a candidate does not continue a word to its left.
+   * Checks that a candidate does not continue a word on the left.
    *
    * @param text The text being scanned.
    * @param start The candidate start.
@@ -41,8 +41,8 @@ final class Boundaries {
   }
 
   /**
-   * Checks that a numeric candidate does not continue a word, a number, a decimal
-   * fraction, or a comma-grouped number to its left.
+   * Checks that a numeric candidate does not continue a word, a dotted decimal value,
+   * or a comma-grouped number on the left.
    *
    * @param text The text being scanned.
    * @param start The candidate start.
@@ -75,7 +75,7 @@ final class Boundaries {
 
   /**
    * Checks the word boundary and rejects a following separator run continued by a
-   * Unicode letter or digit. A terminal separator run can be sentence punctuation.
+   * Unicode letter or digit. A terminal separator run may be punctuation.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.

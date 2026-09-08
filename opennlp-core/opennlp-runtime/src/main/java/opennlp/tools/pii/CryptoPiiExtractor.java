@@ -31,13 +31,13 @@ import java.util.Set;
  *   <a href="https://en.bitcoin.it/wiki/Base58Check_encoding">Base58Check</a> characters
  *   starting with {@code 1} for a public key hash or {@code 3} for a script hash.
  *   The decoded address must contain a mainnet version byte, a 20-byte hash and a valid
- *   four-byte double SHA-256 checksum.</li>
+ *   4-byte double SHA-256 checksum.</li>
  *   <li>Bitcoin, segwit: the prefix {@code bc1}, witness version 0 through 16 and a
  *   2-to-40-byte program. Version 0 requires a 20-byte or 32-byte program. The checksum uses
  *   <a href="https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki">BIP-173</a>
  *   bech32 for witness version zero and
  *   <a href="https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki">BIP-350</a>
- *   bech32m for later versions. Padding bits must be zero, with at most four unused bits.
+ *   bech32m for later versions. Padding bits must be zero, with at most 4 unused bits.
  *   All-lowercase and all-uppercase forms are accepted; mixed-case forms are rejected.</li>
  *   <li>Ethereum: {@code 0x} or {@code 0X} and 40 ASCII hexadecimal digits.
  *   A mixed-case candidate must satisfy
@@ -46,14 +46,14 @@ import java.util.Set;
  * </ul>
  *
  * <p>Bitcoin testnet and regtest addresses and the Ethereum zero address are excluded.
- * An Ethereum address does not identify its network. Detection does not verify ownership,
+ * An Ethereum address does not identify the network. Detection does not verify ownership,
  * transactions, balances or whether an address is used. Single-case Ethereum values may
  * also be hexadecimal identifiers unrelated to a wallet.</p>
  *
- * <p>Normalized forms: a legacy Bitcoin address keeps its characters, since Base58Check is
- * case sensitive; a segwit address is lowercased, the form BIP-173 recommends; an Ethereum
- * address becomes {@code 0x} and the EIP-55 capitalization, so the same address written in
- * any accepted case normalizes to one string.</p>
+ * <p>Normalized forms: a legacy Bitcoin address retains the input characters, since
+ * Base58Check is case sensitive; a segwit address is lowercased, the form BIP-173
+ * recommends; an Ethereum address becomes {@code 0x} and the EIP-55 capitalization, so
+ * the same address written in any accepted case normalizes to one string.</p>
  *
  * <p>Both types are reported by default; the {@link #CryptoPiiExtractor(Set)} constructor
  * limits extraction to a subset.</p>
@@ -174,7 +174,7 @@ public final class CryptoPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a legacy Base58Check address.
+   * Parses a legacy Base58Check address.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
@@ -195,7 +195,7 @@ public final class CryptoPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a segwit bech32 or bech32m address.
+   * Parses a segwit bech32 or bech32m address.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.

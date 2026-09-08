@@ -25,12 +25,12 @@ import java.util.List;
  * <a href="https://www.canada.ca/en/employment-social-development/services/sin.html">
  * Social Insurance Number</a> candidates.
  *
- * <p>Accepts 9 ASCII digits, compact or in three groups of three separated by a single
+ * <p>Accepts 9 ASCII digits, compact or in 3 groups of 3 separated by a single
  * space or hyphen. Both separators must be present and match. Candidates must pass the
  * Luhn check and directly follow an ASCII case-insensitive {@code SIN},
  * {@code Social Insurance Number} or {@code Social Insurance No.} label. A label must not
  * continue a Unicode letter or digit. Whitespace and {@code :}, {@code #}, {@code =}
- * or {@code .} may separate the label from its value.</p>
+ * or {@code .} may separate the label and value.</p>
  *
  * <p>This detector is opt-in. Format and checksum validation do not establish that a
  * number was issued. Normalization removes numeric separators.</p>
@@ -100,12 +100,12 @@ public final class CaIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a compact 9-digit candidate or three equal groups with matching separators.
+   * Parses a compact 9-digit candidate or 3 equal groups with matching separators.
    *
    * @param text The text being scanned.
    * @param start The first digit.
    * @param normalized The digit collector.
-   * @return The exclusive candidate end, or {@code -1} if its form is invalid.
+   * @return The exclusive candidate end, or {@code -1} if the form is invalid.
    */
   private int readDigits(CharSequence text, int start, StringBuilder normalized) {
     int p = start;
@@ -137,7 +137,7 @@ public final class CaIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for punctuation permitted between a label and its value.
+   * Tests for punctuation permitted between a label and value.
    *
    * @param c The character.
    * @return {@code true} for accepted label separators.

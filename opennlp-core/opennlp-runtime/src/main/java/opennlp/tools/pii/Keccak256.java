@@ -25,12 +25,12 @@ package opennlp.tools.pii;
  * <a href="https://keccak.team/files/Keccak-reference-3.0.pdf">Keccak</a> submission with
  * a 1088-bit rate, not the
  * <a href="https://doi.org/10.6028/NIST.FIPS.202">FIPS 202</a> SHA3-256 the JDK provides:
- * the two differ only in the domain separation byte appended to the message, {@code 0x01}
- * here and {@code 0x06} for SHA3-256. The hashes are not interchangeable.</p>
+ * The domain-separation byte is {@code 0x01} for Keccak-256 and {@code 0x06} for
+ * SHA3-256. The hashes are not interchangeable.</p>
  */
 final class Keccak256 {
 
-  /** The iota step's round constants. */
+  /** Constants for each iota step. */
   private static final long[] ROUND_CONSTANTS = {
       0x0000000000000001L, 0x0000000000008082L, 0x800000000000808aL, 0x8000000080008000L,
       0x000000000000808bL, 0x0000000080000001L, 0x8000000080008081L, 0x8000000000008009L,

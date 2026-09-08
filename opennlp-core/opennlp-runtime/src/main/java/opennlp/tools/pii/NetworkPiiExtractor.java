@@ -26,25 +26,25 @@ import java.util.Set;
  *
  * <p>Recognized forms:</p>
  * <ul>
- *   <li>IPv4: four decimal octets from {@code 0} to {@code 255}, following the
+ *   <li>IPv4: 4 decimal octets from {@code 0} to {@code 255}, following the
  *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.2">RFC 3986</a>
- *   literal syntax. Leading zeros and further dotted groups are rejected.</li>
+ *   address syntax. Leading zeros and further dotted groups are rejected.</li>
  *   <li>IPv6: the text representation of
  *   <a href="https://datatracker.ietf.org/doc/html/rfc4291#section-2.2">RFC 4291</a>,
  *   with at most one {@code ::} run and an optional embedded IPv4 part in the last 32
  *   bits.</li>
- *   <li>MAC: six hexadecimal pairs separated by colons or hyphens, or three dotted
- *   groups of four hexadecimal digits. The separator must be consistent.</li>
+ *   <li>MAC: 6 hexadecimal pairs separated by colons or hyphens, or 3 dotted
+ *   groups of 4 hexadecimal digits. The separator must be consistent.</li>
  * </ul>
  *
- * <p>IPv6 without an embedded IPv4 part must spell out at least two groups and either
- * contain a group of three or more digits or spell out all eight groups. This filter
+ * <p>IPv6 without an embedded IPv4 part must include at least 2 groups and either
+ * contain a group of 3 or more digits or include all 8 groups. This filter
  * limits matches in times and namespace expressions, but also omits valid short forms
  * such as {@code ::1} and {@code 2001::}.</p>
  *
- * <p>The unspecified IPv4/IPv6 addresses, limited IPv4 broadcast address and all-zero
+ * <p>The unspecified IPv4/IPv6 addresses, limited IPv4 broadcast address and zero
  * or broadcast MAC addresses are excluded. Matching checks syntax, not assignment or
- * reachability. A four-part software version can also match IPv4 syntax.</p>
+ * reachability. A 4-part software version can also match IPv4 syntax.</p>
  *
  * <p>IPv4 retains dotted decimal form. IPv6 uses lowercase hexadecimal groups and
  * <a href="https://datatracker.ietf.org/doc/html/rfc5952#section-4.2">RFC 5952</a>
@@ -54,7 +54,7 @@ import java.util.Set;
  * <p>Matches do not continue Unicode words or dotted names and numbers. A trailing
  * IPv6 {@code ::} remains part of the span before brackets, punctuation or whitespace.</p>
  *
- * <p>All three types are reported by default; the {@link #NetworkPiiExtractor(Set)}
+ * <p>All supported types are reported by default; the {@link #NetworkPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
  * <p>Instances have no per-call state and may be shared between threads.</p>
@@ -86,7 +86,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   private final Set<String> types;
 
   /**
-   * Initializes an extractor that reports all three types.
+   * Initializes an extractor that reports all supported types.
    */
   public NetworkPiiExtractor() {
     this.types = ALL_TYPES;
@@ -167,11 +167,11 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a dotted decimal IPv4 address.
+   * Parses a dotted decimal IPv4 address.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
-   * @param octets Receives the four octet values when the read succeeds.
+   * @param octets Receives the 4 octet values when parsing succeeds.
    * @return The exclusive end offset of the address, or {@code -1} if no address starts
    *         at {@code start}.
    */
@@ -208,7 +208,7 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   /**
    * Tests for the unspecified and limited broadcast IPv4 addresses.
    *
-   * @param octets The four octet values.
+   * @param octets The 4 octet values.
    * @return {@code true} if the address must not be reported.
    */
   private boolean isReservedIpv4(int[] octets) {
@@ -222,14 +222,14 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * One IPv6 candidate read from the text.
+   * An IPv6 candidate parsed from the text.
    *
    * @param end The exclusive end offset of the candidate.
-   * @param groups The eight 16-bit groups of the address.
-   * @param written The number of groups the text spelled out, not counting the groups an
+   * @param groups The 8 16-bit groups of the address.
+   * @param written The number of groups represented explicitly, excluding groups an
    *                embedded IPv4 part contributed.
-   * @param longestGroup The digit count of the longest group the text spelled out.
-   * @param embeddedIpv4 Indicates that the last 32 bits were written as a dotted quad.
+   * @param longestGroup The digit count of the longest explicitly represented group.
+   * @param embeddedIpv4 Indicates that the final 32 bits use dotted IPv4 notation.
    */
   private record Ipv6(int end, int[] groups, int written, int longestGroup,
                       boolean embeddedIpv4) {
@@ -261,9 +261,9 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads an IPv6 address: hexadecimal groups separated by single colons, with at most
-   * one {@code ::} run standing for one or more all-zero groups, and an optional dotted
-   * quad in the last 32 bits.
+   * Parses an IPv6 address: hexadecimal groups separated by single colons, with at most
+   * one {@code ::} run representing one or more zero-valued groups, and optional dotted
+   * IPv4 in the final 32 bits.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
@@ -375,10 +375,10 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   /**
    * Formats an IPv6 address in the form
    * <a href="https://datatracker.ietf.org/doc/html/rfc5952">RFC 5952</a> recommends:
-   * lowercase, no leading zeros in a group, and the longest run of two or more all-zero
+   * lowercase, no leading zeros in a group, and the longest run of 2 or more zero-valued
    * groups replaced by {@code ::}.
    *
-   * @param groups The eight 16-bit groups.
+   * @param groups The 8 16-bit groups.
    * @return The normalized form.
    */
   private String formatIpv6(int[] groups) {
@@ -459,14 +459,14 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a MAC address written as a fixed number of equally long hexadecimal groups.
+   * Parses a MAC address written as a fixed number of equally long hexadecimal groups.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
    * @param separator The separator between the groups.
    * @param digitsPerGroup The number of hexadecimal digits in each group.
    * @param groups The number of groups.
-   * @param bytes Receives the six address bytes when the read succeeds.
+   * @param bytes Receives the 6 address bytes when parsing succeeds.
    * @return The exclusive end offset of the address, or {@code -1} if no address in this
    *         form starts at {@code start}.
    */
@@ -502,9 +502,9 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for the all-zero and broadcast MAC addresses.
+   * Tests for zero and broadcast MAC addresses.
    *
-   * @param bytes The six address bytes.
+   * @param bytes The 6 address bytes.
    * @return {@code true} if the address must not be reported.
    */
   private boolean isReservedMac(int[] bytes) {
@@ -518,8 +518,8 @@ public final class NetworkPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a grouped candidate does not continue a longer grouped value to its
-   * left, so nothing is reported from inside an address.
+   * Checks that a grouped candidate does not continue a longer grouped value on the
+   * left, preventing a match from inside an address.
    *
    * @param text The text being scanned.
    * @param start The candidate start.

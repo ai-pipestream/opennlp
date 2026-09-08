@@ -24,31 +24,29 @@ import java.util.Set;
 /**
  * A deterministic {@link PiiExtractor}: forward scans over the text, no regular
  * expressions, recognizing email addresses, phone numbers, IBANs, and payment card
- * numbers. IBANs and card numbers are checksum validated and phone numbers must show a
- * {@code +} prefix or visible formatting, so a random digit run is rejected rather than
- * reported.
+ * numbers. IBANs and card numbers are checksum validated. Phone numbers require a
+ * {@code +} prefix or visible formatting.
  *
  * <p>Recognized forms:</p>
  * <ul>
  *   <li>Email: a local part of ASCII letters, digits, and {@code . _ % + -} followed by
- *   {@code @} and a dotted domain of at most {@link #DOMAIN_MAX_LENGTH} characters whose
- *   final label is an
+ *   {@code @} and a dotted domain of at most {@link #DOMAIN_MAX_LENGTH} characters. The
+ *   final label must be an
  *   <a href="https://data.iana.org/TLD/tlds-alpha-by-domain.txt">IANA-registered</a>
  *   top-level domain, including punycode forms. Private-use suffixes such as
  *   {@code .internal} or {@code .local} are not reported. The ASCII local part is limited
  *   to 64 characters and the complete mailbox to 254 characters.</li>
- *   <li>Phone: an international form with {@code +} whose digits split into an
- *   assigned calling code and a national number of a length some territory under that
- *   code assigns, or a domestic form with 10 or 11 digits that shows formatting
- *   evidence, at least one space, hyphen, or parenthesis between the digits. A bare
- *   digit run is never a phone number. Dots are not accepted as separators, which
- *   keeps decimal numbers out.</li>
- *   <li>IBAN: two uppercase letters, two check digits, and more uppercase letters or
+ *   <li>Phone: an international form with {@code +} and digits that split into an
+ *   assigned calling code and a national number length used by a territory under that
+ *   code, or a domestic form with 10 or 11 digits and at least one space, hyphen, or
+ *   parenthesis between digits. An unformatted digit run is not a phone number. Dots
+ *   are excluded as separators to avoid decimal numbers.</li>
+ *   <li>IBAN: 2 uppercase letters, 2 check digits, and more uppercase letters or
  *   digits, optionally in space-separated groups, validated with the
  *   <a href="https://en.wikipedia.org/wiki/International_Bank_Account_Number">ISO 13616</a>
  *   mod-97 check. The country code must be in the ISO 13616 registry and the candidate
- *   must have exactly the length that registry entry assigns, so a checksum-passing run
- *   with an unregistered country or a wrong length is rejected.</li>
+ *   must match the length assigned by that registry entry, so a checksum-passing run
+ *   with an unregistered country or invalid length is rejected.</li>
  *   <li>Card: 13 to 19 digits, optionally separated by single spaces or hyphens,
  *   validated with the <a href="https://en.wikipedia.org/wiki/Luhn_algorithm">Luhn</a>
  *   check and required to start with a digit between 2 and 6 or with
@@ -69,10 +67,10 @@ import java.util.Set;
  * and phone and card numbers keep digits only, with a leading {@code +} preserved for
  * phone numbers.</p>
  *
- * <p>All four types are reported by default; the {@link #CursorPiiExtractor(Set)}
+ * <p>All supported types are reported by default; the {@link #CursorPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
- * <p>The extractor holds no per-call state and is safe to share between threads.</p>
+ * <p>The extractor stores no per-call state and is safe to share between threads.</p>
  *
  * @since 3.0.0
  */
@@ -104,7 +102,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   private final Set<String> types;
 
   /**
-   * Initializes an extractor that reports all four types.
+   * Initializes an extractor that reports all supported types.
    */
   public CursorPiiExtractor() {
     this.types = ALL_TYPES;
@@ -224,7 +222,7 @@ public final class CursorPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks a domain: at most {@link #DOMAIN_MAX_LENGTH} characters, at least two labels,
+   * Checks a domain: at most {@link #DOMAIN_MAX_LENGTH} characters, at least 2 labels,
    * each 1 to 63 characters without a leading or trailing hyphen, and a final label that
    * is an {@link IanaTlds IANA-registered} top-level domain.
    *

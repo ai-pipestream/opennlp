@@ -34,10 +34,11 @@ import java.util.Set;
  *   of 11 becomes zero; a check value of 10 is rejected. Uniform digit runs are rejected.</li>
  *   <li>German tax identification number: 11 ASCII digits, compact or grouped as
  *   {@code 2 3 3 3}, with an ISO 7064 MOD 11,10 check digit. The
- *   <a href="https://www.bzst.de/DE/Privatpersonen/SteuerlicheIdentifikationsnummer/steuerlicheidentifikationsnummer_node.html">
- *   BZSt</a> also constrains the digits themselves: the first may not be zero, and of the
- *   first ten digits exactly one appears twice or three times while every other appears at
- *   most once, and three occurrences may not stand in direct succession.</li>
+ *   <a href="https://download.elster.de/download/schnittstellen/Pruefung_der_Steuer_und_Steueridentifikatsnummer.pdf">
+ *   ELSTER validation rules, section 2.2</a>, require a nonzero leading digit for production
+ *   IDs. This detector excludes official leading-zero test IDs. Among the initial 10 digits,
+ *   a single digit occurs 2 or 3 times; remaining digits occur at most once. 3 adjacent
+ *   occurrences are prohibited.</li>
  * </ul>
  *
  * <p>Groups require matching single ASCII spaces or hyphens. Other separators, including
@@ -73,7 +74,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   private static final int STEUER_ID_MODULUS = 11;
   private static final int DECIMAL_MODULUS = 10;
 
-  /** The most often one digit may appear among the first ten of a tax number. */
+  /** Maximum permitted frequency for a digit among the initial 10 tax-number digits. */
   private static final int STEUER_ID_MAX_REPEATS = 3;
 
   private final Set<String> types;
@@ -127,7 +128,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Finds one identifier type, trying its grouped form before its compact form.
+   * Finds an identifier type, checking the grouped form before the compact form.
    *
    * @param text The text to scan.
    * @param hits The candidate collector.
@@ -160,7 +161,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads an identifier written in its printed grouping.
+   * Parses an identifier in the printed grouping.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
@@ -196,13 +197,13 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads an identifier written as one run of digits.
+   * Parses an identifier written as a continuous run of digits.
    *
    * @param text The text being scanned.
    * @param start The offset to read from.
    * @param digits The number of digits the identifier has.
    * @param value Receives the digits when the read succeeds.
-   * @return The exclusive end offset, or {@code -1} if a run of exactly that length does not
+   * @return The exclusive end offset, or {@code -1} if a run of the requested length does not
    *         start here.
    */
   private int readBare(CharSequence text, int start, int digits, int[] value) {
@@ -220,7 +221,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Validates a candidate's digits against the rules of its type.
+   * Validates a candidate's digits for the selected type.
    *
    * @param value The digits.
    * @param type The type to validate for.
@@ -257,7 +258,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
    * Applies the rules of a German tax identification number: the leading digit, the digit
    * repetition rule, and the ISO 7064 MOD 11,10 check digit.
    *
-   * @param value The eleven digits.
+   * @param value The 11 digits.
    * @return {@code true} if the digits satisfy the number rules and checksum.
    */
   private boolean validSteuerId(int[] value) {
@@ -278,11 +279,10 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Applies the digit repetition rule: of the first ten digits exactly one appears twice or
-   * three times, every other appears at most once, and three occurrences do not stand in
-   * direct succession.
+   * Applies the digit repetition rule to the initial 10 digits. A single digit occurs 2 or
+   * 3 times, remaining digits occur at most once, and 3 adjacent occurrences are prohibited.
    *
-   * @param value The eleven digits.
+   * @param value The 11 digits.
    * @return {@code true} if the digits are spread as the rule demands.
    */
   private boolean repetitionValid(int[] value) {
@@ -315,8 +315,7 @@ public final class EuIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a numeric candidate ends at {@code end} and does not continue into another
-   * group of digits.
+   * Checks a numeric candidate's end boundary and a possible following digit group.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.

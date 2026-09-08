@@ -34,7 +34,7 @@ final class Luhn {
    *
    * @param digits The non-null ASCII digits, already validated by the scanner.
    * @param length The number of leading digits to check, at most the sequence length.
-   * @return {@code true} if the checksum passes, including all-zero values.
+   * @return {@code true} if the checksum passes, including zero-only values.
    */
   static boolean valid(CharSequence digits, int length) {
     int sum = 0;

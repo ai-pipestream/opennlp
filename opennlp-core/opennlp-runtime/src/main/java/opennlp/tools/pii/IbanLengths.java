@@ -26,7 +26,7 @@ package opennlp.tools.pii;
 final class IbanLengths {
 
   /**
-   * The registry as compact 4-character entries, country code then two length digits,
+   * The registry as compact 4-character entries, country code then 2 length digits,
    * sorted by country code.
    */
   private static final String REGISTRY =
@@ -38,7 +38,7 @@ final class IbanLengths {
 
   private static final int TABLE_SIZE = 26 * 26;
 
-  /** Registered length per country code pair, {@code 0} where no country is registered. */
+  /** Registered length indexed by a 2-letter country code; {@code 0} marks no entry. */
   private static final byte[] LENGTHS = new byte[TABLE_SIZE];
 
   static {
@@ -57,7 +57,7 @@ final class IbanLengths {
    * Looks up the registered IBAN length of a country.
    *
    * @param first The first country code letter, {@code A} to {@code Z}.
-   * @param second The second country code letter, {@code A} to {@code Z}.
+   * @param second The trailing country code letter, {@code A} to {@code Z}.
    * @return The length the registry assigns, or {@code 0} if the country is not
    *         registered.
    */

@@ -26,16 +26,16 @@ import java.util.List;
  * <p>Accepts prefixes {@code 00-12}, {@code 21-32}, {@code 61-72} and {@code 80} from
  * the <a href="https://www.aba.com/news-research/analysis-guides/routing-number-policy-procedures">
  * ABA Routing Number Policy, section IV</a>, and validates the check digit. The
- * {@code 00} prefix includes U.S. government checks. All-zero values are rejected.</p>
+ * {@code 00} prefix includes U.S. government checks. Zero-only values are rejected.</p>
  *
- * <p>A format match does not establish that a number is assigned or identify its owner.
+ * <p>A format match does not establish assignment or identify the number's owner.
  * Other numeric identifiers may match, so use the surrounding context to assess results.
  * This detector is opt-in through {@link PiiPacks#payment()} or
  * {@link PiiPacks#allStructured()}, and is not part of the default
  * {@link CursorPiiExtractor}.</p>
  *
  * <p>Spaces and hyphens within a candidate are not accepted. Normalization preserves the
- * matched digits. Instances have no per-call state and may be shared between threads.</p>
+ * detected digits. Instances have no per-call state and may be shared between threads.</p>
  *
  * @since 3.0.0
  */
@@ -90,7 +90,7 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that every character of a range is an ASCII digit.
+   * Checks that a range contains only ASCII digits.
    *
    * @param text The text being scanned.
    * @param start The first character of the range.
@@ -107,8 +107,8 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a numeric candidate ends at {@code end} and does not continue into a
-   * decimal fraction or a comma-grouped number.
+   * Checks the end boundary for a numeric candidate, including decimal and comma-grouped
+   * continuations.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.
@@ -126,7 +126,7 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks the first two digits against the allocated prefix ranges.
+   * Checks the leading 2 digits in the allocated prefix ranges.
    *
    * @param text The text being scanned.
    * @param start The first digit of the candidate.
@@ -144,11 +144,11 @@ public final class BankingPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks the repeating 3, 7, 1 checksum weights and excludes the all-zero candidate.
+   * Checks the repeating 3, 7, 1 checksum weights and excludes a zero-only candidate.
    *
    * @param text The text being scanned.
    * @param start The first digit of the candidate.
-   * @return {@code true} if the weighted sum is a positive multiple of ten.
+   * @return {@code true} if the weighted sum is a positive multiple of 10.
    */
   private boolean checkDigitValid(CharSequence text, int start) {
     int sum = 0;

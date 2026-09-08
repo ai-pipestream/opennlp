@@ -23,7 +23,7 @@ import java.security.NoSuchAlgorithmException;
 /**
  * Checks the <a href="https://en.bitcoin.it/wiki/Base58Check_encoding">Base58Check</a>
  * encoding of legacy Bitcoin addresses. The decoded bytes contain a version byte,
- * a 20-byte hash and the first four bytes of their double SHA-256 checksum.
+ * a 20-byte hash and the initial 4 bytes of their double SHA-256 checksum.
  */
 final class Base58Check {
 
@@ -37,7 +37,7 @@ final class Base58Check {
   /** The value of each ASCII character in the alphabet, or {@code -1}. */
   private static final int[] VALUES = new int[ASCII_RANGE];
 
-  /** The payload of an address: one version byte, a 20-byte hash, and four check bytes. */
+  /** The payload of an address: a version byte, a 20-byte hash, and 4 check bytes. */
   static final int PAYLOAD_LENGTH = 25;
 
   private static final int CHECKSUM_LENGTH = 4;
@@ -68,7 +68,7 @@ final class Base58Check {
   }
 
   /**
-   * Reads the version byte of a Base58Check payload with a valid checksum.
+   * Gets the version byte of a Base58Check payload with a valid checksum.
    *
    * @param text The text being scanned.
    * @param start The first character of the candidate.
@@ -92,7 +92,7 @@ final class Base58Check {
   }
 
   /**
-   * Decodes base 58 characters to bytes, most significant byte first.
+   * Converts base 58 characters to bytes, most significant byte first.
    *
    * @param text The text being scanned.
    * @param start The first character to decode.
@@ -100,7 +100,7 @@ final class Base58Check {
    * @return The decoded bytes, or {@code null} if a character is not a base 58 digit.
    */
   private static byte[] decode(CharSequence text, int start, int end) {
-    // Each base 58 character requires less than one decoded byte.
+    // A single output byte is sufficient per base 58 character.
     final byte[] reversed = new byte[end - start + 1];
     int length = 0;
     for (int i = start; i < end; i++) {
@@ -143,7 +143,7 @@ final class Base58Check {
       digest.update(data, 0, length);
       return digest.digest();
     } catch (NoSuchAlgorithmException e) {
-      // SHA-256 is guaranteed to be available on every conformant JRE.
+      // Conforming Java implementations provide SHA-256.
       throw new IllegalStateException("SHA-256 not available", e);
     }
   }

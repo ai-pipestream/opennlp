@@ -60,7 +60,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   private static final int GROUP_DIGITS = 2;
   private static final int SERIAL_DIGITS = 4;
 
-  /** The 9 digits and two separators of the grouped form. */
+  /** The 9 digits and 2 separators of the grouped form. */
   private static final int FORM_LENGTH =
       AREA_DIGITS + GROUP_DIGITS + SERIAL_DIGITS + 2;
 
@@ -105,7 +105,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   /**
    * {@inheritDoc}
    *
-   * <p>The area range decides which type a candidate can be, so no candidate is ever
+   * <p>The area range selects the candidate type, so a candidate is not
    * reported as both.</p>
    */
   @Override
@@ -149,11 +149,11 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Decides which identifier a candidate's number space allows.
+   * Classifies a candidate by the identifier number space.
    *
-   * @param area The first three digits.
-   * @param group The middle two digits.
-   * @param serial The last four digits.
+   * @param area The 3-digit area.
+   * @param group The 2-digit group.
+   * @param serial The 4-digit serial.
    * @return {@link PiiMention#TYPE_US_SSN}, {@link PiiMention#TYPE_US_ITIN}, or {@code null}
    *         if the number fails this detector's range checks.
    */
@@ -190,7 +190,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a run of digits as a number.
+   * Parses a run of digits as a number.
    *
    * @param text The text being scanned.
    * @param start The first digit.
@@ -206,8 +206,7 @@ public final class UsIdentityPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks that a numeric candidate ends at {@code end} and does not continue into another
-   * group of digits.
+   * Checks the boundary of a numeric candidate and a following digit group.
    *
    * @param text The text being scanned.
    * @param end The candidate end, exclusive.

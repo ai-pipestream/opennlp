@@ -19,16 +19,16 @@ package opennlp.tools.pii;
 
 /**
  * Length plausibility of international phone numbers by
- * <a href="https://www.itu.int/rec/T-REC-E.164">ITU-T E.164</a> calling code: for every
+ * <a href="https://www.itu.int/rec/T-REC-E.164">ITU-T E.164</a> calling code: for each
  * assigned calling code, the set of national number lengths any territory under that
  * code assigns.
  *
  * <p>The table is derived from the {@code PhoneNumberMetadata.xml} of the
  * <a href="https://github.com/google/libphonenumber">libphonenumber</a> project
  * (Apache License 2.0), revision {@code 4ad67e90c65e} of 2026-08-28: per calling code, the
- * union of the {@code possibleLengths national} values of every number type of every
- * territory sharing the code. Local-only lengths are left out, since a number in
- * international form always carries its full national part.</p>
+ * union of the {@code possibleLengths national} values across number types and
+ * territories sharing the code. Local-only lengths are omitted because international
+ * form includes the complete national part.</p>
  */
 final class PhoneNumberLengths {
 
@@ -74,7 +74,7 @@ final class PhoneNumberLengths {
   /** The longest national number a mask bit can express. */
   private static final int MAX_NATIONAL_LENGTH = 31;
 
-  /** One slot per possible calling code, that is per value of at most three digits. */
+  /** Array size covering calling codes of up to 3 digits. */
   private static final int CODE_TABLE_SIZE = 1000;
 
   /** Length bitmask per calling code; {@code 0} marks an unassigned code. */
@@ -86,19 +86,18 @@ final class PhoneNumberLengths {
     }
   }
 
+  /** Prevents construction. */
   private PhoneNumberLengths() {
-    // This class holds the lookup only and is never instantiated.
   }
 
   /**
-   * Checks whether the leading one to three digits form an assigned calling code and
+   * Checks whether the leading 1 to 3 digits form an assigned calling code and
    * the remaining digits have an allowed national length. Calling codes cannot start
    * with zero.
    *
    * @param digits The number's digits without the leading {@code +} or any formatting.
    *               Must not be {@code null}.
-   * @return {@code true} if a calling code split with a plausible national length
-   *         exists.
+   * @return {@code true} if a calling code split with an allowed national length exists.
    */
   static boolean plausibleInternational(String digits) {
     if (digits.isEmpty() || digits.charAt(0) == '0') {

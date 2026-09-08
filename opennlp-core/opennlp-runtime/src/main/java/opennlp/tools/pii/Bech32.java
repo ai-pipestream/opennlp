@@ -20,7 +20,7 @@ package opennlp.tools.pii;
 /**
  * The <a href="https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki">BIP-173</a>
  * bech32 and <a href="https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki">
- * BIP-350</a> bech32m encodings of Bitcoin segwit addresses. The final six characters
+ * BIP-350</a> bech32m encodings of Bitcoin segwit addresses. The final 6 characters
  * encode a checksum over the prefix and data. Witness version 0 uses bech32; versions
  * 1 through 16 use bech32m.
  */
@@ -38,10 +38,10 @@ final class Bech32 {
   private static final int[] GENERATOR =
       {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
 
-  /** The residue a bech32 string leaves. */
+  /** The checksum constant for a bech32 string. */
   private static final int BECH32_RESIDUE = 1;
 
-  /** The residue a bech32m string leaves. */
+  /** The checksum constant for a bech32m string. */
   private static final int BECH32M_RESIDUE = 0x2bc830a3;
 
   private static final int CHECKSUM_LENGTH = 6;
@@ -137,10 +137,10 @@ final class Bech32 {
   }
 
   /**
-   * Computes the BCH residue of a value sequence.
+   * Computes the BCH checksum result for a value sequence.
    *
    * @param values The expanded prefix followed by the data values.
-   * @return The residue.
+   * @return The checksum result.
    */
   private static int polymod(int[] values) {
     int checksum = 1;

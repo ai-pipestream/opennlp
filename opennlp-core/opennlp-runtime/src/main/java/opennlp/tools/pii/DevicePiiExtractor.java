@@ -25,7 +25,7 @@ import java.util.List;
  *
  * <p>An IMEI is reported only when an ASCII case-insensitive {@code IMEI} label directly
  * precedes it, separated only by whitespace or {@code :}, {@code #}, or {@code =}. The
- * label must not continue a Unicode letter or digit. The candidate must contain exactly
+ * label must not continue a Unicode letter or digit. The candidate must contain
  * 15 ASCII digits and pass the Luhn check specified by
  * <a href="https://imeidb.gsma.com/imei/resources/documents/TS.06-v22.0.pdf">
  * GSMA TS.06</a>. Single spaces or hyphens may separate digit groups, but may not be
@@ -92,12 +92,12 @@ public final class DevicePiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads 15 digits with optional consistent separators.
+   * Parses 15 digits with optional consistent separators.
    *
    * @param text The text being scanned.
    * @param start The first digit.
    * @param normalized The digit collector.
-   * @return The exclusive candidate end, or {@code -1} if its form is invalid.
+   * @return The exclusive candidate end, or {@code -1} if the form is invalid.
    */
   private int readDigits(CharSequence text, int start, StringBuilder normalized) {
     int p = start;
@@ -129,7 +129,7 @@ public final class DevicePiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests for punctuation permitted between a label and its value.
+   * Tests for punctuation permitted between a label and value.
    *
    * @param c The character.
    * @return {@code true} for accepted label separators.

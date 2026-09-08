@@ -41,25 +41,25 @@ import java.util.Set;
  *   ASCII letters, digits and underscores, with a scanner limit of 255 characters.
  *   Installation tokens start with {@code ghs_} and accept at least 36 body characters:
  *   ASCII letters, digits, underscores, hyphens and dots, without a fixed maximum length.
- *   Terminal dots are treated as sentence punctuation and excluded from the match.
+ *   Trailing dots are excluded as punctuation.
  *   Prefixes are case sensitive. Checksums, token contents and active status are not
  *   verified. See the <a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github#githubs-token-formats">
  *   token prefix reference</a> and <a href="https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/">
  *   installation-token matching guidance</a>.</li>
- *   <li>JWT candidate: three non-empty, unpadded
+ *   <li>JWT candidate: 3 non-empty, unpadded
  *   <a href="https://datatracker.ietf.org/doc/html/rfc4648#section-5">base64url</a>
  *   segments separated by dots. Encodings must have valid lengths and zero unused bits.
  *   The complete UTF-8 header must be a JSON object with one top-level {@code alg} member
  *   containing a non-empty ASCII string. JSON whitespace, escaped names and nested
  *   values are supported. Signatures, claims and other JOSE parameter semantics are not
- *   verified. Unsigned tokens with empty signatures and five-part encrypted tokens are
+ *   verified. Unsigned tokens with empty signatures and 5-part encrypted tokens are
  *   excluded. See <a href="https://datatracker.ietf.org/doc/html/rfc7515">RFC 7515</a>
  *   and <a href="https://datatracker.ietf.org/doc/html/rfc7519">RFC 7519</a>.</li>
  *   <li>URL credential: the userinfo component of a URL, as
  *   <a href="https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.1">RFC 3986</a>
  *   defines it: a non-empty username, a colon and a non-empty password before {@code @}.
  *   Schemes start with an ASCII letter and may include letters, digits, {@code +},
- *   {@code -} and {@code .}. Percent escapes must contain two hexadecimal digits.
+ *   {@code -} and {@code .}. Percent escapes must contain 2 hexadecimal digits.
  *   Only userinfo is reported; masking preserves the scheme, host and path. The scanner
  *   does not validate the host or scheme-specific rules.</li>
  * </ul>
@@ -71,7 +71,7 @@ import java.util.Set;
  * <p>AWS, GitHub and JWT candidates cannot start or end within a run of Unicode
  * letters, digits or underscores. A hyphen also prevents a JWT candidate start.</p>
  *
- * <p>All four types are reported by default; the {@link #SecretsPiiExtractor(Set)}
+ * <p>All supported types are reported by default; the {@link #SecretsPiiExtractor(Set)}
  * constructor limits extraction to a subset.</p>
  *
  * <p>Instances have no per-call state and may be shared between threads.</p>
@@ -105,7 +105,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   private final Set<String> types;
 
   /**
-   * Initializes an extractor that reports all four types.
+   * Initializes an extractor that reports all supported types.
    */
   public SecretsPiiExtractor() {
     this.types = ALL_TYPES;
@@ -242,7 +242,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads a complete GitHub token body using the alphabet for its prefix.
+   * Parses a GitHub token body using the alphabet for the prefix.
    *
    * @param text The text being scanned.
    * @param start The first body character.
@@ -303,7 +303,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Decodes the complete UTF-8 header and checks JSON syntax and its algorithm member.
+   * Converts the UTF-8 header and checks JSON syntax and the algorithm member.
    *
    * @param text The text being scanned.
    * @param start The first header character.
@@ -391,7 +391,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Decodes an already checked, unpadded base64url run.
+   * Converts a checked, unpadded base64url run.
    *
    * @param text The text being scanned.
    * @param start The first character to decode.
@@ -470,7 +470,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Checks a character in the scheme after its initial ASCII letter.
+   * Checks a noninitial character in a scheme.
    *
    * @param c The character to check.
    * @return {@code true} for an ASCII letter, digit, plus sign, hyphen or dot.
@@ -507,7 +507,7 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Reads the value of a base64url character.
+   * Returns the value of a base64url character.
    *
    * @param c The character, which must be a base64url character.
    * @return The value {@code 0} to {@code 63}.
@@ -556,12 +556,12 @@ public final class SecretsPiiExtractor implements PiiExtractor {
   }
 
   /**
-   * Tests whether a literal occurs at an offset.
+   * Checks whether text is present at an offset.
    *
    * @param text The text being scanned.
    * @param start The offset to compare at.
-   * @param literal The literal to look for.
-   * @return {@code true} if the literal occurs at that offset.
+   * @param literal The text to compare.
+   * @return {@code true} if the text is present at that offset.
    */
   private boolean startsWith(CharSequence text, int start, String literal) {
     if (start + literal.length() > text.length()) {

@@ -24,7 +24,7 @@ import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 
 /**
- * Reads validated mentions from a document's {@link PiiAnnotator#PII} layer.
+ * Retrieves validated mentions from a document's {@link PiiAnnotator#PII} layer.
  */
 final class PiiLayer {
 
@@ -33,13 +33,13 @@ final class PiiLayer {
   }
 
   /**
-   * Reads the PII mentions of a document.
+   * Retrieves the PII mentions of a document.
    *
    * @param document The document. Must be non-null and have a PII layer with matching
    *                 annotation and mention offsets.
    * @return The mentions in annotation order.
    * @throws IllegalArgumentException Thrown if {@code document} is null, lacks the PII
-   *         layer, or contains a mention with offsets that differ from its annotation.
+   *         layer, or contains a mention with offsets that do not match the annotation.
    */
   static List<PiiMention> mentions(Document document) {
     if (document == null) {

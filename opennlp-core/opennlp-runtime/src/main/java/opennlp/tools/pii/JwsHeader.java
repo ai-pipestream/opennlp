@@ -21,9 +21,9 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 /**
- * Reads JSON header syntax and a unique, non-empty ASCII {@code alg} string.
+ * Parses JSON header syntax and a unique, non-empty ASCII {@code alg} string.
  * Other member values are checked for JSON syntax, not JOSE semantics.
- * Nesting uses an explicit stack; each instance reads one decoded header.
+ * Nesting uses an explicit stack; each instance parses a decoded header.
  */
 final class JwsHeader {
 
@@ -54,7 +54,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads one JSON object and checks its top-level algorithm member.
+   * Parses a JSON object and checks the top-level algorithm member.
    *
    * @return {@code true} when the complete header meets the syntax checks.
    */
@@ -134,7 +134,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads a scalar value or starts a nested container without recursion.
+   * Parses a scalar value or starts a nested container without recursion.
    *
    * @return {@code true} when a value starts at the current position.
    */
@@ -162,7 +162,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads and checks a JSON string without retaining its contents.
+   * Parses and checks a JSON string without retaining the contents.
    *
    * @return Algorithm-name, ASCII and non-empty flags, or {@code -1} for invalid syntax.
    */
@@ -196,7 +196,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads a JSON escape after its backslash.
+   * Parses a JSON escape after the backslash.
    *
    * @return The decoded UTF-16 unit, or {@code -1} for an invalid escape.
    */
@@ -218,7 +218,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads four ASCII hexadecimal digits from a Unicode escape.
+   * Parses 4 ASCII hexadecimal digits from a Unicode escape.
    *
    * @return The decoded UTF-16 unit, or {@code -1} for invalid digits.
    */
@@ -238,9 +238,9 @@ final class JwsHeader {
   }
 
   /**
-   * Reads JSON number syntax without converting the numeric value.
+   * Parses JSON number syntax without converting the numeric value.
    *
-   * @return {@code true} for a valid integer, fraction or exponent form.
+   * @return {@code true} for a valid integer, decimal, or exponent form.
    */
   private boolean readNumber() {
     consume('-');
@@ -264,7 +264,7 @@ final class JwsHeader {
   }
 
   /**
-   * Reads one or more ASCII decimal digits.
+   * Parses one or more ASCII decimal digits.
    *
    * @return {@code true} if at least one digit was read.
    */
@@ -277,9 +277,9 @@ final class JwsHeader {
   }
 
   /**
-   * Reads one of the JSON literal names.
+   * Parses a JSON keyword.
    *
-   * @param literal The expected literal.
+   * @param literal The expected keyword.
    * @return {@code true} if it was consumed.
    */
   private boolean readLiteral(String literal) {
@@ -291,7 +291,7 @@ final class JwsHeader {
     return true;
   }
 
-  /** Skips the four whitespace characters permitted by JSON. */
+  /** Skips the 4 whitespace characters permitted by JSON. */
   private void skipWhitespace() {
     while (position < text.length()) {
       final char c = text.charAt(position);
@@ -303,7 +303,7 @@ final class JwsHeader {
   }
 
   /**
-   * Advances past an expected character.
+   * Consumes an expected character.
    *
    * @param expected The character to consume.
    * @return {@code true} if it was present.
