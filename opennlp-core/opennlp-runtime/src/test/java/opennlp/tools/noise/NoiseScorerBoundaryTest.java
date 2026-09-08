@@ -60,6 +60,7 @@ public class NoiseScorerBoundaryTest {
         Arguments.of("signals 4", "bbbbbbb1c2d3f4g", NoiseSpan.SEVERITY_GIBBERISH, 1.0));
   }
 
+  /** Verifies each structural threshold boundary. */
   @ParameterizedTest(name = "{0}")
   @MethodSource("structuralBoundaries")
   void testStructuralThreshold(String name, String token, String severity, double score) {
@@ -83,6 +84,7 @@ public class NoiseScorerBoundaryTest {
         Arguments.of("non-base64 character", "Ab".repeat(12) + "_", false));
   }
 
+  /** Verifies each binary-content threshold boundary. */
   @ParameterizedTest(name = "{0}")
   @MethodSource("binaryBoundaries")
   void testBinaryThreshold(String name, String token, boolean binary) {
@@ -92,6 +94,7 @@ public class NoiseScorerBoundaryTest {
     assertEquals(expected, scorer.score(token, List.of()), name);
   }
 
+  /** Verifies binary-content score saturation. */
   @ParameterizedTest
   @ValueSource(ints = {47, 48, 49})
   void testBinaryScoreSaturation(int length) {
@@ -100,6 +103,7 @@ public class NoiseScorerBoundaryTest {
         Math.min(1.0, length / 48.0))), scorer.score(token, List.of()));
   }
 
+  /** Skips dictionary repair below the minimum core length. */
   @Test
   void testMinimumCoreLengthForDictionaryRepair() {
     final NoiseScorer withDictionary = new StructuralNoiseScorer(Set.of("m", "mx")::contains);
@@ -108,18 +112,21 @@ public class NoiseScorerBoundaryTest {
         withDictionary.score("rnx", List.of()));
   }
 
+  /** Lets dictionary acceptance override structural signals. */
   @Test
   void testLowercaseDictionaryAcceptancePrecedesStructuralSignals() {
     final NoiseScorer withDictionary = new StructuralNoiseScorer(Set.of("xxxxxxxx")::contains);
     assertEquals(List.of(), withDictionary.score("XXXXXXXX", List.of()));
   }
 
+  /** Leaves empty, punctuation-only, and non-ASCII inputs unscored. */
   @ParameterizedTest
   @ValueSource(strings = {"", " \t\n", "()[]{}", "bcdfg\u00e9", "bcdfg\ud83d\ude00"})
   void testUnscoredInputs(String text) {
     assertEquals(List.of(), scorer.score(new StringBuilder(text), List.of()));
   }
 
+  /** Preserves UTF-16 offsets after supplementary characters. */
   @Test
   void testOriginalOffsetsAfterSupplementaryCharacterAndPunctuation() {
     final String text = "\ud83d\ude00 (bcdfg),\u2003end";
@@ -127,6 +134,7 @@ public class NoiseScorerBoundaryTest {
         scorer.score(new StringBuilder(text), List.of()));
   }
 
+  /** Merges findings across supported whitespace characters. */
   @ParameterizedTest
   @ValueSource(strings = {" ", "\t", "\r\n", "\u00a0", "\u2003"})
   void testWhitespaceSeparatedFindingsMerge(String separator) {
