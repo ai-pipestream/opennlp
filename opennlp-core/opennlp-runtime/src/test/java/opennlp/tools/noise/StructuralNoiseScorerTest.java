@@ -48,6 +48,7 @@ public class StructuralNoiseScorerTest {
         "latchstring", "twelfths");
   }
 
+  /** Keeps representative English words clean. */
   @ParameterizedTest
   @MethodSource("representativeWords")
   void testRepresentativeWordsProduceNoNoise(String word) {
@@ -55,6 +56,7 @@ public class StructuralNoiseScorerTest {
         word);
   }
 
+  /** Keeps ordinary prose clean. */
   @Test
   void testOrdinaryProseStaysClean() {
     assertEquals(List.of(), scorer.score(
@@ -79,11 +81,13 @@ public class StructuralNoiseScorerTest {
         scorer.score("see AbstractSingletonProxyFactoryBean docs", List.of()));
   }
 
+  /** Accepts a long identifier with one digit. */
   @Test
   void testLongIdentifierWithOneDigitStaysClean() {
     assertEquals(List.of(), scorer.score("DocumentationVersion2Api", List.of()));
   }
 
+  /** Requires a dictionary-supported repair for misspelled results. */
   @Test
   void testMisspelledBoundaryRequiresARepairToAKnownWord() {
     final StructuralNoiseScorer withDictionary =
@@ -93,6 +97,7 @@ public class StructuralNoiseScorerTest {
         withDictionary.score("rnodern", List.of()).get(0).severity());
   }
 
+  /** Reports a consonant-run signal starting at seven consecutive consonants. */
   @Test
   void testDamagedBoundaryStartsAtSevenConsonants() {
     assertEquals(List.of(), scorer.score("astrchmo", List.of()));
@@ -100,6 +105,7 @@ public class StructuralNoiseScorerTest {
         scorer.score("astrchmfo", List.of()).get(0).severity());
   }
 
+  /** Reports gibberish for multiple structural signals. */
   @Test
   void testGibberishBoundaryStartsAtTwoSignals() {
     assertEquals(NoiseSpan.SEVERITY_DAMAGED,
@@ -108,6 +114,7 @@ public class StructuralNoiseScorerTest {
         scorer.score("asdkfjqwzx", List.of()).get(0).severity());
   }
 
+  /** Reports binary content starting at 24 characters. */
   @Test
   void testBinaryishBoundaryStartsAtTwentyFourCharacters() {
     assertEquals(List.of(), scorer.score("AbAbAbAbAbAbAbAbAbAbAbA", List.of()));
@@ -128,6 +135,7 @@ public class StructuralNoiseScorerTest {
         Arguments.of("zxkcvbnmsdfg"));
   }
 
+  /** Reports tokens with at least two structural signals as gibberish. */
   @ParameterizedTest
   @MethodSource("gibberish")
   void testTwoAgreeingSignalsAreGibberish(String token) {
@@ -176,6 +184,7 @@ public class StructuralNoiseScorerTest {
     assertEquals(NoiseSpan.SEVERITY_GIBBERISH, found.get(0).severity());
   }
 
+  /** Ignores empty exclusions. */
   @Test
   void testEmptyExclusionDoesNotSuppressAToken() {
     final String text = "zxkcvbnmsdfg";
@@ -183,6 +192,7 @@ public class StructuralNoiseScorerTest {
         scorer.score(text, List.of(new Span(3, 3))));
   }
 
+  /** Prevents merging across excluded whitespace. */
   @Test
   void testFindingsDoNotMergeAcrossExcludedWhitespace() {
     final String text = "bcdfg \t bcdfg";
@@ -192,6 +202,7 @@ public class StructuralNoiseScorerTest {
         scorer.score(text, List.of(new Span(6, 7))));
   }
 
+  /** Rejects exclusions outside the text bounds. */
   @Test
   void testExclusionsMustFitTheText() {
     final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
@@ -201,6 +212,7 @@ public class StructuralNoiseScorerTest {
         () -> scorer.score("", List.of(new Span(1, 1))));
   }
 
+  /** Accepts unordered, duplicate, and overlapping exclusions. */
   @Test
   void testUnsortedOverlappingExclusionsAreAccepted() {
     final String text = "bcdfg hello bcdfg end bcdfg";
@@ -210,6 +222,7 @@ public class StructuralNoiseScorerTest {
         NoiseSpan.SEVERITY_DAMAGED, 0.5)), scorer.score(text, exclude));
   }
 
+  /** Accepts findings adjacent to excluded spans. */
   @Test
   void testTouchingExclusionsDoNotSuppressAToken() {
     final String text = " bcdfg ";
@@ -285,6 +298,7 @@ public class StructuralNoiseScorerTest {
     assertEquals(List.of(), withDictionary.score("zxkcvbnmsdfg", List.of()));
   }
 
+  /** Rejects null API arguments. */
   @Test
   void testRejectsContractViolations() {
     assertThrows(IllegalArgumentException.class, () -> scorer.score(null, List.of()));

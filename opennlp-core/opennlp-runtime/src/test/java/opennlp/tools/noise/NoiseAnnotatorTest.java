@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class NoiseAnnotatorTest {
 
+  /** Checks the required and provided layers for both modes. */
   @Test
   void testModesDeclareTheirRequirements() {
     assertEquals(Set.of(AssetAnnotator.ASSETS), new NoiseAnnotator().requires());
@@ -50,6 +51,7 @@ public class NoiseAnnotatorTest {
     assertEquals(Set.of(NoiseAnnotator.NOISE), new NoiseAnnotator().provides());
   }
 
+  /** Excludes asset spans while retaining independent noise findings. */
   @Test
   void testDetectedAssetsAreNotReportedAsNoise() {
     final ByteArrayOutputStream png = new ByteArrayOutputStream();
@@ -72,6 +74,7 @@ public class NoiseAnnotatorTest {
         noise.get(0).span().getCoveredText(text).toString());
   }
 
+  /** Scores all text when asset exclusion is disabled. */
   @Test
   void testStandaloneModeScoresTheWholeText() {
     final String text = "QWxhZGRpbjF2cGVuNHNlc2FtZQ here";
@@ -93,6 +96,7 @@ public class NoiseAnnotatorTest {
         "the message must name the missing layer");
   }
 
+  /** Rejects null constructor and annotation arguments. */
   @Test
   void testRejectsContractViolations() {
     assertThrows(IllegalArgumentException.class, () -> new NoiseAnnotator(null, true));
@@ -100,6 +104,7 @@ public class NoiseAnnotatorTest {
         () -> new NoiseAnnotator().annotate(null));
   }
 
+  /** Adds an empty result layer without changing the input document. */
   @Test
   void testEmptyInputAddsAnEmptyNoiseLayer() {
     final Document input = Document.of("").with(AssetAnnotator.ASSETS, List.of());
@@ -109,6 +114,7 @@ public class NoiseAnnotatorTest {
     assertFalse(input.layers().contains(NoiseAnnotator.NOISE));
   }
 
+  /** Passes exact asset spans to the scorer and retains existing layers. */
   @Test
   void testScorerReceivesFullAssetSpansAndPreservesInputLayers() {
     final String text = "abc bcdfg";

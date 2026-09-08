@@ -56,6 +56,7 @@ public class NoiseManualExampleTest {
     assertEquals(NoiseSpan.SEVERITY_GIBBERISH, noise.get(0).severity());
   }
 
+  /** Exercises the asset-aware manual example. */
   @Test
   void testDocumentExample() {
     String text = "The scan contains zxkcvbnmsdfg here.";
@@ -69,6 +70,7 @@ public class NoiseManualExampleTest {
     assertEquals(List.of(), document.get(AssetAnnotator.ASSETS));
   }
 
+  /** Exercises the standalone manual example. */
   @Test
   void testStandaloneDocumentExample() {
     Document document = new NoiseAnnotator(new StructuralNoiseScorer(), false)

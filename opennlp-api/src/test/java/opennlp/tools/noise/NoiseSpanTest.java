@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Tests the value and validation contract of {@link NoiseSpan}. */
 public class NoiseSpanTest {
 
+  /** Checks record accessors, equality, hashing, and text representation. */
   @Test
   void testRecordContract() {
     final Span span = new Span(1, 4);
@@ -54,6 +55,7 @@ public class NoiseSpanTest {
         noise.toString());
   }
 
+  /** Accepts the documented lower and upper score boundaries. */
   @Test
   void testScoreBoundaries() {
     final Span span = new Span(0, 1);
@@ -63,6 +65,7 @@ public class NoiseSpanTest {
         new NoiseSpan(span, NoiseSpan.SEVERITY_DAMAGED, 1.0).score());
   }
 
+  /** Accepts non-built-in severity names. */
   @Test
   void testCustomSeverityIsAccepted() {
     assertEquals("ocr:suspect", new NoiseSpan(new Span(0, 1), "ocr:suspect", 0.5).severity());
@@ -102,6 +105,7 @@ public class NoiseSpanTest {
                 Double.POSITIVE_INFINITY)));
   }
 
+  /** Rejects each invalid record component with its contract message. */
   @ParameterizedTest(name = "{0}")
   @MethodSource("invalidValues")
   void testRejectsInvalidValues(String name, String expectedMessage, Executable call) {
