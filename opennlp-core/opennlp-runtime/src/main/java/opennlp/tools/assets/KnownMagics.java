@@ -72,11 +72,15 @@ import java.util.Set;
  * after matching an EMR_HEADER prefix, and pcapng byte-order magic after
  * matching a Section Header Block prefix. JPEG 2000 formats use the brand in the
  * file-type box after the shared signature box. DEX requires 3 decimal version
- * digits and a zero terminator after the prefix.</p>
+ * digits and a zero terminator after the prefix. WebVTT permits an initial UTF-8 BOM
+ * and requires a separator or EOF after its identifier.</p>
  *
  * @since 3.0.0
  */
 final class KnownMagics {
+
+  private static final String MPX_FORMAT = "mpx";
+  private static final String MPX_MEDIA_TYPE = "application/x-project";
 
   /**
    * The format name and media type identified by a header.
@@ -134,26 +138,32 @@ final class KnownMagics {
 
   /** The remaining recognized formats. */
   private static final List<Entry> DERIVED = List.of(
-      // -----BEGIN CERTIFICATE--
-      e("2d2d2d2d2d424547494e2043455254494649434154452d2d", "pem-cert", "application/x-x509-cert"),
-      // -----BEGIN DSA PARAMETER
-      e("2d2d2d2d2d424547494e2044534120504152414d45544552", "pem-parameters",
+      // -----BEGIN CERTIFICATE-----
+      e("2d2d2d2d2d424547494e2043455254494649434154452d2d2d2d2d",
+          "pem-cert", "application/x-x509-cert"),
+      // -----BEGIN DSA PARAMETERS-----
+      e("2d2d2d2d2d424547494e2044534120504152414d45544552532d2d2d2d2d", "pem-parameters",
           "application/x-x509-dsa-parameters"),
-      // -----BEGIN DSA PRIVATE K
-      e("2d2d2d2d2d424547494e204453412050524956415445204b", "pem-key", "application/x-x509-key"),
-      // -----BEGIN EC PARAMETERS
-      e("2d2d2d2d2d424547494e20454320504152414d4554455253", "pem-parameters",
+      // -----BEGIN DSA PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e204453412050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN EC PARAMETERS-----
+      e("2d2d2d2d2d424547494e20454320504152414d45544552532d2d2d2d2d", "pem-parameters",
           "application/x-x509-ec-parameters"),
-      // -----BEGIN PRIVATE KEY--
-      e("2d2d2d2d2d424547494e2050524956415445204b45592d2d", "pem-key", "application/x-x509-key"),
-      // -----BEGIN PUBLIC KEY---
-      e("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d", "pem-key", "application/x-x509-key"),
-      // -----BEGIN RSA PRIVATE K
-      e("2d2d2d2d2d424547494e205253412050524956415445204b", "pem-key", "application/x-x509-key"),
+      // -----BEGIN PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e2050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN PUBLIC KEY-----
+      e("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
+      // -----BEGIN RSA PRIVATE KEY-----
+      e("2d2d2d2d2d424547494e205253412050524956415445204b45592d2d2d2d2d",
+          "pem-key", "application/x-x509-key"),
       // Binary DXF sentinel ends with CR, LF, SUB, and NUL bytes.
       e("4175746f4341442042696e617279204458460d0a1a00", "dxf", "image/vnd.dxf"),
-      // MPX,Microsoft Project fo
-      e("4d50582c4d6963726f736f66742050726f6a65637420666f", "mpx", "application/x-project"),
+      // MPX followed by a comma or semicolon list separator.
+      e("4d50582c", MPX_FORMAT, MPX_MEDIA_TYPE),
+      e("4d50583b", MPX_FORMAT, MPX_MEDIA_TYPE),
       // %!PS-Adobe-3.0 EPSF-3.0
       e("252150532d41646f62652d332e3020455053462d332e30", "ps", "application/postscript"),
       // -----BEGIN DSA KEY-----
@@ -177,8 +187,8 @@ final class KnownMagics {
       e("524946462400000043444441666d742018", "cda", "application/x-cdf"), // RIFF$...CDDAfmt .
       // ......F..1...t..
       e("0606edf5d81d46e5bd31efe7fe74b71d", "indd", "application/x-adobe-indesign"),
-      // -----BEGIN PKCS7
-      e("2d2d2d2d2d424547494e20504b435337", "p7s", "application/pkcs7-signature"),
+      // -----BEGIN PKCS7-----
+      e("2d2d2d2d2d424547494e20504b4353372d2d2d2d2d", "p7s", "application/pkcs7-signature"),
       e("457874656e646564204d6f64756c653a", "mod", "audio/x-mod"), // Extended Module:
       // StartFontMetrics
       e("5374617274466f6e744d657472696373", "afm", "application/x-font-adobe-metric"),
@@ -238,9 +248,8 @@ final class KnownMagics {
       e("efbbbf3c3f786d6c", "xml", "application/xml"), // ...<?xml
       e("234558544d3355", "m3u8", "application/vnd.apple.mpegurl"), // #EXTM3U
       e("53747566664974", "sit", "application/x-stuffit"), // StuffIt
-      e("5745425654540a", "vtt", "text/vtt"), // WEBVTT.
-      e("5745425654540d", "vtt", "text/vtt"), // WEBVTT.
-      e("57454256545420", "vtt", "text/vtt"), // WEBVTT
+      e("efbbbf574542565454", "vtt", "text/vtt"), // UTF-8 BOM and WEBVTT
+      e("574542565454", "vtt", "text/vtt"), // WEBVTT
       e("894844460d0a1a0a", "hdf", "application/x-hdf"), // .HDF....
       e("000002000110", "wb1", "application/x-quattro-pro"),
       e("000002000210", "wb2", "application/x-quattro-pro"),
