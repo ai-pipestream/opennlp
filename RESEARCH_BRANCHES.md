@@ -25,12 +25,17 @@ the region-vote and geocode working trees remain uncommitted and excluded.
   unpublished research. New public maintenance PRs are helper inputs; they
   are not automatically admitted to the research preview.
 - Feature fixes stay on their owning branches. Nothing merges out of uber.
-- Six verified review batches were pushed to the fork before this main
-  cascade: gazetteer, relation, noise, embedded assets, BiLSTM and PII.
-  Publication of the aligned heads and integration builds is being verified.
-- The last published helper is `4d2579294`; the last published uber is
-  `da898e16a`. Neither represents this completed feature cascade yet.
-  Build provenance, publication and deployment are separate checks.
+- All 32 admitted feature heads match their published fork branches.
+  Parser, dependency annotations and relation extraction also match their
+  Apache source branches. All open author PRs remain drafts.
+- The helper is published on Apache at `91fc182ee` and contains all 22
+  public author PR heads checked in this round. Its 27-module package build
+  and 48 focused tests passed.
+- Uber contains all 32 aligned feature heads. Its 27-module package build
+  and 580 cross-feature tests passed. A fresh integration has the same source
+  and tests; differences are formatting, license-block order and timestamp.
+  `PIPESTREAM-PROVENANCE.txt` records the selected heads. Preview publication
+  does not deploy either server.
 
 ## Intended dependency tree
 
@@ -168,18 +173,18 @@ head. A PR marked Ready is not necessarily approved or validated for merge.
 
 | PR | Published base | PR source | Published head | Local head | Main missing | Review state |
 | --- | --- | --- | --- | --- | --- | --- |
-| [#1152](https://github.com/apache/opennlp/pull/1152) | `OPENNLP-1885-sentencepiece` | ai-pipestream | `54c70f8b2` | `cce72a000` | 0 | Draft |
-| [#1154](https://github.com/apache/opennlp/pull/1154) | `main` | ai-pipestream | `054003020` | `19419c144` | 0 | Draft |
-| [#1155](https://github.com/apache/opennlp/pull/1155) | `main` | ai-pipestream | `21250fd31` | `f9c56c495` | 0 | Draft |
+| [#1152](https://github.com/apache/opennlp/pull/1152) | `OPENNLP-1885-sentencepiece` | ai-pipestream | `cce72a000` | `cce72a000` | 0 | Draft |
+| [#1154](https://github.com/apache/opennlp/pull/1154) | `main` | ai-pipestream | `19419c144` | `19419c144` | 0 | Draft |
+| [#1155](https://github.com/apache/opennlp/pull/1155) | `main` | ai-pipestream | `f9c56c495` | `f9c56c495` | 0 | Draft |
 | [#1288](https://github.com/apache/opennlp/pull/1288) | `main` | ai-pipestream | `9a7676e74` | `9a7676e74` | 0 | Draft |
-| [#1166](https://github.com/apache/opennlp/pull/1166) | `main` | ai-pipestream | `642ecd211` | `59492abcb` | 0 | Draft |
-| [#1167](https://github.com/apache/opennlp/pull/1167) | `main` | ai-pipestream | `306c782a8` | `4f91b1703` | 0 | Draft |
-| [#1213](https://github.com/apache/opennlp/pull/1213) | `main` | ai-pipestream | `be60c7366` | `a43f3ac6e` | 0 | Draft |
-| [#1214](https://github.com/apache/opennlp/pull/1214) | `main` | ai-pipestream | `b544be277` | `319ab6147` | 0 | Draft |
-| [#1215](https://github.com/apache/opennlp/pull/1215) | `main` | ai-pipestream | `7313e21a9` | `7c253ead2` | 0 | Draft |
-| [#1236](https://github.com/apache/opennlp/pull/1236) | `main` | apache | `ebf96ee89` | `12d9db03f` | 0 | Draft |
-| [#1237](https://github.com/apache/opennlp/pull/1237) | `OPENNLP-547-dependency-parser` | apache | `762691d46` | `0f643ffef` | 0 | Draft |
-| [#1238](https://github.com/apache/opennlp/pull/1238) | `OPENNLP-1919-dependency-annotations` | apache | `1d295c5f6` | `be054493d` | 0 | Draft |
+| [#1166](https://github.com/apache/opennlp/pull/1166) | `main` | ai-pipestream | `59492abcb` | `59492abcb` | 0 | Draft |
+| [#1167](https://github.com/apache/opennlp/pull/1167) | `main` | ai-pipestream | `4f91b1703` | `4f91b1703` | 0 | Draft |
+| [#1213](https://github.com/apache/opennlp/pull/1213) | `main` | ai-pipestream | `a43f3ac6e` | `a43f3ac6e` | 0 | Draft |
+| [#1214](https://github.com/apache/opennlp/pull/1214) | `main` | ai-pipestream | `319ab6147` | `319ab6147` | 0 | Draft |
+| [#1215](https://github.com/apache/opennlp/pull/1215) | `main` | ai-pipestream | `7c253ead2` | `7c253ead2` | 0 | Draft |
+| [#1236](https://github.com/apache/opennlp/pull/1236) | `main` | apache | `12d9db03f` | `12d9db03f` | 0 | Draft |
+| [#1237](https://github.com/apache/opennlp/pull/1237) | `OPENNLP-547-dependency-parser` | apache | `0f643ffef` | `0f643ffef` | 0 | Draft |
+| [#1238](https://github.com/apache/opennlp/pull/1238) | `OPENNLP-1919-dependency-annotations` | apache | `be054493d` | `be054493d` | 0 | Draft |
 
 Fork publication alone does not update #1236, #1237, or #1238: their PR source
 branches are on apache/opennlp. Keep fork synchronization and Apache PR
@@ -237,26 +242,26 @@ The hierarchy tip contains current numeric, gazetteer, region, and geocode heads
 
 | Branch | Local head | Main missing | Preview input | Intended dependency | Fork status |
 | --- | --- | --- | --- | --- | --- |
-| `OPENNLP-XXXX-bilstm-tagger` | `9a4e0ea6c` | 0 | Direct | Feedforward tagger | Aligned head pending verification/push |
-| `OPENNLP-XXXX-coref` | `3d16018da` | 0 | Direct | main subword API, #1288 encoder tests | Aligned head pending verification/push |
-| `OPENNLP-XXXX-dehyphenation` | `9f6e33a2f` | 0 | Direct | main (term vectors included) | Aligned head pending verification/push |
-| `OPENNLP-XXXX-embedded-assets` | `4bc77ebd3` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-embedding-annotator` | `76d096595` | 0 | Direct | #1152 static embeddings | Aligned head pending verification/push |
-| `OPENNLP-XXXX-ff-postagger` | `1e84cac82` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-geocode-annotator` | `939ba00c8` | 0 | Via hierarchy tip | Region vote | Aligned head pending verification/push |
-| `OPENNLP-XXXX-glossary` | `985ba0117` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-hierarchy-annotator` | `6d53ab34e` | 0 | Direct | Geocode annotator | Aligned head pending verification/push |
-| `OPENNLP-XXXX-morfologik-fsa` | `1a047491c` | 0 | Direct | main; reconcile existing extension | Aligned head pending verification/push |
-| `OPENNLP-XXXX-noise` | `6dbf42ad0` | 0 | Direct | Embedded assets | Aligned head pending verification/push |
-| `OPENNLP-XXXX-numeric` | `fa258f964` | 0 | Via hierarchy tip | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-pii` | `6541bcbba` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-place-profiles` | `b0b352fd2` | 0 | Direct | #1154 gazetteer | Aligned head pending verification/push |
-| `OPENNLP-XXXX-predicate-annotators` | `e8354bc9f` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-region-vote` | `006840c62` | 0 | Via hierarchy tip | Numeric + #1154 gazetteer | Aligned head pending verification/push |
-| `OPENNLP-XXXX-spellcheck-recase` | `78a2bf662` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-symbol-joiner` | `db2ee8658` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-text-artifacts` | `d60fe9b0f` | 0 | Direct | main | Aligned head pending verification/push |
-| `OPENNLP-XXXX-wordnet-extension` | `45bd56ac4` | 0 | Direct | #1155 WordNet | Aligned head pending verification/push |
+| `OPENNLP-XXXX-bilstm-tagger` | `9a4e0ea6c` | 0 | Direct | Feedforward tagger | Published |
+| `OPENNLP-XXXX-coref` | `3d16018da` | 0 | Direct | main subword API, #1288 encoder tests | Published |
+| `OPENNLP-XXXX-dehyphenation` | `9f6e33a2f` | 0 | Direct | main (term vectors included) | Published |
+| `OPENNLP-XXXX-embedded-assets` | `4bc77ebd3` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-embedding-annotator` | `76d096595` | 0 | Direct | #1152 static embeddings | Published |
+| `OPENNLP-XXXX-ff-postagger` | `1e84cac82` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-geocode-annotator` | `939ba00c8` | 0 | Via hierarchy tip | Region vote | Published |
+| `OPENNLP-XXXX-glossary` | `985ba0117` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-hierarchy-annotator` | `6d53ab34e` | 0 | Direct | Geocode annotator | Published |
+| `OPENNLP-XXXX-morfologik-fsa` | `1a047491c` | 0 | Direct | main; reconcile existing extension | Published |
+| `OPENNLP-XXXX-noise` | `6dbf42ad0` | 0 | Direct | Embedded assets | Published |
+| `OPENNLP-XXXX-numeric` | `fa258f964` | 0 | Via hierarchy tip | main | Published |
+| `OPENNLP-XXXX-pii` | `6541bcbba` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-place-profiles` | `b0b352fd2` | 0 | Direct | #1154 gazetteer | Published |
+| `OPENNLP-XXXX-predicate-annotators` | `e8354bc9f` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-region-vote` | `006840c62` | 0 | Via hierarchy tip | Numeric + #1154 gazetteer | Published |
+| `OPENNLP-XXXX-spellcheck-recase` | `78a2bf662` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-symbol-joiner` | `db2ee8658` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-text-artifacts` | `d60fe9b0f` | 0 | Direct | main | Published |
+| `OPENNLP-XXXX-wordnet-extension` | `45bd56ac4` | 0 | Direct | #1155 WordNet | Published |
 
 ## Verified stacks
 
@@ -321,8 +326,8 @@ rewriting the feature branches.
    local and published histories. Compare with a fresh scratch integration
    before publishing the preview.
 
-The feature main cascade is local and its ancestry checks passed. Integration
-builds and publication are still being checked. Exact heads and results are in
+The feature main cascade is published, and its ancestry checks passed. Helper
+and uber passed their package and selected regression checks. Exact heads and results are in
 `REVIEW-CHANGES/publication-20260908.1WyFWe/RECEIPT.md` at the workspace root.
 Pending publication and separate-repository work is in
 `TODO/BRANCH-PUBLICATION.md`. PR readiness is unchanged.
