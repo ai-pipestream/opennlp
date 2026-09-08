@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import opennlp.tools.document.Annotation;
 import opennlp.tools.document.Document;
 import opennlp.tools.document.DocumentAnalyzer;
+import opennlp.tools.document.DocumentAnnotator;
 import opennlp.tools.extraction.NumberNotation;
 import opennlp.tools.money.CursorMoneyExtractor;
 import opennlp.tools.money.EcbFxRates;
@@ -52,6 +53,51 @@ import opennlp.tools.util.Span;
  * Tests the numeric manual examples.
  */
 public class NumericManualExampleTest {
+
+  /**
+   * Extends a regional factory pipeline with conversion using synthetic rates.
+   *
+   * @throws IOException If reading the table fails.
+   */
+  @Test
+  void testExtendedPackListing() throws IOException {
+    final String csv = "Date,USD\n2026-07-14,1.25\n";
+    final FxRates rates = EcbFxRates.load(
+        new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+    final List<DocumentAnnotator> annotators = NumericPacks.annotators(Locale.GERMANY);
+    annotators.add(new MoneyConversionAnnotator(rates, "USD"));
+    final DocumentAnalyzer.Builder builder = DocumentAnalyzer.builder();
+    annotators.forEach(builder::add);
+    final String text = "2026-07-14: paid EUR 10 for 3 kg yesterday.";
+    final Document document = builder.build().analyze(text);
+
+    Assertions.assertEquals(Set.of(MoneyAnnotator.MONEY, QuantityAnnotator.QUANTITIES,
+        TemporalAnnotator.TEMPORALS, DocumentDateAnnotator.DOCUMENT_DATE,
+        MoneyConversionAnnotator.CONVERTED_MONEY), document.layers());
+    final List<Annotation<MoneyAmount>> source = document.get(MoneyAnnotator.MONEY);
+    final List<Annotation<MoneyAmount>> converted =
+        document.get(MoneyConversionAnnotator.CONVERTED_MONEY);
+    Assertions.assertEquals(1, source.size());
+    Assertions.assertEquals(1, converted.size());
+    Assertions.assertEquals("EUR", source.getFirst().value().currency());
+    Assertions.assertEquals(0, BigDecimal.TEN.compareTo(source.getFirst().value().amount()));
+    Assertions.assertEquals("USD", converted.getFirst().value().currency());
+    Assertions.assertEquals(0, new BigDecimal("12.5")
+        .compareTo(converted.getFirst().value().amount()));
+    Assertions.assertEquals(new Span(17, 23), source.getFirst().span());
+    Assertions.assertEquals(source.getFirst().span(), converted.getFirst().span());
+    Assertions.assertEquals(converted.getFirst().span(), converted.getFirst().value().span());
+    Assertions.assertEquals("EUR 10", converted.getFirst().span().getCoveredText(text).toString());
+    Assertions.assertEquals(LocalDate.of(2026, 7, 14),
+        document.get(DocumentDateAnnotator.DOCUMENT_DATE).getFirst().value());
+    Assertions.assertEquals(2, document.get(TemporalAnnotator.TEMPORALS).size());
+    Assertions.assertEquals("2026-07-13",
+        document.get(TemporalAnnotator.TEMPORALS).getLast().value().value());
+    Assertions.assertEquals(1, document.get(QuantityAnnotator.QUANTITIES).size());
+    Assertions.assertEquals(0, BigDecimal.valueOf(3)
+        .compareTo(document.get(QuantityAnnotator.QUANTITIES).getFirst().value().value()));
+    Assertions.assertEquals("kg", document.get(QuantityAnnotator.QUANTITIES).getFirst().value().unit());
+  }
 
   /**
    * The dateline resolves a relative date; both expressions retain their text spans.
