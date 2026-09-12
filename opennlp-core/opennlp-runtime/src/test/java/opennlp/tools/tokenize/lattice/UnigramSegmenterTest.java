@@ -267,4 +267,20 @@ public class UnigramSegmenterTest {
 
     Assertions.assertArrayEquals(new String[] {word}, loaded.tokenize(word));
   }
+
+  @Test
+  void testLoadLeavesLexiconStreamOpen() throws IOException {
+    final boolean[] closed = {false};
+    final ByteArrayInputStream stream = new ByteArrayInputStream(
+        "word 1\n".getBytes(StandardCharsets.UTF_8)) {
+      @Override
+      public void close() {
+        closed[0] = true;
+      }
+    };
+
+    UnigramSegmenter.load(stream, StandardCharsets.UTF_8);
+
+    Assertions.assertFalse(closed[0]);
+  }
 }
