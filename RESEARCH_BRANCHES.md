@@ -255,7 +255,7 @@ Their publication and review state should be checked independently.
 
 ## Research worktrees in the preview
 
-All 21 research branch heads contain current main (f09b7f0a5, synchronized 2026-09-16 by merge). Fork status is as of that date; the research heads have not been pushed since.
+All 20 research branch heads contain current main (f09b7f0a5, synchronized 2026-09-16 by merge). Fork status is as of that date; the research heads have not been pushed since.
 The region-vote and geocode worktrees still have pending candidate-policy edits;
 those edits are not in the branch heads below. Temporary feature READMEs remain local.
 The hierarchy tip contains current numeric, gazetteer, region, and geocode heads.
@@ -282,7 +282,6 @@ The hierarchy tip contains current numeric, gazetteer, region, and geocode heads
 | `OPENNLP-XXXX-symbol-joiner` | `3b27812da` | 0 | Direct | main | Fork behind |
 | `OPENNLP-XXXX-text-artifacts` | `6d84f6e01` | 0 | Direct | main | Fork behind |
 | `OPENNLP-XXXX-wordnet-extension` | `4b02d85db` | 0 | Direct | #1155 WordNet | Fork behind |
-| `OPENNLP-XXXX-component-spi` | `d60943ec0` | 0 | Direct | main | Local only |
 
 ## Verified stacks
 
