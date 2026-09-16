@@ -17,8 +17,17 @@
 
 package opennlp.tools.chunker;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.Map;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import opennlp.tools.ml.maxent.GISModel;
+import opennlp.tools.ml.model.Context;
+import opennlp.tools.ml.model.MaxentModel;
+import opennlp.tools.parser.ParserChunkerFactory;
 
 /**
  * This is the test class for {@link ChunkerModel}.
@@ -57,5 +66,29 @@ public class ChunkerModelTest {
     Assertions.assertNotNull(
         new ChunkerModel(this.getClass().getResourceAsStream("chunker180custom.bin")));
 
+  }
+
+  /**
+   * The preview line stamps models with its own 0.x version. A legacy parser model's chunker is
+   * rebuilt at load time with that stamp and {@link ParserChunkerFactory}, so the pre-1.8
+   * factory rule must apply to major 1 only, while a 1.x model with a custom factory still fails.
+   */
+  @Test
+  void testPreviewVersionWithCustomFactoryLoads() throws Exception {
+    final MaxentModel maxent = new GISModel(
+        new Context[] {new Context(new int[] {0, 1}, new double[] {0.5, 0.5})},
+        new String[] {"p"}, new String[] {"B-NP", "O"});
+
+    final ChunkerModel preview = new ChunkerModel("en", maxent,
+        Map.of("OpenNLP-Version", "0.1.0"), new ParserChunkerFactory());
+    Assertions.assertEquals(0, preview.getVersion().getMajor());
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    preview.serialize(out);
+    Assertions.assertNotNull(new ChunkerModel(new ByteArrayInputStream(out.toByteArray())));
+
+    final IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new ChunkerModel("en", maxent, Map.of("OpenNLP-Version", "1.5.0"),
+            new ParserChunkerFactory()));
+    Assertions.assertTrue(e.getMessage().contains("no longer compatible"), e.getMessage());
   }
 }
