@@ -29,6 +29,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import opennlp.embeddings.spi.TeacherEncoder;
+import opennlp.embeddings.spi.TeacherEncoderProvider;
+import opennlp.embeddings.spi.TeacherEncoderProviders;
 import opennlp.tools.util.java.Experimental;
 
 /**
@@ -215,6 +218,35 @@ public final class ModelDistiller {
   public static Result distill(Path teacherDirectory, Path outputDirectory, int pcaDims,
                                List<String> terms, ProgressListener listener)
       throws IOException {
+    return distill(teacherDirectory, outputDirectory, pcaDims, terms, listener, null);
+  }
+
+  /**
+   * Distills a local teacher using a named encoder provider instead of the one
+   * {@link TeacherEncoderProviders#select(Path)} picks for the teacher's ONNX file.
+   * Tokenization, mean pooling requirements, and output layout are the same as the other
+   * overloads.
+   *
+   * @param teacherDirectory The teacher directory. Must not be null.
+   * @param outputDirectory The output directory. Must not be null or the teacher directory.
+   * @param pcaDims The positive number of principal components to keep.
+   * @param terms Additional terms, or null for none.
+   * @param listener Receives progress messages, or null.
+   * @param provider The name of the installed teacher encoder provider to use, or {@code null}
+   *                 to select one by capability and priority.
+   * @return The verified distillation result.
+   * @throws IllegalArgumentException Thrown if an argument, model, or provider is invalid, or
+   *     if no installed provider supports the teacher's ONNX file.
+   * @throws IllegalStateException Thrown if two providers share the highest priority, or if the
+   *     named provider is installed but not available.
+   * @throws IOException Thrown if reading or writing a file fails.
+   */
+  public static Result distill(Path teacherDirectory, Path outputDirectory, int pcaDims,
+                               List<String> terms, ProgressListener listener, String provider)
+      throws IOException {
+    if (provider != null && provider.isBlank()) {
+      throw new IllegalArgumentException("provider must not be blank");
+    }
     if (teacherDirectory == null) {
       throw new IllegalArgumentException("teacherDirectory must not be null");
     }
@@ -258,7 +290,9 @@ public final class ModelDistiller {
         + " through its ONNX graph");
     final float[] embeddings;
     final int teacherDimension;
-    try (OnnxTeacherEncoder encoder = OnnxTeacherEncoder.load(onnxFile)) {
+    final TeacherEncoderProvider encoderProvider = provider == null
+        ? TeacherEncoderProviders.select(onnxFile) : TeacherEncoderProviders.get(provider);
+    try (TeacherEncoder encoder = encoderProvider.load(onnxFile)) {
       float[][] first = encoder.encodeBatch(new long[][] {tokenizer.inputSequence(0)});
       teacherDimension = first[0].length;
       embeddings = new float[totalRows * teacherDimension];
@@ -363,7 +397,7 @@ public final class ModelDistiller {
    * @throws IOException Thrown if reading the teacher's SentencePiece file fails.
    */
   private static void encodeTerms(List<String> termList, TeacherTokenizer tokenizer,
-                                  Path teacherDirectory, OnnxTeacherEncoder encoder,
+                                  Path teacherDirectory, TeacherEncoder encoder,
                                   float[] embeddings, int vocabularyRows, int teacherDimension,
                                   ProgressListener listener) throws IOException {
     if (termList.isEmpty()) {

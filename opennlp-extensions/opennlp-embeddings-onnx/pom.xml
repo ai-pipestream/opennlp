@@ -27,8 +27,8 @@
     <artifactId>opennlp-extensions</artifactId>
     <version>3.0.0-SNAPSHOT</version>
   </parent>
-  <artifactId>opennlp-embeddings</artifactId>
-  <name>Apache OpenNLP :: Ext :: Embeddings</name>
+  <artifactId>opennlp-embeddings-onnx</artifactId>
+  <name>Apache OpenNLP :: Ext :: Embeddings :: ONNX</name>
   <dependencies>
     <dependency>
       <groupId>org.apache.opennlp</groupId>
@@ -36,7 +36,8 @@
     </dependency>
     <dependency>
       <groupId>org.apache.opennlp</groupId>
-      <artifactId>opennlp-embeddings-onnx</artifactId>
+      <artifactId>opennlp-dl</artifactId>
+      <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.opennlp</groupId>
@@ -44,15 +45,6 @@
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
-
-    <!-- Lucene is used only by the HNSW benchmark tests. -->
-    <dependency>
-      <groupId>org.apache.lucene</groupId>
-      <artifactId>lucene-core</artifactId>
-      <version>${lucene.version}</version>
-      <scope>test</scope>
-    </dependency>
-
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
@@ -69,20 +61,4 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.rat</groupId>
-        <artifactId>apache-rat-plugin</artifactId>
-        <configuration>
-          <!-- These self-authored corpus fixtures use formats without an AL header. -->
-          <excludes combine.children="append">
-            <exclude>src/test/resources/opennlp/embeddings/corpus/*</exclude>
-          </excludes>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
-
 </project>
