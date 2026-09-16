@@ -30,22 +30,20 @@ sitting uncommitted in the region-vote and geocode working trees are parked on
   research tips subsume 20 research branches (the hierarchy tip carries numeric,
   region vote and geocode).
 - The helper consumes the published open 3.x PR heads, drafts included, but not
-  unpublished research. It is published on Apache at `d41657fdd`, regenerated on
-  2026-09-16 from main plus all 27 PR heads at version 3.0.0-OPENNLP-1833-SNAPSHOT;
-  its package build and 7581 focused tests passed.
+  unpublished research. It is published on Apache at `c9abcbac8`, regenerated on
+  2026-09-16 from main plus all 27 PR heads at version 3.0.0-OPENNLP-1833-SNAPSHOT
+  after the static embeddings chain was re-stacked, so it needed no relocation
+  or wiring fix of its own.
 - Feature fixes stay on their owning branches. Nothing merges out of uber.
-- Uber is published on the fork at `d84e12448`. Its package build and 1692 targeted
+- Uber is published on the fork at `3def8b630` and later. Its package build and targeted
   cross-feature tests (AD readers, CoNLL-U, tokenizer, string utilities, the
   embedder and component SPI, and every embeddings module) passed, and the
   `0.1.0-alpha4-SNAPSHOT` preview installed with the UIMA integration tests
   green. `PIPESTREAM-PROVENANCE.txt` records the selected heads. Preview
   publication does not deploy either server.
-- Two resolutions recur in every helper and uber regeneration until their causes
-  land: the AD and CoNLL-U bug fixes (#1299, #1300, #1301) are re-applied inside
-  the scan-based readers of #1276 and #1279, and the TurboQuant, vector index and
-  evaluation branches (#1213 to #1215) fork from static embeddings before its
-  module split, so their files are relocated into `opennlp-embeddings-core` and
-  `-cli`. Re-stacking that chain on the #1152 head removes the second one.
+- One resolution recurs in every helper and uber regeneration until its cause
+  lands: the AD and CoNLL-U bug fixes (#1299, #1300, #1301) are applied again
+  inside the scan-based readers of #1276 and #1279.
 - 8 author PRs are ready for review, 19 are drafts.
 
 ## Intended dependency tree
@@ -114,7 +112,7 @@ flowchart LR
   major0["Preview major-0 model support<br/>BaseModel and ChunkerModel"]
   previewDocs["preview-docs"]
   publishedPrs["All published open 3.x PR heads<br/>drafts included, 27"]
-  helper["OPENNLP-1833-grpc-helper d41657fdd"]
+  helper["OPENNLP-1833-grpc-helper c9abcbac8"]
   apacheServer["Apache sandbox server"]
   demoServer["Search and uber-demo server"]
 
@@ -321,8 +319,8 @@ The hierarchy tip contains current numeric, gazetteer, region, and geocode heads
 - The follow-up fixes #1295, #1299, #1300, #1301 and #1305 are independent of the
   stack; at integration their AD and CoNLL-U changes are applied again inside the
   scan-based readers of #1276 and #1279.
-- #1213, #1214 and #1215 fork from #1152 before its module split, so they keep
-  the pre-split `opennlp-embeddings` layout until re-stacked.
+- #1213, #1214 and #1215 were re-stacked on the #1152 head on 2026-09-16 and
+  carry the split module layout themselves.
 
 The TurboQuant cascade carries double-precision analogy queries through its
 internal adapters. The WordNet extension carries the parent's stream ownership,
