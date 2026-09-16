@@ -33,7 +33,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import opennlp.embeddings.EmbeddingTestFixtures;
 import opennlp.embeddings.corpus.CasePassage;
 import opennlp.embeddings.corpus.DictionaryEntry;
-import opennlp.embeddings.eval.HnswBaseline;
 import opennlp.tools.cmdline.TerminateToolException;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -373,7 +372,7 @@ class EvaluationReportFilesTest {
    */
   private void run(boolean hnsw, Path output) throws IOException {
     if (hnsw) {
-      HnswBaseline.main(new String[] {
+      HnswBaselineRunner.main(new String[] {
           model.toString(), passages.toString(), dictionary.toString(), output.toString(), "1"
       });
     } else {

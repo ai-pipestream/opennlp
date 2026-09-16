@@ -59,5 +59,18 @@
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.apache.opennlp</groupId>
+      <artifactId>opennlp-embeddings</artifactId>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <!-- HnswBaseline (opennlp-embeddings test-jar) uses Lucene directly for the HNSW baseline. -->
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-core</artifactId>
+      <version>${lucene.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
