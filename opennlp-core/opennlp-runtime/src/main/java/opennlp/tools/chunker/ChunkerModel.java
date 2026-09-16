@@ -159,10 +159,13 @@ public class ChunkerModel extends BaseModel {
     }
 
     // Since 1.8.0 we changed the ChunkerFactory signature. This will check the if the model
-    // declares a not default factory, and if yes, check if it was created before 1.8
+    // declares a not default factory, and if yes, check if it was created before 1.8.
+    // Only major 1 is older than 1.8: major 0 is the ai.pipestream preview line, which
+    // stamps the models it writes with its own 0.x version (see BaseModel), and a
+    // legacy parser model's chunker is rebuilt with that stamp and ParserChunkerFactory.
     final String factoryName = getManifestProperty(FACTORY_NAME);
     if ( (factoryName != null && !factoryName.equals("opennlp.tools.chunker.ChunkerFactory") )
-        && this.getVersion().getMajor() <= 1 && this.getVersion().getMinor() < 8) {
+        && this.getVersion().getMajor() == 1 && this.getVersion().getMinor() < 8) {
       throw new InvalidFormatException("The Chunker factory '" + factoryName +
       "' is no longer compatible. Please update it to match the latest ChunkerFactory.");
     }
