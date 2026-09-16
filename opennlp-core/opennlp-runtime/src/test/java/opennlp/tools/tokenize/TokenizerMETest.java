@@ -54,11 +54,6 @@ public class TokenizerMETest {
     WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
   }
 
-  @AfterEach
-  void restoreSharedWhitespaceTokenizer() {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
-  }
-
   @Test
   void testTokenizerSimpleModel() throws IOException {
 
