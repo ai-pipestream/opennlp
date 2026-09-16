@@ -54,6 +54,43 @@
 		</para>
 	</section>
 
+	<section xml:id="tools.embeddings.providers">
+		<title>Dependencies and provider selection</title>
+		<para>
+			<code>opennlp-embeddings</code> includes <code>opennlp-embeddings-core</code> and the
+			default <code>opennlp-embeddings-onnx</code> provider. Exclude
+			<code>opennlp-embeddings-onnx</code>, or depend directly on
+			<code>opennlp-embeddings-core</code>, for static inference without ONNX Runtime.
+			CLI commands are in <code>opennlp-embeddings-cli</code>, which the binary distribution
+			includes. The embedding library does not depend on CLI tooling.
+		</para>
+		<para>
+			<code>TextEmbedderProviders.select(model, options)</code> picks the provider for a
+			request among the installed factories implementing the common
+			<code>TextEmbedderProvider</code> SPI: <code>static</code> supports a model directory
+			with <code>model.safetensors</code> and <code>config.json</code> and no options,
+			<code>onnx</code> supports a <code>*.onnx</code> file with its <code>vocabulary</code>
+			and <code>lowerCase</code> options, and the highest priority wins.
+			<code>TextEmbedderProviders.get("static")</code> and <code>get("onnx")</code> select
+			by name, and the system property <code>opennlp.embedder.provider</code> pins a name.
+			The API names no default; ONNX is the default only because the bundle includes it.
+			Several factories and model instances may coexist; close each returned
+			<code>TextEmbedder</code> when finished.
+			Existing direct model constructors and static-model loading calls remain available.
+		</para>
+		<para>
+			Distillation uses <code>TeacherEncoderProvider</code>, whose encoders accept prepared
+			token ids and return mean-pooled vectors without L2 normalization.
+			<code>TeacherEncoderProviders.select(model)</code> picks the provider for the teacher's
+			ONNX file the same way, pinned by the system property
+			<code>opennlp.embeddings.teacher.provider</code>. The local-directory
+			<code>ModelDistiller.distill</code> overload with a final provider name selects
+			another implementation registered through
+			<code>META-INF/services/opennlp.embeddings.spi.TeacherEncoderProvider</code>.
+			Changing the backend does not change the required tokenization or pooling semantics.
+		</para>
+	</section>
+
 	<section xml:id="tools.embeddings.api">
 		<title>Embedding Text with the API</title>
 		<para>
@@ -145,7 +182,7 @@ results.sort(Comparator.comparingDouble(Scored::score).reversed());]]>
 	<section xml:id="tools.embeddings.cmdline">
 		<title>Command Line Tools</title>
 		<para>
-			The module ships its own command line launcher, <code>bin/embeddings</code>, next to
+			The <code>opennlp-embeddings-cli</code> module ships the command line launcher, <code>bin/embeddings</code>, next to
 			<code>bin/opennlp</code> in the binary distribution. Invoked without arguments it lists
 			the available tools, and every tool prints its help when invoked with the
 			<code>help</code> parameter.
