@@ -156,11 +156,15 @@ public class ConlluStream implements ObjectStream<ConlluSentence> {
   }
 
   /**
-   * Replaces the word lines of each multiword token with one merged line.
+   * Replaces the word lines of each multiword token with one merged line. The line index is
+   * built before any range is expanded; each id of a range is checked against it while the
+   * range is walked, and a missing one fails loud. A long cursor permits an inclusive range
+   * ending at the largest integer without wrapping.
    *
    * @param lines The word lines of a sentence.
    * @return The lines with every multiword range merged into its multiword token line.
-   * @throws InvalidFormatException If a multiword token id is malformed.
+   * @throws InvalidFormatException If a multiword token id is malformed, or a range names a
+   *                                word id that has no line.
    */
   private List<ConlluWordLine> postProcessContractions(List<ConlluWordLine> lines)
       throws InvalidFormatException {
@@ -173,11 +177,17 @@ public class ConlluStream implements ObjectStream<ConlluSentence> {
     for (int i = 0; i < lines.size(); i++) {
       ConlluWordLine line = lines.get(i);
       index.put(line.getId(), i);
+    }
+    for (ConlluWordLine line : lines) {
       if (line.getId().indexOf(MULTIWORD_SEPARATOR) != -1) {
         List<String> expandedContractions = new ArrayList<>();
         MultiwordRange range = parseContractionRange(line.getId());
-        for (int j = range.start(); j <= range.end(); j++) {
-          String js = Integer.toString(j);
+        for (long j = range.start(); j <= range.end(); j++) {
+          String js = Long.toString(j);
+          if (!index.containsKey(js)) {
+            throw new InvalidFormatException("Multiword token " + line.getId()
+                + " has no word line for id " + js);
+          }
           expandedContractions.add(js);
           linesToDelete.add(js);
         }
