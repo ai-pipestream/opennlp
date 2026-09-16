@@ -2,14 +2,14 @@
 # Built from unmerged development branches of Apache OpenNLP.
 # Not an Apache Software Foundation release. Apache OpenNLP is a trademark of the ASF.
 version: 0.1.0-alpha4-SNAPSHOT
-generated: 2026-09-16T16:11:00Z
+generated: 2026-09-16T17:39:01Z
 main: f09b7f0a5
 ref: 41aeb8aa4  OPENNLP-1879-gazetteer-api  apache
 ref: 3b376ca8a  OPENNLP-1880-wordnet-api  apache
 ref: 7c42f8099  OPENNLP-1886-light-stemmers  apache
 ref: ccf3a4f1a  OPENNLP-1887-wordnet-expansion  apache
 ref: fbdc1f389  OPENNLP-1927-hunspell-compatibility  apache
-ref: 1cf40f2ad  OPENNLP-1911-vector-search-evaluation  apache
+ref: 8de70d68f  OPENNLP-1911-vector-search-evaluation  apache
 ref: a0a27fc77  OPENNLP-1920-relation-extraction  apache
 ref: ca15862e1  OPENNLP-1937-text-embedder-api  apache
 ref: b41c02477  OPENNLP-1935-regex-guard  apache
