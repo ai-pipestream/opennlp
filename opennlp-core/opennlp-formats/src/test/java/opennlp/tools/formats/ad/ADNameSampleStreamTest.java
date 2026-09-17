@@ -223,6 +223,7 @@ public class ADNameSampleStreamTest extends AbstractADSampleStreamTest<NameSampl
       NameSample sample = stream.read();
       Assertions.assertNotNull(sample);
       Assertions.assertArrayEquals(new String[] {"Olá", "."}, sample.getSentence());
+      Assertions.assertNull(stream.read());
     }
   }
 

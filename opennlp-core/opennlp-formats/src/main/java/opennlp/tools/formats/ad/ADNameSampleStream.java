@@ -560,6 +560,9 @@ public class ADNameSampleStream implements ObjectStream<NameSample> {
       if (textName == null) {
         throw new RuntimeException(INVALID_METADATA + meta);
       }
+      if (textName.isEmpty()) {
+        return -1;
+      }
       if (!textName.equals(textMeta2)) {
         textIdMeta2++;
         textMeta2 = textName;
