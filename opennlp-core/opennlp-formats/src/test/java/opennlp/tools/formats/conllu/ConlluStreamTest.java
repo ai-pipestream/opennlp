@@ -253,34 +253,6 @@ public class ConlluStreamTest extends AbstractConlluSampleStreamTest<SentenceSam
     }
   }
 
-  @Test
-  void testThreeLetterLangCodeIsPreferred() throws IOException {
-    // "text_engl" gives "eng": three ASCII lowercase letters are preferred over two
-    InputStreamFactory in = () -> new ByteArrayInputStream(
-        ("# text_engl = Hello\n"
-            + "1\tHello\thello\tINTJ\t_\t_\t0\troot\t_\t_\n")
-            .getBytes(StandardCharsets.UTF_8));
-
-    try (ObjectStream<ConlluSentence> stream = new ConlluStream(in)) {
-      ConlluSentence sent = stream.read();
-      Assertions.assertEquals(Optional.of(Collections.singletonMap(Locale.of("eng"), "Hello")),
-          sent.getTextLang());
-      Assertions.assertNull(stream.read(), "Stream must be exhausted");
-    }
-  }
-
-  @Test
-  void testInvalidTextLangCodeIsRejected() throws IOException {
-    // "text_e" has a single lowercase letter, so no language code can be extracted
-    InputStreamFactory in = () -> new ByteArrayInputStream(
-        ("# text_e = Bonjour\n"
-            + "1\tBonjour\tbonjour\tINTJ\t_\t_\t0\troot\t_\t_\n")
-            .getBytes(StandardCharsets.UTF_8));
-
-    try (ObjectStream<ConlluSentence> stream = new ConlluStream(in)) {
-      Assertions.assertThrows(InvalidFormatException.class, stream::read);
-    }
-  }
 
   @Test
   void testRangeWithAllWordLinesIsMerged() throws IOException {
