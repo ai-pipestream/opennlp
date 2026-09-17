@@ -339,13 +339,6 @@ public class ADSentenceStream extends FilterObjectStream<String, ADSentenceStrea
     }
 
     /**
-     * Parse a tree element from a AD line
-     *
-     * @param line
-     *          the AD line
-     * @return the tree element
-     */
-    /**
      * Reads one tree line into a {@link Node} or a {@link Leaf}. A leaf line with an equals
      * sign in its tag part, as in {@code =H==CJT:num("818-5817" ...)}, takes the functional
      * tag after the last colon and the syntactic tag before it; without a colon it has no
