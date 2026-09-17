@@ -699,6 +699,7 @@
 		<module>opennlp-docs</module>
 		<module>opennlp-extensions</module>
 		<module>opennlp-tools</module>
+		<module>opennlp-examples</module>
 		<module>opennlp-eval-tests</module>
 	</modules>
 
