@@ -663,7 +663,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry>detokenizer</entry>
@@ -834,7 +834,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry>detokenizer</entry>
@@ -1016,7 +1016,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry>detokenizer</entry>
@@ -1178,7 +1178,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry>detokenizer</entry>
@@ -2248,7 +2248,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry morerows='3' valign='middle'>conll03</entry>
@@ -2475,7 +2475,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry morerows='3' valign='middle'>conll03</entry>
@@ -2719,7 +2719,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry morerows='3' valign='middle'>conll03</entry>
@@ -2930,7 +2930,7 @@ under the License.
   <entry>splitHyphenatedTokens</entry>
   <entry>split</entry>
   <entry>Yes</entry>
-  <entry>If true all hyphenated tokens will be separated (default true)</entry>
+  <entry>Split hyphenated words into words and hyphens (default false).</entry>
   </row>
   <row>
   <entry morerows='3' valign='middle'>conll03</entry>
