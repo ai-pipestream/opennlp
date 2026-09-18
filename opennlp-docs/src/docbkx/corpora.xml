@@ -434,6 +434,21 @@ Execution time: 1,955 seconds]]>
     			</screen>
 			</para>
 			<para>
+				AD name-finder and tokenizer conversion preserves hyphenated words by default:
+				<code>x-café</code> remains one token. Earlier versions enabled hyphen splitting by
+				default; pass <code>-splitHyphenatedTokens true</code> explicitly to request
+				<code>x</code>, <code>-</code>, <code>café</code> instead. With either setting,
+				combining accents stay attached to their letters and the original character sequence
+				is preserved, so precomposed and decomposed accents have the same token boundaries.
+				Java callers select this behavior with the existing
+				<code>ADNameSampleStream</code> constructor boolean. When training or evaluating
+				models, use the same splitting setting for the training and evaluation data.
+				AD represents clitics separately, with the hyphen attached to the verb: for example,
+				<code>ofereceu-</code> and <code>me</code>. Tokenizer conversion applies the
+				detokenizer dictionary's hyphen joining rule to reconstruct <code>ofereceu-me</code>
+				without adding a space or changing those annotated token boundaries.
+			</para>
+			<para>
 				A quoted lemma ends at a matching quote followed by a field boundary. Embedded
 				apostrophes and quotes within a word remain part of the lemma. Quotes in subsequent
 				annotation fields or in the surface text do not extend the lemma or remove part of

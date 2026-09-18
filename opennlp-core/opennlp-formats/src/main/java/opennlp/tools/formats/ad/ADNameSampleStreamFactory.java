@@ -47,8 +47,8 @@ public class ADNameSampleStreamFactory extends
     Charset getEncoding();
 
     @ParameterDescription(valueName = "split",
-        description = "if true all hyphenated tokens will be separated (default true)")
-    @OptionalParameter(defaultValue = "true")
+        description = "split hyphenated words into words and hyphens (default false)")
+    @OptionalParameter(defaultValue = "false")
     Boolean getSplitHyphenatedTokens();
 
     @ParameterDescription(valueName = "language", description = "language which is being processed.")

@@ -28,9 +28,12 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.chunker.ChunkerCrossValidator;
 import opennlp.tools.chunker.ChunkerFactory;
+import opennlp.tools.cmdline.StreamFactoryRegistry;
 import opennlp.tools.formats.ad.ADChunkSampleStream;
 import opennlp.tools.formats.ad.ADNameSampleStream;
+import opennlp.tools.formats.ad.ADNameSampleStreamFactory;
 import opennlp.tools.formats.ad.ADSentenceSampleStream;
+import opennlp.tools.formats.ad.ADTokenSampleStreamFactory;
 import opennlp.tools.formats.convert.NameToTokenSampleStream;
 import opennlp.tools.namefind.NameSample;
 import opennlp.tools.sentdetect.SDCrossValidator;
@@ -114,14 +117,20 @@ public class ArvoresDeitadasEval extends AbstractEvalTest {
     ObjectStream<TokenSample> samples = new NameToTokenSampleStream(
         detokenizer, nameSamples);
 
-    TokenizerCrossValidator validator;
+    tokenizerCrossEval(params, expectedScore, samples);
+  }
 
+  /** Evaluates the supplied conversion path with identical training and held-out settings. */
+  private void tokenizerCrossEval(TrainingParameters params, double expectedScore,
+                                  ObjectStream<TokenSample> samples) throws IOException {
     TokenizerFactory tokFactory = TokenizerFactory.create(null, LANG, null,
         true, null);
-    validator = new opennlp.tools.tokenize.TokenizerCrossValidator(params,
+    TokenizerCrossValidator validator = new TokenizerCrossValidator(params,
         tokFactory);
 
-    validator.evaluate(samples, 10);
+    try (samples) {
+      validator.evaluate(samples, 10);
+    }
 
     Assertions.assertEquals(expectedScore, validator.getFMeasure().getFMeasure(), 0.0001d);
   }
@@ -176,6 +185,19 @@ public class ArvoresDeitadasEval extends AbstractEvalTest {
   @Test
   void evalPortugueseTokenizerNaiveBayes() throws IOException {
     tokenizerCrossEval(createNaiveBayesParams(), 0.9962358244502717d);
+  }
+
+  /** Exercises the CLI default, including preserved compounds and AD clitic detokenization. */
+  @Test
+  void evalPortugueseTokenizerDefaultNaiveBayes() throws IOException {
+    ADNameSampleStreamFactory.registerFactory();
+    ADTokenSampleStreamFactory.registerFactory();
+    ObjectStream<TokenSample> samples = StreamFactoryRegistry.getFactory(TokenSample.class, "ad")
+        .create(new String[] {"-data", new File(getOpennlpDataDir(), FLORESTA_VIRGEM).getPath(),
+            "-lang", LANG, "-encoding", StandardCharsets.ISO_8859_1.name(),
+            "-detokenizer", "lang/pt/tokenizer/pt-detokenizer.xml"});
+    // Preserved compounds have different reference boundaries from the split-token baseline.
+    tokenizerCrossEval(createNaiveBayesParams(), 0.9951936406770416d, samples);
   }
 
   @Test
