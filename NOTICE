@@ -123,8 +123,8 @@ Inc. (https://www.unicode.org/Public/).
     Unicode Emoji version 17.0.
 
 The original Unicode copyright and license header is preserved verbatim at the
-top of each copied or filtered data file. Generated inventories carry source
-and copyright attribution in their headers. These files and derived values are
+top of each copied or filtered data file. Generated inventories identify their
+Unicode sources and license in their headers. These files and derived values are
 distributed under the Unicode License V3, the full text of which is reproduced
 in the LICENSE file accompanying this distribution.
 
