@@ -177,8 +177,11 @@ String category = myCategorizer.getBestCategory(outcomes);]]>
 				the token ID, as in <code>vocab.txt</code>, or a JSON object that maps each token to a
 				non-negative integer ID, as in <code>vocab.json</code>. A file is read as JSON when its
 				first non-whitespace character is an opening brace, and a leading byte order mark is
-				ignored. A Hugging Face <code>tokenizer.json</code> is not a vocabulary file and is
-				rejected; support for it is tracked in OPENNLP-1988. A vocabulary that cannot be read is
+				ignored. A Hugging Face <code>tokenizer.json</code> is also accepted; its
+				<code>model.vocab</code> object supplies the tokens, and the entries of its
+				<code>added_tokens</code> list are part of the vocabulary only if <code>model.vocab</code>
+				lists them as well. A <code>tokenizer.json</code> of a Unigram model, whose
+				<code>model.vocab</code> is a list, is rejected. A vocabulary that cannot be read is
 				rejected with an <code>InvalidFormatException</code> that names the file and the position
 				of the problem.
 			</para>
