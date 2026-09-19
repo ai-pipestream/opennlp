@@ -243,10 +243,22 @@ public class GlobMatcherTest {
         Arguments.of(MODEL_URL, "/repo/*.jar!/opennlp/models/en-pos.bin", false),
         Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*/en-pos.bin", true),
         Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*\\en-pos.bin", false),
-        // the file part keeps its percent encoding
-        Arguments.of("file:/my%20models/en-pos.bin", "*%20*", true),
-        Arguments.of("file:/my%20models/en-pos.bin", "*my models*", false),
-        Arguments.of("file:/my%20models/en-pos.bin", "/my%20models/*.bin", true),
+        // URI escapes are decoded once, while literal plus signs are preserved
+        Arguments.of("file:/my%20models/en-pos.bin", "*%20*", false),
+        Arguments.of("file:/my%20models/en-pos.bin", "*my models*", true),
+        Arguments.of("file:/my%20models/en-pos.bin", "/my models/*.bin", true),
+        Arguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-?.jar", true),
+        Arguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-??.jar", false),
+        Arguments.of("file:/models/model-%2520.jar", "*model-%20.jar", true),
+        Arguments.of("file:/models/model-%2520.jar", "*model- .jar", false),
+        Arguments.of("file:/models/model+1.jar", "*model+1.jar", true),
+        Arguments.of("file:/models/model+1.jar", "*model 1.jar", false),
+        Arguments.of("jar:file:/my%20models/a.jar!/caf%C3%A9/%F0%9F%98%80.bin",
+            "file:/my models/a.jar!/café/?.bin", true),
+        Arguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model%20.bin", true),
+        Arguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model .bin", false),
+        Arguments.of("jar:file:/models/a.jar!/model%23x.bin", "*model#x.bin", true),
+        Arguments.of("jar:file:/models/a.jar!/model%3Fx.bin", "*model?x.bin", true),
         // a query is part of the file part, a fragment is not
         Arguments.of("http://host/models/en-pos.bin?x=1", "*.bin", false),
         Arguments.of("http://host/models/en-pos.bin?x=1", "*.bin?x=1", true),
@@ -257,9 +269,7 @@ public class GlobMatcherTest {
   }
 
   /**
-   * Checks the file part matching of {@code matchesWildcard} against jar, file, and http URLs,
-   * and that the deprecated pair {@code asRegex} and {@code matchesPattern} gives the same
-   * result.
+   * Checks decoded file part matching against jar, file, and http URLs.
    */
   @ParameterizedTest
   @MethodSource("urlsAndWildcards")
@@ -269,9 +279,6 @@ public class GlobMatcherTest {
     final URL parsed = new URI(url).toURL();
     Assertions.assertEquals(expected, finder.matchesWildcard(parsed, wildcard),
         "wildcard '" + wildcard + "' on '" + parsed.getFile() + "'");
-    Assertions.assertEquals(expected,
-        finder.matchesPattern(parsed, Pattern.compile(finder.asRegex(wildcard))),
-        "regex of '" + wildcard + "' on '" + parsed.getFile() + "'");
   }
 
   private static Stream<Arguments> asRegexGlobs() {

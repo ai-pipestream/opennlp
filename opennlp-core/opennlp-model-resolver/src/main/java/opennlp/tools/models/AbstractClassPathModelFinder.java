@@ -40,7 +40,8 @@ import java.util.regex.Pattern;
  * <p>
  * This search mask can be adjusted by using the one argument
  * {@link AbstractClassPathModelFinder#AbstractClassPathModelFinder(String) constructor}.
- * Wildcard search is supported by using asterisk symbol.
+ * Wildcard search supports {@code *} for any run of characters and {@code ?} for one
+ * Unicode code point. Masks use decoded names, including spaces and non-ASCII characters.
  *
  * @see ClassPathModelFinder
  */
@@ -142,15 +143,17 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
   }
 
   /**
-   * Tests whether the file part of {@code url} matches {@code wildcard} from start to end,
-   * where {@code *} stands for any run of characters, {@code ?} for exactly one character,
-   * and every other character for itself.
+   * Tests whether the decoded file part of {@code url} matches {@code wildcard} from start
+   * to end, where {@code *} stands for any run of characters, {@code ?} for exactly one
+   * Unicode code point, and every other character for itself. URI percent escapes are
+   * decoded once; literal plus signs remain plus signs.
    *
-   * @param url The {@link URL} whose {@link URL#getFile() file part} is tested.
+   * @param url The {@link URL} whose decoded file part is tested.
    *            Must not be {@code null}.
    * @param wildcard The wildcard expression. Must not be {@code null}.
    * @return {@code true} if the file part matches, {@code false} otherwise.
-   * @throws IllegalArgumentException If {@code url} or {@code wildcard} is {@code null}.
+   * @throws IllegalArgumentException If {@code url} or {@code wildcard} is {@code null},
+   *                                  or {@code url} is not a valid URI.
    */
   protected boolean matchesWildcard(URL url, String wildcard) {
     if (url == null) {
@@ -159,7 +162,14 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
     if (wildcard == null) {
       throw new IllegalArgumentException(WILDCARD_MUST_NOT_BE_NULL);
     }
-    return GlobMatcher.matches(wildcard, url.getFile());
+    try {
+      final URI uri = url.toURI();
+      final String filePart = uri.isOpaque() ? uri.getSchemeSpecificPart()
+          : uri.getPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getQuery());
+      return GlobMatcher.matches(wildcard, filePart);
+    } catch (URISyntaxException e) {
+      throw new IllegalArgumentException("url must be a valid URI", e);
+    }
   }
 
   /**
@@ -168,8 +178,7 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
    * every other character is quoted so that it stands for itself.
    *
    * @param wildcard The wildcard expression. Must not be {@code null}.
-   * @return A regular expression that accepts what {@link #matchesWildcard(URL, String)}
-   *         accepts for {@code wildcard}.
+   * @return A regular expression for matching decoded file parts with {@code wildcard}.
    * @throws IllegalArgumentException If {@code wildcard} is {@code null}.
    * @deprecated Matching no longer needs a regular expression, use
    *     {@link #matchesWildcard(URL, String)}.
@@ -259,7 +268,8 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
         final JarEntry entry = entries.nextElement();
         if (!entry.isDirectory()) {
           try {
-            uris.add(new URI(jarUrl + entry.getName()));
+            final String entryPath = new URI(null, null, "/" + entry.getName(), null).getRawPath();
+            uris.add(new URI(jarUrl + entryPath.substring(1)));
           } catch (URISyntaxException ignored) {
             //if we cannot convert to URI here, we ignore that entry.
           }
