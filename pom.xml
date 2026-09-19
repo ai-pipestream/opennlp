@@ -263,6 +263,7 @@
 		<classgraph.version>4.8.195</classgraph.version>
 		<zlibsvm.version>3.0.0</zlibsvm.version>
 		<jmh.version>1.37</jmh.version>
+		<regex.forbiddenapis.signatures>${maven.multiModuleProjectDirectory}/src/main/forbiddenapis/regex.txt</regex.forbiddenapis.signatures>
 
 		<!-- Plugin versions -->
 		<coveralls.maven.plugin>4.3.0</coveralls.maven.plugin>
@@ -271,6 +272,7 @@
 		<maven.failsafe.plugin>3.6.0</maven.failsafe.plugin>
 		<maven.javadoc.plugin>3.12.0</maven.javadoc.plugin>
 		<forbiddenapis.plugin>3.10</forbiddenapis.plugin>
+		<maven.invoker.plugin>3.9.1</maven.invoker.plugin>
 		<license-maven-plugin.version>2.7.1</license-maven-plugin.version>
 	</properties>
 
@@ -435,10 +437,38 @@ org.xml.sax.helpers.XMLReaderFactory#createXMLReader(**)
 					</configuration>
 					<executions>
 						<execution>
+							<id>check-main-bytecode</id>
+							<phase>process-classes</phase>
 							<goals>
 								<goal>check</goal>
+							</goals>
+						</execution>
+						<execution>
+							<id>check-test-bytecode</id>
+							<phase>process-test-classes</phase>
+							<goals>
 								<goal>testCheck</goal>
 							</goals>
+						</execution>
+						<execution>
+							<id>regex-free-production</id>
+							<phase>process-classes</phase>
+							<goals>
+								<goal>check</goal>
+							</goals>
+							<configuration>
+								<bundledSignatures combine.self="override" />
+								<signatures combine.self="override" />
+								<signaturesFiles>
+									<signaturesFile>${regex.forbiddenapis.signatures}</signaturesFile>
+								</signaturesFiles>
+								<excludes>
+									<exclude>opennlp/tools/namefind/RegexNameFinder.class</exclude>
+									<exclude>opennlp/tools/namefind/RegexNameFinder$*.class</exclude>
+									<exclude>opennlp/tools/namefind/RegexNameFinderFactory.class</exclude>
+									<exclude>opennlp/tools/namefind/RegexNameFinderFactory$*.class</exclude>
+								</excludes>
+							</configuration>
 						</execution>
 					</executions>
 				</plugin>
@@ -673,6 +703,34 @@ org.xml.sax.helpers.XMLReaderFactory#createXMLReader(**)
 	</build>
 
 	<profiles>
+		<profile>
+			<id>regex-guard-fixtures</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-invoker-plugin</artifactId>
+						<version>${maven.invoker.plugin}</version>
+						<configuration>
+							<projectsDirectory>${maven.multiModuleProjectDirectory}/src/it/regex-guard</projectsDirectory>
+							<cloneProjectsTo>${project.build.directory}/regex-guard-it</cloneProjectsTo>
+							<postBuildHookScript>verify</postBuildHookScript>
+							<streamLogs>true</streamLogs>
+							<profiles>
+								<profile>!regex-guard-fixtures</profile>
+							</profiles>
+						</configuration>
+						<executions>
+							<execution>
+								<id>verify-regex-guard-fixtures</id>
+								<phase>verify</phase>
+								<goals><goal>run</goal></goals>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
 		<profile>
 		<id>apache-release</id>
 		<build>
