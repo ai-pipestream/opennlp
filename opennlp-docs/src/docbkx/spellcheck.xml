@@ -409,7 +409,7 @@ List<SuggestItem> suggestions = checker.lookup("qick");]]>
 			It guards against over-correction (skipping short tokens, numbers, and whole tokens that look like
 			URLs, email addresses, or domains, and
 			never changing a word the dictionary already contains) and preserves the original casing pattern of
-			each token. The URL guard recognizes case-insensitive HTTP and HTTPS schemes, <code>www.</code>
+			each token. The URL guard recognizes ASCII-case-insensitive HTTP and HTTPS schemes, <code>www.</code>
 			hosts, email-like tokens, and dotted host names without limiting top-level domains to a fixed list.
 			It accepts Unicode letters, numbers, and combining marks after a base character in host labels and
 			email local parts. Host labels use the ASCII full stop as their separator. This bounded exclusion
@@ -429,7 +429,8 @@ CharSequence clean = normalizer.normalize("the qick brwn fox"); // -> "the quick
 			</programlisting>
 			With the default URL guard, a whole token such as
 			<code>https://example.technology/docs</code> bypasses dictionary lookup. Set
-			<code>.skipUrls(false)</code> on the builder when such tokens should be sent to the spellchecker.
+			<code>.skipUrls(false)</code> on the builder to let such tokens proceed through the normal
+			correction checks.
 		</para>
 		<para>
 			For stream-based preprocessing two <code>FilterObjectStream&lt;String, String&gt;</code>
