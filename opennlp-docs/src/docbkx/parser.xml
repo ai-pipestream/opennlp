@@ -226,6 +226,16 @@ Arguments description:
 			</listitem>
 		</itemizedlist>
 		The following code snippet shows how to instantiate the HeadRules:
+			Spanish Ancora head-rule files use a small, versioned tag-pattern format. The first line
+			is <literal># opennlp-ancora-head-rules 2</literal>. Patterns contain case-sensitive
+			ASCII tag characters, <literal>*</literal> for zero or more characters, and the bounded
+			choices used by the Ancora tagset, such as <literal>V[MAS]*</literal>. Dots and dollar
+			signs are literals. For example, this right-to-left rule first seeks a noun tag and then
+			an adjective tag:
+		<programlisting>
+<![CDATA[# opennlp-ancora-head-rules 2
+4 GRUP.A 0 NC* AQA*]]>
+		</programlisting>
 		<programlisting language="java">
 <![CDATA[static HeadRules createHeadRules(TrainerToolParams params) throws IOException {
     ArtifactSerializer headRulesSerializer = null;
