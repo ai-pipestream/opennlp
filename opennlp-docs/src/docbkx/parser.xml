@@ -225,7 +225,6 @@ Arguments description:
 				<para>Save the ParseModel to a file</para>
 			</listitem>
 		</itemizedlist>
-		The following code snippet shows how to instantiate the HeadRules:
 			Spanish Ancora head-rule files use a small, versioned tag-pattern format. The first line
 			is <literal># opennlp-ancora-head-rules 2</literal>. Patterns contain case-sensitive
 			ASCII tag characters, <literal>*</literal> for zero or more characters, and the bounded
@@ -236,6 +235,7 @@ Arguments description:
 <![CDATA[# opennlp-ancora-head-rules 2
 4 GRUP.A 0 NC* AQA*]]>
 		</programlisting>
+		The following code snippet shows how to instantiate the HeadRules:
 		<programlisting language="java">
 <![CDATA[static HeadRules createHeadRules(TrainerToolParams params) throws IOException {
     ArtifactSerializer headRulesSerializer = null;
