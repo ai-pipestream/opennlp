@@ -284,7 +284,7 @@ public class DownloadUtil {
     int start = 0;
     while (start < checksumFileContent.length()) {
       final int codePoint = checksumFileContent.codePointAt(start);
-      if (!isChecksumWhitespace(codePoint)) {
+      if (!StringUtil.isUnicodeWhitespace(codePoint)) {
         break;
       }
       start += Character.charCount(codePoint);
@@ -293,7 +293,7 @@ public class DownloadUtil {
     int end = start;
     while (end < checksumFileContent.length()) {
       final int codePoint = checksumFileContent.codePointAt(end);
-      if (isChecksumWhitespace(codePoint)) {
+      if (StringUtil.isUnicodeWhitespace(codePoint)) {
         break;
       }
       end += Character.charCount(codePoint);
@@ -313,10 +313,7 @@ public class DownloadUtil {
     }
   }
 
-  private static boolean isChecksumWhitespace(int codePoint) {
-    return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
-  }
-
+  /** Checks the fixed-width ASCII hexadecimal representation of a SHA-512 digest. */
   private static boolean isSha512(String checksum) {
     if (checksum == null || checksum.length() != 128) {
       return false;

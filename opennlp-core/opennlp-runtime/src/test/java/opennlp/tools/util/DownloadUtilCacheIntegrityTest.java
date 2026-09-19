@@ -163,6 +163,13 @@ public class DownloadUtilCacheIntegrityTest {
         () -> DownloadUtil.downloadModel("en", ModelType.CHUNKER, null));
   }
 
+  @Test
+  void testChecksumScannerAcceptsUnicodeNextLineSeparator() throws IOException {
+    Files.writeString(remoteChecksum, "\u0085" + sha512(remoteModel) + "\u0085model.bin",
+        StandardCharsets.UTF_8);
+    assertNotNull(DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
+  }
+
   /**
    * The actual defect: once a model is cached, its contents are never re-checked. The cached
    * file is replaced with a <em>different but perfectly loadable</em> model, so that a passing

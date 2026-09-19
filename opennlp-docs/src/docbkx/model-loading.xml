@@ -165,6 +165,20 @@ for(ClassPathModelEntry entry : models) {
     </para>
   </section>
 
+  <section xml:id="tools.model.download-checksum">
+    <title>Downloaded model checksums</title>
+    <para>
+      Automatic model downloads use the first field of the published
+      <code>.sha512</code> record as the expected digest. Leading Unicode whitespace
+      is skipped and the next whitespace boundary ends the field; the remaining filename
+      is not part of the digest. For example,
+      <code>&lt;128 hexadecimal digits&gt;  opennlp-en-model.bin</code> supplies one
+      SHA-512 digest. Missing fields, non-hexadecimal characters and other digest lengths
+      are reported as malformed checksums. Checksum verification still compares the digest
+      with the downloaded or cached model bytes.
+    </para>
+  </section>
+
   <section xml:id="tools.model.resource-installer">
     <title>Installing third-party resources</title>
     <para>
