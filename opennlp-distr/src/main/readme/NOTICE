@@ -117,11 +117,16 @@ Inc. (https://www.unicode.org/Public/).
     filtered subset; the upstream file additionally carries the Emoji,
     Emoji_Presentation, Emoji_Modifier, Emoji_Modifier_Base, and
     Emoji_Component properties, which are not retained.
+  * opennlp-core/opennlp-runtime/src/main/java/opennlp/tools/tokenize/Unicode17LatinTokenizerData.java
+    is a generated, filtered range inventory derived from UnicodeData.txt,
+    Scripts.txt, and ScriptExtensions.txt in Unicode Character Database
+    version 17.0.0.
 
 The original Unicode copyright and license header is preserved verbatim at the
-top of each bundled file. These files are distributed under the Unicode License
-V3, the full text of which is reproduced in the LICENSE file accompanying this
-distribution.
+top of each copied or filtered data file. The generated inventory carries source
+and copyright attribution in its class documentation. These files and derived
+values are distributed under the Unicode License V3, the full text of which is
+reproduced in the LICENSE file accompanying this distribution.
 
 The project-authored annotation table
 opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/emoji-annotations.txt

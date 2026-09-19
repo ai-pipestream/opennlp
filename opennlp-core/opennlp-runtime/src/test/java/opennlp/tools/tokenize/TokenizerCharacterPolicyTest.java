@@ -16,6 +16,8 @@
  */
 package opennlp.tools.tokenize;
 
+import java.util.Arrays;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -25,6 +27,7 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,6 +50,62 @@ public class TokenizerCharacterPolicyTest {
       assertEquals(letter, policy.getLetters().contains(cp), "letter U+" + cp);
       assertEquals(digit, policy.getDigits().contains(cp), "digit U+" + cp);
     }
+  }
+
+  @Test
+  void testLatinUnicode17AcceptsComposedAndDecomposedMultilingualText() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.latinUnicode17();
+
+    assertTrue(policy.test("caf\u00E9"));
+    assertTrue(policy.test("cafe\u0301"));
+    assertTrue(policy.test("ma\u00E7\u00E3"));
+    assertTrue(policy.test("mac\u0327a\u0303"));
+    assertTrue(policy.test("\u1EAE"));
+    assertTrue(policy.test("A\u0306\u0301"));
+    assertTrue(policy.test("za\u017C\u00F3\u0142\u0107"));
+  }
+
+  @Test
+  void testLatinUnicode17IncludesSupplementaryLatinLetters() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.latinUnicode17();
+
+    assertTrue(policy.test(codePoints(0x10780, 0x0301)));
+    assertTrue(policy.getLetters().contains(0x1DF25));
+  }
+
+  @Test
+  void testLatinUnicode17ExcludesOtherScriptsAndNonTextSymbols() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.latinUnicode17();
+
+    assertFalse(policy.test("\u03B1"));
+    assertFalse(policy.test("\u0E01"));
+    assertFalse(policy.test("\u4E2D"));
+    assertFalse(policy.test(codePoints(0x1F600)));
+    assertFalse(policy.test("a\u200D"));
+    assertFalse(policy.test("\u05B0"));
+  }
+
+  @Test
+  void testLatinUnicode17MarksRemainContinuationsOfLettersOnly() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.latinUnicode17();
+
+    assertFalse(policy.test("\u0301a"));
+    assertFalse(policy.test("7\u0301"));
+    assertFalse(policy.test("a7\u0301"));
+    assertTrue(policy.test("a\u03017"));
+  }
+
+  @Test
+  void testLatinUnicode17ResolvedSetsAreVersionStable() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.latinUnicode17();
+
+    assertSame(policy, TokenizerCharacterPolicy.latinUnicode17());
+    assertEquals(1453, policy.getLetters().size());
+    assertEquals(10, policy.getDigits().size());
+    assertEquals(51, policy.getMarks().size());
+    assertEquals(-949684388, Arrays.hashCode(policy.getLetters().toArray()));
+    assertEquals(1604054150, Arrays.hashCode(policy.getMarks().toArray()));
+    assertEquals(CodePointSet.ofRange('0', '9'), policy.getDigits());
   }
 
   @Test

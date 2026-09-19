@@ -31,6 +31,9 @@ public final class TokenizerCharacterPolicy {
   private static final TokenizerCharacterPolicy ASCII = new TokenizerCharacterPolicy(
       CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
       CodePointSet.ofRange('0', '9'), CodePointSet.of());
+  private static final TokenizerCharacterPolicy LATIN_UNICODE_17 = new TokenizerCharacterPolicy(
+      Unicode17LatinTokenizerData.letters(), CodePointSet.ofRange('0', '9'),
+      Unicode17LatinTokenizerData.marks());
 
   private final CodePointSet letters;
   private final CodePointSet digits;
@@ -73,6 +76,25 @@ public final class TokenizerCharacterPolicy {
   /** {@return a policy for ASCII letters and digits, with no marks} */
   public static TokenizerCharacterPolicy ascii() {
     return ASCII;
+  }
+
+  /**
+   * Returns the Unicode 17.0 Latin-script eligibility preset.
+   *
+   * <p>The letter set is the Unicode 17 Latin Script property intersected with the Letter
+   * general categories. The digit set is ASCII {@code 0-9}. Continuation marks are Unicode marks
+   * whose Script Extensions include Latin, plus the recursive canonical-decomposition marks of
+   * the included letters. The resolved sets are generated from pinned Unicode Character Database
+   * files and do not depend on the running JDK's Unicode tables.</p>
+   *
+   * <p>This preset recognizes candidates for a tokenizer optimization. It is not a Unicode word
+   * boundary implementation and deliberately excludes letters from scripts such as Greek, Thai,
+   * and Han.</p>
+   *
+   * @return The cached, immutable Unicode 17.0 Latin policy.
+   */
+  public static TokenizerCharacterPolicy latinUnicode17() {
+    return LATIN_UNICODE_17;
   }
 
   /**
