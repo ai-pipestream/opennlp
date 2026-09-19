@@ -355,6 +355,18 @@ assert !decomposed.isAllLetter();]]>
             clears whole-token classifications, while valid code points elsewhere in the token
             still contribute containment flags and digit counts.
         </para>
+        <para>
+            <code>FeatureGeneratorUtil.tokenFeature()</code> maps these patterns to the compact
+            labels used by token-class feature generators. A single uppercase Unicode code point
+            receives <code>sc</code>, and that code point followed by exactly one period receives
+            <code>cp</code>. The established <code>2d</code> and <code>4d</code> labels count digits
+            contained in a token, so they can also describe mixed tokens.
+        </para>
+        <programlisting>
+<![CDATA[assert FeatureGeneratorUtil.tokenFeature("A1B2").equals("2d");
+assert FeatureGeneratorUtil.tokenFeature("12-34").equals("4d");
+assert FeatureGeneratorUtil.tokenFeature("É.").equals("cp");]]>
+        </programlisting>
     </section>
     <section xml:id="intro.sysprops">
         <title>System Properties</title>

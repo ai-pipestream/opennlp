@@ -82,4 +82,35 @@ public class FeatureGeneratorUtilTest {
     Assertions.assertEquals("jak", FeatureGeneratorUtil.tokenFeature("オープン・ソ〜ス・ソフトウェア"));
     Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature("アパッチ・ソフトウェア財団"));
   }
+
+  @Test
+  void testDigitClassesUseContainedDigitCount() {
+    Assertions.assertEquals("2d", FeatureGeneratorUtil.tokenFeature("A1B2"));
+    Assertions.assertEquals("4d", FeatureGeneratorUtil.tokenFeature("12-34"));
+    Assertions.assertEquals("2d", FeatureGeneratorUtil.tokenFeature("1/2"));
+    Assertions.assertEquals("2d", FeatureGeneratorUtil.tokenFeature("１２"));
+    Assertions.assertEquals("4d", FeatureGeneratorUtil.tokenFeature("𝟘𝟙𝟚𝟛"));
+  }
+
+  @Test
+  void testSupplementaryCapitalClasses() {
+    String deseretCapital = new String(Character.toChars(0x10400));
+    Assertions.assertEquals("sc", FeatureGeneratorUtil.tokenFeature(deseretCapital));
+    Assertions.assertEquals("cp", FeatureGeneratorUtil.tokenFeature(deseretCapital + "."));
+  }
+
+  @Test
+  void testCapitalPeriodRequiresExactlyOneUppercaseCodePointAndPeriod() {
+    Assertions.assertEquals("cp", FeatureGeneratorUtil.tokenFeature("É."));
+    Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature("é."));
+    Assertions.assertEquals("ic", FeatureGeneratorUtil.tokenFeature("AB."));
+    Assertions.assertEquals("ic", FeatureGeneratorUtil.tokenFeature("A.\n"));
+  }
+
+  @Test
+  void testEmptyAndNullInput() {
+    Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature(""));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> FeatureGeneratorUtil.tokenFeature(null));
+  }
 }
