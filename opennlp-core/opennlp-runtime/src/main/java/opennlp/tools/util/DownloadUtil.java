@@ -111,9 +111,20 @@ public class DownloadUtil {
    * @param <T>       The generic type which is a subclass of {@link BaseModel}.
    * @return A model instance of type {@link T}.
    * @throws IOException Thrown if IO errors occurred or the model is invalid.
+   * @throws IllegalArgumentException Thrown if any argument is {@code null}.
    */
   public static <T extends BaseModel> T downloadModel(String language, ModelType modelType,
                                                       Class<T> type) throws IOException {
+
+    if (language == null) {
+      throw new IllegalArgumentException("The model language must not be null");
+    }
+    if (modelType == null) {
+      throw new IllegalArgumentException("The model type must not be null");
+    }
+    if (type == null) {
+      throw new IllegalArgumentException("The model class must not be null");
+    }
 
     if (getAvailableModels().containsKey(language)) {
       final URL url = getAvailableModels().get(language).get(modelType);
@@ -273,7 +284,7 @@ public class DownloadUtil {
     int start = 0;
     while (start < checksumFileContent.length()) {
       final int codePoint = checksumFileContent.codePointAt(start);
-      if (!Character.isWhitespace(codePoint)) {
+      if (!isChecksumWhitespace(codePoint)) {
         break;
       }
       start += Character.charCount(codePoint);
@@ -282,7 +293,7 @@ public class DownloadUtil {
     int end = start;
     while (end < checksumFileContent.length()) {
       final int codePoint = checksumFileContent.codePointAt(end);
-      if (Character.isWhitespace(codePoint)) {
+      if (isChecksumWhitespace(codePoint)) {
         break;
       }
       end += Character.charCount(codePoint);
@@ -291,11 +302,33 @@ public class DownloadUtil {
   }
 
   private static void verifyChecksum(Path model, String expectedChecksum) throws IOException {
+    if (!isSha512(expectedChecksum)) {
+      throw new IOException("Expected SHA512 checksum is missing or malformed for "
+          + model.getFileName());
+    }
     final String actualChecksum = calculateSHA512(model);
     if (!actualChecksum.equalsIgnoreCase(expectedChecksum)) {
       throw new IOException("SHA512 checksum validation failed for " + model.getFileName() +
           ". Expected: " + expectedChecksum + ", but got: " + actualChecksum);
     }
+  }
+
+  private static boolean isChecksumWhitespace(int codePoint) {
+    return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
+  }
+
+  private static boolean isSha512(String checksum) {
+    if (checksum == null || checksum.length() != 128) {
+      return false;
+    }
+    for (int i = 0; i < checksum.length(); i++) {
+      final char value = checksum.charAt(i);
+      if (!(value >= '0' && value <= '9') && !(value >= 'a' && value <= 'f')
+          && !(value >= 'A' && value <= 'F')) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

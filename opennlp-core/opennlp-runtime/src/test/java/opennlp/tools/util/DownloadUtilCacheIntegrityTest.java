@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import opennlp.tools.chunker.ChunkerModel;
+import opennlp.tools.models.ModelType;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -128,9 +129,21 @@ public class DownloadUtilCacheIntegrityTest {
   }
 
   @Test
+  void testMalformedPublishedChecksumIsRejectedWithoutEchoingRecord() throws IOException {
+    Files.writeString(remoteChecksum, "not-a-checksum" + "x".repeat(100_000),
+        StandardCharsets.UTF_8);
+
+    final IOException e = assertThrows(IOException.class,
+        () -> DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
+    assertTrue(e.getMessage().contains("checksum"));
+    assertTrue(e.getMessage().length() < 256,
+        "Malformed checksum diagnostics must remain bounded");
+  }
+
+  @Test
   void testChecksumScannerAcceptsUnicodeWhitespaceAndIgnoresFilename() throws IOException {
     String filename = "model".repeat(100_000) + ".bin";
-    Files.writeString(remoteChecksum, "\u2003" + sha512(remoteModel) + "\u2028" + filename,
+    Files.writeString(remoteChecksum, "\u2003" + sha512(remoteModel) + "\u00a0" + filename,
         StandardCharsets.UTF_8);
 
     assertNotNull(DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
@@ -142,6 +155,12 @@ public class DownloadUtilCacheIntegrityTest {
         () -> DownloadUtil.downloadModel((URL) null, ChunkerModel.class));
     assertThrows(IllegalArgumentException.class,
         () -> DownloadUtil.downloadModel(modelUrl, null));
+    assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel(null, ModelType.CHUNKER, ChunkerModel.class));
+    assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel("en", null, ChunkerModel.class));
+    assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel("en", ModelType.CHUNKER, null));
   }
 
   /**
