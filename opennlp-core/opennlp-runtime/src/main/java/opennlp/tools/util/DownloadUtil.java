@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -40,11 +41,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
+import nu.validator.htmlparser.common.XmlViolationPolicy;
+import nu.validator.htmlparser.sax.HtmlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.xml.sax.Attributes;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
 
 import opennlp.tools.commons.Internal;
 import opennlp.tools.models.ModelType;
@@ -321,10 +326,12 @@ public class DownloadUtil {
             System.getProperty("user.home"))).resolve(".opennlp");
   }
 
+  /**
+   * Reads model links from an HTML directory index using the HTML parsing algorithm.
+   */
   @Internal
   static class DownloadParser {
 
-    private static final Pattern LINK_PATTERN = Pattern.compile("<a href=\\\"(.*?)\\\">(.*?)</a>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private final URL indexUrl;
 
     DownloadParser(URL indexUrl) {
@@ -334,13 +341,24 @@ public class DownloadUtil {
 
     Map<String, Map<ModelType, URL>> getAvailableModels()
         throws MalformedURLException, URISyntaxException {
-      final Matcher matcher = LINK_PATTERN.matcher(fetchPageIndex());
-
       final List<String> links = new ArrayList<>();
-      while (matcher.find()) {
-        links.add(matcher.group(1));
+      HtmlParser parser = new HtmlParser(XmlViolationPolicy.ALLOW);
+      parser.setContentHandler(new DefaultHandler() {
+        @Override
+        public void startElement(String uri, String localName, String name, Attributes attributes) {
+          if ("http://www.w3.org/1999/xhtml".equals(uri) && "a".equals(localName)) {
+            String href = attributes.getValue("href");
+            if (href != null) {
+              links.add(href);
+            }
+          }
+        }
+      });
+      try {
+        parser.parse(new InputSource(new StringReader(fetchPageIndex())));
+      } catch (IOException | SAXException e) {
+        logger.error("Could not parse page index from {}", indexUrl, e);
       }
-
       return toMap(links);
     }
 

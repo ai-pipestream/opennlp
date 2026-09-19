@@ -41,6 +41,25 @@ under the License.
         </para>
     </section>
 
+    <section xml:id="intro.model.directory.links">
+        <title>Model directory links</title>
+        <para>
+            Automatic model discovery reads HTML directory indexes with the Validator.nu HTML parser.
+            Anchor names and attribute names are case insensitive. Attribute order, quotation style,
+            and character references do not change which download target is selected. Apparent links
+            inside comments or text elements such as <literal>script</literal> and
+            <literal>textarea</literal> are not download links.
+        </para>
+        <para>
+            For example, <literal>&lt;A class="download"
+            HREF='opennlp-en-ud-ewt-tokens-a&amp;amp;b.bin'&gt;model&lt;/A&gt;</literal>
+            identifies the filename <literal>opennlp-en-ud-ewt-tokens-a&amp;b.bin</literal>.
+            The parser follows the
+            <ulink url="https://html.spec.whatwg.org/multipage/parsing.html">HTML parsing algorithm</ulink>;
+            model filename recognition and checksum verification are separate steps.
+        </para>
+    </section>
+
     <section xml:id="intro.general.library.structure">
         <title>General Library Structure</title>
         <para>The Apache OpenNLP library contains several components, enabling one to build
