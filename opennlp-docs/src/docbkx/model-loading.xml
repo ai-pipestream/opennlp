@@ -174,6 +174,12 @@ for(ClassPathModelEntry entry : models) {
       and spaces do not need to be written as <code>%20</code>. Literal percent signs and plus
       signs retain their meaning. Model and properties URIs returned by the finders remain
       escaped for opening the resources.
+      Custom subclasses of <code>AbstractClassPathModelFinder</code> use
+      <code>matchesWildcard(url, wildcard)</code>, for example
+      <code>matchesWildcard(url, "*.bin")</code>. The former protected
+      <code>asRegex</code> and <code>matchesPattern</code> methods are removed in 3.0;
+      subclasses using them must migrate and recompile. Pass the literal wildcard directly,
+      without regex quoting or compilation. An arbitrary regex is not a supported search mask.
       <code>ClassgraphModelFinder</code> uses ClassGraph's own wildcard rules.
       <code>SimpleClassPathModelFinder</code> reads the <code>java.class.path</code> system
       property and splits it on <code>;</code> on Windows and <code>:</code> elsewhere; empty

@@ -19,7 +19,6 @@ package opennlp.tools.models;
 import java.net.URI;
 import java.net.URL;
 import java.util.List;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
@@ -207,22 +206,6 @@ public class GlobMatcherTest {
     };
   }
 
-  private static Stream<Arguments> acceptedAndRejected() {
-    return Stream.concat(accepted(), rejected());
-  }
-
-  /**
-   * Checks that the deprecated translation agrees with the glob matcher on each glob and
-   * input of the accept and reject lists.
-   */
-  @ParameterizedTest
-  @MethodSource("acceptedAndRejected")
-  void testAsRegexAgreesWithMatcher(String glob, String input) {
-    final Pattern regex = Pattern.compile(newProbeFinder().asRegex(glob));
-    Assertions.assertEquals(GlobMatcher.matches(glob, input), regex.matcher(input).matches(),
-        "regex '" + regex + "' and glob '" + glob + "' differ on '" + input + "'");
-  }
-
   private static Stream<Arguments> urlsAndWildcards() {
     return Stream.of(
         Arguments.of(MODEL_URL, "*.bin", true),
@@ -281,7 +264,7 @@ public class GlobMatcherTest {
         "wildcard '" + wildcard + "' on '" + parsed.getFile() + "'");
   }
 
-  private static Stream<Arguments> asRegexGlobs() {
+  private static Stream<Arguments> literalGlobs() {
     return Stream.of(
         Arguments.of("*.bin", "en-pos.bin", "en-posxbin"),
         Arguments.of("*.bin", ".bin", "en-pos.bin.bak"),
@@ -309,48 +292,22 @@ public class GlobMatcherTest {
         Arguments.of("", "", "a"));
   }
 
-  /**
-   * Checks that the deprecated translation yields a regular expression with the meaning of
-   * the glob: every character other than the two wildcards stands for itself.
-   */
+  /** Checks literal characters and both wildcards against explicit accept/reject examples. */
   @ParameterizedTest
-  @MethodSource("asRegexGlobs")
-  void testAsRegexTranslatesGlob(String glob, String accepted, String rejected) {
-    final Pattern regex = Pattern.compile(newProbeFinder().asRegex(glob));
-    Assertions.assertTrue(regex.matcher(accepted).matches(),
-        "regex '" + regex + "' should accept '" + accepted + "'");
-    Assertions.assertFalse(regex.matcher(rejected).matches(),
-        "regex '" + regex + "' should reject '" + rejected + "'");
-    Assertions.assertEquals(GlobMatcher.matches(glob, accepted), regex.matcher(accepted).matches());
-    Assertions.assertEquals(GlobMatcher.matches(glob, rejected), regex.matcher(rejected).matches());
+  @MethodSource("literalGlobs")
+  void testLiteralGlobSemantics(String glob, String accepted, String rejected) {
+    Assertions.assertTrue(GlobMatcher.matches(glob, accepted));
+    Assertions.assertFalse(GlobMatcher.matches(glob, rejected));
   }
 
   /**
-   * Checks that the deprecated matcher evaluates the pattern as the regular expression it is.
+   * An example finder using the supported wildcard API.
    */
-  @Test
-  void testMatchesPatternEvaluatesRegex() throws Exception {
-    final AbstractClassPathModelFinder finder = newProbeFinder();
-    final URL url = new URI(MODEL_URL).toURL();
-    Assertions.assertTrue(finder.matchesPattern(url, Pattern.compile(".*\\.bin")));
-    Assertions.assertTrue(finder.matchesPattern(url, Pattern.compile(".*opennlp-models-[a-z]+-en-.*")));
-    Assertions.assertTrue(finder.matchesPattern(url, Pattern.compile(finder.asRegex("*.bin"))));
-    // the whole file part must match, as before
-    Assertions.assertFalse(finder.matchesPattern(url, Pattern.compile("en-pos\\.bin")));
-    Assertions.assertFalse(finder.matchesPattern(url, Pattern.compile(".*\\.properties")));
-    // a literal pattern is not read as a glob
-    Assertions.assertFalse(finder.matchesPattern(url, Pattern.compile("*.bin", Pattern.LITERAL)));
-  }
-
-  /**
-   * A finder written against the previous API: it translates the glob with
-   * {@code asRegex} and filters with {@code matchesPattern}.
-   */
-  private static final class LegacyFinder extends AbstractClassPathModelFinder {
+  private static final class WildcardFinder extends AbstractClassPathModelFinder {
 
     private final List<URL> candidates;
 
-    LegacyFinder(List<URL> candidates) {
+    WildcardFinder(List<URL> candidates) {
       this.candidates = candidates;
     }
 
@@ -360,12 +317,10 @@ public class GlobMatcherTest {
     }
 
     @Override
-    @SuppressWarnings("removal")
     protected List<URI> getMatchingURIs(String wildcardPattern, Object context) {
-      final Pattern pattern = Pattern.compile(asRegex("*" + wildcardPattern));
       final List<URI> matches = new java.util.ArrayList<>();
       for (URL candidate : candidates) {
-        if (matchesPattern(candidate, pattern)) {
+        if (matchesWildcard(candidate, "*" + wildcardPattern)) {
           try {
             matches.add(candidate.toURI());
           } catch (java.net.URISyntaxException e) {
@@ -378,15 +333,15 @@ public class GlobMatcherTest {
   }
 
   /**
-   * Checks that a subclass compiled against the previous API still filters correctly.
+   * Checks that a custom finder filters through the supported wildcard API.
    */
   @Test
-  void testLegacySubclassStillFilters() throws Exception {
+  void testCustomSubclassFilters() throws Exception {
     final URL bin = new URI(MODEL_URL).toURL();
     final URL properties = new URI(
         "jar:file:/repo/opennlp-models-pos-en-1.2.0.jar!/opennlp/models/model.properties").toURL();
     final URL other = new URI("jar:file:/repo/other.jar!/x/readme.txt").toURL();
-    final LegacyFinder finder = new LegacyFinder(List.of(bin, properties, other));
+    final WildcardFinder finder = new WildcardFinder(List.of(bin, properties, other));
     Assertions.assertEquals(List.of(bin.toURI()), finder.getMatchingURIs("*.bin", null));
     Assertions.assertEquals(List.of(properties.toURI()),
         finder.getMatchingURIs("model.properties", null));
@@ -418,13 +373,9 @@ public class GlobMatcherTest {
   void testFinderMatchersRejectNull() throws Exception {
     final AbstractClassPathModelFinder finder = newProbeFinder();
     final URL url = new URI(MODEL_URL).toURL();
-    Assertions.assertThrows(IllegalArgumentException.class, () -> finder.asRegex(null));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> finder.matchesWildcard(null, "*.bin"));
     Assertions.assertThrows(IllegalArgumentException.class, () -> finder.matchesWildcard(url, null));
-    Assertions.assertThrows(IllegalArgumentException.class,
-        () -> finder.matchesPattern(null, Pattern.compile(".*\\.bin")));
-    Assertions.assertThrows(IllegalArgumentException.class, () -> finder.matchesPattern(url, null));
   }
 
   @Test
