@@ -406,9 +406,17 @@ List<SuggestItem> suggestions = checker.lookup("qick");]]>
 			It works in one of two modes: <code>Mode.PER_TOKEN</code> (the default) corrects each
 			whitespace-delimited token independently and preserves the line's whitespace and punctuation, while
 			<code>Mode.COMPOUND</code> corrects the whole input as a phrase, repairing word splits and merges.
-			It guards against over-correction (skipping short tokens, numbers and URL/email-like tokens, and
+			It guards against over-correction (skipping short tokens, numbers, and whole tokens that look like
+			URLs, email addresses, or domains, and
 			never changing a word the dictionary already contains) and preserves the original casing pattern of
-			each token.
+			each token. The URL guard recognizes case-insensitive HTTP and HTTPS schemes, <code>www.</code>
+			hosts, email-like tokens, and dotted host names without limiting top-level domains to a fixed list.
+			It accepts Unicode letters, numbers, and combining marks after a base character in host labels and
+			email local parts. Host labels use the ASCII full stop as their separator. This bounded exclusion
+			heuristic follows the relevant shapes from
+			<ulink url="https://www.rfc-editor.org/rfc/rfc3986">RFC 3986</ulink> and
+			<ulink url="https://www.rfc-editor.org/rfc/rfc6531">RFC 6531</ulink>; it is not a general URL,
+			DNS, email, or IPv6 validator.
 			<programlisting language="java">
 <![CDATA[SymSpellModel model = SymSpellModels.deserialize(in);
 
@@ -419,6 +427,9 @@ CharSequenceNormalizer normalizer = SpellCheckingCharSequenceNormalizer.builder(
 
 CharSequence clean = normalizer.normalize("the qick brwn fox"); // -> "the quick brown fox"]]>
 			</programlisting>
+			With the default URL guard, a whole token such as
+			<code>https://example.technology/docs</code> bypasses dictionary lookup. Set
+			<code>.skipUrls(false)</code> on the builder when such tokens should be sent to the spellchecker.
 		</para>
 		<para>
 			For stream-based preprocessing two <code>FilterObjectStream&lt;String, String&gt;</code>

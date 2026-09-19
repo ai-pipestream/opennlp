@@ -21,11 +21,16 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import opennlp.spellcheck.SpellChecker;
+import opennlp.spellcheck.SuggestItem;
+import opennlp.spellcheck.Verbosity;
 import opennlp.spellcheck.symspell.SymSpell;
 import opennlp.spellcheck.symspell.TinyDictionary;
 import opennlp.tools.util.normalizer.AggregateCharSequenceNormalizer;
@@ -35,6 +40,7 @@ import opennlp.tools.util.normalizer.UrlCharSequenceNormalizer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SpellCheckingCharSequenceNormalizerTest {
 
@@ -141,6 +147,77 @@ public class SpellCheckingCharSequenceNormalizerTest {
     // URL-like third alternative: a bare domain with a known TLD is never corrected.
     assertEquals("quikc.com", norm(normalizer, "quikc.com"));
     assertEquals("www.quikc.com/broen", norm(normalizer, "www.quikc.com/broen"));
+  }
+
+  @Test
+  void urlGuardSkipsWholeInternationalAndNetworkLikeTokensWithoutLookup() {
+    final RecordingSpellChecker checker = new RecordingSpellChecker();
+    final var normalizer = SpellCheckingCharSequenceNormalizer.builder(checker)
+        .minTokenLength(1).build();
+    final List<String> excluded = List.of(
+        "HTTP://example.com/path",
+        "https://localhost/status",
+        "https://user:pass@[2001:db8::1]:8443/a?b=c#d",
+        "https://" + cp(0x10400) + ".example/" + cp(0x10400),
+        "WWW.Example.technology/path",
+        "example.photography",
+        "example.com/path@tail",
+        "example.com/search?q=user@example.com",
+        "user+tag@example.museum",
+        "a!#$%&'*+-/=?^_`{|}~b@example.com",
+        "e\u0301xample.example",
+        "δοκιμή@παράδειγμα.δοκιμή");
+
+    for (String token : excluded) {
+      assertEquals(token, norm(normalizer, token));
+    }
+    assertTrue(checker.lookups.isEmpty());
+  }
+
+  @Test
+  void urlGuardDoesNotHideMalformedOrEmbeddedNearMisses() {
+    final RecordingSpellChecker checker = new RecordingSpellChecker();
+    final var normalizer = SpellCheckingCharSequenceNormalizer.builder(checker)
+        .minTokenLength(1).build();
+    final List<String> correctable = List.of(
+        "http://", "http:///path", "www..com", "user@@example.com",
+        "http\u017F://example.com",
+        "user..tag@example.com", "example.c", "example-.com", "version1.2",
+        "a.\u0301b@example.com", "a-\u0301b.example", "https://[]@example.com",
+        "http://example.com:99999", "http://[2001:db8::1", "prefixhttps://example.com");
+
+    for (String token : correctable) {
+      norm(normalizer, token);
+    }
+    assertEquals(correctable.size(), checker.lookups.size());
+  }
+
+  @Test
+  void urlGuardHandlesLongNearMissInOneLookup() {
+    final RecordingSpellChecker checker = new RecordingSpellChecker();
+    final var normalizer = SpellCheckingCharSequenceNormalizer.builder(checker)
+        .minTokenLength(1).build();
+    final String nearMiss = "a".repeat(100_000) + ".1";
+
+    norm(normalizer, nearMiss);
+
+    assertEquals(List.of(nearMiss), checker.lookups);
+  }
+
+  @Test
+  void disablingUrlGuardSendsUrlLikeTokensToLookup() {
+    final RecordingSpellChecker checker = new RecordingSpellChecker();
+    final var normalizer = SpellCheckingCharSequenceNormalizer.builder(checker)
+        .minTokenLength(1).skipUrls(false).build();
+
+    norm(normalizer, "HTTPS://Example.COM/path");
+
+    assertEquals(List.of("https://example.com/path"), checker.lookups);
+  }
+
+  @Test
+  void urlLikeHelperRejectsNull() {
+    assertThrows(IllegalArgumentException.class, () -> UrlLikeToken.matches(null));
   }
 
   @Test
@@ -296,5 +373,31 @@ public class SpellCheckingCharSequenceNormalizerTest {
 
   private static String cp(int codePoint) {
     return new String(Character.toChars(codePoint));
+  }
+
+  private static final class RecordingSpellChecker implements SpellChecker {
+
+    private final List<String> lookups = new ArrayList<>();
+
+    @Override
+    public List<SuggestItem> lookup(String term, Verbosity verbosity, int maxEditDistance) {
+      lookups.add(term);
+      return List.of(new SuggestItem("corrected", 1, 1));
+    }
+
+    @Override
+    public int maxEditDistance() {
+      return 2;
+    }
+
+    @Override
+    public List<SuggestItem> lookup(String term) {
+      return lookup(term, Verbosity.TOP, maxEditDistance());
+    }
+
+    @Override
+    public List<SuggestItem> lookupCompound(String input, int maxEditDistance) {
+      return List.of(new SuggestItem(input, 0, 1));
+    }
   }
 }

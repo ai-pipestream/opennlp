@@ -19,7 +19,6 @@ package opennlp.spellcheck.normalizer;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 
 import opennlp.spellcheck.SpellChecker;
 import opennlp.spellcheck.SuggestItem;
@@ -53,7 +52,8 @@ import opennlp.tools.util.normalizer.CharSequenceNormalizer;
  * <p>Several guards, all configurable through the {@link Builder}, keep the corrector from
  * "fixing" tokens that should be left as they are: tokens shorter than {@code minTokenLength}
  * are skipped, numeric tokens are skipped when {@code skipNumbers} is set (on by default),
- * URL- and email-like tokens are skipped when {@code skipUrls} is set (on by default), and a
+ * whole tokens that look like URLs, email addresses, or domains are skipped when {@code skipUrls}
+ * is set (on by default), and a
  * token whose lower-cased form is already in the dictionary is never changed.</p>
  *
  * <p><b>Casing.</b> Lookups are performed on the lower-cased token and the original casing
@@ -77,12 +77,6 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
 
   /** The default minimum token length below which tokens are left untouched. */
   public static final int DEFAULT_MIN_TOKEN_LENGTH = 4;
-
-  /** Matches URL- and email-like tokens that should never be spell-corrected. */
-  private static final Pattern URL_LIKE = Pattern.compile(
-      "(?:https?://|www\\.)\\S+"
-          + "|[-+_.0-9A-Za-z]+@[-0-9A-Za-z]+\\.[-.0-9A-Za-z]+"
-          + "|\\S+\\.(?:com|org|net|edu|gov|io)\\b\\S*");
 
   /** The correction mode. */
   public enum Mode {
@@ -294,7 +288,7 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
     if (core.length() < minTokenLength) {
       return false;
     }
-    if (skipUrls && URL_LIKE.matcher(core).matches()) {
+    if (skipUrls && UrlLikeToken.matches(core)) {
       return false;
     }
     if (skipNumbers && isNumberLike(core)) {
@@ -492,7 +486,8 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
     }
 
     /**
-     * @param value whether to skip URL- and email-like tokens (default {@code true})
+     * @param value whether to skip whole tokens that look like URLs, email addresses, or domains
+     *              (default {@code true})
      * @return this builder
      */
     public Builder skipUrls(boolean value) {
