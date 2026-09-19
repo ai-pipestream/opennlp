@@ -117,6 +117,33 @@ public class DownloadUtilCacheIntegrityTest {
         "The stored checksum should be interchangeable with the published one");
   }
 
+  @Test
+  void testBlankPublishedChecksumIsRejectedClearly() throws IOException {
+    Files.writeString(remoteChecksum, " \t\u2003\n", StandardCharsets.UTF_8);
+
+    final IOException e = assertThrows(IOException.class,
+        () -> DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
+    assertTrue(e.getMessage().contains("checksum"),
+        "Expected a descriptive checksum failure, but got: " + e.getMessage());
+  }
+
+  @Test
+  void testChecksumScannerAcceptsUnicodeWhitespaceAndIgnoresFilename() throws IOException {
+    String filename = "model".repeat(100_000) + ".bin";
+    Files.writeString(remoteChecksum, "\u2003" + sha512(remoteModel) + "\u2028" + filename,
+        StandardCharsets.UTF_8);
+
+    assertNotNull(DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
+  }
+
+  @Test
+  void testPublicDownloadRejectsNullArguments() {
+    assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel((URL) null, ChunkerModel.class));
+    assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel(modelUrl, null));
+  }
+
   /**
    * The actual defect: once a model is cached, its contents are never re-checked. The cached
    * file is replaced with a <em>different but perfectly loadable</em> model, so that a passing

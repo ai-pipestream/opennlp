@@ -139,8 +139,16 @@ public class DownloadUtil {
    * @param <T>  The generic type which is a subclass of {@link BaseModel}.
    * @return A model instance of type {@link T}.
    * @throws IOException Thrown if the model cannot be downloaded.
+   * @throws IllegalArgumentException Thrown if {@code url} or {@code type} is {@code null}.
    */
   public static <T extends BaseModel> T downloadModel(URL url, Class<T> type) throws IOException {
+
+    if (url == null) {
+      throw new IllegalArgumentException("The model URL must not be null");
+    }
+    if (type == null) {
+      throw new IllegalArgumentException("The model type must not be null");
+    }
 
     final Path homeDirectory = getDownloadHome();
 
@@ -261,8 +269,25 @@ public class DownloadUtil {
     if (checksumFileContent == null) {
       return null;
     }
-    final String trimmed = checksumFileContent.trim();
-    return trimmed.isEmpty() ? null : trimmed.split("\\s")[0];
+
+    int start = 0;
+    while (start < checksumFileContent.length()) {
+      final int codePoint = checksumFileContent.codePointAt(start);
+      if (!Character.isWhitespace(codePoint)) {
+        break;
+      }
+      start += Character.charCount(codePoint);
+    }
+
+    int end = start;
+    while (end < checksumFileContent.length()) {
+      final int codePoint = checksumFileContent.codePointAt(end);
+      if (Character.isWhitespace(codePoint)) {
+        break;
+      }
+      end += Character.charCount(codePoint);
+    }
+    return start == end ? null : checksumFileContent.substring(start, end);
   }
 
   private static void verifyChecksum(Path model, String expectedChecksum) throws IOException {
