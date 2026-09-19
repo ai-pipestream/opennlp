@@ -191,8 +191,8 @@ public abstract class AbstractParserModelTest {
                         + "(PP (IN On) (NP (NNP June) (CD 16))) "
                         + "(NP (PRP he))"
                         + "(VP (VBD was) (VP (VBN born) "
-                        + "(PP in (NP Germany)))))",
-                        "On June 16 he was born Germany ")
+                        + "(PP (IN in) (NP (NNP Germany))))))",
+                        "On June 16 he was born in Germany ")
     ) ;
   }
 
@@ -238,4 +238,3 @@ public abstract class AbstractParserModelTest {
     );
   }
 }
-

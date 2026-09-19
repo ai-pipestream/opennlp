@@ -27,13 +27,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Stack;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Data structure for holding parse constituents.
@@ -105,22 +104,6 @@ public class Parse implements Cloneable, Comparable<Parse> {
    * Specifies whether this constituent was built during the chunking phase.
    */
   private boolean isChunk;
-
-  /**
-   * The pattern used to find the base constituent label of a
-   * Penn Treebank labeled constituent.
-   */
-  private static final Pattern typePattern = Pattern.compile("^([^ =-]+)");
-
-  /**
-   * The pattern used to find the function tags.
-   */
-  private static final Pattern funTypePattern = Pattern.compile("^[^ =-]+-([^ =-]+)");
-
-  /**
-   * The patter used to identify tokens in Penn Treebank labeled constituents.
-   */
-  private static final Pattern tokenPattern = Pattern.compile("^[^ ()]+ ([^ ()]+)\\s*\\)");
 
   /**
    * The set of punctuation parses which are between this parse and the previous parse.
@@ -652,36 +635,46 @@ public class Parse implements Cloneable, Comparable<Parse> {
     this.label = label;
   }
 
-  private static String getType(String rest) {
-    if (rest.startsWith("-LCB-")) {
-      return "-LCB-";
-    } else if (rest.startsWith("-RCB-")) {
-      return "-RCB-";
-    } else if (rest.startsWith("-LRB-")) {
-      return "-LRB-";
-    } else if (rest.startsWith("-RRB-")) {
-      return "-RRB-";
-    } else if (rest.startsWith("-RSB-")) {
-      return "-RSB-";
-    } else if (rest.startsWith("-LSB-")) {
-      return "-LSB-";
-    } else if (rest.startsWith("-NONE-")) {
-      return "-NONE-";
-    } else {
-      Matcher typeMatcher = typePattern.matcher(rest);
-      if (typeMatcher.find()) {
-        String type = typeMatcher.group(1);
-        if (useFunctionTags) {
-          Matcher funMatcher = funTypePattern.matcher(rest);
-          if (funMatcher.find()) {
-            String ftag = funMatcher.group(1);
-            type = type + "-" + ftag;
-          }
-        }
-        return type;
-      }
+  /** Reads the category and, when requested, function tags without numeric coindices. */
+  private static String getType(String label) {
+    if ("-LCB-".equals(label) || "-RCB-".equals(label)
+        || "-LRB-".equals(label) || "-RRB-".equals(label)
+        || "-RSB-".equals(label) || "-LSB-".equals(label)
+        || "-NONE-".equals(label)) {
+      return label;
     }
-    return null;
+
+    int typeEnd = 0;
+    while (typeEnd < label.length()) {
+      char c = label.charAt(typeEnd);
+      if (c == '-' || c == '=') {
+        break;
+      }
+      typeEnd++;
+    }
+    if (typeEnd == 0) {
+      return null;
+    }
+
+    String type = label.substring(0, typeEnd);
+    if (useFunctionTags) {
+      int end = typeEnd;
+      while (end < label.length() && label.charAt(end) == '-') {
+        int start = end + 1;
+        int next = start;
+        boolean numeric = true;
+        while (next < label.length() && label.charAt(next) != '-' && label.charAt(next) != '=') {
+          char c = label.charAt(next++);
+          numeric &= c >= '0' && c <= '9';
+        }
+        if (next == start || numeric) {
+          break;
+        }
+        end = next;
+      }
+      type = label.substring(0, end);
+    }
+    return type;
   }
 
   private static String encodeToken(String token) {
@@ -718,19 +711,6 @@ public class Parse implements Cloneable, Comparable<Parse> {
     }
 
     return token;
-  }
-
-  /**
-   * @param rest The portion of the parse string remaining to be processed.
-   * @return Retrieves the string containing the token for the specified portion of the parse
-   * string or {@code null} if the portion of the parse string does not represent a token.
-   */
-  private static String getToken(String rest) {
-    Matcher tokenMatcher = tokenPattern.matcher(rest);
-    if (tokenMatcher.find()) {
-      return decodeToken(tokenMatcher.group(1));
-    }
-    return null;
   }
 
   /**
@@ -847,6 +827,7 @@ public class Parse implements Cloneable, Comparable<Parse> {
    *
    * @param parse A tree-bank style {@link Parse} string.
    * @return A {@link Parse} structure for the specified tree-bank style parse string.
+   * @throws IllegalArgumentException if {@code parse} is {@code null} or malformed.
    */
   public static Parse parseParse(String parse) {
     return parseParse(parse, null);
@@ -859,23 +840,65 @@ public class Parse implements Cloneable, Comparable<Parse> {
    * @param parse A tree-bank style {@link Parse} string.
    * @param gl    The {@link GapLabeler} to be used.
    * @return A {@link Parse} structure for the specified tree-bank style parse string.
+   * @throws IllegalArgumentException if {@code parse} is {@code null} or malformed.
    */
   public static Parse parseParse(String parse, GapLabeler gl) {
+    if (parse == null) {
+      throw new IllegalArgumentException("parse must not be null");
+    }
     StringBuilder text = new StringBuilder();
     int offset = 0;
+    int roots = 0;
     Stack<Constituent> stack = new Stack<>();
     List<Constituent> cons = new LinkedList<>();
     for (int ci = 0, cl = parse.length(); ci < cl; ci++) {
       char c = parse.charAt(ci);
       if (c == '(') {
-        String rest = parse.substring(ci + 1);
-        String type = getType(rest);
-        if (type == null) {
-          logger.warn("null type for: {}", rest);
+        if (stack.empty() && ++roots > 1) {
+          throw malformedParse(ci, "multiple root constituents");
         }
-        String token = getToken(rest);
+        int labelStart = ci + 1;
+        while (labelStart < cl && StringUtil.isUnicodeWhitespace(parse.charAt(labelStart))) {
+          labelStart++;
+        }
+        int labelEnd = labelStart;
+        while (labelEnd < cl && !StringUtil.isUnicodeWhitespace(parse.charAt(labelEnd))
+            && parse.charAt(labelEnd) != '(' && parse.charAt(labelEnd) != ')') {
+          labelEnd++;
+        }
+        boolean fileWrapper = labelEnd == labelStart && labelStart < cl
+            && parse.charAt(labelStart) == '(' && stack.empty();
+        if (labelEnd == labelStart && !fileWrapper) {
+          throw malformedParse(ci, "missing constituent label");
+        }
+        String type = fileWrapper ? Parser.TOP_NODE
+            : getType(parse.substring(labelStart, labelEnd));
+        if (type == null) {
+          throw malformedParse(ci, "invalid constituent label");
+        }
         stack.push(new Constituent(type, new Span(offset, offset)));
-        if (token != null) {
+
+        int contentStart = fileWrapper ? labelStart : labelEnd;
+        while (contentStart < cl && StringUtil.isUnicodeWhitespace(parse.charAt(contentStart))) {
+          contentStart++;
+        }
+        if (contentStart >= cl) {
+          throw malformedParse(ci, "unterminated constituent");
+        }
+        if (parse.charAt(contentStart) != '(' && parse.charAt(contentStart) != ')') {
+          int tokenEnd = contentStart;
+          while (tokenEnd < cl && !StringUtil.isUnicodeWhitespace(parse.charAt(tokenEnd))
+              && parse.charAt(tokenEnd) != '(' && parse.charAt(tokenEnd) != ')') {
+            tokenEnd++;
+          }
+          String token = decodeToken(parse.substring(contentStart, tokenEnd));
+          int close = tokenEnd;
+          while (close < cl && StringUtil.isUnicodeWhitespace(parse.charAt(close))) {
+            close++;
+          }
+          if (close >= cl || parse.charAt(close) != ')') {
+            throw malformedParse(tokenEnd, "terminal must end after one token");
+          }
           if (Objects.equals(type, "-NONE-") && gl != null) {
             if (logger.isTraceEnabled()) {
               logger.trace("stack.size={}", stack.size());
@@ -887,14 +910,28 @@ public class Parse implements Cloneable, Comparable<Parse> {
             text.append(token).append(" ");
             offset += token.length() + 1;
           }
+          ci = close - 1;
+        } else {
+          ci = contentStart - 1;
         }
       } else if (c == ')') {
+        if (stack.empty()) {
+          throw malformedParse(ci, "unmatched closing parenthesis");
+        }
         Constituent con = stack.pop();
         int start = con.getSpan().getStart();
         if (start < offset) {
           cons.add(new Constituent(con.getLabel(), new Span(start, offset - 1)));
         }
+      } else if (!StringUtil.isUnicodeWhitespace(c)) {
+        throw malformedParse(ci, "content outside a constituent");
       }
+    }
+    if (!stack.empty()) {
+      throw malformedParse(parse.length(), "unclosed constituent");
+    }
+    if (roots == 0) {
+      throw malformedParse(0, "missing root constituent");
     }
     String txt = text.toString();
     int tokenIndex = -1;
@@ -914,6 +951,11 @@ public class Parse implements Cloneable, Comparable<Parse> {
       }
     }
     return p;
+  }
+
+  /** Describes a malformed tree using its UTF-16 input offset. */
+  private static IllegalArgumentException malformedParse(int index, String reason) {
+    return new IllegalArgumentException("Malformed treebank parse at index " + index + ": " + reason);
   }
 
   /**
