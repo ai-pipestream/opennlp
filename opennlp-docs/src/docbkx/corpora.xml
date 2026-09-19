@@ -402,6 +402,19 @@ Execution time: 1,955 seconds]]>
 			ids. Ranges ending at the largest integer do not wrap around. Correct the
 			input before resuming conversion or training; missing words are not fabricated.
 		</para>
+		<para>
+			The reader accepts the three CoNLL-U id forms: positive integer word ids such as
+			<code>1</code>, nonempty multiword ranges such as <code>1-2</code>, and empty-node
+			ids such as <code>2.1</code> (including sentence-initial <code>0.1</code>). A range
+			line is merged with its integer word lines, while an empty node between those lines
+			remains independent. Id components use ASCII digits without leading zeroes and must
+			fit a signed 32-bit integer. Equal ranges such as <code>7-7</code>, reversed ranges,
+			incomplete decimal ids, duplicate ids, and overlapping ranges stop reading with
+			<code>InvalidFormatException</code>.
+			Language-specific text comments use an exact two- or three-letter lowercase key,
+			for example <code>text_en</code> or <code>text_eng</code>;
+			<code>text_engl</code> is invalid and is not shortened.
+		</para>
 	</section>
 	<section xml:id="tools.corpora.arvores-deitadas">
 		<title>Arvores Deitadas</title>
