@@ -223,8 +223,20 @@ boolean word = policy.test("Cafe\u0301");]]>
 		</programlisting>
 		<para>
 			Use <code>TokenizerCharacterPolicy.ascii()</code> for the fixed ASCII letter and digit
-			preset. Policy sets must be pairwise disjoint Unicode scalar values and cannot contain
-			whitespace. The getters expose the immutable sets for model persistence.
+			preset. Use <code>TokenizerCharacterPolicy.latinUnicode17()</code> for the version-pinned
+			Unicode 17 Latin-script preset. It contains Latin-category letters, ASCII digits, and
+			continuation marks selected from the Latin Script Extensions and canonical decompositions
+			of the included letters. This gives composed and decomposed Latin text equivalent eligibility
+			without depending on the running JDK's Unicode tables. For example:
+			<programlisting language="java">
+<![CDATA[TokenizerCharacterPolicy latin = TokenizerCharacterPolicy.latinUnicode17();
+boolean composed = latin.test("caf\u00E9");
+boolean decomposed = latin.test("cafe\u0301");]]>
+			</programlisting>
+			The preset is an eligibility inventory for Latin-language tokenizer optimization. It is
+			not a Unicode word-boundary algorithm and deliberately excludes letters from scripts such
+			as Greek, Thai, and Han. Policy sets must be pairwise disjoint Unicode scalar values and
+			cannot contain whitespace. The getters expose the immutable sets for model persistence.
 		</para>
 		<para>
 			This character-set approach follows the code point predicates used by
