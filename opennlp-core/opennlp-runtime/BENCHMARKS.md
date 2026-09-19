@@ -15,6 +15,8 @@ variance reporting.
 | `POSTaggerMEBenchmark` | POSTaggerME | 3 approaches x 2 cache configs |
 | `SnowballStemmerBenchmark` | SnowballStemmer | 3 approaches (incl. plain-field baseline) |
 | `CachingStemmerBenchmark` | CachingStemmer | cached vs uncached x 2 workloads |
+| `NameSampleParseBenchmark` | NameSample training-data parser | Unicode, markup-heavy, at least 16K and 64K UTF-16 units |
+| `ParseParseBenchmark` | Tree-bank parse parser | Unicode, deeply nested, at least 16K and 64K UTF-16 units |
 
 ### Approaches measured
 
@@ -28,17 +30,23 @@ variance reporting.
 
 ```bash
 # Build with JMH profile
-mvn test-compile -Pjmh \
-    -pl opennlp-core/opennlp-runtime -am \
-    -Dforbiddenapis.skip=true -Dcheckstyle.skip=true
+./mvnw test-compile -Pjmh \
+    -pl opennlp-core/opennlp-runtime -am -Dopennlp.forkCount=1 -Drat.skip=true
 
 # Materialize the test classpath once (JMH's forked JVMs inherit
 # java.class.path, which mvn exec:java does not populate, running
 # through exec:java fails with ClassNotFoundException: ForkedMain)
-mvn dependency:build-classpath -pl opennlp-core/opennlp-runtime \
-    -Pjmh -DincludeScope=test -Dmdep.outputFile=/tmp/cp.txt
+./mvnw dependency:build-classpath -pl opennlp-core/opennlp-runtime -am \
+    -Pjmh -DincludeScope=test -Dmdep.outputFile=target/jmh-classpath.txt \
+    -Dopennlp.forkCount=1 -Drat.skip=true
 
-CP="opennlp-core/opennlp-runtime/target/classes:opennlp-core/opennlp-runtime/target/test-classes:$(cat /tmp/cp.txt)"
+CP="opennlp-core/opennlp-runtime/target/test-classes:$(cat opennlp-core/opennlp-runtime/target/jmh-classpath.txt)"
+while IFS= read -r bench_pom; do
+    bench_classes="${bench_pom%/pom.xml}/target/classes"
+    if [ -d "$bench_classes" ]; then
+        CP="$PWD/$bench_classes:$CP"
+    fi
+done < <(git ls-files '**/pom.xml')
 
 # Run all ME benchmarks
 java -cp "$CP" org.openjdk.jmh.Main 'opennlp.tools.*.ME*'
@@ -46,6 +54,51 @@ java -cp "$CP" org.openjdk.jmh.Main 'opennlp.tools.*.ME*'
 # Run POSTagger only (includes cacheSize param)
 java -cp "$CP" org.openjdk.jmh.Main POSTaggerMEBenchmark
 ```
+
+### Parser scan baselines
+
+The parser benchmarks construct their immutable input strings during trial setup, so measured
+operations cover only the public parsing calls. Run both benchmark classes with two independent
+forks and enough warmup and measurement iterations for a bounded baseline. Run on an otherwise
+idle machine and retain the raw output:
+
+```bash
+java -cp "$CP" org.openjdk.jmh.Main \
+    'NameSampleParseBenchmark|ParseParseBenchmark' \
+    -f 2 -wi 3 -i 5 -w 1s -r 1s -prof gc \
+    -rf json -rff /tmp/opennlp-parser-baseline.json
+```
+
+The `gc` profiler reports normalized allocation as `gc.alloc.rate.norm` in bytes per operation.
+Keep the raw JMH text and JSON outputs with the exact commit, JDK, and command used. To compare an
+implementation branch, rebuild the classpath in that branch and run the same command and machine
+configuration. Compare matching workload rows and their error intervals; do not infer a speedup
+from a single score or from overlapping intervals.
+
+The harness can also measure an implementation checkout without copying benchmark sources into
+that checkout. Build `opennlp-api` in the implementation checkout, then put its compiled classes
+first on the harness classpath:
+
+```bash
+IMPLEMENTATION=/absolute/path/to/implementation-checkout
+HARNESS=/absolute/path/to/scan-benchmarks-checkout
+
+cd "$IMPLEMENTATION"
+./mvnw package -pl opennlp-api -am -DskipTests -Drat.skip=true -Dopennlp.forkCount=1
+
+cd "$HARNESS"
+CP="$IMPLEMENTATION/opennlp-api/target/classes:$CP"
+java -cp "$CP" org.openjdk.jmh.Main \
+    'NameSampleParseBenchmark|ParseParseBenchmark' \
+    -f 2 -wi 3 -i 5 -w 1s -r 1s -prof gc
+```
+
+Classpath order is significant: it selects the implementation checkout's `NameSample` and
+`Parse` classes while retaining the benchmark harness from this checkout. This requires the public
+parser signatures to remain binary compatible. Confirm the loaded `NameSample` and `Parse` class
+origins before each run (for example with `-Xlog:class+load=info` in a separate smoke run). A
+dependency classpath may contain locally installed SNAPSHOT jars; their contents do not establish
+which checkout is being measured. Include both baseline and candidate origins with the results.
 
 ### Baseline comparison
 
