@@ -46,53 +46,93 @@ public class StringPattern {
     this.digits = digits;
   }
 
+  /**
+   * Classifies a token by Unicode code point. Combining marks continue the case and Japanese
+   * script classification of an immediately preceding letter, but are not themselves letters.
+   * An empty token has no positive classifications. Malformed UTF-16 clears whole-token
+   * classifications while valid code points still contribute containment flags and digit counts.
+   *
+   * @param token The token to classify.
+   * @return The recognized string pattern.
+   * @throws IllegalArgumentException Thrown if {@code token} is {@code null}.
+   */
   public static StringPattern recognize(String token) {
+    if (token == null) {
+      throw new IllegalArgumentException("token must not be null");
+    }
+    if (token.isEmpty()) {
+      return new StringPattern(0, 0);
+    }
 
-    int pattern = ALL_CAPITAL_LETTER | ALL_LOWERCASE_LETTER | ALL_DIGIT | ALL_LETTERS
-        | ALL_HIRAGANA | ALL_KATAKANA;
-
+    boolean allCapital = true;
+    boolean allLowercase = true;
+    boolean allLetters = true;
+    boolean allDigits = true;
+    boolean allHiragana = true;
+    boolean allKatakana = true;
+    boolean initialCapital = false;
+    boolean containsLetters = false;
+    boolean containsUppercase = false;
+    boolean containsDigit = false;
+    boolean malformed = false;
+    boolean markCanContinueWord = false;
+    boolean japaneseRunStarted = false;
+    int pattern = 0;
     int digits = 0;
 
-    for (int i = 0; i < token.length(); i++) {
-      final char ch = token.charAt(i);
-      final int letterType = Character.getType(ch);
-      boolean isLetter = letterType == Character.UPPERCASE_LETTER ||
-          letterType == Character.LOWERCASE_LETTER ||
-          letterType == Character.TITLECASE_LETTER ||
-          letterType == Character.MODIFIER_LETTER ||
-          letterType == Character.OTHER_LETTER;
+    for (int offset = 0; offset < token.length();) {
+      char ch = token.charAt(offset);
+      if (Character.isSurrogate(ch)
+          && !(Character.isHighSurrogate(ch) && offset + 1 < token.length()
+          && Character.isLowSurrogate(token.charAt(offset + 1)))) {
+        malformed = true;
+        allCapital = false;
+        allLowercase = false;
+        allLetters = false;
+        allDigits = false;
+        allHiragana = false;
+        allKatakana = false;
+        markCanContinueWord = false;
+        offset++;
+        continue;
+      }
+
+      int codePoint = token.codePointAt(offset);
+      int type = Character.getType(codePoint);
+      boolean isLetter = Character.isLetter(codePoint);
+      boolean isMark = type == Character.NON_SPACING_MARK
+          || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK;
 
       if (isLetter) {
-        pattern |= CONTAINS_LETTERS;
-        pattern &= ~ALL_DIGIT;
-
-        if (letterType == Character.UPPERCASE_LETTER) {
-          if (i == 0) {
-            pattern |= INITAL_CAPITAL_LETTER;
-          }
-
-          pattern |= CONTAINS_UPPERCASE;
-
-          pattern &= ~ALL_LOWERCASE_LETTER;
-        } else {
-          pattern &= ~ALL_CAPITAL_LETTER;
+        boolean uppercase = Character.isUpperCase(codePoint);
+        boolean lowercase = Character.isLowerCase(codePoint);
+        if (offset == 0) {
+          initialCapital = uppercase;
         }
+        containsLetters = true;
+        containsUppercase |= uppercase;
+        allCapital &= uppercase;
+        allLowercase &= lowercase;
+        allDigits = false;
+        markCanContinueWord = true;
       } else {
-        // contains chars other than letter, this means
-        // it can not be one of these:
-        pattern &= ~ALL_LETTERS;
-        pattern &= ~ALL_CAPITAL_LETTER;
-        pattern &= ~ALL_LOWERCASE_LETTER;
-
-        if (letterType == Character.DECIMAL_DIGIT_NUMBER) {
-          pattern |= CONTAINS_DIGIT;
-          pattern &= ~(ALL_HIRAGANA | ALL_KATAKANA);
-          digits++;
-        } else {
-          pattern &= ~ALL_DIGIT;
+        allLetters = false;
+        boolean continuingMark = isMark && markCanContinueWord;
+        if (!continuingMark) {
+          allCapital = false;
+          allLowercase = false;
         }
 
-        switch (ch) {
+        if (type == Character.DECIMAL_DIGIT_NUMBER) {
+          containsDigit = true;
+          digits++;
+          markCanContinueWord = false;
+        } else if (!continuingMark) {
+          allDigits = false;
+          markCanContinueWord = false;
+        }
+
+        switch (codePoint) {
           case ',':
             pattern |= CONTAINS_COMMA;
             break;
@@ -114,27 +154,58 @@ public class StringPattern {
         }
       }
 
-      // for Japanese...
-      final int codePoint = token.codePointAt(i);
-      final Character.UnicodeScript us = Character.UnicodeScript.of(codePoint);
-      if (us != Character.UnicodeScript.COMMON) {
-        if (us == Character.UnicodeScript.LATIN) {
-          pattern &= ~(ALL_HIRAGANA | ALL_KATAKANA);
-        }
-        else if (us == Character.UnicodeScript.HAN) {
-          pattern &= ~(ALL_HIRAGANA | ALL_KATAKANA | ALL_LOWERCASE_LETTER);
-        }
-        else if (us == Character.UnicodeScript.HIRAGANA) {
-          pattern &= ~(ALL_KATAKANA | ALL_LOWERCASE_LETTER);
-        }
-        else if (us == Character.UnicodeScript.KATAKANA) {
-          pattern &= ~(ALL_HIRAGANA | ALL_LOWERCASE_LETTER);
-        }
+      Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
+      if (script == Character.UnicodeScript.HIRAGANA) {
+        allKatakana = false;
+        japaneseRunStarted = true;
+      } else if (script == Character.UnicodeScript.KATAKANA) {
+        allHiragana = false;
+        japaneseRunStarted = true;
+      } else if (isMark && markCanContinueWord) {
+        // Combining marks extend the preceding script run.
+      } else if ((codePoint == '・' || codePoint == 'ー' || codePoint == '〜')
+          && japaneseRunStarted) {
+        markCanContinueWord = true;
+      } else {
+        allHiragana = false;
+        allKatakana = false;
       }
-      else {
-        if (ch != '・' && ch != 'ー' && ch != '〜')
-          pattern &= ~(ALL_HIRAGANA | ALL_KATAKANA);
-      }
+
+      offset += Character.charCount(codePoint);
+    }
+
+    if (malformed) {
+      initialCapital = false;
+    }
+    if (initialCapital) {
+      pattern |= INITAL_CAPITAL_LETTER;
+    }
+    if (allCapital) {
+      pattern |= ALL_CAPITAL_LETTER;
+    }
+    if (allLowercase) {
+      pattern |= ALL_LOWERCASE_LETTER;
+    }
+    if (allLetters) {
+      pattern |= ALL_LETTERS;
+    }
+    if (allDigits) {
+      pattern |= ALL_DIGIT;
+    }
+    if (allHiragana) {
+      pattern |= ALL_HIRAGANA;
+    }
+    if (allKatakana) {
+      pattern |= ALL_KATAKANA;
+    }
+    if (containsLetters) {
+      pattern |= CONTAINS_LETTERS;
+    }
+    if (containsUppercase) {
+      pattern |= CONTAINS_UPPERCASE;
+    }
+    if (containsDigit) {
+      pattern |= CONTAINS_DIGIT;
     }
 
     return new StringPattern(pattern, digits);

@@ -332,6 +332,30 @@ Arguments description:
 			from accumulating during repeated reads and training passes.
 		</para>
 	</section>
+    <section xml:id="intro.unicode-string-patterns">
+        <title>Unicode String Patterns</title>
+        <para>
+            Feature generators can inspect a token with <code>StringPattern</code>. Its
+            classifications scan Unicode code points, so supplementary letters and digits count
+            as one character. A combining mark immediately after a letter preserves that
+            letter's case and Japanese script run. The strict <code>isAllLetter()</code> result
+            remains false for a decomposed token because the mark is not a Unicode letter.
+        </para>
+        <programlisting>
+<![CDATA[StringPattern composed = StringPattern.recognize("café");
+StringPattern decomposed = StringPattern.recognize("cafe\u0301");
+
+assert composed.isAllLowerCaseLetter();
+assert decomposed.isAllLowerCaseLetter();
+assert composed.isAllLetter();
+assert !decomposed.isAllLetter();]]>
+        </programlisting>
+        <para>
+            Empty input has no positive classifications. Null input is rejected. Malformed UTF-16
+            clears whole-token classifications, while valid code points elsewhere in the token
+            still contribute containment flags and digit counts.
+        </para>
+    </section>
     <section xml:id="intro.sysprops">
         <title>System Properties</title>
         <section xml:id="intro.sysprops.interner">

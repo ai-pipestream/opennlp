@@ -140,4 +140,120 @@ public class StringPatternTest {
     Assertions.assertFalse(StringPattern.recognize("---.1/,").containsLetters());
   }
 
+  @Test
+  void testEmptyInputHasNoPositiveCategories() {
+    StringPattern pattern = StringPattern.recognize("");
+
+    Assertions.assertFalse(pattern.isAllLetter());
+    Assertions.assertFalse(pattern.isInitialCapitalLetter());
+    Assertions.assertFalse(pattern.isAllCapitalLetter());
+    Assertions.assertFalse(pattern.isAllLowerCaseLetter());
+    Assertions.assertFalse(pattern.isAllDigit());
+    Assertions.assertFalse(pattern.isAllHiragana());
+    Assertions.assertFalse(pattern.isAllKatakana());
+    Assertions.assertFalse(pattern.containsPeriod());
+    Assertions.assertFalse(pattern.containsComma());
+    Assertions.assertFalse(pattern.containsSlash());
+    Assertions.assertFalse(pattern.containsDigit());
+    Assertions.assertFalse(pattern.containsHyphen());
+    Assertions.assertFalse(pattern.containsLetters());
+    Assertions.assertEquals(0, pattern.digits());
+  }
+
+  @Test
+  void testNullInputRejectedAtPublicBoundary() {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> StringPattern.recognize(null));
+  }
+
+  @Test
+  void testNonJapaneseScriptsAreNotJapanese() {
+    StringPattern greek = StringPattern.recognize("αλφα");
+    Assertions.assertTrue(greek.isAllLetter());
+    Assertions.assertTrue(greek.isAllLowerCaseLetter());
+    Assertions.assertFalse(greek.isAllHiragana());
+    Assertions.assertFalse(greek.isAllKatakana());
+
+    StringPattern cyrillic = StringPattern.recognize("слово");
+    Assertions.assertTrue(cyrillic.isAllLetter());
+    Assertions.assertTrue(cyrillic.isAllLowerCaseLetter());
+    Assertions.assertFalse(cyrillic.isAllHiragana());
+    Assertions.assertFalse(cyrillic.isAllKatakana());
+
+    StringPattern arabic = StringPattern.recognize("لغة");
+    Assertions.assertTrue(arabic.isAllLetter());
+    Assertions.assertFalse(arabic.isAllLowerCaseLetter());
+    Assertions.assertFalse(arabic.isAllCapitalLetter());
+    Assertions.assertFalse(arabic.isAllHiragana());
+    Assertions.assertFalse(arabic.isAllKatakana());
+
+    StringPattern han = StringPattern.recognize("日本");
+    Assertions.assertTrue(han.isAllLetter());
+    Assertions.assertFalse(han.isAllHiragana());
+    Assertions.assertFalse(han.isAllKatakana());
+  }
+
+  @Test
+  void testSupplementaryLettersAndDigitsAreSingleCodePoints() {
+    String deseretCapital = new String(Character.toChars(0x10400));
+    String mathematicalDigit = new String(Character.toChars(0x1D7D8));
+
+    StringPattern capital = StringPattern.recognize(deseretCapital);
+    Assertions.assertTrue(capital.isAllLetter());
+    Assertions.assertTrue(capital.isInitialCapitalLetter());
+    Assertions.assertTrue(capital.isAllCapitalLetter());
+    Assertions.assertTrue(capital.containsLetters());
+
+    StringPattern digit = StringPattern.recognize(mathematicalDigit);
+    Assertions.assertTrue(digit.isAllDigit());
+    Assertions.assertTrue(digit.containsDigit());
+    Assertions.assertEquals(1, digit.digits());
+  }
+
+  @Test
+  void testCombiningMarksPreserveWordCaseAfterLetters() {
+    StringPattern composedLower = StringPattern.recognize("café");
+    StringPattern decomposedLower = StringPattern.recognize("cafe\u0301");
+    Assertions.assertTrue(composedLower.isAllLowerCaseLetter());
+    Assertions.assertTrue(decomposedLower.isAllLowerCaseLetter());
+    Assertions.assertTrue(composedLower.isAllLetter());
+    Assertions.assertFalse(decomposedLower.isAllLetter());
+
+    StringPattern composedCapital = StringPattern.recognize("Café");
+    StringPattern decomposedCapital = StringPattern.recognize("Cafe\u0301");
+    Assertions.assertEquals(composedCapital.isInitialCapitalLetter(),
+        decomposedCapital.isInitialCapitalLetter());
+    Assertions.assertEquals(composedCapital.isAllLowerCaseLetter(),
+        decomposedCapital.isAllLowerCaseLetter());
+
+    Assertions.assertTrue(StringPattern.recognize("は\u3099").isAllHiragana());
+    Assertions.assertFalse(StringPattern.recognize("\u0301").isAllHiragana());
+    Assertions.assertFalse(StringPattern.recognize("\u0301").isAllKatakana());
+    Assertions.assertFalse(StringPattern.recognize("\u0301a").isAllLowerCaseLetter());
+    Assertions.assertFalse(StringPattern.recognize("1\u0301").isAllLowerCaseLetter());
+    Assertions.assertFalse(StringPattern.recognize("a.\u0301").isAllLowerCaseLetter());
+  }
+
+  @Test
+  void testMalformedUtf16ClearsWholeTokenCategoriesButScansValidCharacters() {
+    StringPattern pattern = StringPattern.recognize("A\uD8001.-");
+
+    Assertions.assertFalse(pattern.isAllLetter());
+    Assertions.assertFalse(pattern.isInitialCapitalLetter());
+    Assertions.assertFalse(pattern.isAllCapitalLetter());
+    Assertions.assertFalse(pattern.isAllLowerCaseLetter());
+    Assertions.assertFalse(pattern.isAllDigit());
+    Assertions.assertFalse(pattern.isAllHiragana());
+    Assertions.assertFalse(pattern.isAllKatakana());
+    Assertions.assertTrue(pattern.containsLetters());
+    Assertions.assertTrue(pattern.containsDigit());
+    Assertions.assertTrue(pattern.containsPeriod());
+    Assertions.assertTrue(pattern.containsHyphen());
+    Assertions.assertEquals(1, pattern.digits());
+
+    pattern = StringPattern.recognize("\uDC00\uD800");
+    Assertions.assertFalse(pattern.isAllLetter());
+    Assertions.assertFalse(pattern.containsLetters());
+    Assertions.assertEquals(0, pattern.digits());
+  }
+
 }
