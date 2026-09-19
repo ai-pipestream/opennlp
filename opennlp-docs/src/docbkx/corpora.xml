@@ -28,6 +28,17 @@ under the License.
 	OpenNLP has built-in support to convert into the native training format or directly use
 	various corpora	needed by the different	trainable components.
 	</para>
+	<section xml:id="tools.corpora.english-token-lines">
+		<title>English Penn Treebank token lines</title>
+		<para>
+			The English <code>TokenSampleStream</code> reads one whitespace-delimited token
+			sample per line and reconstructs the original spacing with Penn Treebank
+			conventions. For example, <code>The dog 's -LRB- big -RRB- .</code> becomes
+			<code>The dog's ( big).</code>, with a span for each input token. Runs of Unicode
+			whitespace separate tokens, and an empty line produces an empty sample and resets
+			the state used to distinguish opening and closing double quotes.
+		</para>
+	</section>
 	<section xml:id="tools.corpora.conll">
 		<title>CONLL</title>
 		<para>
