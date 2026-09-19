@@ -24,12 +24,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import opennlp.tools.commons.Sample;
-import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Encapsulates names for a single unit of text.
@@ -262,9 +260,6 @@ public class NameSample implements Sample {
     return errorString.toString();
   }
 
-  private static final Pattern START_TAG_PATTERN = Pattern.compile("<START(:([^:>\\s]*))?>");
-
-
   /**
    * Parses given input into a {@link NameSample}.
    * 
@@ -272,7 +267,8 @@ public class NameSample implements Sample {
    * @param clearAdaptiveData {@code true} if the adaptive data of the feature generators should be cleared,
    *                          {@code false} otherwise.
    * @return A {@link NameSample} instance resulting from the parsing.
-   * @throws IOException Thrown if IO errors occurred during parsing.
+   * @throws IOException Thrown if the annotation markup is malformed.
+   * @throws IllegalArgumentException Thrown if {@code taggedTokens} is {@code null}.
    */
   public static NameSample parse(String taggedTokens, boolean clearAdaptiveData) throws IOException {
     return parse(taggedTokens, DEFAULT_TYPE, clearAdaptiveData);
@@ -282,17 +278,21 @@ public class NameSample implements Sample {
    * Parses given input into a {@link NameSample}.
    *
    * @param taggedTokens The input data to parse.
-   * @param defaultType The type to set by default.
+   * @param defaultType The type for each untyped annotation. May be {@code null}.
    * @param clearAdaptiveData {@code true} if the adaptive data of the feature generators should be cleared,
    *                          {@code false} otherwise.
    * @return A {@link NameSample} instance resulting from the parsing.
-   * @throws IOException Thrown if IO errors occurred during parsing.
+   * @throws IOException Thrown if the annotation markup is malformed.
+   * @throws IllegalArgumentException Thrown if {@code taggedTokens} is {@code null}.
    */
   // TODO: Should throw another exception, and then convert it into an IOException in the stream
   public static NameSample parse(String taggedTokens, String defaultType, boolean clearAdaptiveData)
           throws IOException {
 
-    String[] parts = WhitespaceTokenizer.INSTANCE.tokenize(taggedTokens);
+    if (taggedTokens == null) {
+      throw new IllegalArgumentException("taggedTokens must not be null");
+    }
+    String[] parts = StringUtil.splitOnUnicodeWhitespace(taggedTokens);
 
     List<String> tokenList = new ArrayList<>(parts.length);
     List<Span> nameList = new ArrayList<>();
@@ -301,31 +301,26 @@ public class NameSample implements Sample {
     int startIndex = -1;
     int wordIndex = 0;
 
-    // we check if at least one name has the a type. If no one has, we will
-    // leave the NameType property of NameSample null.
     boolean catchingName = false;
 
     for (int pi = 0; pi < parts.length; pi++) {
-      Matcher startMatcher = START_TAG_PATTERN.matcher(parts[pi]);
-      if (startMatcher.matches()) {
+      String part = parts[pi];
+      if (part.equals(START_TAG) || part.startsWith(START_TAG_PREFIX)) {
         if (catchingName) {
           throw new IOException("Found unexpected annotation" +
               " while handling a name sequence: " + errorTokenWithContext(parts, pi));
         }
         catchingName = true;
         startIndex = wordIndex;
-        String nameTypeFromSample = startMatcher.group(2);
-        if (nameTypeFromSample != null) {
-          if (nameTypeFromSample.length() == 0) {
-            throw new IOException("Missing a name type: " + errorTokenWithContext(parts, pi));
-          }
-          nameType = nameTypeFromSample;
-        }
+        nameType = part.equals(START_TAG) ? defaultType : parseNameType(part, parts, pi);
 
       }
       else if (parts[pi].equals(END_TAG)) {
         if (!catchingName) {
           throw new IOException("Found unexpected annotation: " + errorTokenWithContext(parts, pi));
+        }
+        if (startIndex == wordIndex) {
+          throw new IOException("Empty name annotation: " + errorTokenWithContext(parts, pi));
         }
         catchingName = false;
         // create name
@@ -337,9 +332,33 @@ public class NameSample implements Sample {
         wordIndex++;
       }
     }
+    if (catchingName) {
+      throw new IOException("Unclosed name annotation at token " + startIndex);
+    }
     String[] sentence = tokenList.toArray(new String[0]);
     Span[] names = nameList.toArray(new Span[0]);
 
     return new NameSample(sentence, names, clearAdaptiveData);
+  }
+
+  /**
+   * Reads the type of a reserved {@code <START:...>} marker. Types consist of
+   * Unicode scalar values other than markup delimiters and Unicode whitespace.
+   */
+  private static String parseNameType(String part, String[] parts, int index) throws IOException {
+    int start = START_TAG_PREFIX.length();
+    int end = part.length() - 1;
+    if (end <= start || part.charAt(end) != '>') {
+      throw new IOException("Missing or malformed name type: " + errorTokenWithContext(parts, index));
+    }
+    for (int offset = start; offset < end;) {
+      int cp = part.codePointAt(offset);
+      if (cp == ':' || cp == '<' || cp == '>' || StringUtil.isUnicodeWhitespace(cp)
+          || (cp >= Character.MIN_SURROGATE && cp <= Character.MAX_SURROGATE)) {
+        throw new IOException("Malformed name type: " + errorTokenWithContext(parts, index));
+      }
+      offset += Character.charCount(cp);
+    }
+    return part.substring(start, end);
   }
 }

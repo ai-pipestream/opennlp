@@ -254,6 +254,18 @@ Span[] spans = finder.findInOriginal(tokens);]]>
 			detect these multiple types.
 		</para>
 		<para>
+			Annotation markers must be separate tokens delimited by Unicode whitespace.
+			Each <literal>&lt;START:type&gt;</literal> or <literal>&lt;START&gt;</literal>
+			must enclose at least one token and end with <literal>&lt;END&gt;</literal>.
+			Nested, empty, unclosed, and malformed annotations are rejected with an
+			<literal>IOException</literal>. Types may contain Unicode characters, but not
+			whitespace, colons, angle brackets, or unpaired UTF-16 surrogates.
+			For example, <literal>&lt;START:person&gt; Ana &lt;END&gt; met &lt;START&gt; Jo &lt;END&gt;</literal>
+			assigns <literal>person</literal> to Ana and the configured default type to Jo.
+			An untyped annotation never inherits the previous annotation's type.
+			Parsing uses fixed Unicode whitespace rules regardless of the process whitespace mode.
+		</para>
+		<para>
 			Sample sentence of the data:
 			<screen>
 <![CDATA[<START:person> Pierre Vinken <END> , 61 years old , will join the board as a nonexecutive director Nov. 29 .

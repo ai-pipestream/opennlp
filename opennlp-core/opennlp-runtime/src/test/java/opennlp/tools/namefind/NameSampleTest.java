@@ -27,8 +27,11 @@ import java.io.ObjectOutputStream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.util.Span;
+import opennlp.tools.util.WhitespaceMode;
 
 /**
  * This is the test class for {@link NameSample}.
@@ -284,6 +287,118 @@ public class NameSampleTest {
   void testNestedNameSpans() {
     Assertions.assertThrows(IOException.class, () -> NameSample.parse(
             "<START:Person> <START:Location> Kennedy <END> City <END>", false));
+  }
+
+  @Test
+  void testUntypedNameUsesDefaultAfterTypedName() throws IOException {
+    NameSample sample = NameSample.parse(
+        "<START:person> Ada <END> met <START> Charles <END>", "fallback", false);
+
+    Assertions.assertArrayEquals(new String[] {"Ada", "met", "Charles"}, sample.getSentence());
+    Assertions.assertArrayEquals(new Span[] {
+        new Span(0, 1, "person"), new Span(2, 3, "fallback")
+    }, sample.getNames());
+  }
+
+  @Test
+  void testUnicodeNameTypeAndWhitespace() throws IOException {
+    NameSample sample = NameSample.parse(
+        "before\u2003<START:場所_\uD83D\uDE80>\tNew\nTown\u2029<END>\rafter", false);
+
+    Assertions.assertArrayEquals(new String[] {"before", "New", "Town", "after"},
+        sample.getSentence());
+    Assertions.assertArrayEquals(new Span[] {new Span(1, 3, "場所_\uD83D\uDE80")},
+        sample.getNames());
+  }
+
+  @Test
+  void testParsingUsesUnicodeWhitespaceIndependentOfCompatibilityMode() throws IOException {
+    WhitespaceMode previousMode = WhitespaceMode.current();
+    try {
+      WhitespaceMode.setActive(WhitespaceMode.LEGACY);
+
+      NameSample sample = NameSample.parse("before\u0085<START>\u0085name\u0085<END>\u0085after", false);
+
+      Assertions.assertArrayEquals(new String[] {"before", "name", "after"}, sample.getSentence());
+      Assertions.assertArrayEquals(new Span[] {new Span(1, 2, NameSample.DEFAULT_TYPE)},
+          sample.getNames());
+    } finally {
+      WhitespaceMode.setActive(previousMode);
+    }
+  }
+
+  @ParameterizedTest(name = "reject malformed annotation: {0}")
+  @MethodSource("malformedAnnotations")
+  void testMalformedAnnotations(String input) {
+    Assertions.assertThrows(IOException.class, () -> NameSample.parse(input, false));
+  }
+
+  private static String[] malformedAnnotations() {
+    return new String[] {
+        "<START> <END>",
+        "<START:person> <END>",
+        "<START> token",
+        "<START:person> token",
+        "<START> token <END>.",
+        "token <END>",
+        "<START:person> <START> token <END> <END>",
+        "<START:",
+        "<START:person",
+        "<START:per<son> token <END>",
+        "<START:per\u2003son> token <END>",
+        "<START:per\u202Fson> token <END>",
+        "<START:per\uD800son> token <END>",
+        "<START:per\uDC00son> token <END>"
+    };
+  }
+
+  @Test
+  void testMarkerLikeTextRemainsARegularToken() throws IOException {
+    NameSample sample = NameSample.parse("<STARTED> ordinary <angle-bracket> text", false);
+
+    Assertions.assertArrayEquals(
+        new String[] {"<STARTED>", "ordinary", "<angle-bracket>", "text"},
+        sample.getSentence());
+    Assertions.assertArrayEquals(new Span[0], sample.getNames());
+  }
+
+  @Test
+  void testNullTaggedTokensRejectedByBothPublicOverloads() {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> NameSample.parse(null, false));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> NameSample.parse(null, "fallback", false));
+  }
+
+  @Test
+  void testNullDefaultTypeRemainsSupported() throws IOException {
+    NameSample sample = NameSample.parse("<START> token <END>", null, false);
+
+    Assertions.assertArrayEquals(new Span[] {new Span(0, 1)}, sample.getNames());
+  }
+
+  @Test
+  void testLongInputPreservesTokensAndSpanBoundaries() throws IOException {
+    int tokenCount = 20_000;
+    int nameStart = 7_777;
+    int nameEnd = 12_345;
+    StringBuilder input = new StringBuilder(tokenCount * 8);
+    for (int i = 0; i < tokenCount; i++) {
+      if (i == nameStart) {
+        input.append("<START:long> ");
+      }
+      input.append("token").append(i).append(' ');
+      if (i + 1 == nameEnd) {
+        input.append("<END> ");
+      }
+    }
+
+    NameSample sample = NameSample.parse(input.toString(), false);
+
+    Assertions.assertEquals(tokenCount, sample.getSentence().length);
+    Assertions.assertEquals("token0", sample.getSentence()[0]);
+    Assertions.assertEquals("token19999", sample.getSentence()[tokenCount - 1]);
+    Assertions.assertArrayEquals(new Span[] {new Span(nameStart, nameEnd, "long")},
+        sample.getNames());
   }
 
   @Test

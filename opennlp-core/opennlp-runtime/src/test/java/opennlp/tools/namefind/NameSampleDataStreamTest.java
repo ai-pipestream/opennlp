@@ -80,10 +80,10 @@ public class NameSampleDataStreamTest {
 
     String[] expectedNames = {"Alan McKennedy", "Julie", "Marie Clara",
         "Stefanie Schmidt", "Mike", "Stefanie Schmidt", "George", "Luise",
-        "George Bauer", "Alisa Fernandes", "Alisa", "Mike Sander",
+        "George Bauer", "Alisa Fernandes", "Alisa", "Gerhard Fritsch", "Mike Sander",
         "Stefan Miller", "Stefan Miller", "Stefan Miller", "Elenor Meier",
         "Gina Schneider", "Bruno Schulz", "Michel Seile", "George Miller",
-        "Miller", "Peter Schubert", "Natalie"};
+        "Miller", "Peter Schubert", "Natalie", "Michael Hinterhofer"};
 
     List<String> names = new ArrayList<>();
     List<Span> spans = new ArrayList<>();
@@ -112,16 +112,18 @@ public class NameSampleDataStreamTest {
     Assertions.assertEquals(createDefaultSpan(0, 1), spans.get(10));
     Assertions.assertEquals(createDefaultSpan(3, 5), spans.get(11));
     Assertions.assertEquals(createDefaultSpan(3, 5), spans.get(12));
-    Assertions.assertEquals(createDefaultSpan(10, 12), spans.get(13));
-    Assertions.assertEquals(createDefaultSpan(1, 3), spans.get(14));
-    Assertions.assertEquals(createDefaultSpan(6, 8), spans.get(15));
+    Assertions.assertEquals(createDefaultSpan(3, 5), spans.get(13));
+    Assertions.assertEquals(createDefaultSpan(10, 12), spans.get(14));
+    Assertions.assertEquals(createDefaultSpan(1, 3), spans.get(15));
     Assertions.assertEquals(createDefaultSpan(6, 8), spans.get(16));
-    Assertions.assertEquals(createDefaultSpan(8, 10), spans.get(17));
-    Assertions.assertEquals(createDefaultSpan(12, 14), spans.get(18));
-    Assertions.assertEquals(createDefaultSpan(1, 3), spans.get(19));
-    Assertions.assertEquals(createDefaultSpan(0, 1), spans.get(20));
-    Assertions.assertEquals(createDefaultSpan(2, 4), spans.get(21));
-    Assertions.assertEquals(createDefaultSpan(5, 6), spans.get(22));
+    Assertions.assertEquals(createDefaultSpan(6, 8), spans.get(17));
+    Assertions.assertEquals(createDefaultSpan(8, 10), spans.get(18));
+    Assertions.assertEquals(createDefaultSpan(12, 14), spans.get(19));
+    Assertions.assertEquals(createDefaultSpan(1, 3), spans.get(20));
+    Assertions.assertEquals(createDefaultSpan(0, 1), spans.get(21));
+    Assertions.assertEquals(createDefaultSpan(2, 4), spans.get(22));
+    Assertions.assertEquals(createDefaultSpan(5, 6), spans.get(23));
+    Assertions.assertEquals(createDefaultSpan(3, 5), spans.get(24));
   }
 
   private Span createDefaultSpan(int s, int e) {

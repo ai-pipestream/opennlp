@@ -19,7 +19,7 @@ So please call a driver to Leonardstraße 112, near the Ostbahnhof in 56473 Hambu
 I'd like to be at Silberhornstraße 12 as soon as possible.
 Thank you very much!
 
-Hi <START> Mike <END> , it's <START> Stefanie Schmidt <END> . 
+Hi <START> Mike <END> , it's <START> Stefanie Schmidt <END> .
 I'm in Nürnberg at the moment and I've got the problem that my bike has broken.
 Could you please pick me up from Seidlstraße 56, I'm in the Café "Mondnacht" at the moment.
 Please hurry up, I need to be back in Ulm at 8 p.m.!
@@ -60,7 +60,7 @@ I've never heard of that before.
 Could you give me the complete address?
 Sure, it's in Veilchenstraße 12, in 78181 Hamburg.
 I deem it best to write a letter to the owner if the shoes are still available.
-His name is <START> Gerhard Fritsch.
+His name is <START> Gerhard Fritsch <END> .
 
 Hi, am I talking to the inquiries?
 My name is <START> Mike Sander <END> and I'd like to know if it is possible to get information about an address if I merely know the name and the phone number of a person!
@@ -121,7 +121,7 @@ The party starts at  9 p.m..
 I hope you'll find it.
 Thank you very much, see you next friday!
 
-My name is <START> Michael Hinterhofer <END>. 
+My name is <START> Michael Hinterhofer <END> .
 When I was 21, I moved out from my parents' home into my first own appartment in order to study in a bigger city.
 My new home was in Lilienstraße 1 in 25334 Hamburg.
 But I realized quickly that life in a metropolis wasn't relaxed enough for me.

@@ -19,7 +19,7 @@ So please call a driver to Leonardstraße 112, near the Ostbahnhof in 56473 Hamb
 I'd like to be at Silberhornstraße 12 as soon as possible.
 Thank you very much!
 
-Hi <START:person> Mike <END> , it's <START:person> Stefanie Schmidt <END> . 
+Hi <START:person> Mike <END> , it's <START:person> Stefanie Schmidt <END> .
 I'm in Nürnberg at the moment and I've got the problem that my bike has broken.
 Could you please pick me up from Seidlstraße 56, I'm in the Cafe "Mondnacht" at the moment.
 Please hurry up, I need to be back in Ulm at 8 p.m.!
@@ -29,7 +29,7 @@ We got married on March 11, 1995.
 Therefore, we found a photo album with pictures of our first own apartment, which was in 81234 Munich.
 As a young married couple, we didn't have enough money to afford a bigger lodge than this one in Blumenweg 1.
 But only five years later, my husband was offered a well-payed job in 17818 Hamburg, so we moved there.
-Since then, our guests have to ring at Veilchenstraße 11 if they want to visit us, <START:person> Luise <END> and <START:person> George Bauer <END>.
+Since then, our guests have to ring at Veilchenstraße 11 if they want to visit us, <START:person> Luise <END> and <START:person> George Bauer <END> .
 
 I read your help-wanted ad with great attention.
 I'm a student of informatics, 6th semester, and I'm very interested in your part-time job offer. 
@@ -60,7 +60,7 @@ I've never heard of that before.
 Could you give me the complete address?
 Sure, it's in Veilchenstraße 12, in 78181 Hamburg.
 I deem it best to write a letter to the owner if the shoes are still available.
-His name is <START:person> Gerhard Fritsch.
+His name is <START:person> Gerhard Fritsch <END> .
 
 Hi, am I talking to the inquiries?
 My name is <START:person> Mike Sander <END> and I'd like to know if it is possible to get information about an address if I merely know the name and the phone number of a person!
@@ -121,7 +121,7 @@ The party starts at  9 p.m..
 I hope you'll find it.
 Thank you very much, see you next friday!
 
-My name is <START:person> Michael Hinterhofer <END>. 
+My name is <START:person> Michael Hinterhofer <END> .
 When I was 21, I moved out from my parents' home into my first own appartment in order to study in a bigger city.
 My new home was in Lilienstraße 1 in 25334 Hamburg.
 But I realized quickly that life in a metropolis wasn't relaxed enough for me.
