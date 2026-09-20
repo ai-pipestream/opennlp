@@ -21,11 +21,14 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Locale;
-import java.util.regex.Pattern;
+import java.util.Map;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.dictionary.Dictionary;
 import opennlp.tools.formats.ResourceAsStreamFactory;
@@ -33,9 +36,12 @@ import opennlp.tools.tokenize.DummyTokenizerFactory.DummyContextGenerator;
 import opennlp.tools.tokenize.DummyTokenizerFactory.DummyDictionary;
 import opennlp.tools.tokenize.lang.Factory;
 import opennlp.tools.util.InputStreamFactory;
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.PlainTextByLineStream;
 import opennlp.tools.util.TrainingParameters;
+import opennlp.tools.util.model.ArtifactProvider;
+import opennlp.tools.util.normalizer.CodePointSet;
 
 /**
  * Tests for the {@link TokenizerFactory} class.
@@ -57,6 +63,142 @@ public class TokenizerFactoryTest {
   private static TokenizerModel train(TokenizerFactory factory)
       throws IOException {
     return TokenizerME.train(createSampleStream(), factory, TrainingParameters.defaultParams());
+  }
+
+  private static TokenizerCharacterPolicy legacyPolicy(String expression) {
+    TokenizerCharacterPolicy policy = new Factory().importLegacyAlphanumeric(expression);
+    Assertions.assertNotNull(policy, () -> "Missing legacy fixture: " + expression);
+    return policy;
+  }
+
+  private static void assertPolicyEquals(TokenizerCharacterPolicy expected,
+      TokenizerCharacterPolicy actual) {
+    Assertions.assertEquals(expected.getLetters(), actual.getLetters());
+    Assertions.assertEquals(expected.getDigits(), actual.getDigits());
+    Assertions.assertEquals(expected.getMarks(), actual.getMarks());
+  }
+
+  private static TestTokenizerFactory loadedFactory(Map<String, String> manifest) {
+    TestTokenizerFactory factory = new TestTokenizerFactory();
+    factory.load(new MapArtifactProvider(manifest));
+    return factory;
+  }
+
+  @Test
+  void testExplicitPolicyManifestRoundTripPreservesEverySet() throws InvalidFormatException {
+    TokenizerCharacterPolicy expected = TokenizerCharacterPolicy.of(
+        CodePointSet.of('a', 0x10400), CodePointSet.of('7'), CodePointSet.of(0x0301));
+    TokenizerFactory written = new TokenizerFactory("x-test", null, false, expected);
+    Map<String, String> manifest = written.createManifestEntries();
+
+    TestTokenizerFactory loaded = loadedFactory(manifest);
+    loaded.validateArtifactMap();
+
+    assertPolicyEquals(expected, loaded.getTokenizerCharacterPolicy());
+    Assertions.assertFalse(loaded.isUseAlphaNumericOptimization());
+  }
+
+  @Test
+  void testInvalidPolicyManifestRejectedEvenWhenOptimizationDisabled() {
+    Map<String, String> manifest = new HashMap<>();
+    manifest.put("useAlphaNumericOptimization", "false");
+    manifest.put("tokenizerCharacterPolicyVersion", "1");
+    manifest.put("tokenizerCharacterPolicyLetters", "61,,62");
+    manifest.put("tokenizerCharacterPolicyDigits", "30");
+    manifest.put("tokenizerCharacterPolicyMarks", "");
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        () -> loadedFactory(manifest).validateArtifactMap());
+    Assertions.assertTrue(error.getMessage().contains("character policy"));
+  }
+
+  @Test
+  void testUnsupportedPolicyVersionRejected() {
+    Map<String, String> manifest = new HashMap<>();
+    manifest.put("useAlphaNumericOptimization", "false");
+    manifest.put("tokenizerCharacterPolicyVersion", "2");
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        () -> loadedFactory(manifest).validateArtifactMap());
+    Assertions.assertTrue(error.getCause().getMessage().contains("version"));
+  }
+
+  @Test
+  void testPolicyEntriesWithoutVersionAreRejected() {
+    TestTokenizerFactory factory = loadedFactory(Map.of(
+        "useAlphaNumericOptimization", "false",
+        "tokenizerCharacterPolicyLetters", "61"));
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        factory::validateArtifactMap);
+    Assertions.assertTrue(error.getCause().getMessage().contains("require"));
+  }
+
+  @Test
+  void testMalformedOptimizationFlagIsRejected() {
+    TestTokenizerFactory factory = loadedFactory(Map.of(
+        "useAlphaNumericOptimization", "yes"));
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        factory::validateArtifactMap);
+    Assertions.assertTrue(error.getCause().getMessage().contains("useAlphaNumericOptimization"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"en", "eng", "es", "spa", "it", "ita", "pt", "por", "ca",
+      "cat", "pl", "pol", "de", "deu", "ger", "fr", "fre", "fra", "nl", "nld", "dut"})
+  void testSupportedLatinLanguageDefaults(String language) {
+    TokenizerCharacterPolicy policy = new TokenizerFactory(language, null, true, null)
+        .getTokenizerCharacterPolicy();
+
+    Assertions.assertTrue(policy.test("café"));
+    Assertions.assertTrue(policy.test("cafe\u0301"));
+    Assertions.assertTrue(policy.test("A7"));
+    Assertions.assertFalse(policy.test("中文"));
+    Assertions.assertFalse(policy.test("😀"));
+    Assertions.assertFalse(policy.test("\u0301a"));
+  }
+
+  @Test
+  void testUnknownLanguageUsesConservativeAsciiDefault() {
+    TokenizerCharacterPolicy policy = new TokenizerFactory("x-test", null, true, null)
+        .getTokenizerCharacterPolicy();
+
+    assertPolicyEquals(TokenizerCharacterPolicy.ascii(), policy);
+  }
+
+  @Test
+  void testConstructorDoesNotDispatchToOverridableInit() {
+    Assertions.assertDoesNotThrow(ConstructorDispatchFactory::new);
+  }
+
+  @Test
+  void testLegacyModelWithoutExpressionUsesAsciiPolicy() throws InvalidFormatException {
+    TestTokenizerFactory factory = loadedFactory(
+        Map.of("useAlphaNumericOptimization", "true"));
+    factory.validateArtifactMap();
+    assertPolicyEquals(TokenizerCharacterPolicy.ascii(),
+        factory.getTokenizerCharacterPolicy());
+  }
+
+  @Test
+  void testKnownLegacyExpressionImportsBoundedPolicy() throws InvalidFormatException {
+    String expression = "^[A-Za-z0-9äéöüÄÉÖÜß]+$";
+    TestTokenizerFactory factory = loadedFactory(Map.of(
+        "useAlphaNumericOptimization", "true", "alphaNumericPattern", expression));
+    factory.validateArtifactMap();
+    assertPolicyEquals(legacyPolicy(expression), factory.getTokenizerCharacterPolicy());
+  }
+
+  @Test
+  void testUnsupportedLegacyExpressionGivesMigrationGuidance() {
+    TestTokenizerFactory factory = loadedFactory(Map.of(
+        "useAlphaNumericOptimization", "true", "alphaNumericPattern", "^[a-f]+$"));
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        factory::validateArtifactMap);
+    Assertions.assertTrue(error.getCause().getMessage().contains("explicit"));
+    Assertions.assertTrue(error.getCause().getMessage().contains("retrain"));
   }
 
   private static Dictionary loadAbbDictionary(Locale loc) throws IOException {
@@ -88,14 +230,14 @@ public class TokenizerFactoryTest {
     Dictionary dic = loadAbbDictionary(Locale.ENGLISH);
     final String lang = "eng";
 
-    TokenizerModel model = train(new TokenizerFactory(lang, dic, false, null));
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.ascii();
+    TokenizerModel model = train(new TokenizerFactory(lang, dic, false, policy));
 
     TokenizerFactory factory = model.getFactory();
     Assertions.assertNotNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
 
-    String defaultPattern = Factory.DEFAULT_ALPHANUMERIC.pattern();
-    Assertions.assertEquals(defaultPattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertFalse(factory.isUseAlphaNumericOptimization());
@@ -110,7 +252,7 @@ public class TokenizerFactoryTest {
     Assertions.assertNotNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
 
-    Assertions.assertEquals(defaultPattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertFalse(factory.isUseAlphaNumericOptimization());
@@ -122,14 +264,14 @@ public class TokenizerFactoryTest {
     Dictionary dic = null;
     final String lang = "eng";
 
-    TokenizerModel model = train(new TokenizerFactory(lang, dic, false, null));
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.ascii();
+    TokenizerModel model = train(new TokenizerFactory(lang, dic, false, policy));
 
     TokenizerFactory factory = model.getFactory();
     Assertions.assertNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
 
-    String defaultPattern = Factory.DEFAULT_ALPHANUMERIC.pattern();
-    Assertions.assertEquals(defaultPattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertFalse(factory.isUseAlphaNumericOptimization());
@@ -144,7 +286,7 @@ public class TokenizerFactoryTest {
     Assertions.assertNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
 
-    Assertions.assertEquals(defaultPattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertFalse(factory.isUseAlphaNumericOptimization());
@@ -157,14 +299,14 @@ public class TokenizerFactoryTest {
     final String lang = "spa";
     String pattern = "^[0-9a-záéíóúüýñA-ZÁÉÍÓÚÝÑ]+$";
 
-    TokenizerModel model = train(new TokenizerFactory(lang, dic, true,
-        Pattern.compile(pattern)));
+    TokenizerCharacterPolicy policy = legacyPolicy(pattern);
+    TokenizerModel model = train(new TokenizerFactory(lang, dic, true, policy));
 
     TokenizerFactory factory = model.getFactory();
     Assertions.assertNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
 
-    Assertions.assertEquals(pattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertTrue(factory.isUseAlphaNumericOptimization());
@@ -178,7 +320,7 @@ public class TokenizerFactoryTest {
     factory = fromSerialized.getFactory();
     Assertions.assertNull(factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DefaultTokenContextGenerator.class, factory.getContextGenerator());
-    Assertions.assertEquals(pattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertTrue(factory.isUseAlphaNumericOptimization());
@@ -203,7 +345,7 @@ public class TokenizerFactoryTest {
       loc = LOCALE_SPANISH;
     }
     TokenizerModel model = train(new TokenizerFactory(lang, loadAbbDictionary(loc), true,
-        Pattern.compile(pattern)));
+        legacyPolicy(pattern)));
 
     TokenizerME tokenizer = new TokenizerME(model);
     String[] tokens = tokenizer.tokenize(sentence);
@@ -346,7 +488,7 @@ public class TokenizerFactoryTest {
     String pattern = "^[0-9a-zàèéìîíòóùüA-ZÀÈÉÌÎÍÒÓÙÜ]+$";
 
     TokenizerModel model = train(new TokenizerFactory(lang, dic, true,
-        Pattern.compile(pattern)));
+        legacyPolicy(pattern)));
 
     TokenizerME tokenizer = new TokenizerME(model);
     String sentence = "La contrazione di \"dove è\" è \"dov'è\".";
@@ -368,7 +510,7 @@ public class TokenizerFactoryTest {
     String pattern = "^[A-Za-z0-9]+$";
 
     TokenizerModel model = train(new TokenizerFactory(lang, dic, true,
-        Pattern.compile(pattern)));
+        legacyPolicy(pattern)));
 
     TokenizerME tokenizer = new TokenizerME(model);
     String sentence = "The cat wasn't in the house and the dog wasn't either.";
@@ -389,13 +531,13 @@ public class TokenizerFactoryTest {
     final String lang = "eng";
     String pattern = "^[0-9A-Za-z]+$";
 
-    TokenizerModel model = train(new DummyTokenizerFactory(lang, dic, true,
-        Pattern.compile(pattern)));
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.ascii();
+    TokenizerModel model = train(new DummyTokenizerFactory(lang, dic, true, policy));
 
     TokenizerFactory factory = model.getFactory();
     Assertions.assertInstanceOf(DummyDictionary.class, factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DummyContextGenerator.class, factory.getContextGenerator());
-    Assertions.assertEquals(pattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertTrue(factory.isUseAlphaNumericOptimization());
@@ -409,7 +551,7 @@ public class TokenizerFactoryTest {
     factory = fromSerialized.getFactory();
     Assertions.assertInstanceOf(DummyDictionary.class, factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DummyContextGenerator.class, factory.getContextGenerator());
-    Assertions.assertEquals(pattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertEquals(lang, model.getLanguage());
     Assertions.assertTrue(factory.isUseAlphaNumericOptimization());
@@ -421,14 +563,58 @@ public class TokenizerFactoryTest {
     final String lang = "eng";
     String pattern = "^[0-9A-Za-z]+$";
 
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.ascii();
     TokenizerFactory factory = TokenizerFactory.create(
         DummyTokenizerFactory.class.getCanonicalName(), lang, dic, true,
-        Pattern.compile(pattern));
+        policy);
 
     Assertions.assertInstanceOf(DummyDictionary.class, factory.getAbbreviationDictionary());
     Assertions.assertInstanceOf(DummyContextGenerator.class, factory.getContextGenerator());
-    Assertions.assertEquals(pattern, factory.getAlphaNumericPattern().pattern());
+    assertPolicyEquals(policy, factory.getTokenizerCharacterPolicy());
     Assertions.assertEquals(lang, factory.getLanguageCode());
     Assertions.assertTrue(factory.isUseAlphaNumericOptimization());
+  }
+
+  private static final class TestTokenizerFactory extends TokenizerFactory {
+
+    private void load(ArtifactProvider provider) {
+      init(provider);
+    }
+  }
+
+  private static final class ConstructorDispatchFactory extends TokenizerFactory {
+
+    private ConstructorDispatchFactory() {
+      super("eng", null, true, null);
+    }
+
+    @Override
+    protected void init(String languageCode, Dictionary abbreviationDictionary,
+        boolean useAlphaNumericOptimization, TokenizerCharacterPolicy alphanumericPolicy) {
+      throw new AssertionError("Constructor dispatched to overridable init");
+    }
+  }
+
+  private record MapArtifactProvider(Map<String, String> manifest) implements ArtifactProvider {
+
+    @Override
+    public <T> T getArtifact(String key) {
+      return null;
+    }
+
+    @Override
+    public String getManifestProperty(String key) {
+      return manifest.get(key);
+    }
+
+    @Override
+    public String getLanguage() {
+      return "x-test";
+    }
+
+    @Override
+    public boolean isLoadedFromSerialized() {
+      return true;
+    }
   }
 }

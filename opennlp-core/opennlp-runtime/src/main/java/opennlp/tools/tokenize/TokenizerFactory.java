@@ -20,13 +20,13 @@ package opennlp.tools.tokenize;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import opennlp.tools.dictionary.Dictionary;
 import opennlp.tools.tokenize.lang.Factory;
 import opennlp.tools.util.BaseToolFactory;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ext.ExtensionLoader;
+import opennlp.tools.util.normalizer.CodePointSet;
 
 /**
  * The factory that provides {@link Tokenizer} default implementation and
@@ -38,11 +38,15 @@ public class TokenizerFactory extends BaseToolFactory {
   private String languageCode;
   private Dictionary abbreviationDictionary;
   private Boolean useAlphaNumericOptimization = false;
-  private Pattern alphaNumericPattern;
+  private TokenizerCharacterPolicy alphanumericPolicy;
 
   private static final String ABBREVIATIONS_ENTRY_NAME = "abbreviations.dictionary";
   private static final String USE_ALPHA_NUMERIC_OPTIMIZATION = "useAlphaNumericOptimization";
   private static final String ALPHA_NUMERIC_PATTERN = "alphaNumericPattern";
+  private static final String POLICY_VERSION = "tokenizerCharacterPolicyVersion";
+  private static final String POLICY_LETTERS = "tokenizerCharacterPolicyLetters";
+  private static final String POLICY_DIGITS = "tokenizerCharacterPolicyDigits";
+  private static final String POLICY_MARKS = "tokenizerCharacterPolicyMarks";
 
   /**
    * Instantiates a {@link TokenizerFactory} that provides the default implementation
@@ -58,29 +62,37 @@ public class TokenizerFactory extends BaseToolFactory {
    * @param languageCode The ISO language code to be used for this factory.
    * @param abbreviationDictionary The {@link Dictionary} which holds abbreviations.
    * @param useAlphaNumericOptimization Whether alphanumerics are skipped, or not.
-   * @param alphaNumericPattern {@code null} or a custom alphanumeric {@link Pattern}
-   *                            (default is: {@code "^[A-Za-z0-9]+$"}, provided by
-   *                            {@link Factory#DEFAULT_ALPHANUMERIC}.
+   * @param alphanumericPolicy The explicit character policy, or {@code null} to resolve the
+   *                           built-in policy for {@code languageCode}.
    */
   public TokenizerFactory(String languageCode, Dictionary abbreviationDictionary,
-                          boolean useAlphaNumericOptimization, Pattern alphaNumericPattern) {
-    this.init(languageCode, abbreviationDictionary,
-        useAlphaNumericOptimization, alphaNumericPattern);
+                          boolean useAlphaNumericOptimization,
+                          TokenizerCharacterPolicy alphanumericPolicy) {
+    configure(languageCode, abbreviationDictionary,
+        useAlphaNumericOptimization, alphanumericPolicy);
   }
 
   /**
    * @param languageCode The ISO language code to be used for this factory.
    * @param abbreviationDictionary The {@link Dictionary} which holds abbreviations.
    * @param useAlphaNumericOptimization Whether alphanumerics are skipped, or not.
-   * @param alphaNumericPattern {@code null} or a custom alphanumeric {@link Pattern}
-   *                            (default is: {@code "^[A-Za-z0-9]+$"}, provided by
-   *                            {@link Factory#DEFAULT_ALPHANUMERIC}.
+   * @param alphanumericPolicy The explicit character policy, or {@code null} to resolve the
+   *                           built-in policy for {@code languageCode}.
    */
   protected void init(String languageCode, Dictionary abbreviationDictionary,
-      boolean useAlphaNumericOptimization, Pattern alphaNumericPattern) {
+      boolean useAlphaNumericOptimization, TokenizerCharacterPolicy alphanumericPolicy) {
+    configure(languageCode, abbreviationDictionary,
+        useAlphaNumericOptimization, alphanumericPolicy);
+  }
+
+  private void configure(String languageCode, Dictionary abbreviationDictionary,
+      boolean useAlphaNumericOptimization, TokenizerCharacterPolicy alphanumericPolicy) {
+    if (alphanumericPolicy == null) {
+      alphanumericPolicy = new Factory().getAlphanumericPolicy(languageCode);
+    }
     this.languageCode = languageCode;
     this.useAlphaNumericOptimization = useAlphaNumericOptimization;
-    this.alphaNumericPattern = alphaNumericPattern;
+    this.alphanumericPolicy = alphanumericPolicy;
     this.abbreviationDictionary = abbreviationDictionary;
   }
 
@@ -95,6 +107,12 @@ public class TokenizerFactory extends BaseToolFactory {
     if (abbreviationsEntry != null && !(abbreviationsEntry instanceof Dictionary)) {
       throw new InvalidFormatException("Abbreviations dictionary '" + abbreviationsEntry +
               "' has wrong type, needs to be of type Dictionary!");
+    }
+    try {
+      isUseAlphaNumericOptimization();
+      getTokenizerCharacterPolicy();
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      throw new InvalidFormatException("Invalid tokenizer character policy", e);
     }
   }
 
@@ -117,10 +135,11 @@ public class TokenizerFactory extends BaseToolFactory {
     manifestEntries.put(USE_ALPHA_NUMERIC_OPTIMIZATION,
         Boolean.toString(isUseAlphaNumericOptimization()));
 
-    // alphanumeric pattern is optional
-    if (getAlphaNumericPattern() != null) {
-      manifestEntries.put(ALPHA_NUMERIC_PATTERN, getAlphaNumericPattern().pattern());
-    }
+    TokenizerCharacterPolicy policy = getTokenizerCharacterPolicy();
+    manifestEntries.put(POLICY_VERSION, "1");
+    manifestEntries.put(POLICY_LETTERS, encode(policy.getLetters()));
+    manifestEntries.put(POLICY_DIGITS, encode(policy.getDigits()));
+    manifestEntries.put(POLICY_MARKS, encode(policy.getMarks()));
 
     return manifestEntries;
   }
@@ -133,8 +152,8 @@ public class TokenizerFactory extends BaseToolFactory {
    * @param abbreviationDictionary An optional {@link Dictionary} containing abbreviations,
    *                               or {@code null} if not present.
    * @param useAlphaNumericOptimization Whether the alphanumeric optimization is be enabled or not.
-   * @param alphaNumericPattern The {@link Pattern} the alphanumeric optimization should use,
-   *                            if enabled.
+   * @param alphanumericPolicy The policy the alphanumeric optimization should use, or
+   *                           {@code null} to resolve the built-in language policy.
    *
    * @return A valid {@link TokenizerFactory} instance.
    *
@@ -143,18 +162,18 @@ public class TokenizerFactory extends BaseToolFactory {
   public static TokenizerFactory create(String subclassName, String languageCode,
                                         Dictionary abbreviationDictionary,
                                         boolean useAlphaNumericOptimization,
-                                        Pattern alphaNumericPattern)
+                                        TokenizerCharacterPolicy alphanumericPolicy)
       throws InvalidFormatException {
     if (subclassName == null) {
       // will create the default factory
       return new TokenizerFactory(languageCode, abbreviationDictionary,
-          useAlphaNumericOptimization, alphaNumericPattern);
+          useAlphaNumericOptimization, alphanumericPolicy);
     }
     try {
       TokenizerFactory theFactory = ExtensionLoader.instantiateExtension(
           TokenizerFactory.class, subclassName);
       theFactory.init(languageCode, abbreviationDictionary,
-          useAlphaNumericOptimization, alphaNumericPattern);
+          useAlphaNumericOptimization, alphanumericPolicy);
       return theFactory;
     } catch (Exception e) {
       String msg = "Could not instantiate the " + subclassName
@@ -164,23 +183,100 @@ public class TokenizerFactory extends BaseToolFactory {
   }
 
   /**
-   * @return Retrieves the (user-)specified alphanumeric {@link Pattern} or a default.
+   * @return Retrieves the resolved tokenizer character policy.
    */
-  public Pattern getAlphaNumericPattern() {
-    if (this.alphaNumericPattern == null) {
+  public TokenizerCharacterPolicy getTokenizerCharacterPolicy() {
+    if (this.alphanumericPolicy == null) {
       if (this.artifactProvider != null) {
-        String prop = this.artifactProvider.getManifestProperty(ALPHA_NUMERIC_PATTERN);
-        if (prop != null) {
-          this.alphaNumericPattern = Pattern.compile(prop);
+        String version = this.artifactProvider.getManifestProperty(POLICY_VERSION);
+        if (version != null) {
+          if (!"1".equals(version)) {
+            throw new IllegalArgumentException("Unsupported tokenizer character policy version: "
+                + version);
+          }
+          String letters = requiredPolicyEntry(POLICY_LETTERS);
+          String digits = requiredPolicyEntry(POLICY_DIGITS);
+          String marks = requiredPolicyEntry(POLICY_MARKS);
+          this.alphanumericPolicy = TokenizerCharacterPolicy.of(
+              decode(POLICY_LETTERS, letters), decode(POLICY_DIGITS, digits),
+              decode(POLICY_MARKS, marks));
+        } else {
+          if (this.artifactProvider.getManifestProperty(POLICY_LETTERS) != null
+              || this.artifactProvider.getManifestProperty(POLICY_DIGITS) != null
+              || this.artifactProvider.getManifestProperty(POLICY_MARKS) != null) {
+            throw new IllegalArgumentException("Tokenizer character policy entries require "
+                + POLICY_VERSION);
+          }
+          this.alphanumericPolicy = importLegacyPolicy(
+              this.artifactProvider.getManifestProperty(ALPHA_NUMERIC_PATTERN));
         }
       }
-      // could not load from manifest, will get from language dependent factory
-      if (this.alphaNumericPattern == null) {
-        Factory f = new Factory();
-        this.alphaNumericPattern = f.getAlphanumeric(languageCode);
+    }
+    if (this.alphanumericPolicy == null) {
+      throw new IllegalStateException("No tokenizer character policy was configured");
+    }
+    return this.alphanumericPolicy;
+  }
+
+  private String requiredPolicyEntry(String name) {
+    String value = artifactProvider.getManifestProperty(name);
+    if (value == null) {
+      throw new IllegalArgumentException("Missing tokenizer character policy entry: " + name);
+    }
+    return value;
+  }
+
+  private static String encode(CodePointSet set) {
+    StringBuilder encoded = new StringBuilder();
+    for (int codePoint : set.toArray()) {
+      if (!encoded.isEmpty()) {
+        encoded.append(',');
+      }
+      encoded.append(Integer.toHexString(codePoint));
+    }
+    return encoded.toString();
+  }
+
+  private static CodePointSet decode(String name, String encoded) {
+    if (encoded.isEmpty()) {
+      return CodePointSet.of();
+    }
+    int count = 1;
+    for (int i = 0; i < encoded.length(); i++) {
+      if (encoded.charAt(i) == ',') {
+        count++;
       }
     }
-    return this.alphaNumericPattern;
+    int[] values = new int[count];
+    int index = 0;
+    int start = 0;
+    for (int i = 0; i <= encoded.length(); i++) {
+      if (i == encoded.length() || encoded.charAt(i) == ',') {
+        if (i == start) {
+          throw new IllegalArgumentException("Malformed tokenizer character policy entry: " + name);
+        }
+        try {
+          values[index++] = Integer.parseInt(encoded.substring(start, i), 16);
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException(
+              "Malformed tokenizer character policy entry: " + name, e);
+        }
+        start = i + 1;
+      }
+    }
+    return CodePointSet.of(values);
+  }
+
+  private static TokenizerCharacterPolicy importLegacyPolicy(String expression) {
+    if (expression == null || "^[A-Za-z0-9]+$".equals(expression)) {
+      return TokenizerCharacterPolicy.ascii();
+    }
+    TokenizerCharacterPolicy imported = new Factory().importLegacyAlphanumeric(expression);
+    if (imported == null) {
+      throw new IllegalArgumentException("Unsupported legacy alphaNumericPattern. Supply explicit "
+          + "TokenizerCharacterPolicy sets and retrain or repackage the model.");
+    }
+    return imported;
   }
 
   /**
@@ -188,8 +284,12 @@ public class TokenizerFactory extends BaseToolFactory {
    */
   public boolean isUseAlphaNumericOptimization() {
     if (artifactProvider != null) {
-      this.useAlphaNumericOptimization = Boolean.valueOf(this.artifactProvider
-          .getManifestProperty(USE_ALPHA_NUMERIC_OPTIMIZATION));
+      String value = this.artifactProvider.getManifestProperty(USE_ALPHA_NUMERIC_OPTIMIZATION);
+      if (!"true".equals(value) && !"false".equals(value)) {
+        throw new IllegalArgumentException("Invalid " + USE_ALPHA_NUMERIC_OPTIMIZATION
+            + " value: " + value);
+      }
+      this.useAlphaNumericOptimization = Boolean.valueOf(value);
     }
     return this.useAlphaNumericOptimization;
   }

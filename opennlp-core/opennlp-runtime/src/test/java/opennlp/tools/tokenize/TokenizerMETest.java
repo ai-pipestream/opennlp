@@ -19,10 +19,13 @@ package opennlp.tools.tokenize;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.formats.ResourceAsStreamFactory;
 import opennlp.tools.util.InputStreamFactory;
@@ -30,7 +33,9 @@ import opennlp.tools.util.InsufficientTrainingDataException;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.Parameters;
 import opennlp.tools.util.PlainTextByLineStream;
+import opennlp.tools.util.Span;
 import opennlp.tools.util.TrainingParameters;
+import opennlp.tools.util.normalizer.CodePointSet;
 
 /**
  * Tests for the {@link TokenizerME} class.
@@ -176,6 +181,79 @@ public class TokenizerMETest {
     Assertions.assertArrayEquals(new String[] {"a", "\n", "b"}, tokenizer.tokenize("a\nb"));
     tokenizer.setKeepNewLines(false);
     Assertions.assertArrayEquals(new String[] {"a", "b"}, tokenizer.tokenize("a\nb"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void testOptimizationOverrideControlsModelEvaluation(boolean modelOptimization)
+      throws IOException {
+    TokenizerModel trained = TokenizerTestUtil.createSimpleMaxentTokenModel();
+    TokenizerModel model = new TokenizerModel(trained.getMaxentModel(), Map.of(),
+        new CountingContextFactory(modelOptimization));
+    CountingContextFactory factory = (CountingContextFactory) model.getFactory();
+    class SwitchableTokenizer extends TokenizerME {
+      private Boolean enabled;
+
+      SwitchableTokenizer() {
+        super(model);
+        enabled = true;
+      }
+
+      @Override
+      public boolean useAlphaNumericOptimization() {
+        Assertions.assertNotNull(enabled, "The constructor must not call the override");
+        return enabled;
+      }
+    }
+    SwitchableTokenizer tokenizer = new SwitchableTokenizer();
+    Assertions.assertArrayEquals(new String[] {"café", "cafe\u0301"},
+        tokenizer.tokenize("café cafe\u0301"));
+    Assertions.assertEquals(0, factory.contexts);
+
+    tokenizer.tokenize("ab\uD800");
+    Assertions.assertTrue(factory.contexts > 0,
+        "Malformed text must still reach the model");
+    int afterMalformedText = factory.contexts;
+
+    tokenizer.enabled = false;
+    tokenizer.tokenize("café");
+    Assertions.assertTrue(factory.contexts > afterMalformedText,
+        "Disabling the shortcut must evaluate split positions");
+    int afterDisabled = factory.contexts;
+
+    tokenizer.enabled = true;
+    tokenizer.tokenize("café");
+    Assertions.assertEquals(afterDisabled, factory.contexts,
+        "Re-enabling the shortcut must skip the model again");
+  }
+
+  @Test
+  void testOptimizationOverrideUsesResolvedDefaultPolicy() throws IOException {
+    TokenizerModel trained = TokenizerTestUtil.createSimpleMaxentTokenModel();
+    TokenizerFactory factory = TokenizerFactory.create(null, "eng", null, false, null);
+    TokenizerModel model = new TokenizerModel(trained.getMaxentModel(), Map.of(), factory);
+    TokenizerME tokenizer = new TokenizerME(model) {
+      @Override
+      public boolean useAlphaNumericOptimization() {
+        return true;
+      }
+    };
+
+    Assertions.assertArrayEquals(new String[] {"hello123"}, tokenizer.tokenize("hello123"));
+    Assertions.assertArrayEquals(new double[] {1d}, tokenizer.probs());
+  }
+
+  @Test
+  void testSupplementaryPolicyPreservesUtf16Offsets() throws IOException {
+    TokenizerModel trained = TokenizerTestUtil.createSimpleMaxentTokenModel();
+    TokenizerCharacterPolicy supplementaryPolicy = TokenizerCharacterPolicy.of(
+        CodePointSet.of(0x10400), CodePointSet.of(), CodePointSet.of());
+    TokenizerModel model = new TokenizerModel(trained.getMaxentModel(), Map.of(),
+        new TokenizerFactory("eng", null, true, supplementaryPolicy));
+
+    Span[] spans = new TokenizerME(model).tokenizePos("\uD801\uDC00");
+
+    Assertions.assertArrayEquals(new Span[] {new Span(0, 2)}, spans);
   }
 
 }

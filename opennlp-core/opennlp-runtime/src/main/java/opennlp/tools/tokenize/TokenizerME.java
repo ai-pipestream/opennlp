@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.dictionary.Dictionary;
@@ -102,7 +101,7 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
    */
   public static final String NO_SPLIT = "F";
 
-  private final Pattern alphanumeric;
+  private final TokenizerCharacterPolicy characterPolicy;
 
   /*
    * The maximum entropy model to use to evaluate contexts.
@@ -165,7 +164,7 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
     this.abbDict = abbDict;
     TokenizerFactory factory = model.getFactory();
     this.cg = factory.getContextGenerator();
-    this.alphanumeric = factory.getAlphaNumericPattern();
+    this.characterPolicy = factory.getTokenizerCharacterPolicy();
     this.useAlphaNumericOptimization = factory.isUseAlphaNumericOptimization();
   }
 
@@ -210,7 +209,7 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
       if (tok.length() < 2) {
         localTokens.add(s);
         localProbs.add(1d);
-      } else if (useAlphaNumericOptimization() && alphanumeric.matcher(tok).matches()) {
+      } else if (useAlphaNumericOptimization() && characterPolicy.test(tok)) {
         localTokens.add(s);
         localProbs.add(1d);
       } else {
@@ -218,7 +217,8 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
         int end = s.getEnd();
         final int origStart = s.getStart();
         double tokenProb = 1.0;
-        for (int j = origStart + 1; j < end; j++) {
+        for (int j = origStart + Character.charCount(d.codePointAt(origStart)); j < end;
+            j += Character.charCount(d.codePointAt(j))) {
           double[] probs =
               model.eval(cg.getContext(tok, j - origStart));
           String best = model.getBestOutcome(probs);
@@ -280,7 +280,7 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
 
     ObjectStream<Event> eventStream = new TokSpanEventStream(samples,
         factory.isUseAlphaNumericOptimization(),
-        factory.getAlphaNumericPattern(), factory.getContextGenerator());
+        factory.getTokenizerCharacterPolicy(), factory.getContextGenerator());
 
     EventTrainer<TrainingParameters> trainer = TrainerFactory.getEventTrainer(
         mlParams, manifestInfoEntries);
@@ -291,6 +291,10 @@ public class TokenizerME extends AbstractTokenizer implements Probabilistic {
   }
 
   /**
+   * Determines whether matching policy candidates bypass model evaluation. Subclasses may
+   * override this method independently of the stored model setting. This method is not called
+   * during construction.
+   *
    * @return {@code true} if the tokenizer uses alphanumeric optimization, {@code false} otherwise.
    */
   public boolean useAlphaNumericOptimization() {

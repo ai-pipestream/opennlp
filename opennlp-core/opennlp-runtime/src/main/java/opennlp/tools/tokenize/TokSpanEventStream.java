@@ -21,13 +21,11 @@ package opennlp.tools.tokenize;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.ml.model.Event;
-import opennlp.tools.tokenize.lang.Factory;
 import opennlp.tools.util.AbstractEventStream;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.Span;
@@ -44,22 +42,23 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
 
   private final boolean skipAlphaNumerics;
 
-  private final Pattern alphaNumeric;
+  private final TokenizerCharacterPolicy characterPolicy;
 
   /**
    * Initializes a new event stream based on the data stream using a {@link TokenContextGenerator}.
    *
    * @param tokenSamples The {@link ObjectStream data stream} for this event stream.
    * @param skipAlphaNumerics Whether alphanumerics are skipped, or not.
-   * @param alphaNumeric A custom alphanumeric {@link Pattern} or {@code null}.
-   *                     Default is: {@code "^[A-Za-z0-9]+$"}, provided by
-   *                     {@link Factory#DEFAULT_ALPHANUMERIC}.
+   * @param characterPolicy The policy shared with tokenizer inference.
    * @param cg A {@link TokenContextGenerator} which should be used for the event stream {@code d}.
    */
   public TokSpanEventStream(ObjectStream<TokenSample> tokenSamples, boolean skipAlphaNumerics,
-                            Pattern alphaNumeric, TokenContextGenerator cg) {
-    super(tokenSamples);
-    this.alphaNumeric = alphaNumeric;
+                            TokenizerCharacterPolicy characterPolicy, TokenContextGenerator cg) {
+    super(requireTokenSamples(tokenSamples));
+    if (characterPolicy == null || cg == null) {
+      throw new IllegalArgumentException("characterPolicy and context generator must not be null");
+    }
+    this.characterPolicy = characterPolicy;
     this.skipAlphaNumerics = skipAlphaNumerics;
     this.cg = cg;
   }
@@ -73,7 +72,7 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
    */
   public TokSpanEventStream(ObjectStream<TokenSample> tokenSamples, boolean skipAlphaNumerics,
                             TokenContextGenerator cg) {
-    this(tokenSamples, skipAlphaNumerics, new Factory().getAlphanumeric(null), cg );
+    this(tokenSamples, skipAlphaNumerics, TokenizerCharacterPolicy.ascii(), cg);
   }
 
   /**
@@ -102,6 +101,23 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
     Span[] tokens = tokenSample.getTokenSpans();
     String text = tokenSample.getText();
 
+    int previousEnd = -1;
+    for (Span token : tokens) {
+      if (token.getStart() == token.getEnd()) {
+        throw new IllegalArgumentException("Training token spans must not be empty: " + token);
+      }
+      if (token.getStart() < previousEnd) {
+        throw new IllegalArgumentException(
+            "Training token spans must be ordered and non-overlapping: " + token);
+      }
+      if (token.getStart() < 0 || token.getEnd() > text.length()) {
+        throw new IllegalArgumentException("Training token span is outside the text: " + token);
+      }
+      requireCodePointBoundary(text, token.getStart());
+      requireCodePointBoundary(text, token.getEnd());
+      previousEnd = token.getEnd();
+    }
+
     if (tokens.length > 0) {
 
       int start = tokens[0].getStart();
@@ -113,13 +129,24 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
 
       int firstTrainingToken = -1;
       int lastTrainingToken = -1;
+      int annotationCursor = 0;
       for (Span candToken : candTokens) {
         Span cSpan = candToken;
         String ctok = sent.substring(cSpan.getStart(), cSpan.getEnd());
         //adjust cSpan to text offsets
         cSpan = new Span(cSpan.getStart() + start, cSpan.getEnd() + start);
+        boolean policyMatch = ctok.length() > 1 && characterPolicy.test(ctok);
+        while (annotationCursor < tokens.length
+            && tokens[annotationCursor].getEnd() <= cSpan.getStart()) {
+          annotationCursor++;
+        }
+        if (skipAlphaNumerics && policyMatch
+            && hasAnnotatedBoundaryInside(cSpan, tokens, annotationCursor)) {
+          throw new IllegalArgumentException("Training annotation splits a candidate accepted by "
+              + "the tokenizer character policy: " + cSpan);
+        }
         //should we skip this token
-        if (ctok.length() > 1 && (!skipAlphaNumerics || !alphaNumeric.matcher(ctok).matches())) {
+        if (ctok.length() > 1 && (!skipAlphaNumerics || !policyMatch)) {
 
           //find offsets of annotated tokens inside of candidate tokens
           boolean foundTrainingTokens = false;
@@ -149,9 +176,14 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
             for (int ti = firstTrainingToken; ti <= lastTrainingToken; ti++) {
               Span tSpan = tokens[ti];
               int cStart = cSpan.getStart();
-              for (int i = tSpan.getStart() + 1; i < tSpan.getEnd(); i++) {
-                String[] context = cg.getContext(ctok, i - cStart);
+              for (int i = tSpan.getStart();;) {
+                int boundary = i + Character.charCount(text.codePointAt(i));
+                if (boundary >= tSpan.getEnd()) {
+                  break;
+                }
+                String[] context = cg.getContext(ctok, boundary - cStart);
                 events.add(new Event(TokenizerME.NO_SPLIT, context));
+                i = boundary;
               }
 
               if (tSpan.getEnd() != cSpan.getEnd()) {
@@ -165,5 +197,35 @@ public class TokSpanEventStream extends AbstractEventStream<TokenSample> {
     }
 
     return events.iterator();
+  }
+
+  private static boolean hasAnnotatedBoundaryInside(
+      Span candidate, Span[] tokens, int firstPossibleToken) {
+    for (int i = firstPossibleToken; i < tokens.length; i++) {
+      Span token = tokens[i];
+      if (token.getStart() >= candidate.getEnd()) {
+        break;
+      }
+      if (token.getEnd() > candidate.getStart() && token.getEnd() < candidate.getEnd()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static ObjectStream<TokenSample> requireTokenSamples(
+      ObjectStream<TokenSample> tokenSamples) {
+    if (tokenSamples == null) {
+      throw new IllegalArgumentException("tokenSamples must not be null");
+    }
+    return tokenSamples;
+  }
+
+  private static void requireCodePointBoundary(String text, int offset) {
+    if (offset > 0 && offset < text.length() && Character.isLowSurrogate(text.charAt(offset))
+        && Character.isHighSurrogate(text.charAt(offset - 1))) {
+      throw new IllegalArgumentException("Training token boundary splits a UTF-16 surrogate pair "
+          + "at offset " + offset);
+    }
   }
 }

@@ -370,10 +370,15 @@ Path: en-custom-token.bin]]>
     StandardCharsets.UTF_8);
 
 ObjectStream<TokenSample> sampleStream = new TokenSampleStream(lineStream);
+TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.of(
+    CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
+    CodePointSet.ofRange('0', '9'),
+    CodePointSet.of(0x0300, 0x0301));
 TokenizerModel model;
 try {
   model = TokenizerME.train(sampleStream,
-  	TokenizerFactory.create(null, "eng", null, true, null), TrainingParameters.defaultParams());
+    TokenizerFactory.create(null, "eng", null, true, policy),
+    TrainingParameters.defaultParams());
 }
 finally {
   sampleStream.close();
@@ -389,6 +394,20 @@ try {
 }]]>
 				</programlisting>
 			</para>
+				<para>
+					The character policy defines which complete candidates can bypass statistical
+					model evaluation. Its letter, digit, and combining-mark sets are stored in the
+					model so training and inference use the same inventory. A combining mark is
+					accepted only after a letter or another accepted mark. Passing a null policy
+					selects the built-in policy for the language when training a new model.
+				</para>
+				<para>
+					Models with the historical built-in alphanumeric expressions are imported
+					when loaded. A historical custom expression outside that fixed set cannot be
+					converted automatically. Supply explicit character sets and retrain or
+					repackage that model. New models persist the resolved policy in a versioned
+					format and are not intended for OpenNLP 2.x runtimes.
+				</para>
 		</section>
 	</section>
 	
