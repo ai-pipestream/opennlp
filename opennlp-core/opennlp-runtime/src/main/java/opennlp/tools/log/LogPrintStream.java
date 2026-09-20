@@ -22,7 +22,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Locale;
 
 import org.slf4j.Logger;
@@ -42,6 +48,7 @@ public class LogPrintStream extends PrintStream {
    * Creates a {@link LogPrintStream} for the given {@link Logger}.
    *
    * @param logger must not be {@code null}
+   * @throws IllegalArgumentException if {@code logger} is {@code null}
    */
   public LogPrintStream(Logger logger) {
     this(logger, Level.INFO);
@@ -53,27 +60,40 @@ public class LogPrintStream extends PrintStream {
    *
    * @param logger must not be {@code null}
    * @param level  must not be {@code null}
+   * @throws IllegalArgumentException if {@code logger} or {@code level} is {@code null}
    */
   public LogPrintStream(Logger logger, Level level) {
     super(new LoggingOutputStream(requireArgument(logger, "logger"),
         requireArgument(level, "level")), false, StandardCharsets.UTF_8);
   }
 
+  /**
+   * @throws UnsupportedOperationException always; pass preformatted text to a print method
+   */
   @Override
   public PrintStream printf(String format, Object... args) {
     throw unsupportedFormatting();
   }
 
+  /**
+   * @throws UnsupportedOperationException always; pass preformatted text to a print method
+   */
   @Override
   public PrintStream printf(Locale locale, String format, Object... args) {
     throw unsupportedFormatting();
   }
 
+  /**
+   * @throws UnsupportedOperationException always; pass preformatted text to a print method
+   */
   @Override
   public PrintStream format(String format, Object... args) {
     throw unsupportedFormatting();
   }
 
+  /**
+   * @throws UnsupportedOperationException always; pass preformatted text to a print method
+   */
   @Override
   public PrintStream format(Locale locale, String format, Object... args) {
     throw unsupportedFormatting();
@@ -103,10 +123,11 @@ public class LogPrintStream extends PrintStream {
 
     @Override
     public synchronized void write(int value) {
-      if (value == '\n') {
-        logLine();
+      int octet = value & 0xff;
+      if (octet == '\n') {
+        logLine(true, true);
       } else {
-        line.write(value);
+        line.write(octet);
       }
     }
 
@@ -120,24 +141,44 @@ public class LogPrintStream extends PrintStream {
     @Override
     public synchronized void flush() {
       if (line.size() > 0) {
-        logLine();
+        logLine(false, false);
       }
     }
 
     @Override
     public synchronized void close() throws IOException {
-      flush();
+      if (line.size() > 0) {
+        logLine(true, false);
+      }
       line.close();
     }
 
-    private void logLine() {
+    private void logLine(boolean endOfInput, boolean stripCarriageReturn) {
       byte[] bytes = line.toByteArray();
       int length = bytes.length;
-      if (length > 0 && bytes[length - 1] == '\r') {
+      if (stripCarriageReturn && length > 0 && bytes[length - 1] == '\r') {
         length--;
       }
-      String message = new String(bytes, 0, length, StandardCharsets.UTF_8);
+
+      CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+          .onMalformedInput(CodingErrorAction.REPLACE)
+          .onUnmappableCharacter(CodingErrorAction.REPLACE);
+      ByteBuffer input = ByteBuffer.wrap(bytes, 0, length);
+      CharBuffer output = CharBuffer.allocate(length + 1);
+      CoderResult result = decoder.decode(input, output, endOfInput);
+      if (endOfInput) {
+        decoder.flush(output);
+      }
+      if (result.isError()) {
+        throw new IllegalStateException("UTF-8 decoder rejected replacement input");
+      }
+
+      String message = output.flip().toString();
       line.reset();
+      line.writeBytes(Arrays.copyOfRange(bytes, input.position(), length));
+      if (!endOfInput && message.isEmpty()) {
+        return;
+      }
       switch (level) {
         case TRACE:
           logger.trace(message);

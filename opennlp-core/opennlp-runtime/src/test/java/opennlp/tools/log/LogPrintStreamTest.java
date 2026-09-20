@@ -53,6 +53,42 @@ class LogPrintStreamTest {
   }
 
   @Test
+  void writeIntUsesOnlyTheLowEightBits() {
+    RecordingLogger logger = new RecordingLogger();
+    try (LogPrintStream stream = new LogPrintStream(logger)) {
+      stream.write(0x10a);
+
+      assertEquals(List.of(""), logger.messages(Level.INFO));
+    }
+  }
+
+  @Test
+  void retainsAnIncompleteUtf8CharacterAcrossFlush() {
+    byte[] bytes = "A😀B\n".getBytes(StandardCharsets.UTF_8);
+    RecordingLogger logger = new RecordingLogger();
+    try (LogPrintStream stream = new LogPrintStream(logger)) {
+      stream.write(bytes, 0, 3);
+      stream.flush();
+      assertEquals(List.of("A"), logger.messages(Level.INFO));
+
+      stream.write(bytes, 3, bytes.length - 3);
+      assertEquals(List.of("A", "😀B"), logger.messages(Level.INFO));
+    }
+  }
+
+  @Test
+  void closeFinishesAnIncompleteUtf8Character() {
+    byte[] bytes = "😀".getBytes(StandardCharsets.UTF_8);
+    RecordingLogger logger = new RecordingLogger();
+    LogPrintStream stream = new LogPrintStream(logger);
+    stream.write(bytes, 0, 2);
+
+    stream.close();
+
+    assertEquals(List.of("�"), logger.messages(Level.INFO));
+  }
+
+  @Test
   void flushAndCloseLogIncompleteLines() {
     RecordingLogger logger = new RecordingLogger();
     LogPrintStream flushed = new LogPrintStream(logger);
