@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import opennlp.tools.ml.model.AbstractModelReader;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * outsized allocation.
  */
 class SymSpellModelSerializerLimitsTest {
+
+  @Test
+  void invalidMagicDisplaysAllEightHexDigits() throws IOException {
+    assertInvalidMagic(0, "00000000");
+    assertInvalidMagic(-1, "FFFFFFFF");
+    assertInvalidMagic(Integer.MIN_VALUE, "80000000");
+    assertInvalidMagic(15, "0000000F");
+  }
+
+  private void assertInvalidMagic(int magic, String expected) throws IOException {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (DataOutputStream output = new DataOutputStream(bytes)) {
+      output.writeInt(magic);
+    }
+    IOException error = expectRejection(bytes.toByteArray());
+    assertEquals("not a SymSpell model stream (magic was 0x" + expected
+        + ", expected 0x53594D53)", error.getMessage());
+  }
 
   /**
    * Writes a well-formed header up to (and including) the unigram count, optionally

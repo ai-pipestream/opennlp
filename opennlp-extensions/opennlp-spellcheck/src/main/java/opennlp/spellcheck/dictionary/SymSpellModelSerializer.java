@@ -24,6 +24,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -116,8 +117,9 @@ public final class SymSpellModelSerializer implements ArtifactSerializer<SymSpel
 
     final int magic = din.readInt();
     if (magic != MAGIC) {
-      throw new IOException(String.format(
-          "not a SymSpell model stream (magic was 0x%08X, expected 0x%08X)", magic, MAGIC));
+      HexFormat hex = HexFormat.of().withUpperCase();
+      throw new IOException("not a SymSpell model stream (magic was 0x" + hex.toHexDigits(magic)
+          + ", expected 0x" + hex.toHexDigits(MAGIC) + ")");
     }
     final int formatVersion = din.readInt();
     if (formatVersion != FORMAT_VERSION) {

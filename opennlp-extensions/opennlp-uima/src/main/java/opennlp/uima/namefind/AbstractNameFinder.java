@@ -127,7 +127,7 @@ abstract class AbstractNameFinder extends CasAnnotator_ImplBase {
         }
         else {
           mLogger.log(Level.WARNING,
-              String.format("Failed to parse a part of the type mapping [%s]", mapping));
+              "Failed to parse a part of the type mapping [" + mapping + "]");
         }
       }
 
