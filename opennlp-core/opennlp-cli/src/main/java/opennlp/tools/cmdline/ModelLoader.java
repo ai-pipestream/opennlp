@@ -21,6 +21,7 @@ import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.util.Objects;
 
 import org.slf4j.Logger;
@@ -71,7 +72,7 @@ public abstract class ModelLoader<T> {
 
     long modelLoadingDuration = System.currentTimeMillis() - beginModelLoadingTime;
 
-    logger.info(String.format("done (%.3fs)\n", modelLoadingDuration / 1000d));
+    logger.info("done ({}s)\n", BigDecimal.valueOf(modelLoadingDuration, 3).toPlainString());
 
     return model;
   }

@@ -26,6 +26,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -191,7 +192,7 @@ public final class CmdLineUtil {
 
     long modelWritingDuration = System.currentTimeMillis() - beginModelWritingTime;
 
-    logger.info(String.format("done (%.3fs)\n", modelWritingDuration / 1000d));
+    logger.info("done ({}s)\n", BigDecimal.valueOf(modelWritingDuration, 3).toPlainString());
 
     logger.info("Wrote {} model to path: {}", modelName, modelFile.getAbsolutePath());
   }

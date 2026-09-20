@@ -18,6 +18,7 @@
 
 package opennlp.tools.cmdline;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -293,6 +294,7 @@ public final class CLI {
     }
 
     final long endTime = System.currentTimeMillis();
-    logger.info(String.format("Execution time: %.3f seconds\n", (endTime - startTime) / 1000.0));
+    logger.info("Execution time: {} seconds\n",
+        BigDecimal.valueOf(endTime - startTime, 3).toPlainString());
   }
 }
