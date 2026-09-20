@@ -80,11 +80,12 @@ import opennlp.tools.embeddings.TextEmbedder;
  * tokenized length; {@link PaddingStrategy#LONGEST} runs a whole call of mixed-length inputs as
  * one inference. The strategy never changes the vectors, only the tensor shapes.</p>
  *
- * <p>Inference runs on the CPU execution provider unless
+ * <p>Inference runs where ONNX Runtime puts it, which is the CPU, unless
  * {@link #SentenceVectorsDL(File, File, boolean, Pooling, boolean, int, PaddingStrategy,
- * InferenceOptions)} is given an {@link InferenceOptions} with {@link InferenceOptions#setGpu(
- * boolean)} set, which adds the CUDA execution provider on the configured device. The execution
- * provider does not change the vectors beyond the reordering a different kernel implies.</p>
+ * InferenceOptions)} is given an {@link InferenceOptions} that requests execution providers through
+ * {@link InferenceOptions#setExecutionProviders(List)}. They are appended in the order requested,
+ * which is the order ONNX Runtime falls back along. The execution provider does not change the
+ * vectors beyond the reordering a different kernel implies.</p>
  */
 @ThreadSafe
 public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
@@ -224,24 +225,27 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * Instantiates a {@link SentenceVectorsDL sentence vector generator} using ONNX models, on the
    * execution provider the given {@link InferenceOptions} selects.
    *
-   * <p>This is the only constructor that can move inference off the CPU. Set
-   * {@link InferenceOptions#setGpu(boolean)} and, for a machine with more than one card,
-   * {@link InferenceOptions#setGpuDeviceId(int)}, and the session is created with the CUDA
-   * execution provider added. Running on the GPU requires the {@code onnxruntime_gpu} runtime on
-   * the classpath, which the {@code opennlp-dl-gpu} module brings in; with the CPU-only
-   * {@code onnxruntime} runtime, or with a CUDA installation the runtime cannot load, this
-   * constructor throws an {@link OrtException} instead of running on the CPU. An
-   * unusable device id likewise fails here rather than later.</p>
+   * <p>This is the only constructor that can move inference off the CPU or change how the session
+   * uses threads. Requesting {@link opennlp.dl.ExecutionProviders#CUDA} through
+   * {@link InferenceOptions#setExecutionProviders(List)} creates the session with the CUDA
+   * execution provider added, and so does the deprecated {@link InferenceOptions#setGpu(boolean)}.
+   * Running on the GPU requires the {@code onnxruntime_gpu} runtime on the classpath, which the
+   * {@code opennlp-dl-gpu} module brings in; with the CPU-only {@code onnxruntime} runtime, or with
+   * a CUDA installation the runtime cannot load, this constructor throws an {@link OrtException}
+   * instead of running on the CPU. An unusable device id likewise fails here rather than later.</p>
    *
    * <p>{@code inferenceOptions} is the last parameter so that it extends the constructor chain the
    * same way the earlier parameters did, and so that the other five settings keep the positions
-   * they have had since they were introduced. Only two of its values are read: the execution
-   * provider and, if {@link InferenceOptions#setLowerCase(boolean)} was called, the lower casing
-   * behavior, which then wins over the {@code lowerCase} parameter. The rest of
-   * {@link InferenceOptions} describes inputs this component does not have: it has no document
-   * splitting, and it always sends both an attention mask and token type ids, since the encoding
-   * of a sentence-transformers model is fixed. Nothing is read from the object after
-   * construction, so a caller may reuse or mutate it afterwards.</p>
+   * they have had since they were introduced. Three groups of its values are read: the execution
+   * providers, the session settings ({@link InferenceOptions#setIntraOpNumThreads(int)},
+   * {@link InferenceOptions#setInterOpNumThreads(int)} and
+   * {@link InferenceOptions#setOptimizationLevel(OrtSession.SessionOptions.OptLevel)}), and, if
+   * {@link InferenceOptions#setLowerCase(boolean)} was called, the lower casing behavior, which
+   * then wins over the {@code lowerCase} parameter. The rest of {@link InferenceOptions} describes
+   * inputs this component does not have: it has no document splitting, and it always sends both an
+   * attention mask and token type ids, since the encoding of a sentence-transformers model is
+   * fixed. Nothing is read from the object after construction, so a caller may reuse or mutate it
+   * afterwards.</p>
    *
    * @param model The file name of a sentence vectors ONNX model.
    * @param vocabulary The file name of the vocabulary file for the model.
@@ -256,17 +260,19 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * @param padding How the tensors of one inference are shaped when the inputs of a call differ
    *     in length. Must not be {@code null}. Every strategy but
    *     {@link PaddingStrategy#EXACT_LENGTH} requires a padding token in the vocabulary.
-   * @param inferenceOptions The execution provider to run on. Must not be {@code null}. A default
-   *     {@link InferenceOptions} selects the CPU, which is what every other constructor passes.
+   * @param inferenceOptions The execution providers to run on and the session settings to create
+   *     the session with. Must not be {@code null}. A default {@link InferenceOptions} requests
+   *     nothing and leaves every session setting at ONNX Runtime's own, which is what every other
+   *     constructor passes.
    *
    * @throws IllegalArgumentException Thrown if {@code pooling}, {@code padding} or
    *     {@code inferenceOptions} is {@code null}, if {@code maxLength} is less than {@code 2}, if
    *     the model has no output of shape {@code [batch, hidden]} or
    *     {@code [batch, tokens, hidden]}, or if {@code padding} pads and the vocabulary has no
    *     padding token.
-   * @throws OrtException Thrown if the {@code model} cannot be loaded, or if the requested
-   *     execution provider is not available in the ONNX Runtime on the classpath or cannot be
-   *     initialized on the requested device.
+   * @throws OrtException Thrown if the {@code model} cannot be loaded, or if a requested execution
+   *     provider is not available in the ONNX Runtime on the classpath or cannot be initialized on
+   *     the requested device.
    * @throws IOException Thrown if errors occurred loading the {@code model} or {@code vocabulary}.
    *
    * @since 3.0.0

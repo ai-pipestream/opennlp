@@ -36,6 +36,8 @@ import java.util.stream.Stream;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import opennlp.tools.tokenize.SubwordPiece;
 import opennlp.tools.tokenize.SubwordTokenizer;
@@ -50,6 +52,11 @@ import opennlp.tools.util.normalizer.CharClass;
  * Base class for OpenNLP deep-learning classes using ONNX Runtime.
  */
 public abstract class AbstractDL implements AutoCloseable {
+
+  private static final Logger logger = LoggerFactory.getLogger(AbstractDL.class);
+
+  /** What the log entry at construction prints for a session setting that was not set. */
+  private static final String ORT_DEFAULT = "ONNX Runtime default";
 
   public static final String INPUT_IDS = "input_ids";
   public static final String ATTENTION_MASK = "attention_mask";
@@ -142,36 +149,110 @@ public abstract class AbstractDL implements AutoCloseable {
   }
 
   /**
-   * Builds ONNX session options from the given {@link InferenceOptions}, enabling the CUDA
-   * execution provider on the configured device when GPU inference is requested.
+   * Builds ONNX session options from the given {@link InferenceOptions}: the execution providers
+   * it requests, appended in the order it gives, and the session settings it sets.
    *
-   * <p>The ONNX Runtime environment is initialized before an execution provider is added, even
-   * though the session is created later. Loading a shared execution provider library goes through
-   * ONNX Runtime's default logger, which only exists once an {@link OrtEnvironment} has been
-   * created, so on a JVM where nothing has touched ONNX Runtime yet {@code addCUDA} otherwise
-   * fails with "Attempt to use DefaultLogger but none has been registered" and, on a second
-   * attempt, with "Failed to load shared library". The environment is a process-wide singleton
-   * that the constructors below fetch anyway, so fetching it here costs nothing and does not
-   * change what the CPU path does.</p>
+   * <p>A default {@link InferenceOptions} requests no execution provider and sets no session
+   * setting, so the returned options are a plain {@code OrtSession.SessionOptions} and the session
+   * runs where ONNX Runtime puts it, which is the CPU. Nothing is added or changed that the caller
+   * did not ask for.</p>
    *
-   * @param inferenceOptions The inference options to read the GPU configuration from.
-   * @return The configured session options.
+   * <p>The returned options are closed if the configuration fails part way, so a rejected
+   * execution provider does not leak the native options object.</p>
    *
-   * @throws OrtException Thrown if the CUDA execution provider cannot be added, which is what
-   *     happens when the ONNX Runtime on the classpath has no CUDA support, when its CUDA
-   *     libraries cannot be loaded, or when no device answers to the configured device id. ONNX
-   *     Runtime does not fall back to the CPU in any of those cases.
+   * @param inferenceOptions The inference options to read the session configuration from. Must not
+   *     be {@code null}.
+   * @return The configured session options. The caller owns them and closes them, which the
+   *     constructors below do by handing them to the session.
+   *
+   * @throws IllegalArgumentException Thrown if {@code inferenceOptions} is {@code null}, if its
+   *     split settings cannot make progress, if it requests an execution provider id no
+   *     {@link ExecutionProviderConfigurer} answers to, or if a configurer rejects the provider
+   *     options of its request.
+   * @throws OrtException Thrown if a requested execution provider cannot be registered, which is
+   *     what happens when the ONNX Runtime on the classpath was not built with it, when its shared
+   *     libraries cannot be loaded, or when no device answers to a device the request names. ONNX
+   *     Runtime does not fall back to the CPU in any of those cases, and neither does this.
    */
   protected static OrtSession.SessionOptions sessionOptions(final InferenceOptions inferenceOptions)
       throws OrtException {
     requireNonNullArg(inferenceOptions, "inferenceOptions");
     validateSplitOptions(inferenceOptions);
     final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
-    if (inferenceOptions.isGpu()) {
-      OrtEnvironment.getEnvironment();
-      sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
+    try {
+      configureSession(sessionOptions, inferenceOptions);
+    } catch (final OrtException | RuntimeException e) {
+      sessionOptions.close();
+      throw e;
     }
     return sessionOptions;
+  }
+
+  /**
+   * Applies an {@link InferenceOptions} to session options that already exist: the requested
+   * execution providers first, in the order requested, then each session setting that is set.
+   *
+   * <p>The execution providers go on first because ONNX Runtime keeps them in the order they were
+   * appended and runs a node on the first one that accepts it, so their order is the caller's
+   * priority order and must not be disturbed by anything else. The ONNX Runtime environment is
+   * initialized before the first of them is added, for the reason
+   * {@link ExecutionProviders#addTo(OrtSession.SessionOptions, List)} records.</p>
+   *
+   * <p>Every session setting that {@code inferenceOptions} leaves unset is not touched here, so
+   * ONNX Runtime's own default stands. The graph optimization level is one of those: ONNX Runtime
+   * already applies every optimization by default, and a session that was not asked to change that
+   * keeps it.</p>
+   *
+   * <p>One log entry is written here, on the ordinary path and not only on failure, naming the
+   * resolved execution providers and the effective session settings. It is the answer to "what did
+   * this session actually run on", which nothing in this package used to be able to answer: a
+   * component that could only ever reach the CPU advertised GPU support for two years without a
+   * single line of evidence to the contrary.</p>
+   *
+   * @param sessionOptions The session options to configure. Must not be {@code null}.
+   * @param inferenceOptions The inference options to read the session configuration from. Must not
+   *     be {@code null}.
+   *
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}, if
+   *     {@code inferenceOptions} requests an execution provider id no
+   *     {@link ExecutionProviderConfigurer} answers to, or if a configurer rejects the provider
+   *     options of its request.
+   * @throws OrtException Thrown if a requested execution provider cannot be registered, or if ONNX
+   *     Runtime rejects a session setting.
+   */
+  protected static void configureSession(final OrtSession.SessionOptions sessionOptions,
+      final InferenceOptions inferenceOptions) throws OrtException {
+    requireNonNullArg(sessionOptions, "sessionOptions");
+    requireNonNullArg(inferenceOptions, "inferenceOptions");
+    final List<ExecutionProviderRequest> providers = ExecutionProviders.resolve(inferenceOptions);
+    ExecutionProviders.addTo(sessionOptions, providers);
+    final Integer intraOpNumThreads = inferenceOptions.getIntraOpNumThreads();
+    if (intraOpNumThreads != null) {
+      sessionOptions.setIntraOpNumThreads(intraOpNumThreads);
+    }
+    final Integer interOpNumThreads = inferenceOptions.getInterOpNumThreads();
+    if (interOpNumThreads != null) {
+      sessionOptions.setInterOpNumThreads(interOpNumThreads);
+    }
+    final OrtSession.SessionOptions.OptLevel optimizationLevel =
+        inferenceOptions.getOptimizationLevel();
+    if (optimizationLevel != null) {
+      sessionOptions.setOptimizationLevel(optimizationLevel);
+    }
+    logger.info("ONNX session configured: execution providers: {}; intra-op threads: {}; "
+            + "inter-op threads: {}; graph optimization level: {}",
+        ExecutionProviders.describe(providers), effective(intraOpNumThreads),
+        effective(interOpNumThreads), effective(optimizationLevel));
+  }
+
+  /**
+   * Renders one session setting for the log entry of {@link #configureSession}.
+   *
+   * @param setting The value, or {@code null} if it was not set.
+   * @return The value, or a note that ONNX Runtime decides. Never {@code null}.
+   */
+  private static String effective(final Object setting) {
+    return setting == null ? ORT_DEFAULT : setting.toString();
   }
 
   /**

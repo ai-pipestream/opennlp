@@ -19,11 +19,16 @@ package opennlp.dl.vectors;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 
+import opennlp.dl.CudaExecutionProviderConfigurer;
+import opennlp.dl.ExecutionProviderRequest;
+import opennlp.dl.ExecutionProviders;
 import opennlp.dl.InferenceOptions;
 import opennlp.tools.embeddings.TextEmbedder;
 import opennlp.tools.embeddings.TextEmbedderProvider;
@@ -198,14 +203,24 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
    * reported rather than ignored, but it only reaches ONNX Runtime when the GPU is
    * requested.</p>
    *
+   * <p>{@value #GPU_OPTION} becomes a request for the {@value ExecutionProviders#CUDA} execution
+   * provider, which is what the same option has always meant. A spec cannot yet name another
+   * execution provider or order a fallback, which
+   * {@link InferenceOptions#setExecutionProviders(java.util.List)} can.</p>
+   *
    * @param spec The spec to read.
    * @return The inference options, selecting the CPU unless {@value #GPU_OPTION} is {@code true}.
    * @throws IllegalArgumentException Thrown if either value is malformed.
    */
   private InferenceOptions inferenceOptions(final ProviderSpec spec) {
     final InferenceOptions inferenceOptions = new InferenceOptions();
-    inferenceOptions.setGpu(booleanOption(spec, GPU_OPTION, FALSE));
-    inferenceOptions.setGpuDeviceId(gpuDeviceIdOption(spec));
+    final boolean gpu = booleanOption(spec, GPU_OPTION, FALSE);
+    final int deviceId = gpuDeviceIdOption(spec);
+    if (gpu) {
+      inferenceOptions.setExecutionProviders(List.of(ExecutionProviderRequest.of(
+          ExecutionProviders.CUDA, Map.of(CudaExecutionProviderConfigurer.DEVICE_ID_OPTION,
+              Integer.toString(deviceId)))));
+    }
     return inferenceOptions;
   }
 

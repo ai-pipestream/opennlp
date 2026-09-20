@@ -21,14 +21,31 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 /**
- * Exposes {@link AbstractDL#sessionOptions(InferenceOptions)} to tests outside this package, which
- * cannot reach a {@code protected static} member of {@link AbstractDL} on their own. It exists so
- * that a test can compare the session options a component builds against a plain default
- * {@code OrtSession.SessionOptions} without loading a model.
+ * Exposes {@link AbstractDL#sessionOptions(InferenceOptions)} and
+ * {@link AbstractDL#configureSession(OrtSession.SessionOptions, InferenceOptions)} to tests outside
+ * this package, which cannot reach a {@code protected static} member of {@link AbstractDL} on their
+ * own. It exists so that a test can compare the session options a component builds against a plain
+ * default {@code OrtSession.SessionOptions} without loading a model, and so that a test can hand
+ * the configuration step session options of its own that record what was done to them.
  */
 public final class SessionOptionsProbe {
 
   private SessionOptionsProbe() {
+  }
+
+  /**
+   * Applies the given inference options to session options the caller owns, which is what
+   * {@link AbstractDL} does to the options it hands to a new session.
+   *
+   * @param sessionOptions The session options to configure, which may be a subclass that records
+   *     the calls it receives.
+   * @param inferenceOptions The options to apply.
+   * @throws OrtException Thrown if a requested execution provider cannot be registered or a
+   *     session setting is rejected.
+   */
+  public static void configure(final OrtSession.SessionOptions sessionOptions,
+      final InferenceOptions inferenceOptions) throws OrtException {
+    AbstractDL.configureSession(sessionOptions, inferenceOptions);
   }
 
   /**
