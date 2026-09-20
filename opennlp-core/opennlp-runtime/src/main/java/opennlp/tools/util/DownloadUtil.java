@@ -439,11 +439,10 @@ public class DownloadUtil {
 
     private String fetchPageIndex() {
       final StringBuilder html = new StringBuilder();
-      try (BufferedReader br = new BufferedReader(
-          new InputStreamReader(indexUrl.openStream(), StandardCharsets.UTF_8))) {
+      try (InputStreamReader reader = new InputStreamReader(indexUrl.openStream(), StandardCharsets.UTF_8)) {
         char[] buffer = new char[8192];
         int read;
-        while ((read = br.read(buffer)) != -1) {
+        while ((read = reader.read(buffer)) != -1) {
           html.append(buffer, 0, read);
         }
       } catch (IOException e) {
