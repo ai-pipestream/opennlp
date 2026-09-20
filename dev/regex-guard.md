@@ -34,10 +34,11 @@ Run the executable guard fixtures with:
 ```
 
 Calling the Invoker goal directly avoids running the incomplete baseline through the production
-scan. Each fixture inherits the root plugin configuration. Post-build scripts require proof that
-compilation completed, the regex guard ran, and every expected diagnostic appeared. The negative
-fixtures must fail their nested builds, while the lookalike receiver and exact name finder
-exception fixtures must pass.
+scan. Each fixture inherits the root plugin configuration and uses Invoker's filtered
+`@project.version@` value for its parent, so release-version changes cannot resolve an older parent
+from the local repository. Post-build scripts require proof that compilation completed, the regex
+guard ran, and every expected diagnostic appeared. The negative fixtures must fail their nested
+builds, while the lookalike receiver and exact name finder exception fixtures must pass.
 
 For a clean production check after composing the implementation branches, run:
 
