@@ -30,6 +30,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.event.Level;
@@ -133,6 +134,10 @@ public class LogPrintStream extends PrintStream {
 
     @Override
     public synchronized void write(byte[] bytes, int offset, int length) {
+      if (bytes == null) {
+        throw new IllegalArgumentException("bytes must not be null");
+      }
+      Objects.checkFromIndexSize(offset, length, bytes.length);
       for (int i = offset; i < offset + length; i++) {
         write(bytes[i] & 0xff);
       }

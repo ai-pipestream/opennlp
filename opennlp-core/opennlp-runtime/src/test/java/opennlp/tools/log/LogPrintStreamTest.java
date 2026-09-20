@@ -23,6 +23,7 @@ import org.slf4j.Marker;
 import org.slf4j.event.Level;
 import org.slf4j.helpers.AbstractLogger;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -86,6 +87,28 @@ class LogPrintStreamTest {
     stream.close();
 
     assertEquals(List.of("�"), logger.messages(Level.INFO));
+  }
+
+  @Test
+  void rejectsNullByteArrayWithIllegalArgumentException() {
+    try (LogPrintStream stream = new LogPrintStream(new RecordingLogger())) {
+      assertThrows(IllegalArgumentException.class, () -> stream.write(null, 0, 1));
+    }
+  }
+
+  @Test
+  void rejectsInvalidByteSlicesBeforeWritingAnyOutput() {
+    RecordingLogger logger = new RecordingLogger();
+    try (LogPrintStream stream = new LogPrintStream(logger)) {
+      assertAll(
+          () -> assertThrows(IndexOutOfBoundsException.class,
+              () -> stream.write(new byte[1], 0, -1)),
+          () -> assertThrows(IndexOutOfBoundsException.class,
+              () -> stream.write(new byte[1], -1, 1)),
+          () -> assertThrows(IndexOutOfBoundsException.class,
+              () -> stream.write("written\n".getBytes(StandardCharsets.UTF_8), 0, 9)),
+          () -> assertEquals(List.of(), logger.messages(Level.INFO)));
+    }
   }
 
   @Test
