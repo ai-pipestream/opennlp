@@ -39,6 +39,7 @@ import opennlp.tools.util.ext.Providers;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.LOWER_CASE_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.MAX_LENGTH_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.NORMALIZE_OPTION;
+import static opennlp.dl.vectors.OnnxTextEmbedderProvider.PADDING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.POOLING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.VOCABULARY_OPTION;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -133,10 +134,22 @@ class SentenceVectorsDLEmbedderTest {
         "a missing model");
     assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(graph)),
         "no vocabulary");
+    // The padding strategy is selectable, and every strategy gives the same vector.
+    for (final String strategy : List.of("exact_length", "longest", "max_length")) {
+      final ProviderSpec paddingSpec = ProviderSpec.of(graph, Map.of(VOCABULARY_OPTION,
+          "vocab.txt", PADDING_OPTION, strategy, MAX_LENGTH_OPTION, "16"));
+      try (TextEmbedder embedder = provider.create(paddingSpec)) {
+        assertArrayEquals(UNIT_VECTOR, embedder.embed("hello world"), DELTA, strategy);
+        assertArrayEquals(UNIT_VECTOR, embedder.embedAll(List.of("hello", "hello world"))[0],
+            DELTA, strategy);
+      }
+    }
     for (final Map.Entry<String, String> invalid : List.of(Map.entry(LOWER_CASE_OPTION, "invalid"),
         Map.entry(NORMALIZE_OPTION, "yes"), Map.entry(POOLING_OPTION, "max"),
         Map.entry(POOLING_OPTION, "MEAN"), Map.entry(MAX_LENGTH_OPTION, "1"),
-        Map.entry(MAX_LENGTH_OPTION, "many"), Map.entry("typo", "true"))) {
+        Map.entry(MAX_LENGTH_OPTION, "many"), Map.entry(PADDING_OPTION, "LONGEST"),
+        Map.entry(PADDING_OPTION, "true"), Map.entry(PADDING_OPTION, "padded"),
+        Map.entry("typo", "true"))) {
       assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(graph,
           Map.of(VOCABULARY_OPTION, "vocab.txt", invalid.getKey(), invalid.getValue()))),
           invalid.toString());

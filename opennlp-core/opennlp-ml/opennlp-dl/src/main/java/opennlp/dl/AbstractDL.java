@@ -145,10 +145,22 @@ public abstract class AbstractDL implements AutoCloseable {
    * Builds ONNX session options from the given {@link InferenceOptions}, enabling the CUDA
    * execution provider on the configured device when GPU inference is requested.
    *
+   * <p>The ONNX Runtime environment is initialized before an execution provider is added, even
+   * though the session is created later. Loading a shared execution provider library goes through
+   * ONNX Runtime's default logger, which only exists once an {@link OrtEnvironment} has been
+   * created, so on a JVM where nothing has touched ONNX Runtime yet {@code addCUDA} otherwise
+   * fails with "Attempt to use DefaultLogger but none has been registered" and, on a second
+   * attempt, with "Failed to load shared library". The environment is a process-wide singleton
+   * that the constructors below fetch anyway, so fetching it here costs nothing and does not
+   * change what the CPU path does.</p>
+   *
    * @param inferenceOptions The inference options to read the GPU configuration from.
    * @return The configured session options.
    *
-   * @throws OrtException Thrown if the CUDA execution provider cannot be added.
+   * @throws OrtException Thrown if the CUDA execution provider cannot be added, which is what
+   *     happens when the ONNX Runtime on the classpath has no CUDA support, when its CUDA
+   *     libraries cannot be loaded, or when no device answers to the configured device id. ONNX
+   *     Runtime does not fall back to the CPU in any of those cases.
    */
   protected static OrtSession.SessionOptions sessionOptions(final InferenceOptions inferenceOptions)
       throws OrtException {
@@ -156,6 +168,7 @@ public abstract class AbstractDL implements AutoCloseable {
     validateSplitOptions(inferenceOptions);
     final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
     if (inferenceOptions.isGpu()) {
+      OrtEnvironment.getEnvironment();
       sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
     }
     return sessionOptions;
@@ -316,6 +329,34 @@ public abstract class AbstractDL implements AutoCloseable {
     throw new IllegalArgumentException(
         "The vocabulary contains neither '" + WordpieceTokenizer.ROBERTA_UNK_TOKEN
             + "' nor '" + WordpieceTokenizer.BERT_UNK_TOKEN + "' as an unknown token.");
+  }
+
+  /**
+   * Resolves the vocabulary id of the padding token, the id to place at positions the attention
+   * mask marks as {@code 0} when rows of different lengths share one batch tensor. The convention
+   * matches {@link #createWordpieceEncoder(Map, boolean)}: a RoBERTa-style vocabulary uses
+   * {@link WordpieceTokenizer#ROBERTA_PAD_TOKEN}, a BERT-style one
+   * {@link WordpieceTokenizer#BERT_PAD_TOKEN}. The id is read from the vocabulary rather than
+   * assumed, because it is only the conventional {@code 0} for BERT vocabularies.
+   *
+   * @param vocab The vocabulary map. Must not be {@code null}.
+   * @return The vocabulary id of the padding token.
+   * @throws IllegalArgumentException Thrown if {@code vocab} is {@code null} or contains neither
+   *     supported padding token.
+   */
+  protected static long resolvePadTokenId(final Map<String, Integer> vocab) {
+    if (vocab == null) {
+      throw new IllegalArgumentException("vocab must not be null");
+    }
+    final String padToken = vocab.containsKey(WordpieceTokenizer.ROBERTA_CLS_TOKEN)
+        && vocab.containsKey(WordpieceTokenizer.ROBERTA_SEP_TOKEN)
+        ? WordpieceTokenizer.ROBERTA_PAD_TOKEN : WordpieceTokenizer.BERT_PAD_TOKEN;
+    final Integer id = vocab.get(padToken);
+    if (id == null) {
+      throw new IllegalArgumentException("The vocabulary has no padding token '" + padToken
+          + "', so rows of different lengths cannot be padded into one batch.");
+    }
+    return id;
   }
 
   /**

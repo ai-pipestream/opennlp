@@ -79,12 +79,23 @@
       <artifactId>slf4j-simple</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The tests of opennlp-dl are rescanned here so that they run against onnxruntime_gpu.
+         The CPU-only onnxruntime has to be excluded from this entry as well as from the main
+         one: without it both native runtimes land on the test classpath, whichever of the two
+         loads first wins, and a CUDA execution provider from one build ends up beside the
+         libonnxruntime.so of the other, which fails to link. -->
     <dependency>
       <groupId>org.apache.opennlp</groupId>
       <artifactId>opennlp-dl</artifactId>
       <version>${project.version}</version>
       <type>test-jar</type>
       <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>com.microsoft.onnxruntime</groupId>
+          <artifactId>onnxruntime</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
 

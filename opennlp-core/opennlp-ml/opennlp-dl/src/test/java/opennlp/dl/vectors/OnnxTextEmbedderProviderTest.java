@@ -16,11 +16,14 @@
  */
 package opennlp.dl.vectors;
 
+import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -28,10 +31,13 @@ import opennlp.tools.embeddings.TextEmbedderProvider;
 import opennlp.tools.util.ext.ProviderSpec;
 import opennlp.tools.util.ext.Providers;
 
+import static opennlp.dl.vectors.OnnxTextEmbedderProvider.GPU_DEVICE_ID_OPTION;
+import static opennlp.dl.vectors.OnnxTextEmbedderProvider.GPU_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.LOWER_CASE_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.MAX_LENGTH_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.NAME;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.NORMALIZE_OPTION;
+import static opennlp.dl.vectors.OnnxTextEmbedderProvider.PADDING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.POOLING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.VOCABULARY_OPTION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,6 +70,11 @@ class OnnxTextEmbedderProviderTest {
     assertTrue(provider.supports(ProviderSpec.of(Path.of(model),
         Map.of(VOCABULARY_OPTION, "vocab.txt", POOLING_OPTION, "cls", NORMALIZE_OPTION, "false",
             MAX_LENGTH_OPTION, "256"))));
+    assertTrue(provider.supports(ProviderSpec.of(Path.of(model),
+        Map.of(VOCABULARY_OPTION, "vocab.txt", PADDING_OPTION, "longest"))));
+    assertTrue(provider.supports(ProviderSpec.of(Path.of(model),
+        Map.of(VOCABULARY_OPTION, "vocab.txt", GPU_OPTION, "true",
+            GPU_DEVICE_ID_OPTION, "1"))));
   }
 
   @ParameterizedTest
@@ -80,6 +91,27 @@ class OnnxTextEmbedderProviderTest {
     assertFalse(provider.supports(ProviderSpec.of(URI.create("https://example.org/model.onnx"),
         OPTIONS)), "not a local file");
     assertThrows(IllegalArgumentException.class, () -> provider.supports(null));
+  }
+
+  /**
+   * The execution provider options, checked without loading a model. {@value
+   * OnnxTextEmbedderProvider#GPU_OPTION} defaults to {@code false}, which is the only default that
+   * keeps the SPI path on the CPU, and a malformed value of either option is rejected before any
+   * session is created rather than quietly ignored.
+   */
+  @Test
+  void testGpuOptionsAreValidatedAndDefaultToTheCpu(@TempDir final Path dir) throws Exception {
+    final Path model = Files.createFile(dir.resolve("model.onnx"));
+    assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(model,
+        Map.of(VOCABULARY_OPTION, "v.txt", GPU_OPTION, "yes"))), "gpu must be true or false");
+    assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(model,
+        Map.of(VOCABULARY_OPTION, "v.txt", GPU_DEVICE_ID_OPTION, "-1"))), "a negative device id");
+    assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(model,
+        Map.of(VOCABULARY_OPTION, "v.txt", GPU_DEVICE_ID_OPTION, "one"))), "not an integer");
+    // An empty file is not a model, so this reaches ONNX Runtime and fails there rather than on
+    // an option: proof that gpu=false does not trip the CUDA path on a CPU-only runtime.
+    assertThrows(IOException.class, () -> provider.create(ProviderSpec.of(model,
+        Map.of(VOCABULARY_OPTION, "v.txt", GPU_OPTION, "false", GPU_DEVICE_ID_OPTION, "3"))));
   }
 
   /** The provider is registered in this module and is the one selected for an ONNX model. */

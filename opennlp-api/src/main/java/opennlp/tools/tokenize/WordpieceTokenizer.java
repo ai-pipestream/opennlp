@@ -66,6 +66,11 @@ public class WordpieceTokenizer implements Tokenizer {
   public static final String BERT_SEP_TOKEN = "[SEP]";
   /** BERT unknown token: {@code [UNK]}. */
   public static final String BERT_UNK_TOKEN = "[UNK]";
+  /**
+   * BERT padding token: {@code [PAD]}. It carries no meaning of its own: a model only sees it at
+   * positions the attention mask marks as {@code 0}.
+   */
+  public static final String BERT_PAD_TOKEN = "[PAD]";
 
   /** RoBERTa classification token: {@code <s>}. */
   public static final String ROBERTA_CLS_TOKEN = "<s>";
@@ -73,6 +78,11 @@ public class WordpieceTokenizer implements Tokenizer {
   public static final String ROBERTA_SEP_TOKEN = "</s>";
   /** RoBERTa unknown token. */
   public static final String ROBERTA_UNK_TOKEN = "<unk>";
+  /**
+   * RoBERTa padding token: {@code <pad>}. It carries no meaning of its own: a model only sees it
+   * at positions the attention mask marks as {@code 0}.
+   */
+  public static final String ROBERTA_PAD_TOKEN = "<pad>";
 
   private final Set<String> vocabulary;
   private final String classificationToken;

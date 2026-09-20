@@ -24,6 +24,7 @@ import java.util.Locale;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 
+import opennlp.dl.InferenceOptions;
 import opennlp.tools.embeddings.TextEmbedder;
 import opennlp.tools.embeddings.TextEmbedderProvider;
 import opennlp.tools.util.ext.ProviderSpec;
@@ -32,7 +33,8 @@ import opennlp.tools.util.ext.ProviderSpec;
  * Provides a {@link SentenceVectorsDL} under the name {@value #NAME}. It supports a spec whose
  * location is a local file named {@code *.onnx}, in any letter case, and whose only options are
  * {@value #VOCABULARY_OPTION}, {@value #LOWER_CASE_OPTION}, {@value #POOLING_OPTION},
- * {@value #NORMALIZE_OPTION} and {@value #MAX_LENGTH_OPTION}. The option values are checked by
+ * {@value #NORMALIZE_OPTION}, {@value #MAX_LENGTH_OPTION}, {@value #PADDING_OPTION},
+ * {@value #GPU_OPTION} and {@value #GPU_DEVICE_ID_OPTION}. The option values are checked by
  * {@link #create(ProviderSpec)}, which also initializes the ONNX Runtime.
  *
  * @since 3.0.0
@@ -63,11 +65,38 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
    */
   public static final String MAX_LENGTH_OPTION = "maxLength";
 
+  /**
+   * The option that selects the {@link PaddingStrategy}: {@code exact_length} by default,
+   * {@code longest} or {@code max_length}.
+   */
+  public static final String PADDING_OPTION = "padding";
+
+  /**
+   * The option that runs inference on the CUDA execution provider, {@code false} by default or
+   * {@code true}. It requires the {@code onnxruntime_gpu} runtime on the classpath, which the
+   * {@code opennlp-dl-gpu} module brings in. With the CPU-only runtime, or with a CUDA installation
+   * the runtime cannot load, {@link #create(ProviderSpec)} reports the failure rather than falling
+   * back to the CPU.
+   */
+  public static final String GPU_OPTION = "gpu";
+
+  /**
+   * The option that names the CUDA device to run on, {@code 0} by default. It is only read when
+   * {@value #GPU_OPTION} is {@code true}. An id no card answers to makes
+   * {@link #create(ProviderSpec)} fail rather than fall back to another card or to the CPU.
+   */
+  public static final String GPU_DEVICE_ID_OPTION = "gpuDeviceId";
+
   private static final String MODEL_SUFFIX = ".onnx";
   private static final String TRUE = "true";
   private static final String FALSE = "false";
   private static final String MEAN = Pooling.MEAN.name().toLowerCase(Locale.ROOT);
   private static final String CLS = Pooling.CLS.name().toLowerCase(Locale.ROOT);
+  private static final String EXACT_LENGTH =
+      PaddingStrategy.EXACT_LENGTH.name().toLowerCase(Locale.ROOT);
+  private static final String LONGEST = PaddingStrategy.LONGEST.name().toLowerCase(Locale.ROOT);
+  private static final String MAX_LENGTH =
+      PaddingStrategy.MAX_LENGTH.name().toLowerCase(Locale.ROOT);
   private static final int MIN_MAX_LENGTH = 2;
 
   @Override
@@ -95,7 +124,8 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
     }
     return spec.path().isPresent() && spec.locationEndsWith(MODEL_SUFFIX)
         && spec.hasOnlyOptions(VOCABULARY_OPTION, LOWER_CASE_OPTION, POOLING_OPTION,
-            NORMALIZE_OPTION, MAX_LENGTH_OPTION);
+            NORMALIZE_OPTION, MAX_LENGTH_OPTION, PADDING_OPTION, GPU_OPTION,
+            GPU_DEVICE_ID_OPTION);
   }
 
   @Override
@@ -115,10 +145,12 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
     final boolean normalize = booleanOption(spec, NORMALIZE_OPTION);
     final Pooling pooling = poolingOption(spec);
     final int maxLength = maxLengthOption(spec);
+    final PaddingStrategy padding = paddingOption(spec);
+    final InferenceOptions inferenceOptions = inferenceOptions(spec);
     final Path vocabularyPath = model.toAbsolutePath().getParent().resolve(vocabulary);
     try {
       return new SentenceVectorsDL(model.toFile(), vocabularyPath.toFile(), lowerCase, pooling,
-          normalize, maxLength);
+          normalize, maxLength, padding, inferenceOptions);
     } catch (final OrtException e) {
       throw new IOException("Cannot load the ONNX model " + model, e);
     } catch (final LinkageError e) {
@@ -136,11 +168,69 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
    *     {@code false}.
    */
   private boolean booleanOption(final ProviderSpec spec, final String name) {
-    final String value = spec.option(name, TRUE);
+    return booleanOption(spec, name, TRUE);
+  }
+
+  /**
+   * Reads a boolean option with the given default.
+   *
+   * @param spec The spec to read.
+   * @param name The name of the option.
+   * @param fallback The value to use if the option is not set, {@code "true"} or {@code "false"}.
+   * @return The option value.
+   * @throws IllegalArgumentException Thrown if the value is neither {@code true} nor
+   *     {@code false}.
+   */
+  private boolean booleanOption(final ProviderSpec spec, final String name,
+      final String fallback) {
+    final String value = spec.option(name, fallback);
     if (!TRUE.equals(value) && !FALSE.equals(value)) {
       throw new IllegalArgumentException(name + " must be true or false");
     }
     return TRUE.equals(value);
+  }
+
+  /**
+   * Builds the {@link InferenceOptions} that select the execution provider from the
+   * {@value #GPU_OPTION} and {@value #GPU_DEVICE_ID_OPTION} options.
+   *
+   * <p>The device id is read whether or not {@value #GPU_OPTION} is set, so a bad value is
+   * reported rather than ignored, but it only reaches ONNX Runtime when the GPU is
+   * requested.</p>
+   *
+   * @param spec The spec to read.
+   * @return The inference options, selecting the CPU unless {@value #GPU_OPTION} is {@code true}.
+   * @throws IllegalArgumentException Thrown if either value is malformed.
+   */
+  private InferenceOptions inferenceOptions(final ProviderSpec spec) {
+    final InferenceOptions inferenceOptions = new InferenceOptions();
+    inferenceOptions.setGpu(booleanOption(spec, GPU_OPTION, FALSE));
+    inferenceOptions.setGpuDeviceId(gpuDeviceIdOption(spec));
+    return inferenceOptions;
+  }
+
+  /**
+   * Reads the {@value #GPU_DEVICE_ID_OPTION} option.
+   *
+   * @param spec The spec to read.
+   * @return The device id, {@code 0} if the option is not set.
+   * @throws IllegalArgumentException Thrown if the value is not a non-negative integer.
+   */
+  private int gpuDeviceIdOption(final ProviderSpec spec) {
+    final String value = spec.option(GPU_DEVICE_ID_OPTION, null);
+    if (value == null) {
+      return 0;
+    }
+    try {
+      final int deviceId = Integer.parseInt(value);
+      if (deviceId >= 0) {
+        return deviceId;
+      }
+    } catch (final NumberFormatException e) {
+      // reported below
+    }
+    throw new IllegalArgumentException(
+        GPU_DEVICE_ID_OPTION + " must be a non-negative integer");
   }
 
   /**
@@ -160,6 +250,30 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
       return Pooling.CLS;
     }
     throw new IllegalArgumentException(POOLING_OPTION + " must be " + MEAN + " or " + CLS);
+  }
+
+  /**
+   * Reads the {@value #PADDING_OPTION} option.
+   *
+   * @param spec The spec to read.
+   * @return The padding strategy, {@link SentenceVectorsDL#DEFAULT_PADDING} if the option is not
+   *     set.
+   * @throws IllegalArgumentException Thrown if the value names no {@link PaddingStrategy}.
+   */
+  private PaddingStrategy paddingOption(final ProviderSpec spec) {
+    final String value = spec.option(PADDING_OPTION,
+        SentenceVectorsDL.DEFAULT_PADDING.name().toLowerCase(Locale.ROOT));
+    if (EXACT_LENGTH.equals(value)) {
+      return PaddingStrategy.EXACT_LENGTH;
+    }
+    if (LONGEST.equals(value)) {
+      return PaddingStrategy.LONGEST;
+    }
+    if (MAX_LENGTH.equals(value)) {
+      return PaddingStrategy.MAX_LENGTH;
+    }
+    throw new IllegalArgumentException(PADDING_OPTION + " must be " + EXACT_LENGTH + ", "
+        + LONGEST + " or " + MAX_LENGTH);
   }
 
   /**
