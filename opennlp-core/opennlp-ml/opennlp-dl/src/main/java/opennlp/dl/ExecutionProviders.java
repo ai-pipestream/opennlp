@@ -30,6 +30,8 @@ import java.util.TreeSet;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import opennlp.tools.util.ext.Providers;
 
@@ -57,6 +59,8 @@ import opennlp.tools.util.ext.Providers;
  */
 public final class ExecutionProviders {
 
+  private static final Logger logger = LoggerFactory.getLogger(ExecutionProviders.class);
+
   /** The id of the built-in CPU configurer, {@link CpuExecutionProviderConfigurer}. */
   public static final String CPU = CpuExecutionProviderConfigurer.ID;
 
@@ -78,18 +82,18 @@ public final class ExecutionProviders {
       Map.of(CPU, new CpuExecutionProviderConfigurer(), CUDA, new CudaExecutionProviderConfigurer());
 
   /**
-   * The execution provider ids classified as an accelerator by {@link #runsOnAccelerator(List)}, the
-   * question a default derived from where a session runs comes down to. Today that is
+   * The execution provider ids this class classifies as an accelerator itself, which is the fallback
+   * of {@link #runsOnAccelerator(List)} for a request whose configurer states no placement. That is
    * {@value #CUDA}, the one accelerator {@code opennlp-dl} can register through the base ONNX
    * Runtime API.
    *
-   * <p>This field is the single point where an id joins the group, so a later stage or an addon has
-   * one place to change. An addon that registers a configurer for OpenVINO, DirectML or TensorRT
-   * contributes an id this class cannot classify, and {@link #runsOnAccelerator(List)} answers
-   * {@code false} for it, which keeps the conservative default rather than guessing on its behalf.
-   * The alternative to editing this set is to let {@link ExecutionProviderConfigurer} state the
-   * answer for the id it serves, which would let an addon classify itself; that is a design decision
-   * for the first addon, not something to add while CUDA is the only entry.</p>
+   * <p>This set holds built-in ids and does not grow with the addons. An execution provider from an
+   * addon answers for itself, through
+   * {@link ExecutionProviderConfigurer#placement(opennlp.tools.util.ext.ProviderSpec)}, because the
+   * placement of several of them is not in the id at all: ONNX Runtime registers OpenVINO with a
+   * device type, so one id covers {@code GPU.0} and {@code CPU}. A configurer that states nothing,
+   * which is every configurer written before that method existed, lands here, and an id that is not
+   * in this set keeps the conservative answer rather than a guess.</p>
    */
   private static final Set<String> ACCELERATOR_IDS = Set.of(CUDA);
 
@@ -151,9 +155,21 @@ public final class ExecutionProviders {
    * for it, while {@code [cpu, cuda]} runs on the CPU, because the CPU execution provider accepts
    * any node and leaves the one behind it with none, and this returns {@code false}.</p>
    *
+   * <p>The configurer of that first request answers the question, through
+   * {@link ExecutionProviderConfigurer#placement(opennlp.tools.util.ext.ProviderSpec)}, and it is
+   * handed the provider options of the request because the answer is not always in the id: the
+   * OpenVINO execution provider is registered with a device type, so {@code GPU.0} and {@code CPU}
+   * are one id on two placements. A configurer that states
+   * {@link ExecutionProviderPlacement#UNSPECIFIED}, which is the default and therefore the answer of
+   * every configurer written before that method existed, leaves the decision to the
+   * {@code ACCELERATOR_IDS} of this class, and so does an id no configurer answers to at all.</p>
+   *
    * <p>An empty list returns {@code false}: ONNX Runtime places such a session on the CPU by itself.
-   * So does an id that is not classified here, which is how any addon execution provider appears.
-   * The {@code ACCELERATOR_IDS} field states what that costs and how to widen the group.</p>
+   * So does an unclassified id, which is the conservative answer rather than a guess.</p>
+   *
+   * <p>This resolves configurers, so it must not be called in a loop: like
+   * {@link #addTo(OrtSession.SessionOptions, List)} it costs one service lookup, which belongs at the
+   * construction of a component and not in a request.</p>
    *
    * @param requests The requests, in priority order, as {@link #resolve(InferenceOptions)} returns
    *     them. Must not be {@code null} or start with a {@code null} element.
@@ -173,7 +189,51 @@ public final class ExecutionProviders {
     if (first == null) {
       throw new IllegalArgumentException("The requests must not hold a null element.");
     }
+    final ExecutionProviderPlacement stated = placementOf(first);
+    if (stated == ExecutionProviderPlacement.ACCELERATOR) {
+      return true;
+    }
+    if (stated == ExecutionProviderPlacement.CPU) {
+      return false;
+    }
     return ACCELERATOR_IDS.contains(first.id());
+  }
+
+  /**
+   * Asks the configurer of one request where its session would run.
+   *
+   * <p>A configurer that is not registered and not built in, one that returns {@code null} and one
+   * that fails leave the placement {@link ExecutionProviderPlacement#UNSPECIFIED}. The last two are
+   * bugs in an addon, and they are reported rather than thrown: the caller is deriving a default, and
+   * a session that would have run is worth more than one that failed to start over a default. The
+   * request is registered right afterwards, by {@link #addTo(OrtSession.SessionOptions, List)}, which
+   * is where a broken configurer does fail the construction.</p>
+   *
+   * @param request The request. Must not be {@code null}.
+   * @return The placement its configurer states. Never {@code null}.
+   */
+  private static ExecutionProviderPlacement placementOf(final ExecutionProviderRequest request) {
+    final ExecutionProviderConfigurer configurer = Providers.of(ExecutionProviderConfigurer.class)
+        .byName(request.id()).orElseGet(() -> BUILT_IN.get(request.id()));
+    if (configurer == null) {
+      return ExecutionProviderPlacement.UNSPECIFIED;
+    }
+    final ExecutionProviderPlacement placement;
+    try {
+      placement = configurer.placement(request.spec());
+    } catch (final RuntimeException e) {
+      logger.warn("The {} for the execution provider id '{}' failed to state a placement, so the "
+          + "default derived from it stays the conservative one: {}",
+          ExecutionProviderConfigurer.class.getSimpleName(), request.id(), e.toString());
+      return ExecutionProviderPlacement.UNSPECIFIED;
+    }
+    if (placement == null) {
+      logger.warn("The {} for the execution provider id '{}' stated no placement at all, which its "
+          + "contract does not allow, so the default derived from it stays the conservative one.",
+          ExecutionProviderConfigurer.class.getSimpleName(), request.id());
+      return ExecutionProviderPlacement.UNSPECIFIED;
+    }
+    return placement;
   }
 
   /**

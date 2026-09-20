@@ -80,6 +80,20 @@ public final class CudaExecutionProviderConfigurer implements ExecutionProviderC
 
   /**
    * {@inheritDoc}
+   * CUDA is an accelerator whatever its provider options say: every device this execution provider
+   * can be pointed at is a CUDA card, and {@value #DEVICE_ID_OPTION} chooses between cards rather
+   * than between a card and the host.
+   */
+  @Override
+  public ExecutionProviderPlacement placement(final ProviderSpec spec) {
+    if (spec == null) {
+      throw new IllegalArgumentException("spec must not be null");
+    }
+    return ExecutionProviderPlacement.ACCELERATOR;
+  }
+
+  /**
+   * {@inheritDoc}
    * Any option name is supported, since ONNX Runtime owns the CUDA option namespace.
    */
   @Override

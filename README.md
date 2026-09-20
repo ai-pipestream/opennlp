@@ -77,6 +77,7 @@ Currently, the library has different modules:
 * `opennlp-ml-libsvm` : Support Vector Machine (SVM) based text classification via [zlibsvm](https://github.com/rzo1/zlibsvm).
 * `opennlp-dl` : Apache OpenNLP adapter for [ONNX](https://onnx.ai) models using the `onnxruntime` dependency.
 * `opennlp-dl-gpu` : Replaces `onnxruntime` with the `onnxruntime_gpu` dependency to support GPU acceleration.
+* `opennlp-dl-openvino` : Contributes the OpenVINO execution provider to `opennlp-dl`, for inference on Intel CPUs, GPUs and NPUs.
 * `opennlp-model-resolver` : Classes for discovering and loading Apache OpenNLP models from the classpath.
 * `opennlp-formats` : Support for reading and writing various NLP training and data formats.
 * `opennlp-cli` : The command-line tools for training, evaluating, and running models.

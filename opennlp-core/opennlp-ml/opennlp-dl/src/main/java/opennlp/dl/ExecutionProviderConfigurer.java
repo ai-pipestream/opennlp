@@ -48,4 +48,38 @@ import opennlp.tools.util.ext.Providers;
  * @since 3.0.0
  */
 public interface ExecutionProviderConfigurer extends Provider<ExecutionProvider> {
+
+  /**
+   * States where a session configured from {@code spec} would run, which is what a setting derived
+   * from the placement of a session reads. The default is
+   * {@link ExecutionProviderPlacement#UNSPECIFIED}, so an implementation that has nothing to say
+   * about this overrides nothing.
+   *
+   * <p>The spec is passed because the answer is not always a property of the id. ONNX Runtime
+   * registers the OpenVINO execution provider through
+   * {@link ai.onnxruntime.OrtSession.SessionOptions#addOpenVINO(String)}, whose argument is a device
+   * type, so one id covers {@code GPU.0} and {@code CPU}, which are two placements. An
+   * implementation reads its own provider options here, the same ones
+   * {@link #create(ProviderSpec)} reads, and nothing else.</p>
+   *
+   * <p>This runs while providers are being looked up, so it obeys the same rule as
+   * {@link #isAvailable()} and {@link #supports(ProviderSpec)}: it must not load a model, initialize
+   * a native library or ask a device anything. Where the answer would need the device,
+   * {@link ExecutionProviderPlacement#UNSPECIFIED} is the answer. It must not block, and it must be
+   * answerable for any spec, including one {@link #supports(ProviderSpec)} rejects: a caller reading
+   * a placement is deciding a default, not validating a configuration.</p>
+   *
+   * @param spec The provider options of the request, as {@link #create(ProviderSpec)} receives
+   *     them. Must not be {@code null}.
+   * @return The placement, never {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code spec} is {@code null}.
+   * @see ExecutionProviders#runsOnAccelerator(java.util.List)
+   * @since 3.0.0
+   */
+  default ExecutionProviderPlacement placement(ProviderSpec spec) {
+    if (spec == null) {
+      throw new IllegalArgumentException("spec must not be null");
+    }
+    return ExecutionProviderPlacement.UNSPECIFIED;
+  }
 }

@@ -73,6 +73,19 @@ public final class CpuExecutionProviderConfigurer implements ExecutionProviderCo
     }
   }
 
+  /**
+   * {@inheritDoc}
+   * The CPU execution provider runs on the host CPU, and {@value #USE_ARENA_OPTION}, its only
+   * option, changes how it allocates rather than where it runs.
+   */
+  @Override
+  public ExecutionProviderPlacement placement(final ProviderSpec spec) {
+    if (spec == null) {
+      throw new IllegalArgumentException("spec must not be null");
+    }
+    return ExecutionProviderPlacement.CPU;
+  }
+
   /** {@inheritDoc} */
   @Override
   public boolean supports(final ProviderSpec spec) {

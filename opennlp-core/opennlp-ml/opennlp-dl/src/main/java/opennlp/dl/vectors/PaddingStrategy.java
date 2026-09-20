@@ -101,9 +101,17 @@ public enum PaddingStrategy {
    * occupancy in return. {@link #MAX_LENGTH} is around twenty times behind on either placement, so
    * it is not derived at all and remains the explicit choice of a fixed-shape graph or device.</p>
    *
-   * <p>An execution provider id that {@link ExecutionProviders} does not classify as an accelerator,
-   * which is how an addon id such as {@code openvino} arrives here, is treated as the CPU case and
-   * gets {@link #EXACT_LENGTH}. Three reasons for the conservative answer over the fast one:</p>
+   * <p>An execution provider from an addon states its own placement, through
+   * {@link opennlp.dl.ExecutionProviderConfigurer#placement(opennlp.tools.util.ext.ProviderSpec)},
+   * and is derived for like any other: the {@code openvino} configurer of
+   * {@code opennlp-dl-openvino} answers {@link #LONGEST} for {@code device_type=GPU.0} and
+   * {@link #EXACT_LENGTH} for {@code device_type=CPU}, which are the same execution provider on two
+   * placements. Nothing in {@code opennlp-dl} holds the id.</p>
+   *
+   * <p>An execution provider whose placement is unstated, which is the case for an id no configurer
+   * answers to and for every configurer written before that method existed, is treated as the CPU
+   * case and gets {@link #EXACT_LENGTH}. Three reasons for the conservative answer over the fast
+   * one:</p>
    *
    * <ul>
    *   <li>{@link #EXACT_LENGTH} needs no padding token in the vocabulary and no assumption about a
@@ -119,9 +127,11 @@ public enum PaddingStrategy {
    *       it.</li>
    * </ul>
    *
-   * <p>Refining this for a further execution provider means adding its id to the accelerator group
-   * in {@link ExecutionProviders}, or extending {@link opennlp.dl.ExecutionProviderConfigurer} so
-   * that an addon states the answer for the id it serves.</p>
+   * <p>Refining this for a further execution provider is the addon's own work: its configurer
+   * overrides
+   * {@link opennlp.dl.ExecutionProviderConfigurer#placement(opennlp.tools.util.ext.ProviderSpec)}
+   * and reads whichever of its provider options decides the placement. No edit to this class or to
+   * {@link ExecutionProviders} is involved.</p>
    *
    * @param executionProviders The execution providers of the session, in priority order, as
    *     {@link ExecutionProviders#resolve(InferenceOptions)} returns them. An empty list is the CPU

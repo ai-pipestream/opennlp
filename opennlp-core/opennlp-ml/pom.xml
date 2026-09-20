@@ -39,6 +39,7 @@
     <module>opennlp-ml-libsvm</module>
     <module>opennlp-dl</module>
     <module>opennlp-dl-gpu</module>
+    <module>opennlp-dl-openvino</module>
   </modules>
 
   <dependencies>

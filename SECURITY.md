@@ -207,7 +207,8 @@ Vulnerabilities in libraries OpenNLP depends on should be reported to those
 projects. We track dependency advisories and update accordingly, so please do tell
 us if we are shipping a version with a known issue and have not moved.
 
-OpenNLP's deep-learning components (`opennlp-dl`, `opennlp-dl-gpu`) delegate model
+OpenNLP's deep-learning components (`opennlp-dl`, `opennlp-dl-gpu`,
+`opennlp-dl-openvino`) delegate model
 execution to ONNX Runtime, which is native code. ONNX model files are subject to
 whatever trust boundary ONNX Runtime provides; OpenNLP adds no sandbox of its own.
 Treat ONNX models exactly as you would treat native libraries.

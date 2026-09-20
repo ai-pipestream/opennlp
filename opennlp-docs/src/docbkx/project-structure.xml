@@ -204,6 +204,16 @@ under the License.
                     is available and desired.
                 </para>
             </listitem>
+            <listitem>
+                <para>
+                    <code>opennlp-dl-openvino</code> — Contributes the OpenVINO execution provider
+                    to <code>opennlp-dl</code> through its execution provider SPI, for inference on
+                    Intel CPUs, GPUs and NPUs. Added alongside <code>opennlp-dl</code> rather than
+                    instead of it. Running on it requires an ONNX Runtime built with the OpenVINO
+                    execution provider, which no published artifact carries; see the README of that
+                    module.
+                </para>
+            </listitem>
         </itemizedlist>
 
         <programlisting language="xml">
