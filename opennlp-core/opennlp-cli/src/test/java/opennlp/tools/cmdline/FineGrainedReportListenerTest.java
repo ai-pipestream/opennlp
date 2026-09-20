@@ -71,8 +71,8 @@ public class FineGrainedReportListenerTest {
 
   @Test
   void testReportPreservesSupplementaryLabels() throws Exception {
-    String[] sentence = {"token\uD83D\uDE00"};
-    POSSample reference = new POSSample(sentence, new String[] {"TAG\uD83D\uDE00-LONG"});
+    String[] sentence = {"\uD801\uDC00"};
+    POSSample reference = new POSSample(sentence, new String[] {"\uD801\uDC00"});
     POSSample prediction = new POSSample(sentence, new String[] {"OTHER"});
 
     try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -80,8 +80,8 @@ public class FineGrainedReportListenerTest {
       listener.misclassified(reference, prediction);
       listener.writeReport();
       String report = out.toString(StandardCharsets.UTF_8);
-      Assertions.assertTrue(report.contains("token\uD83D\uDE00"));
-      Assertions.assertTrue(report.contains("TAG\uD83D\uDE00-LONG"));
+      Assertions.assertTrue(report.contains("|   1 |      1 |     \uD801\uDC00 |"), report);
+      Assertions.assertTrue(report.contains("|   \uD801\uDC00 |      1 |      1 |"), report);
     }
   }
 

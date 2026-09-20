@@ -112,10 +112,22 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
     return statsForOutcome.get(type);
   }
 
+  /**
+   * Creates a report using locale-independent number formatting.
+   *
+   * @return The evaluation report.
+   */
   public String createReport() {
     return createReport(Locale.ROOT);
   }
 
+  /**
+   * Creates a report whose percentages and integer counts use the requested locale.
+   *
+   * @param locale The locale used to format report numbers.
+   * @return The evaluation report.
+   * @throws IllegalArgumentException if {@code locale} is {@code null}.
+   */
   public String createReport(Locale locale) {
     if (locale == null) {
       throw new IllegalArgumentException("locale must not be null");
@@ -123,6 +135,8 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
     DecimalFormat percentFormat = new DecimalFormat("0.00", DecimalFormatSymbols.getInstance(locale));
     percentFormat.setGroupingUsed(false);
     percentFormat.setRoundingMode(RoundingMode.HALF_UP);
+    DecimalFormat integerFormat = new DecimalFormat("0", DecimalFormatSymbols.getInstance(locale));
+    integerFormat.setGroupingUsed(false);
     StringBuilder ret = new StringBuilder();
     int tp = generalStats.getTruePositives();
     int found = generalStats.getFalsePositives() + tp;
@@ -130,13 +144,13 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
         .append(generalStats.getTarget()).append(" entities; found: ")
         .append(found).append(" entities; correct: ").append(tp).append(".\n");
 
-    appendScores(ret, "TOTAL", generalStats, percentFormat, false);
+    appendScores(ret, "TOTAL", generalStats, percentFormat, integerFormat, false);
     ret.append("\n");
     SortedSet<String> set = new TreeSet<>(new F1Comparator());
     set.addAll(statsForOutcome.keySet());
     for (String type : set) {
 
-      appendScores(ret, type, statsForOutcome.get(type), percentFormat, true);
+      appendScores(ret, type, statsForOutcome.get(type), percentFormat, integerFormat, true);
       ret.append("\n");
     }
 
@@ -144,15 +158,18 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
   }
 
   private void appendScores(StringBuilder report, String label, Stats stats,
-      DecimalFormat percentFormat, boolean includeCounts) {
+      DecimalFormat percentFormat, DecimalFormat integerFormat, boolean includeCounts) {
     report.append(ReportLayout.right(label, 12)).append(": precision: ")
         .append(formatPercent(stats.getPrecisionScore(), percentFormat))
         .append(";  recall: ").append(formatPercent(stats.getRecallScore(), percentFormat))
         .append("; F1: ").append(formatPercent(stats.getFMeasure(), percentFormat)).append('.');
     if (includeCounts) {
-      report.append(" [target: ").append(ReportLayout.right(stats.getTarget(), 3))
-          .append("; tp: ").append(ReportLayout.right(stats.getTruePositives(), 3))
-          .append("; fp: ").append(ReportLayout.right(stats.getFalsePositives(), 3)).append(']');
+      report.append(" [target: ")
+          .append(ReportLayout.right(integerFormat.format(stats.getTarget()), 3))
+          .append("; tp: ")
+          .append(ReportLayout.right(integerFormat.format(stats.getTruePositives()), 3))
+          .append("; fp: ")
+          .append(ReportLayout.right(integerFormat.format(stats.getFalsePositives()), 3)).append(']');
     }
   }
 

@@ -30,9 +30,17 @@ final class ReportLayout {
     return pad(value, width, true);
   }
 
+  /**
+   * Counts Unicode code points for logical report columns. This does not attempt to model
+   * grapheme clusters or terminal display-cell widths.
+   */
+  static int width(String value) {
+    return value.codePointCount(0, value.length());
+  }
+
   private static String pad(Object value, int width, boolean before) {
     String text = String.valueOf(value);
-    int padding = width - text.length();
+    int padding = width - width(text);
     if (padding <= 0) {
       return text;
     }

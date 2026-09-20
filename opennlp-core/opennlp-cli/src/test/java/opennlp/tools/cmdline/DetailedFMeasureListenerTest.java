@@ -57,6 +57,25 @@ class DetailedFMeasureListenerTest {
   }
 
   @Test
+  void localizesCountsWithRequestedLocale() {
+    listener.correctlyClassified(new Span[] {new Span(0, 1, "X")}, new Span[0]);
+
+    String report = listener.createReport(Locale.forLanguageTag("ar-EG"));
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        report.contains("[target:   ١; tp:   ١; fp:   ٠]"), report);
+  }
+
+  @Test
+  void padsSupplementaryLabelByCodePoint() {
+    listener.correctlyClassified(new Span[] {new Span(0, 1, "\uD801\uDC00")}, new Span[0]);
+
+    String typeLine = listener.createReport().lines().skip(2).findFirst().orElseThrow();
+
+    org.junit.jupiter.api.Assertions.assertTrue(typeLine.startsWith("           \uD801\uDC00:"), typeLine);
+  }
+
+  @Test
   void rejectsNullLocale() {
     assertThrows(IllegalArgumentException.class, () -> listener.createReport(null));
   }

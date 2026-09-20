@@ -258,8 +258,8 @@ public abstract class FineGrainedReportListener {
     Iterator<String> tokIterator = toks.iterator();
     while (tokIterator.hasNext() && count++ < maxLines) {
       String tok = tokIterator.next();
-      if (tok.length() > maxTokSize) {
-        maxTokSize = tok.length();
+      if (ReportLayout.width(tok) > maxTokSize) {
+        maxTokSize = ReportLayout.width(tok);
       }
     }
 
@@ -292,8 +292,8 @@ public abstract class FineGrainedReportListener {
     Iterator<String> tokIterator = toks.iterator();
     while (tokIterator.hasNext() && count++ < 20) {
       String tok = tokIterator.next();
-      if (tok.length() > maxTokenSize) {
-        maxTokenSize = tok.length();
+      if (ReportLayout.width(tok) > maxTokenSize) {
+        maxTokenSize = ReportLayout.width(tok);
       }
     }
 
@@ -327,8 +327,8 @@ public abstract class FineGrainedReportListener {
     int maxTagSize = 3;
 
     for (String t : tags) {
-      if (t.length() > maxTagSize) {
-        maxTagSize = t.length();
+      if (ReportLayout.width(t) > maxTagSize) {
+        maxTagSize = ReportLayout.width(t);
       }
     }
 
