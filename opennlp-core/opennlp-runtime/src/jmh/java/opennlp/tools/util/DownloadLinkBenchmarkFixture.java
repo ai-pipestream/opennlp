@@ -63,7 +63,7 @@ final class DownloadLinkBenchmarkFixture implements AutoCloseable {
     if (!parsed.isEmpty()) {
       URL tokenizer = parsed.getOrDefault("en", Map.of()).get(ModelType.TOKENIZER);
       if (parsed.size() != 1 || tokenizer == null
-          || !tokenizer.toString().contains("tokens-31&amp;copy.bin")) {
+          || !tokenizer.toString().endsWith("opennlp-en-ud-ewt-tokens-31&copy.bin")) {
         throw new IllegalStateException("Unexpected markup-heavy model map: " + parsed);
       }
     }

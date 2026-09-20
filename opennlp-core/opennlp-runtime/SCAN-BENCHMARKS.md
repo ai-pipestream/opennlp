@@ -86,6 +86,9 @@ harness diff, JDK and raw JMH output. Build and measurement must not overlap wit
 
 Unicode feature cases and flexible HTML markup exercise corrected behavior that the baseline may not implement. Compare speed only alongside output correctness. Link timing includes local file reads and model-map construction; checksum timing includes hashing and model loading.
 
+The markup-heavy fingerprint contains the decoded `&copy` filename fragment produced from the
+fixture's `&amp;copy` attribute text. Preserve the decoded fingerprint when comparing implementations.
+
 Trial setup validates stable behavior for shared workloads and prints a compact output fingerprint.
 The markup-heavy link case permits either the baseline's empty result or the corrected parser's
 single English tokenizer entry, while rejecting links embedded in comments. Preserve these
