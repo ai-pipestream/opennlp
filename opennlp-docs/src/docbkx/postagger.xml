@@ -363,6 +363,15 @@ Evaluating ... done
 Accuracy: 0.9659110277825124]]>
 			 </screen>
 		</para>
+		<para>
+		A fine-grained report can be written to a file for inspecting token and tag errors:
+		<screen>
+<![CDATA[$ opennlp POSTaggerEvaluator -model pt.postagger.bin -data pt.postagger.test \
+    -encoding utf-8 -reportOutputFile postagger-report.txt]]>
+		</screen>
+		The report uses stable dot-decimal numbers and keeps long token and tag labels intact in its
+		tables.
+		</para>
             <para>
             There is a command line tool for cross-validation of the test data set.
             The following command shows how the tool can be run:

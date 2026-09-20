@@ -17,6 +17,9 @@
 
 package opennlp.tools.cmdline;
 
+import java.math.RoundingMode;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -109,17 +112,17 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
     return statsForOutcome.get(type);
   }
 
-  private static final String PERCENT = "%\u00207.2f%%";
-  private static final String FORMAT = "%12s: precision: " + PERCENT
-      + ";  recall: " + PERCENT + "; F1: " + PERCENT + ".";
-  private static final String FORMAT_EXTRA = FORMAT
-      + " [target: %3d; tp: %3d; fp: %3d]";
-
   public String createReport() {
     return createReport(Locale.ROOT);
   }
 
   public String createReport(Locale locale) {
+    if (locale == null) {
+      throw new IllegalArgumentException("locale must not be null");
+    }
+    DecimalFormat percentFormat = new DecimalFormat("0.00", DecimalFormatSymbols.getInstance(locale));
+    percentFormat.setGroupingUsed(false);
+    percentFormat.setRoundingMode(RoundingMode.HALF_UP);
     StringBuilder ret = new StringBuilder();
     int tp = generalStats.getTruePositives();
     int found = generalStats.getFalsePositives() + tp;
@@ -127,26 +130,36 @@ public abstract class DetailedFMeasureListener<T> implements EvaluationMonitor<T
         .append(generalStats.getTarget()).append(" entities; found: ")
         .append(found).append(" entities; correct: ").append(tp).append(".\n");
 
-    ret.append(String.format(locale, FORMAT, "TOTAL",
-        zeroOrPositive(generalStats.getPrecisionScore() * 100),
-        zeroOrPositive(generalStats.getRecallScore() * 100),
-        zeroOrPositive(generalStats.getFMeasure() * 100)));
+    appendScores(ret, "TOTAL", generalStats, percentFormat, false);
     ret.append("\n");
     SortedSet<String> set = new TreeSet<>(new F1Comparator());
     set.addAll(statsForOutcome.keySet());
     for (String type : set) {
 
-      ret.append(String.format(locale, FORMAT_EXTRA, type,
-          zeroOrPositive(statsForOutcome.get(type).getPrecisionScore() * 100),
-          zeroOrPositive(statsForOutcome.get(type).getRecallScore() * 100),
-          zeroOrPositive(statsForOutcome.get(type).getFMeasure() * 100),
-          statsForOutcome.get(type).getTarget(), statsForOutcome.get(type)
-              .getTruePositives(), statsForOutcome.get(type)
-              .getFalsePositives()));
+      appendScores(ret, type, statsForOutcome.get(type), percentFormat, true);
       ret.append("\n");
     }
 
     return ret.toString();
+  }
+
+  private void appendScores(StringBuilder report, String label, Stats stats,
+      DecimalFormat percentFormat, boolean includeCounts) {
+    report.append(ReportLayout.right(label, 12)).append(": precision: ")
+        .append(formatPercent(stats.getPrecisionScore(), percentFormat))
+        .append(";  recall: ").append(formatPercent(stats.getRecallScore(), percentFormat))
+        .append("; F1: ").append(formatPercent(stats.getFMeasure(), percentFormat)).append('.');
+    if (includeCounts) {
+      report.append(" [target: ").append(ReportLayout.right(stats.getTarget(), 3))
+          .append("; tp: ").append(ReportLayout.right(stats.getTruePositives(), 3))
+          .append("; fp: ").append(ReportLayout.right(stats.getFalsePositives(), 3)).append(']');
+    }
+  }
+
+  private String formatPercent(double score, DecimalFormat format) {
+    double percent = zeroOrPositive(score * 100);
+    String sign = percent >= 0 ? " " : "";
+    return ReportLayout.right(sign + format.format(percent), 7) + "%";
   }
 
   @Override

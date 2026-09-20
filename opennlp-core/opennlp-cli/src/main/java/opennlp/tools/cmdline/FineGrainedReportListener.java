@@ -190,7 +190,10 @@ public abstract class FineGrainedReportListener {
     int initialIndex = 0;
     String[] tags = tagset.toArray(new String[0]);
     StringBuilder sb = new StringBuilder();
-    int minColumnSize = Integer.MIN_VALUE;
+    int minColumnSize = 1;
+    if (data.length == 0) {
+      return "| Accuracy | <-- classified as\n";
+    }
     String[][] matrix = new String[data.length][data[0].length];
     for (int i = 0; i < data.length; i++) {
       int j = 0;
@@ -207,12 +210,10 @@ public abstract class FineGrainedReportListener {
       }
     }
 
-    final String headerFormat = "%" + (minColumnSize + 2) + "s "; // | 1234567 |
-    final String cellFormat = "%" + (minColumnSize + 2) + "s "; // | 12345 |
-    final String diagFormat = " %" + (minColumnSize + 2) + "s";
+    int columnWidth = minColumnSize + 2;
     for (int i = initialIndex; i < tagset.size(); i++) {
-      sb.append(String.format(headerFormat,
-          generateAlphaLabel(i - initialIndex).trim()));
+      sb.append(ReportLayout.right(generateAlphaLabel(i - initialIndex).trim(), columnWidth))
+          .append(' ');
     }
     sb.append("| Accuracy | <-- classified as\n");
     for (int i = initialIndex; i < data.length; i++) {
@@ -220,14 +221,14 @@ public abstract class FineGrainedReportListener {
       for (; j < data[i].length - 1; j++) {
         if (i == j) {
           String val = "<" + matrix[i][j] + ">";
-          sb.append(String.format(diagFormat, val));
+          sb.append(' ').append(ReportLayout.right(val, columnWidth));
         } else {
-          sb.append(String.format(cellFormat, matrix[i][j]));
+          sb.append(ReportLayout.right(matrix[i][j], columnWidth)).append(' ');
         }
       }
-      sb.append(
-          String.format("|   %-6s |   %3s = ", matrix[i][j],
-              generateAlphaLabel(i - initialIndex))).append(tags[i]);
+      sb.append("|   ").append(ReportLayout.left(matrix[i][j], 6)).append(" |   ")
+          .append(ReportLayout.right(generateAlphaLabel(i - initialIndex), 3)).append(" = ")
+          .append(tags[i]);
       sb.append("\n");
     }
     return sb.toString();
@@ -235,20 +236,13 @@ public abstract class FineGrainedReportListener {
 
   protected void printGeneralStatistics() {
     printHeader("Evaluation summary");
-    printStream.append(
-        String.format("%21s: %6s", "Number of sentences", getNumberOfSentences())).append("\n");
-    printStream.append(
-        String.format("%21s: %6s", "Min sentence size", getMinSentenceSize())).append("\n");
-    printStream.append(
-        String.format("%21s: %6s", "Max sentence size", getMaxSentenceSize())).append("\n");
-    printStream.append(
-        String.format("%21s: %6s", "Average sentence size",
-            formatNumber("{0,number,#.##}", getAverageSentenceSize()))).append("\n");
-    printStream.append(
-        String.format("%21s: %6s", "Tags count", getNumberOfTags())).append("\n");
-    printStream.append(
-        String.format("%21s: %6s", "Accuracy",
-            formatNumber("{0,number,#.##%}", getAccuracy()))).append("\n");
+    appendStatistic("Number of sentences", getNumberOfSentences());
+    appendStatistic("Min sentence size", getMinSentenceSize());
+    appendStatistic("Max sentence size", getMaxSentenceSize());
+    appendStatistic("Average sentence size",
+        formatNumber("{0,number,#.##}", getAverageSentenceSize()));
+    appendStatistic("Tags count", getNumberOfTags());
+    appendStatistic("Accuracy", formatNumber("{0,number,#.##%}", getAccuracy()));
     printFooter("Evaluation Corpus Statistics");
   }
 
@@ -270,10 +264,8 @@ public abstract class FineGrainedReportListener {
     }
 
     int tableSize = maxTokSize + 19;
-    String format = "| %3s | %6s | %" + maxTokSize + "s |";
-
     printLine(tableSize);
-    printStream.append(String.format(format, "Pos", "Count", "Token")).append("\n");
+    appendTokenOccurrenceRow("Pos", "Count", "Token", maxTokSize);
     printLine(tableSize);
 
     // get the first 20 errors
@@ -283,9 +275,7 @@ public abstract class FineGrainedReportListener {
       String tok = tokIterator.next();
       int frequency = getTokenFrequency(tok);
 
-      printStream.append(String.format(format, count, frequency, tok)
-
-      ).append("\n");
+      appendTokenOccurrenceRow(count, frequency, tok, maxTokSize);
     }
     printLine(tableSize);
     printFooter("Most frequent tokens");
@@ -309,10 +299,8 @@ public abstract class FineGrainedReportListener {
 
     int tableSize = 31 + maxTokenSize;
 
-    String format = "| %" + maxTokenSize + "s | %6s | %5s | %7s |\n";
-
     printLine(tableSize);
-    printStream.append(String.format(format, "Token", "Errors", "Count", "% Err"));
+    appendTokenErrorRow("Token", "Errors", "Count", "% Err", maxTokenSize);
     printLine(tableSize);
 
     // get the first 20 errors
@@ -325,9 +313,7 @@ public abstract class FineGrainedReportListener {
       String rate = formatNumber("{0,number,#.##%}", (double) errors
           / ocurrencies);
 
-      printStream.append(String.format(format, tok, errors, ocurrencies, rate)
-
-      );
+      appendTokenErrorRow(tok, errors, ocurrencies, rate, maxTokenSize);
     }
     printLine(tableSize);
     printFooter("Tokens with the highest number of errors");
@@ -348,14 +334,9 @@ public abstract class FineGrainedReportListener {
 
     int tableSize = 65 + maxTagSize;
 
-    String headerFormat = "| %" + maxTagSize
-        + "s | %6s | %6s | %7s | %9s | %6s | %9s |\n";
-    String format = "| %" + maxTagSize
-        + "s | %6s | %6s | %-7s | %-9s | %-6s | %-9s |\n";
-
     printLine(tableSize);
-    printStream.append(String.format(headerFormat, "Tag", "Errors", "Count",
-        "% Err", "Precision", "Recall", "F-Measure"));
+    appendTagErrorRow("Tag", "Errors", "Count", "% Err", "Precision", "Recall",
+        "F-Measure", maxTagSize, true);
     printLine(tableSize);
 
     for (String tag : tags) {
@@ -368,12 +349,10 @@ public abstract class FineGrainedReportListener {
       double r = getTagRecall(tag);
       double f = getTagFMeasure(tag);
 
-      printStream.append(String.format(format, tag, errors, ocurrencies, rate,
+      appendTagErrorRow(tag, errors, ocurrencies, rate,
           formatNumber("{0,number,#.###}", p > 0 ? p : 0),
           formatNumber("{0,number,#.###}", r > 0 ? r : 0),
-          formatNumber("{0,number,#.###}", f > 0 ? f : 0))
-
-      );
+          formatNumber("{0,number,#.###}", f > 0 ? f : 0), maxTagSize, false);
     }
     printLine(tableSize);
 
@@ -417,16 +396,11 @@ public abstract class FineGrainedReportListener {
             .append("\n[")
             .append(t)
             .append("]\n")
-            .append(
-                String.format("%12s: %-8s", "Accuracy",
-                    formatNumber("{0,number,#.##%}", acc)))
+            .append(ReportLayout.right("Accuracy", 12)).append(": ")
+            .append(ReportLayout.left(formatNumber("{0,number,#.##%}", acc), 8))
             .append("\n");
-        printStream.append(
-            String.format("%12s: %-8s", "Ocurrencies",
-                    getTokenFrequency(t))).append("\n");
-        printStream.append(
-            String.format("%12s: %-8s", "Errors",
-                    getTokenErrors(t))).append("\n");
+        appendTokenDetail("Ocurrencies", getTokenFrequency(t));
+        appendTokenDetail("Errors", getTokenErrors(t));
 
         SortedSet<String> labels = getConfusionMatrixTagset(t);
 
@@ -436,6 +410,44 @@ public abstract class FineGrainedReportListener {
       }
     }
     printFooter("Confusion matrix for tokens");
+  }
+
+  private void appendStatistic(String label, Object value) {
+    printStream.append(ReportLayout.right(label, 21)).append(": ")
+        .append(ReportLayout.right(value, 6)).append('\n');
+  }
+
+  private void appendTokenOccurrenceRow(Object position, Object count, String token, int tokenWidth) {
+    printStream.append("| ").append(ReportLayout.right(position, 3)).append(" | ")
+        .append(ReportLayout.right(count, 6)).append(" | ")
+        .append(ReportLayout.right(token, tokenWidth)).append(" |\n");
+  }
+
+  private void appendTokenErrorRow(String token, Object errors, Object count, String rate,
+      int tokenWidth) {
+    printStream.append("| ").append(ReportLayout.right(token, tokenWidth)).append(" | ")
+        .append(ReportLayout.right(errors, 6)).append(" | ")
+        .append(ReportLayout.right(count, 5)).append(" | ")
+        .append(ReportLayout.right(rate, 7)).append(" |\n");
+  }
+
+  private void appendTagErrorRow(String tag, Object errors, Object count, String rate,
+      String precision, String recall, String fMeasure, int tagWidth, boolean header) {
+    printStream.append("| ").append(ReportLayout.right(tag, tagWidth)).append(" | ")
+        .append(ReportLayout.right(errors, 6)).append(" | ")
+        .append(ReportLayout.right(count, 6)).append(" | ")
+        .append(header ? ReportLayout.right(rate, 7) : ReportLayout.left(rate, 7)).append(" | ")
+        .append(header ? ReportLayout.right(precision, 9) : ReportLayout.left(precision, 9))
+        .append(" | ")
+        .append(header ? ReportLayout.right(recall, 6) : ReportLayout.left(recall, 6))
+        .append(" | ")
+        .append(header ? ReportLayout.right(fMeasure, 9) : ReportLayout.left(fMeasure, 9))
+        .append(" |\n");
+  }
+
+  private void appendTokenDetail(String label, Object value) {
+    printStream.append(ReportLayout.right(label, 12)).append(": ")
+        .append(ReportLayout.left(value, 8)).append('\n');
   }
 
   /** Auxiliary method that prints a emphasised report header */
@@ -911,11 +923,11 @@ public abstract class FineGrainedReportListener {
     }
 
     private int getMinSentenceSize() {
-      return this.minimalSentenceLength;
+      return getNumberOfSentences() == 0 ? 0 : this.minimalSentenceLength;
     }
 
     private int getMaxSentenceSize() {
-      return this.maximumSentenceLength;
+      return getNumberOfSentences() == 0 ? 0 : this.maximumSentenceLength;
     }
 
     private double getTokenAccuracy(String token) {

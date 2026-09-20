@@ -55,6 +55,36 @@ public class FineGrainedReportListenerTest {
         () -> "Report should not render figures with the default locale:\n" + report);
   }
 
+  @Test
+  void testEmptyReport() throws Exception {
+    try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      new POSTaggerFineGrainedReportListener(out).writeReport();
+      String report = out.toString(StandardCharsets.UTF_8);
+      Assertions.assertTrue(report.contains("  Number of sentences:      0\n"));
+      Assertions.assertTrue(report.contains("    Min sentence size:      0\n"));
+      Assertions.assertTrue(report.contains("    Max sentence size:      0\n"));
+      Assertions.assertTrue(report.contains("Average sentence size:      0\n"));
+      Assertions.assertTrue(report.contains("             Accuracy:     0%\n"));
+      Assertions.assertTrue(report.contains("| Accuracy | <-- classified as\n"));
+    }
+  }
+
+  @Test
+  void testReportPreservesSupplementaryLabels() throws Exception {
+    String[] sentence = {"token\uD83D\uDE00"};
+    POSSample reference = new POSSample(sentence, new String[] {"TAG\uD83D\uDE00-LONG"});
+    POSSample prediction = new POSSample(sentence, new String[] {"OTHER"});
+
+    try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      POSTaggerFineGrainedReportListener listener = new POSTaggerFineGrainedReportListener(out);
+      listener.misclassified(reference, prediction);
+      listener.writeReport();
+      String report = out.toString(StandardCharsets.UTF_8);
+      Assertions.assertTrue(report.contains("token\uD83D\uDE00"));
+      Assertions.assertTrue(report.contains("TAG\uD83D\uDE00-LONG"));
+    }
+  }
+
   private static String createReport() throws Exception {
     final String[] sentence = {"He", "runs", "fast"};
     final POSSample reference = new POSSample(sentence, new String[] {"PRP", "VBZ", "RB"});
