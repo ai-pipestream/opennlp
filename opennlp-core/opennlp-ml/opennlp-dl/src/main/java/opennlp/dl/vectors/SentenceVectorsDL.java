@@ -20,19 +20,15 @@ package opennlp.dl.vectors;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import ai.onnxruntime.NodeInfo;
 import ai.onnxruntime.OnnxJavaType;
-import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.TensorInfo;
@@ -607,35 +603,20 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       Arrays.fill(ids, b * length + rowLength, (b + 1) * length, padTokenId);
     }
 
-    final Map<String, OnnxTensor> inputs = new HashMap<>();
-    final long[] shape = {batch.length, length};
-
-    try {
-      inputs.put(INPUT_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(ids), shape));
-
-      inputs.put(ATTENTION_MASK, OnnxTensor.createTensor(env, LongBuffer.wrap(mask), shape));
-
-      inputs.put(TOKEN_TYPE_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(types), shape));
-
-      try (OrtSession.Result result = session.run(inputs)) {
-        final OnnxValue output = result.get(outputName).orElseThrow(() -> new OrtException(
-            "The model returned no output named " + outputName));
-        // getValue() copies the tensor into Java arrays, so the result can be closed safely.
-        final Object value = output.getValue();
-        final float[][] vectors = new float[batch.length][];
-        for (int b = 0; b < batch.length; b++) {
-          vectors[b] = pooledOutput ? ((float[][]) value)[b]
-              : pool(((float[][][]) value)[b], batch[b].mask());
-          if (normalize) {
-            scaleToUnitLength(vectors[b]);
-          }
-        }
-        return vectors;
+    // The tensors, the run and the release of every native handle belong to OnnxInference; what is
+    // left here is the batch this component staged and what it makes of the numbers. The value has
+    // been copied out of native memory already, so pooling it after the tensors are closed is safe.
+    final Object value = inference.run(new long[] {batch.length, length}, ids, mask, types,
+        outputName);
+    final float[][] vectors = new float[batch.length][];
+    for (int b = 0; b < batch.length; b++) {
+      vectors[b] = pooledOutput ? ((float[][]) value)[b]
+          : pool(((float[][][]) value)[b], batch[b].mask());
+      if (normalize) {
+        scaleToUnitLength(vectors[b]);
       }
-    } finally {
-      inputs.values().forEach(OnnxTensor::close);
     }
-
+    return vectors;
   }
 
   /**

@@ -67,6 +67,15 @@ public abstract class AbstractDL implements AutoCloseable {
   protected final SubwordTokenizer tokenizer;
   protected final Map<String, Integer> vocab;
 
+  /**
+   * The one ONNX Runtime interaction of this package: it stages tensors, runs {@link #session} and
+   * reads an output back, releasing every native handle it created. Subclasses express only which
+   * inputs their model declares, which output they read, and what they do with the numbers. It
+   * holds no state of its own, so {@link #close()} has nothing of it to close; that changes with
+   * the first pooled or pinned native state added to it.
+   */
+  protected final OnnxInference inference;
+
   private final AtomicBoolean closed = new AtomicBoolean();
 
   protected record ChunkRange(int start, int end) {
@@ -126,6 +135,7 @@ public abstract class AbstractDL implements AutoCloseable {
         throw e;
       }
       this.session = createdSession;
+      this.inference = new OnnxInference(env, createdSession);
     }
   }
 
@@ -146,6 +156,7 @@ public abstract class AbstractDL implements AutoCloseable {
     this.session = session;
     this.vocab = vocab;
     this.tokenizer = createWordpieceEncoder(vocab, lowerCase);
+    this.inference = new OnnxInference(env, session);
   }
 
   /**

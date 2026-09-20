@@ -19,16 +19,13 @@ package opennlp.dl.namefinder;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import org.slf4j.Logger;
@@ -350,35 +347,21 @@ public class NameFinderDL extends AbstractDL implements OffsetMappingNameFinder 
    */
   private float[][] infer(final Tokens tokens) {
 
-    // At most three inputs (ids, attention mask, token type ids), so size for exactly that.
-    final Map<String, OnnxTensor> inputs = HashMap.newHashMap(3);
+    // One chunk is the batch of one row that a shape of {1, tokens} describes. The tensors, the run
+    // and the release of every native handle belong to OnnxInference; an input the model does not
+    // declare is left out by passing no array for it. The value has been copied out of native
+    // memory, so it stays valid after the tensors are closed.
     final Object output;
     try {
-      inputs.put(INPUT_IDS, OnnxTensor.createTensor(env, LongBuffer.wrap(tokens.ids()),
-          new long[] {1, tokens.ids().length}));
-
-      if (includeAttentionMask) {
-        inputs.put(ATTENTION_MASK, OnnxTensor.createTensor(env,
-            LongBuffer.wrap(tokens.mask()), new long[] {1, tokens.mask().length}));
-      }
-
-      if (includeTokenTypeIds) {
-        inputs.put(TOKEN_TYPE_IDS, OnnxTensor.createTensor(env,
-            LongBuffer.wrap(tokens.types()), new long[] {1, tokens.types().length}));
-      }
-
-      // getValue() copies the tensor into Java arrays, so the result can be closed safely.
-      try (OrtSession.Result result = session.run(inputs)) {
-        output = result.get(0).getValue();
-      }
+      output = inference.run(new long[] {1, tokens.ids().length}, tokens.ids(),
+          includeAttentionMask ? tokens.mask() : null,
+          includeTokenTypeIds ? tokens.types() : null);
     } catch (OrtException ex) {
       throw new IllegalStateException(
           "Unable to perform name finder inference: " + ex.getMessage(), ex);
     } catch (RuntimeException ex) {
       throw new IllegalStateException(
           "Unexpected runtime failure during name finder inference: " + ex.getMessage(), ex);
-    } finally {
-      inputs.values().forEach(OnnxTensor::close);
     }
 
     // The model returns one score row per token, batched: float[batch][token][label]. Any other

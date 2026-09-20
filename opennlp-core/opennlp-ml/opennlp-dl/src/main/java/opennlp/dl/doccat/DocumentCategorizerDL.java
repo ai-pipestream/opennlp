@@ -19,7 +19,6 @@ package opennlp.dl.doccat;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -32,7 +31,6 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
 
-import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
@@ -239,31 +237,17 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
    */
   private float[] infer(final Tokens t) {
 
-    // At most three inputs (ids, attention mask, token type ids), so size for exactly that.
-    final Map<String, OnnxTensor> inputs = HashMap.newHashMap(3);
+    // One token window is the batch of one row that a shape of {1, tokens} describes. The tensors,
+    // the run and the release of every native handle belong to OnnxInference; an input the model
+    // does not declare is left out by passing no array for it. The value has been copied out of
+    // native memory, so it stays valid after the tensors are closed.
     final Object output;
     try {
-      inputs.put(INPUT_IDS, OnnxTensor.createTensor(env,
-          LongBuffer.wrap(t.ids()), new long[] {1, t.ids().length}));
-
-      if (includeAttentionMask) {
-        inputs.put(ATTENTION_MASK, OnnxTensor.createTensor(env,
-            LongBuffer.wrap(t.mask()), new long[] {1, t.mask().length}));
-      }
-
-      if (includeTokenTypeIds) {
-        inputs.put(TOKEN_TYPE_IDS, OnnxTensor.createTensor(env,
-            LongBuffer.wrap(t.types()), new long[] {1, t.types().length}));
-      }
-
-      // getValue() copies the tensor into Java arrays, so the result can be closed safely.
-      try (OrtSession.Result result = session.run(inputs)) {
-        output = result.get(0).getValue();
-      }
+      output = inference.run(new long[] {1, t.ids().length}, t.ids(),
+          includeAttentionMask ? t.mask() : null,
+          includeTokenTypeIds ? t.types() : null);
     } catch (OrtException | RuntimeException ex) {
       throw new IllegalStateException("Unable to perform document classification inference", ex);
-    } finally {
-      inputs.values().forEach(OnnxTensor::close);
     }
 
     return logitsFromOutput(output);
