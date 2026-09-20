@@ -35,8 +35,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Formatter;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -356,18 +356,9 @@ public class DownloadUtil {
           // Reading the file to update the digest
         }
       }
-      return byteArrayToHexString(digest.digest());
+      return HexFormat.of().formatHex(digest.digest());
     } catch (NoSuchAlgorithmException e) {
       throw new IOException("SHA-512 algorithm not found", e);
-    }
-  }
-
-  private static String byteArrayToHexString(byte[] bytes) {
-    try (Formatter formatter = new Formatter()) {
-      for (byte b : bytes) {
-        formatter.format("%02x", b);
-      }
-      return formatter.toString();
     }
   }
 

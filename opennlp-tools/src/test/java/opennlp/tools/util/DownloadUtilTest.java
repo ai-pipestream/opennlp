@@ -24,6 +24,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EmptySource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -87,11 +88,17 @@ public class DownloadUtilTest {
   }
 
   @ParameterizedTest(name = "Detect invalid input: \"{0}\"")
-  @NullAndEmptySource
+  @EmptySource
   @ValueSource(strings = {" ", "\t", "\n"})
   public void testDownloadModelInvalid(String input) {
     assertThrows(IOException.class, () -> DownloadUtil.downloadModel(input,
             ModelType.SENTENCE_DETECTOR, SentenceModel.class), "Invalid model");
+  }
+
+  @Test
+  public void testDownloadModelNullLanguage() {
+    assertThrows(IllegalArgumentException.class, () -> DownloadUtil.downloadModel(
+        (String) null, ModelType.SENTENCE_DETECTOR, SentenceModel.class));
   }
 
   private static final ModelType MT_TOKENIZER = ModelType.TOKENIZER;
