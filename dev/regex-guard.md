@@ -30,15 +30,15 @@ non-portable APIs.
 Run the executable guard fixtures with:
 
 ```shell
-./mvnw -N -Pregex-guard-fixtures -Drat.skip=true invoker:run
+dev/run-regex-guard-fixtures.sh
 ```
 
-Calling the Invoker goal directly avoids running the incomplete baseline through the production
-scan. Each fixture inherits the root plugin configuration and uses Invoker's filtered
-`@project.version@` value for its parent, so release-version changes cannot resolve an older parent
-from the local repository. Post-build scripts require proof that compilation completed, the regex
-guard ran, and every expected diagnostic appeared. The negative fixtures must fail their nested
-builds, while the lookalike receiver and exact name finder exception fixtures must pass.
+The shell driver uses the repository Maven wrapper and existing `forbiddenapis` configuration. It
+copies each fixture below `target`, substitutes the current project version into its parent, and
+requires proof that compilation completed, the regex guard ran, and every expected diagnostic
+appeared. The negative fixtures must fail their nested builds, while the lookalike receiver and
+exact name finder exception fixtures must pass. A mutated signature-file run also proves that a
+missing signature makes fixture verification fail.
 
 For a clean production check after composing the implementation branches, run:
 
