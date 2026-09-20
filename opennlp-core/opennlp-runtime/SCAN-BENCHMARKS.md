@@ -1,8 +1,9 @@
 # Runtime scan benchmarks
 
 The checksum benchmark uses the public cached-model path, so its score includes sidecar I/O,
-hashing, and model construction. `DownloadLinkParsingBenchmark` covers steady parsing and a
-single-shot cold-start slice for normal, markup-heavy, and long indexes.
+hashing, and model construction. `DownloadLinkParsingBenchmark` covers steady parsing for normal,
+markup-heavy, and long indexes. `DownloadLinkColdStartBenchmark` separately measures the first HTML
+parser call in each fork.
 
 Build and materialize the test classpath:
 
@@ -15,11 +16,18 @@ Build and materialize the test classpath:
 CP="opennlp-core/opennlp-runtime/target/classes:opennlp-core/opennlp-runtime/target/test-classes:$(cat /tmp/opennlp-jmh-cp.txt)"
 ```
 
-Smoke-test the harness:
+Smoke-test the steady-state harness shape:
 
 ```bash
-java -cp "$CP" org.openjdk.jmh.Main 'FeatureClassificationBenchmark|AncoraHeadRulesBenchmark|DownloadChecksumBenchmark' \
+java -cp "$CP" org.openjdk.jmh.Main 'FeatureClassificationBenchmark|AncoraHeadRulesBenchmark|DownloadChecksumBenchmark|DownloadLinkParsingBenchmark' \
     -f 1 -wi 0 -i 1 -r 100ms
+```
+
+Smoke-test the cold-start source shape separately:
+
+```bash
+java -cp "$CP" org.openjdk.jmh.Main DownloadLinkColdStartBenchmark \
+    -p workload=normal -f 1 -wi 0 -i 1
 ```
 
 To measure an implementation checkout without copying benchmark sources into its review diff,
@@ -28,9 +36,20 @@ Classpath order selects the implementation while retaining the benchmark from th
 
 For measurements, use at least two forks, warmup, several measurement iterations, and the allocation profiler. Save the raw output with the exact commit and JDK. Do not treat a smoke run as performance evidence.
 
-Run `DownloadLinkParsingBenchmark` only after the HTML parser implementation and its dependency
-classpath have been finalized. Its single-shot method needs multiple independent forks for useful
-cold-start evidence; one fork is only a harness check.
+Run the link benchmarks only after the HTML parser implementation and its dependency classpath have
+been finalized. Steady-state measurements use `DownloadLinkParsingBenchmark` with normal warmup and
+measurement iterations. Cold-start measurements use `DownloadLinkColdStartBenchmark` with zero
+warmup iterations, exactly one single-shot measurement per fork, and multiple independent forks:
+
+```bash
+java -cp "$CP" org.openjdk.jmh.Main DownloadLinkColdStartBenchmark \
+    -f 10 -wi 0 -i 1
+```
+
+Do not add a warmup invocation to the cold command. Its trial setup creates the local fixture but
+does not construct or invoke `DownloadParser`. The timed method performs the first parser call in
+that fork. Trial teardown validates the result and prints its fingerprint after timing. One fork is
+only a harness check, not cold-start evidence.
 
 Before measuring, prepend the checkout's built reactor class directories to the resolved dependency
 classpath. This prevents an installed Maven SNAPSHOT from supplying the implementation being timed:

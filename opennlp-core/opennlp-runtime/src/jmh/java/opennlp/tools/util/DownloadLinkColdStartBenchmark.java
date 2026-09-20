@@ -4,15 +4,10 @@
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * the License.  You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
 package opennlp.tools.util;
 
@@ -37,33 +32,39 @@ import opennlp.tools.models.ModelType;
 
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Thread)
-public class DownloadLinkParsingBenchmark {
+public class DownloadLinkColdStartBenchmark {
 
   @Param({"normal", "markupHeavy", "longIndex"})
   private String workload;
 
   private DownloadLinkBenchmarkFixture fixture;
+  private Map<String, Map<ModelType, URL>> parsed;
 
   @Setup(Level.Trial)
   public void setUp() throws Exception {
     fixture = DownloadLinkBenchmarkFixture.create(workload);
-    Map<String, Map<ModelType, URL>> parsed =
-        new DownloadUtil.DownloadParser(fixture.indexUrl()).getAvailableModels();
-    fixture.validateParsedModels(parsed);
-    System.out.println("DownloadLinkParsingBenchmark fingerprint " + workload + "="
-        + DownloadLinkBenchmarkFixture.fingerprint(parsed));
   }
 
   @Benchmark
-  @BenchmarkMode(Mode.AverageTime)
-  @Warmup(iterations = 3, time = 1)
-  @Measurement(iterations = 5, time = 1)
-  public Map<String, Map<ModelType, URL>> parseIndex() throws Exception {
-    return new DownloadUtil.DownloadParser(fixture.indexUrl()).getAvailableModels();
+  @BenchmarkMode(Mode.SingleShotTime)
+  @Warmup(iterations = 0)
+  @Measurement(iterations = 1)
+  public Map<String, Map<ModelType, URL>> firstParserCall() throws Exception {
+    parsed = new DownloadUtil.DownloadParser(fixture.indexUrl()).getAvailableModels();
+    return parsed;
   }
 
   @TearDown(Level.Trial)
   public void tearDown() throws Exception {
-    fixture.close();
+    try {
+      if (parsed == null) {
+        throw new IllegalStateException("Cold-start benchmark did not execute");
+      }
+      fixture.validateParsedModels(parsed);
+      System.out.println("DownloadLinkColdStartBenchmark fingerprint " + workload + "="
+          + DownloadLinkBenchmarkFixture.fingerprint(parsed));
+    } finally {
+      fixture.close();
+    }
   }
 }
