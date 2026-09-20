@@ -35,7 +35,6 @@ public class StringPattern {
   private static final int CONTAINS_DIGIT = 0x1 << 10;
   private static final int CONTAINS_HYPHEN = 0x1 << 11;
   private static final int CONTAINS_LETTERS = 0x1 << 12;
-  private static final int CONTAINS_UPPERCASE = 0x1 << 13;
 
   private final int pattern;
 
@@ -72,7 +71,6 @@ public class StringPattern {
     boolean allKatakana = true;
     boolean initialCapital = false;
     boolean containsLetters = false;
-    boolean containsUppercase = false;
     boolean containsDigit = false;
     boolean malformed = false;
     boolean markCanContinueWord = false;
@@ -99,7 +97,11 @@ public class StringPattern {
 
       int codePoint = token.codePointAt(offset);
       int type = Character.getType(codePoint);
-      boolean isLetter = Character.isLetter(codePoint);
+      boolean isLetter = type == Character.UPPERCASE_LETTER
+          || type == Character.LOWERCASE_LETTER
+          || type == Character.TITLECASE_LETTER
+          || type == Character.MODIFIER_LETTER
+          || type == Character.OTHER_LETTER;
       boolean isMark = type == Character.NON_SPACING_MARK
           || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK;
 
@@ -110,7 +112,6 @@ public class StringPattern {
           initialCapital = uppercase;
         }
         containsLetters = true;
-        containsUppercase |= uppercase;
         allCapital &= uppercase;
         allLowercase &= lowercase;
         allDigits = false;
@@ -154,21 +155,23 @@ public class StringPattern {
         }
       }
 
-      Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
-      if (script == Character.UnicodeScript.HIRAGANA) {
-        allKatakana = false;
-        japaneseRunStarted = true;
-      } else if (script == Character.UnicodeScript.KATAKANA) {
-        allHiragana = false;
-        japaneseRunStarted = true;
-      } else if (isMark && markCanContinueWord) {
-        // Combining marks extend the preceding script run.
-      } else if ((codePoint == '・' || codePoint == 'ー' || codePoint == '〜')
-          && japaneseRunStarted) {
-        markCanContinueWord = true;
-      } else {
-        allHiragana = false;
-        allKatakana = false;
+      if (allHiragana || allKatakana) {
+        Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
+        if (script == Character.UnicodeScript.HIRAGANA) {
+          allKatakana = false;
+          japaneseRunStarted = true;
+        } else if (script == Character.UnicodeScript.KATAKANA) {
+          allHiragana = false;
+          japaneseRunStarted = true;
+        } else if (isMark && markCanContinueWord) {
+          // Combining marks extend the preceding script run.
+        } else if ((codePoint == '・' || codePoint == 'ー' || codePoint == '〜')
+            && japaneseRunStarted) {
+          markCanContinueWord = true;
+        } else {
+          allHiragana = false;
+          allKatakana = false;
+        }
       }
 
       offset += Character.charCount(codePoint);
@@ -200,9 +203,6 @@ public class StringPattern {
     }
     if (containsLetters) {
       pattern |= CONTAINS_LETTERS;
-    }
-    if (containsUppercase) {
-      pattern |= CONTAINS_UPPERCASE;
     }
     if (containsDigit) {
       pattern |= CONTAINS_DIGIT;
