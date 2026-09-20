@@ -4,6 +4,10 @@ Copyright 2021-2026 The Apache Software Foundation
 This product includes software developed at
 The Apache Software Foundation (http://www.apache.org/).
 
+This product includes named HTML character reference data from the WHATWG
+HTML Living Standard.
+Copyright WHATWG (Apple, Google, Mozilla, Microsoft).
+
 ============================================================================
 
 The snowball stemmers in
