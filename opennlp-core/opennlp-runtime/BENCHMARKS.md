@@ -185,7 +185,7 @@ concurrent access. Run it with `mvn verify` (not `mvn test`, which excludes
 `*IT.java`).
 
 ```bash
-mvn verify -pl opennlp-core/opennlp-runtime -am \
-    -Dforbiddenapis.skip=true \
+./mvnw verify -pl opennlp-core/opennlp-runtime -am \
+    -Dopennlp.forkCount=1 -Drat.skip=true \
     -Dit.test=ThreadSafetyBenchmarkIT
 ```
