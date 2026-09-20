@@ -30,7 +30,7 @@ variance reporting.
 # Build with JMH profile
 mvn test-compile -Pjmh \
     -pl opennlp-core/opennlp-runtime -am \
-    -Dforbiddenapis.skip=true -Dcheckstyle.skip=true
+    -Dcheckstyle.skip=true
 
 # Materialize the test classpath once (JMH's forked JVMs inherit
 # java.class.path, which mvn exec:java does not populate, running
@@ -131,6 +131,5 @@ concurrent access. Run it with `mvn verify` (not `mvn test`, which excludes
 
 ```bash
 mvn verify -pl opennlp-core/opennlp-runtime -am \
-    -Dforbiddenapis.skip=true \
     -Dit.test=ThreadSafetyBenchmarkIT
 ```

@@ -21,8 +21,15 @@ final class LookalikeMethods {
   String[] split(String value) { return new String[] {value}; }
   String replaceAll(String value, String replacement) { return replacement; }
   String replaceFirst(String value, String replacement) { return value; }
+  String format(String value, Object... args) { return value; }
+  String formatted(Object... args) { return args.length == 0 ? "" : args[0].toString(); }
+  String printf(String value, Object... args) { return value; }
+  String getPathMatcher(String value) { return value; }
+  String newDirectoryStream(String path, String glob) { return path + glob; }
 
   Object[] use(String value) {
-    return new Object[] {matches(value), split(value), replaceAll(value, "x"), replaceFirst(value, "x")};
+    return new Object[] {matches(value), split(value), replaceAll(value, "x"), replaceFirst(value, "x"),
+        format(value, 1), formatted(value), printf(value, 1), getPathMatcher(value),
+        newDirectoryStream(value, "*")};
   }
 }
