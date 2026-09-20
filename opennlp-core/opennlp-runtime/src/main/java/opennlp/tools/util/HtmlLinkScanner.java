@@ -210,7 +210,8 @@ final class HtmlLinkScanner {
         cursor++;
       } else if (script && escaped == 0 && html.startsWith("<!--", cursor)) {
         escaped = 1;
-        cursor += 4;
+        // Revisit the opening dashes: an immediate '>' returns to normal script data.
+        cursor += 2;
       } else if (script && escaped == 1 && appropriateName(html, cursor + 1, name)) {
         escaped = 2;
         cursor += name.length() + 1;

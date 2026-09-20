@@ -81,6 +81,14 @@ class HtmlLinkScannerTest {
   }
 
   @Test
+  void testScriptEscapeCanCloseImmediatelyAfterOpeningDashes() {
+    for (String escape : List.of("<!-->", "<!--->", "<!-- -->")) {
+      Assertions.assertEquals(List.of("real"), HtmlLinkScanner.links(
+          "<script>" + escape + "<script></script><a href=real>"), escape);
+    }
+  }
+
+  @Test
   void testAbruptAndEofCommentsDoNotInventLinks() {
     Assertions.assertAll(
         () -> Assertions.assertEquals(List.of("one"),
