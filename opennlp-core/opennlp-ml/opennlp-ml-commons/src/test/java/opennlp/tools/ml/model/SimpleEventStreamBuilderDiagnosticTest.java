@@ -24,16 +24,16 @@ class SimpleEventStreamBuilderDiagnosticTest {
 
   @Test
   void testMissingOutcomeSeparatorDiagnostic() {
-    RuntimeException error = Assertions.assertThrows(RuntimeException.class,
+    IllegalArgumentException error = Assertions.assertThrows(IllegalArgumentException.class,
         () -> new SimpleEventStreamBuilder().add("broken event"));
     Assertions.assertEquals("format error of the event \"broken event\"", error.getMessage());
   }
 
   @Test
   void testMissingRealValueDiagnostic() {
-    RuntimeException error = Assertions.assertThrows(RuntimeException.class,
+    IllegalArgumentException error = Assertions.assertThrows(IllegalArgumentException.class,
         () -> new SimpleEventStreamBuilder().add("outcome/context;"));
     Assertions.assertEquals("format error of the event \"outcome/context;\". "
-        + "\"[context]\" doesn't have value", error.getMessage());
+        + "\"context;\" is not name;value", error.getMessage());
   }
 }
