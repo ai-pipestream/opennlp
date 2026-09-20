@@ -39,10 +39,24 @@ new DocumentCategorizerDL(model, vocabulary, categories, options);
 new NameFinderDL(model, vocabulary, ids2Labels, options, sentenceDetector);
 ```
 
-The text embedder SPI cannot ask for this yet. `OnnxTextEmbedderProvider` reads the deprecated `gpu`
-and `gpuDeviceId` options off a spec and has no option for an execution provider list, so an embedder
-configured by name runs on the CPU or on CUDA and nowhere else. Asking for an addon execution
-provider means the Java API above.
+## Asking for OpenVINO from a spec
+
+A component configured by name, through `TextEmbedderProvider`, asks for this execution provider in
+the `executionProviders` option of its spec:
+
+```
+executionProviders=openvino(device_type=GPU.0),cpu
+```
+
+`OnnxTextEmbedderProvider` documents the syntax. The short form: `,` separates the requests of the
+ordered list and `;` separates the provider options inside one request, which is why a device type
+holding a comma, such as `openvino(device_type=MULTI:GPU,CPU),cpu`, needs no escaping. The id is the
+id this module's configurer answers to, so nothing about this option is specific to OpenVINO: an
+addon becomes reachable from a spec by registering a configurer, and the id is how a spec names it.
+
+The deprecated `gpu` and `gpuDeviceId` spec options still work and still mean CUDA. They are read
+only while `executionProviders` is absent, which is the precedence
+`ExecutionProviders.resolve(InferenceOptions)` documents for the two settings they map onto.
 
 ## The device type is the whole configuration
 

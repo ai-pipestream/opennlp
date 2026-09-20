@@ -119,3 +119,53 @@ tokenizer = AutoTokenizer.from_pretrained(model_id)
 model.save_pretrained(onnx_path)
 tokenizer.save_pretrained(onnx_path)
 ```
+
+## Android
+
+This module does **not** run on Android and produces no Android artifact. What it does hold is a
+check that keeps a future Android addon possible: `AndroidReachabilityTest` compiles the ONNX Runtime
+facing sources of `opennlp.dl` a second time with `--release 11`, in process, and fails if one of
+them has picked up a Java API or a language feature newer than that. Java 11 is the level Android's
+desugaring covers, and a source that compiles under a release by definition uses nothing newer.
+
+```bash
+./mvnw -o test -pl opennlp-core/opennlp-ml/opennlp-dl -am -Dtest=AndroidReachabilityTest
+```
+
+The guarded sources are `OnnxInference`, `InferenceOptions`, `ExecutionProvider`,
+`ExecutionProviderConfigurer`, `ExecutionProviderPlacement`, `CpuExecutionProviderConfigurer` and
+`CudaExecutionProviderConfigurer`. `OnnxInference` is the one that matters, since it is the single ORT
+interaction of the package; the rest are what an addon would have to implement to register an
+execution provider. The test also asserts that every other source of the package is on its list of
+known exceptions, so a new file cannot slip past unnoticed.
+
+The usual tool for this is animal-sniffer with an Android signature set. It is not used here because
+neither `animal-sniffer-maven-plugin` nor any Android signature artifact resolves in an offline
+build, and a check that only an online build can run is not a check. The trade is stated in the test:
+`--release` catches newer language features as well as newer APIs, which a signature set does not,
+and it misses an API that is in Java 11 and absent from Android, which a signature set would catch.
+
+### What an actual Android build would still need
+
+The check is about one property. A real Android addon would have to deal with all of this:
+
+1. **The language level.** This module compiles at the project baseline, JDK 21, so it emits class
+   file version 65. An Android build needs a level its toolchain accepts, which means either a
+   separate source set for the addon or a module whose `maven.compiler.release` differs from the
+   project's. The check does not change what this module targets and must not be read as lowering it.
+2. **Four sources of `opennlp.dl` that are not reachable today**, each for a concrete reason:
+   `Tokens` is a record; `AbstractDL` holds records and switch rules; `ExecutionProviderRequest` uses
+   a pattern `instanceof`; `ExecutionProviders` uses `Stream.toList`, which is Java 16. `Tokens` is
+   the awkward one, because every component passes it and its accessors are its API, so replacing the
+   record with a class is a visible change rather than a rewrite of a method body.
+   `AndroidReachabilityTest` holds this list and requires each of them to really fail under
+   `--release 11`, so the list cannot go stale in the optimistic direction.
+3. **A different ONNX Runtime artifact.** This module compiles against
+   `com.microsoft.onnxruntime:onnxruntime`, a jar carrying desktop native libraries. Android builds
+   depend on `com.microsoft.onnxruntime:onnxruntime-android`, published as an AAR, and an AAR is not
+   a Maven jar dependency a module like this one can simply add. Which execution providers that
+   artifact registers is its own matter, so `ExecutionProviderConfigurer` implementations for an
+   Android accelerator would be new addons rather than the CUDA one that ships here.
+4. **Service loading under shrinking.** Execution providers and text embedders are resolved through
+   `java.util.ServiceLoader`. R8 and resource shrinking drop `META-INF/services` entries unless they
+   are kept, so an Android addon needs the keep rules to go with its service files.

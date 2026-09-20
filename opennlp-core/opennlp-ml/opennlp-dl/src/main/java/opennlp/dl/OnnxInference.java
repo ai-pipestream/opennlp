@@ -253,6 +253,11 @@ import opennlp.tools.commons.ThreadSafe;
  * code moved here used, is Java 19, so a plain sized {@link HashMap} stands in its place, and
  * {@code ByteBuffer.slice(int, int)} is Java 13, so the older {@code duplicate} then
  * {@code position} then {@code limit} then {@code slice} sequence stands in for it.</p>
+ *
+ * <p>That is a property a comment cannot keep, so it is checked: {@code AndroidReachabilityTest}
+ * compiles this source with {@code --release 11} and fails the build if an edit reaches for anything
+ * newer. The README of this module says what the check covers, what it does not, and what an actual
+ * Android build would need beyond it.</p>
  */
 @Internal
 @ThreadSafe
