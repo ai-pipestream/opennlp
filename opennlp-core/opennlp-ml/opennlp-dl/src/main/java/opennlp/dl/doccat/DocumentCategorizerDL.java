@@ -241,6 +241,13 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
     // the run and the release of every native handle belong to OnnxInference; an input the model
     // does not declare is left out by passing no array for it. The value has been copied out of
     // native memory, so it stays valid after the tensors are closed.
+    //
+    // This is the flat read of OnnxInference, shaped back into the arrays logitsFromOutput
+    // dispatches on, rather than the pinned output the sentence embedder uses. Two things rule
+    // pinning out here: the rank differs by model, {1, categories} for BERT and {categories} for
+    // RoBERTa, and the category count is what requireMatchingCategoryCount checks the model against
+    // rather than trusting, so pinning a shape would assert the very agreement this class verifies.
+    // A batch of one row also reads every value it allocates.
     final Object output;
     try {
       output = inference.run(new long[] {1, t.ids().length}, t.ids(),

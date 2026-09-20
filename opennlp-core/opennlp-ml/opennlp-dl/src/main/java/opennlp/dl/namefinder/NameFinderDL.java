@@ -351,6 +351,13 @@ public class NameFinderDL extends AbstractDL implements OffsetMappingNameFinder 
     // and the release of every native handle belong to OnnxInference; an input the model does not
     // declare is left out by passing no array for it. The value has been copied out of native
     // memory, so it stays valid after the tensors are closed.
+    //
+    // This is the flat read of OnnxInference, shaped back into the nested arrays the shape dispatch
+    // below expects, rather than the pinned output the sentence embedder uses. The output here is
+    // {1, tokens, labels} and the label count is a property of the model that decodeSpans validates
+    // against id2Labels rather than assumes, so there is no shape to pin ahead of the run; and a
+    // batch of one row reads every value it allocates, which is the waste pinning removes
+    // elsewhere.
     final Object output;
     try {
       output = inference.run(new long[] {1, tokens.ids().length}, tokens.ids(),

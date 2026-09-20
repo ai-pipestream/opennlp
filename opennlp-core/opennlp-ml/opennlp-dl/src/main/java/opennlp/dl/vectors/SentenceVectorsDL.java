@@ -20,6 +20,7 @@ package opennlp.dl.vectors;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -67,9 +68,11 @@ import opennlp.tools.embeddings.TextEmbedder;
  * comparable with the corrected output and must be re-embedded.</p>
  *
  * <p>This class is thread-safe and may be shared across threads: the inference methods hold no
- * per-call instance state and the underlying {@link OrtSession} supports concurrent execution.
- * This thread-safety guarantee applies until {@link #close()} is called; callers must not race
- * {@code close()} with inference methods.</p>
+ * per-call instance state and the underlying {@link OrtSession} supports concurrent execution. The
+ * reusable direct output buffer each inference writes into is confined to the thread that runs the
+ * inference, so no two threads share one, and the total such buffers hold is bounded; see
+ * {@code OnnxInference}. This thread-safety guarantee applies until {@link #close()} is called;
+ * callers must not race {@code close()} with inference methods.</p>
  *
  * <p>{@link #embedAll(List)} turns a call into as few inferences as the configured
  * {@link PaddingStrategy} allows. By default it pads nothing and runs one inference per distinct
@@ -82,6 +85,17 @@ import opennlp.tools.embeddings.TextEmbedder;
  * {@link InferenceOptions#setExecutionProviders(List)}. They are appended in the order requested,
  * which is the order ONNX Runtime falls back along. The execution provider does not change the
  * vectors beyond the reordering a different kernel implies.</p>
+ *
+ * <p><b>Vectors from a GPU execution provider depend on the shape of the batch they were produced
+ * in.</b> cuBLAS picks its blocking from the tensor width and floating point addition does not
+ * associate, so the same text embedded in a batch padded to a longer member and embedded on its own
+ * differ by around {@code 1.2e-4} absolute per component; the worst deviation measured was
+ * {@code 5.15e-7} in one minus cosine similarity, which is well inside any retrieval or
+ * clustering tolerance but is not zero. On the CPU provider the two agree exactly. Anyone caching or
+ * persisting vectors has to key the cache by the execution provider and, on a GPU, accept that a
+ * vector is reproducible only to that tolerance unless the batch shape is reproduced too. The
+ * {@link PaddingStrategy} therefore does change GPU vectors slightly, even though it changes nothing
+ * on a CPU.</p>
  */
 @ThreadSafe
 public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
@@ -100,6 +114,11 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * {@value #MAX_BATCH_TOKEN_POSITIONS} elements each, and a {@code [batch, tokens, hidden]}
    * output with a hidden size of 768 holds around 48 MiB of {@code float}. A single input longer
    * than the bound still runs on its own rather than being dropped or truncated further.
+   *
+   * <p>This is also what decides how large one reusable pinned output buffer can grow, so it is
+   * paired with {@code OnnxInference.DEFAULT_MAX_PINNED_OUTPUT_BYTES}, which bounds how many such
+   * buffers one component may hold across its threads. Changing either number means revisiting the
+   * other.</p>
    */
   public static final int MAX_BATCH_TOKEN_POSITIONS = 16384;
 
@@ -113,6 +132,15 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   private final int maxLength;
   private final String outputName;
   private final boolean pooledOutput;
+
+  /**
+   * The output shape the model declares, as it declares it, with a non-positive entry wherever a
+   * dimension is dynamic. {@link #pinnableOutputShape(int, int)} checks a candidate output shape
+   * against it, so that a model declaring a fixed dimension where this class would pin a different
+   * one falls back to an unpinned read rather than failing the run.
+   */
+  private final long[] declaredOutputShape;
+
   private final int dimension;
   private final PaddingStrategy padding;
   private final long padTokenId;
@@ -303,7 +331,11 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       this.outputName = selectOutput(outputs);
       final long[] shape = ((TensorInfo) outputs.get(outputName).getInfo()).getShape();
       this.pooledOutput = shape.length == POOLED_RANK;
+      this.declaredOutputShape = shape.clone();
       final long declared = shape[shape.length - 1];
+      // The bootstrap run below happens while dimension is still its blank final default of 0, so
+      // pinnableOutputShape returns null for it and it reads the output unpinned. That is the only
+      // way round: the hidden size is what the run is being made to discover.
       this.dimension = declared > 0 && declared <= Integer.MAX_VALUE
           ? (int) declared : run(new Tokens[] {encodeTokens("")})[0].length;
     } catch (final OrtException | RuntimeException e) {
@@ -580,8 +612,22 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * padding token id, {@code attention_mask} with {@code 0} and {@code token_type_ids} with
    * {@code 0}. A padded position therefore changes no output vector, whether the sentence vector
    * comes from an in-graph {@code sentence_embedding} output that honors the mask or from
-   * {@link #pool(float[][], long[])}, which reads only the positions the row's own mask covers.
-   * Every row's vector equals the vector the row would get in a batch of its own.</p>
+   * {@link #pool(FloatBuffer, int, int, long[])}, which reads only the positions the row's own mask
+   * covers. Every row's vector equals the vector the row would get in a batch of its own, exactly on
+   * the CPU provider and to about {@code 1.2e-4} absolute on a GPU one, where cuBLAS picks its
+   * blocking from the tensor width; the worst deviation measured was {@code 5.15e-7} in one minus
+   * cosine similarity. Anyone caching or persisting vectors produced on a GPU has to key the cache
+   * by the batch shape too, or accept that tolerance.</p>
+   *
+   * <p>The output is read through a pinned output tensor whenever
+   * {@link #pinnableOutputShape(int, int)} can name its shape, which is the ordinary case: the row
+   * count and the row width are this method's own choices and the hidden size is
+   * {@link #dimension()}. ONNX Runtime then writes the results into a direct buffer this class
+   * already owns and the vectors are pooled straight out of it, with no copy and none of the nested
+   * arrays a <code>{rows, width, hidden}</code> output would otherwise be materialized into, over
+   * half of which a padded batch never reads. Where the shape cannot be named, which is the run that
+   * discovers the hidden size and any model declaring an output dimension this class would pin
+   * differently, the output is read through one flat copy instead and the pooling is identical.</p>
    *
    * @param batch The encodings, of any lengths.
    * @return The sentence vectors.
@@ -604,14 +650,87 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
     }
 
     // The tensors, the run and the release of every native handle belong to OnnxInference; what is
-    // left here is the batch this component staged and what it makes of the numbers. The value has
-    // been copied out of native memory already, so pooling it after the tensors are closed is safe.
-    final Object value = inference.run(new long[] {batch.length, length}, ids, mask, types,
-        outputName);
+    // left here is the batch this component staged and what it makes of the numbers. The values are
+    // read inside the reader, while the output memory is still the run's, and what leaves the reader
+    // is the pooled vectors, which are this class's own arrays.
+    return inference.run(new long[] {batch.length, length}, ids, mask, types, outputName,
+        pinnableOutputShape(batch.length, length),
+        (values, shape) -> vectors(batch, values, shape));
+  }
+
+  /**
+   * {@return the shape to pin the output of one inference at, or {@code null} to read it unpinned}
+   *
+   * <p>The shape of the output of this model is <code>{rows, hidden}</code> for an in-graph pooled
+   * output and <code>{rows, width, hidden}</code> for a token output. Both are known before the run:
+   * {@code rows} and {@code width} are what {@link #run(Tokens[])} chose and {@code hidden} is
+   * {@link #dimension()}. The candidate is then checked against every dimension the model declares
+   * statically, so a model that fixes a dimension where this would pin a different one reads its
+   * output unpinned rather than failing the run. {@code null} comes back while the hidden size is
+   * still being discovered, and for any output rank other than 2 or 3.</p>
+   *
+   * @param rows The row count of the inference.
+   * @param width The row width of the inference.
+   */
+  private long[] pinnableOutputShape(final int rows, final int width) {
+    if (dimension <= 0 || rows <= 0 || width <= 0) {
+      return null;
+    }
+    final long[] candidate;
+    if (declaredOutputShape.length == POOLED_RANK) {
+      candidate = new long[] {rows, dimension};
+    } else if (declaredOutputShape.length == TOKEN_RANK) {
+      candidate = new long[] {rows, width, dimension};
+    } else {
+      return null;
+    }
+    for (int d = 0; d < candidate.length; d++) {
+      if (declaredOutputShape[d] > 0 && declaredOutputShape[d] != candidate[d]) {
+        return null;
+      }
+    }
+    return candidate;
+  }
+
+  /**
+   * Pools one inference's output into one sentence vector per row, reading the flat values of the
+   * output by index.
+   *
+   * @param batch The encodings of the inference, in the order their rows were staged.
+   * @param values The values of the output, row major. Valid only for the duration of this call.
+   * @param shape The shape of the output as the run reports it.
+   * @return The sentence vectors, in the order of {@code batch}.
+   *
+   * @throws OrtException Thrown if the output does not have the shape this batch requires, which is
+   *     a model-contract violation rather than an inference failure.
+   */
+  private float[][] vectors(final Tokens[] batch, final FloatBuffer values, final long[] shape)
+      throws OrtException {
+    final int rank = shape.length;
+    if (rank != (pooledOutput ? POOLED_RANK : TOKEN_RANK)) {
+      throw new OrtException("The model returned an output of rank " + rank + " where rank "
+          + (pooledOutput ? POOLED_RANK : TOKEN_RANK) + " was selected at construction.");
+    }
+    if (shape[0] != batch.length) {
+      throw new OrtException("The model returned " + shape[0] + " rows for a batch of "
+          + batch.length + ".");
+    }
+    final int hidden = (int) shape[rank - 1];
+    // The width of the output, which for a token output is the padded row width of the run, so a
+    // row's own positions are the first mask.length of its own stride.
+    final int width = pooledOutput ? 1 : (int) shape[1];
     final float[][] vectors = new float[batch.length][];
     for (int b = 0; b < batch.length; b++) {
-      vectors[b] = pooledOutput ? ((float[][]) value)[b]
-          : pool(((float[][][]) value)[b], batch[b].mask());
+      if (pooledOutput) {
+        vectors[b] = slice(values, b * hidden, hidden);
+      } else {
+        final long[] rowMask = batch[b].mask();
+        if (rowMask.length > width) {
+          throw new OrtException("Row " + b + " has " + rowMask.length
+              + " token positions but the output is only " + width + " wide.");
+        }
+        vectors[b] = pool(values, b * width * hidden, hidden, rowMask);
+      }
       if (normalize) {
         scaleToUnitLength(vectors[b]);
       }
@@ -641,34 +760,60 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   }
 
   /**
-   * Pools the token vectors of one input into its sentence vector.
+   * Pools the token vectors of one input into its sentence vector, indexing the flat values of the
+   * output rather than walking nested arrays.
    *
-   * <p>Only the first {@code mask.length} positions are read, so trailing padded positions of a
-   * batch row are ignored and a row pools to the same vector at any batch width.</p>
+   * <p>Only the first {@code mask.length} positions of the row are read, so the trailing padded
+   * positions of a batch row are ignored and a row pools to the same vector at any batch width. That
+   * is the whole reason the read is flat: the positions past a row's own mask are the ones a padded
+   * batch never looks at, and building an array per one of them is what made a batch of 128 rows
+   * allocate 7168 arrays to read 3275 of them.</p>
    *
-   * @param tokenVectors The vectors of the input's tokens, at least as many as {@code mask} is
-   *     long.
+   * @param values The values of the output, row major.
+   * @param base The index in {@code values} where this row's token vectors begin.
+   * @param hidden The hidden size, which is the stride from one token vector to the next.
    * @param mask The attention mask of the input, without padding.
    * @return A new array holding the sentence vector.
    */
-  private float[] pool(final float[][] tokenVectors, final long[] mask) {
+  private float[] pool(final FloatBuffer values, final int base, final int hidden,
+      final long[] mask) {
     if (pooling == Pooling.CLS) {
-      return tokenVectors[0].clone();
+      return slice(values, base, hidden);
     }
-    final float[] sum = new float[tokenVectors[0].length];
+    final float[] sum = new float[hidden];
     int count = 0;
     for (int t = 0; t < mask.length; t++) {
       if (mask[t] != 0) {
-        for (int d = 0; d < sum.length; d++) {
-          sum[d] += tokenVectors[t][d];
+        final int token = base + t * hidden;
+        for (int d = 0; d < hidden; d++) {
+          sum[d] += values.get(token + d);
         }
         count++;
       }
     }
-    for (int d = 0; d < sum.length; d++) {
+    for (int d = 0; d < hidden; d++) {
       sum[d] /= Math.max(count, 1);
     }
     return sum;
+  }
+
+  /**
+   * {@return {@code length} values of {@code values} from {@code offset}, as a new array}
+   *
+   * <p>Read with the absolute {@link FloatBuffer#get(int)} rather than a bulk get, because the
+   * position of the buffer is the run's and not this class's to move: on the pinned path it is the
+   * buffer ONNX Runtime wrote into and the next run of this thread reuses it as it stands.</p>
+   *
+   * @param values The values of the output, row major.
+   * @param offset The index to read from.
+   * @param length The number of values to read.
+   */
+  private static float[] slice(final FloatBuffer values, final int offset, final int length) {
+    final float[] copy = new float[length];
+    for (int i = 0; i < length; i++) {
+      copy[i] = values.get(offset + i);
+    }
+    return copy;
   }
 
   /**

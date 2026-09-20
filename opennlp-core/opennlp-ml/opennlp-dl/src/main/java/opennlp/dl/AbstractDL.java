@@ -70,9 +70,9 @@ public abstract class AbstractDL implements AutoCloseable {
   /**
    * The one ONNX Runtime interaction of this package: it stages tensors, runs {@link #session} and
    * reads an output back, releasing every native handle it created. Subclasses express only which
-   * inputs their model declares, which output they read, and what they do with the numbers. It
-   * holds no state of its own, so {@link #close()} has nothing of it to close; that changes with
-   * the first pooled or pinned native state added to it.
+   * inputs their model declares, which output they read, and what they do with the numbers. It now
+   * holds reusable direct output buffers and the tensors pinned over them, so {@link #close()}
+   * closes it.
    */
   protected final OnnxInference inference;
 
@@ -716,6 +716,11 @@ public abstract class AbstractDL implements AutoCloseable {
    * every deep-learning component, so closing it here would tear down the environment
    * other live components still depend on.</p>
    *
+   * <p>The reusable direct output buffers of {@link #inference} and the tensors pinned over them are
+   * released first, before the session they were run against goes away. They are released even if
+   * closing the session then fails, because a failed session close does not make the native output
+   * memory any less released.</p>
+   *
    * <p>This method is idempotent: calling {@code close()} more than once, or calling it on
    * a never-used but successfully constructed instance, is a no-op after the first successful
    * close attempt. The underlying {@link OrtSession#close()} is only invoked once.</p>
@@ -724,8 +729,13 @@ public abstract class AbstractDL implements AutoCloseable {
    */
   @Override
   public void close() throws OrtException {
-    if (closed.compareAndSet(false, true) && session != null) {
-      session.close();
+    if (closed.compareAndSet(false, true)) {
+      if (inference != null) {
+        inference.close();
+      }
+      if (session != null) {
+        session.close();
+      }
     }
   }
 
