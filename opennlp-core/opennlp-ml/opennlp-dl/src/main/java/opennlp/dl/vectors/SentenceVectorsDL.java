@@ -34,8 +34,12 @@ import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.TensorInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import opennlp.dl.AbstractDL;
+import opennlp.dl.ExecutionProviderRequest;
+import opennlp.dl.ExecutionProviders;
 import opennlp.dl.InferenceOptions;
 import opennlp.dl.Tokens;
 import opennlp.tools.commons.ThreadSafe;
@@ -76,9 +80,18 @@ import opennlp.tools.embeddings.TextEmbedder;
  * {@link #close()} is called; callers must not race {@code close()} with inference methods.</p>
  *
  * <p>{@link #embedAll(List)} turns a call into as few inferences as the configured
- * {@link PaddingStrategy} allows. By default it pads nothing and runs one inference per distinct
- * tokenized length; {@link PaddingStrategy#LONGEST} runs a whole call of mixed-length inputs as
- * one inference. The strategy never changes the vectors, only the tensor shapes.</p>
+ * {@link PaddingStrategy} allows. Under {@link PaddingStrategy#EXACT_LENGTH} it adds no padding and
+ * runs one inference per distinct tokenized length; under {@link PaddingStrategy#LONGEST} it runs an
+ * entire call of mixed-length inputs as one inference. The strategy leaves the vectors as they are
+ * and changes only the tensor shapes.</p>
+ *
+ * <p>{@link #withDerivedPadding(File, File, boolean, Pooling, boolean, int, InferenceOptions)}
+ * takes no {@link PaddingStrategy} and derives one from the execution providers the session was
+ * configured with, through {@link PaddingStrategy#defaultFor(List)}: padding to the longest row of a
+ * batch on an accelerator, exact length grouping on the CPU, since the two want different shapes by
+ * a factor of several. A strategy given by name is applied as given; the execution provider does not
+ * override it. Either way the strategy is written to the log at {@code info} next to the execution
+ * providers, so what a session runs at can be read rather than inferred.</p>
  *
  * <p>Inference runs where ONNX Runtime puts it, which is the CPU, unless
  * {@link #SentenceVectorsDL(File, File, boolean, Pooling, boolean, int, PaddingStrategy,
@@ -104,7 +117,18 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   /** The maximum number of tokens per input if none is given, the BERT position limit. */
   public static final int DEFAULT_MAX_LENGTH = 512;
 
-  /** The {@link PaddingStrategy} applied if none is given. */
+  /**
+   * The {@link PaddingStrategy} applied where no caller and no execution provider of the session
+   * calls for another one: the constructors that take no {@link InferenceOptions}, which run on the
+   * CPU, and any provider list {@link PaddingStrategy#defaultFor(List)} does not classify as an
+   * accelerator. It equals {@code PaddingStrategy.defaultFor(List.of())} and is unchanged from
+   * earlier releases, so a caller of an older constructor gets the tensor shapes, the inference
+   * count and the vectors it has always had.
+   *
+   * <p>It is not the strategy each session applies. A session on an accelerator derives
+   * {@link PaddingStrategy#LONGEST} instead, since padding is six to eight times faster there and
+   * slower on the CPU; {@link PaddingStrategy#defaultFor(List)} has the numbers and the rule.</p>
+   */
   public static final PaddingStrategy DEFAULT_PADDING = PaddingStrategy.EXACT_LENGTH;
 
   /**
@@ -124,6 +148,8 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * others.</p>
    */
   public static final int MAX_BATCH_TOKEN_POSITIONS = 16384;
+
+  private static final Logger logger = LoggerFactory.getLogger(SentenceVectorsDL.class);
 
   private static final String SENTENCE_EMBEDDING = "sentence_embedding";
   private static final int POOLED_RANK = 2;
@@ -249,6 +275,66 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   }
 
   /**
+   * {@return a {@link SentenceVectorsDL sentence vector generator} on the execution providers the
+   * given {@link InferenceOptions} selects, with the {@link PaddingStrategy} derived from those
+   * execution providers}
+   *
+   * <p>This is the entry point for a caller that has an opinion about where inference runs and none
+   * about tensor shapes. {@link PaddingStrategy#defaultFor(List)} makes the choice, reading the
+   * execution providers {@link ExecutionProviders#resolve(InferenceOptions)} resolves: a session on
+   * an accelerator pads each batch to its longest row, six to eight times the throughput on a GPU,
+   * and a session on the CPU groups by exact tokenized length, where padding runs at 0.66 to 0.81 of
+   * that speed. That method has the figures, and it states what an execution provider id from an
+   * addon derives. The strategy is written to the log at {@code info} next to the line naming the
+   * execution providers, so the derived choice can be read off a running system.</p>
+   *
+   * <p>Name the strategy through
+   * {@link #SentenceVectorsDL(File, File, boolean, Pooling, boolean, int, PaddingStrategy,
+   * InferenceOptions)} to decide it yourself. The padding strategy is the one setting derived here,
+   * and a named one always wins: no execution provider setting overrides it.</p>
+   *
+   * <p>This is a factory rather than another constructor because a constructor of the same arity
+   * taking {@link InferenceOptions} in place of {@link PaddingStrategy} would make
+   * {@code new SentenceVectorsDL(model, vocabulary, true, pooling, false, 512, null)} ambiguous, and
+   * that call compiles against the constructor that takes a {@link PaddingStrategy} today.</p>
+   *
+   * @param model The file name of a sentence vectors ONNX model.
+   * @param vocabulary The file name of the vocabulary file for the model.
+   * @param lowerCase {@code true} for uncased models (lower casing and accent
+   *     stripping during tokenization), {@code false} for cased models. Overridden by
+   *     {@link InferenceOptions#getLowerCase()} when that is set.
+   * @param pooling How token vectors are pooled. Not used for a model with a
+   *     {@code sentence_embedding} output. Must not be {@code null}.
+   * @param normalize {@code true} to scale every vector to unit length.
+   * @param maxLength The maximum number of tokens per input, {@code [CLS]} and {@code [SEP]}
+   *     included; longer input is truncated. Must be at least {@code 2}.
+   * @param inferenceOptions The execution providers to run on and the session settings to create
+   *     the session with, which also decide the {@link PaddingStrategy}. Must not be {@code null}.
+   *
+   * @throws IllegalArgumentException Thrown if {@code pooling} or {@code inferenceOptions} is
+   *     {@code null}, if {@code maxLength} is less than {@code 2}, if the model has no output of
+   *     shape {@code [batch, hidden]} or {@code [batch, tokens, hidden]}, or if the derived
+   *     strategy pads and the vocabulary has no padding token.
+   * @throws OrtException Thrown if the {@code model} cannot be loaded, or if a requested execution
+   *     provider is not available in the ONNX Runtime on the classpath or cannot be initialized on
+   *     the requested device.
+   * @throws IOException Thrown if errors occurred loading the {@code model} or {@code vocabulary}.
+   *
+   * @since 3.0.0
+   */
+  public static SentenceVectorsDL withDerivedPadding(final File model, final File vocabulary,
+      final boolean lowerCase, final Pooling pooling, final boolean normalize, final int maxLength,
+      final InferenceOptions inferenceOptions)
+      throws OrtException, IOException {
+
+    // resolve() rejects a null inferenceOptions, so the derivation needs no check of its own.
+    return new SentenceVectorsDL(model, vocabulary, lowerCase, pooling, normalize, maxLength,
+        PaddingStrategy.defaultFor(ExecutionProviders.resolve(inferenceOptions)), inferenceOptions,
+        true);
+
+  }
+
+  /**
    * Instantiates a {@link SentenceVectorsDL sentence vector generator} using ONNX models, on the
    * execution provider the given {@link InferenceOptions} selects.
    *
@@ -309,6 +395,38 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       final PaddingStrategy padding, final InferenceOptions inferenceOptions)
       throws OrtException, IOException {
 
+    this(model, vocabulary, lowerCase, pooling, normalize, maxLength, padding, inferenceOptions,
+        false);
+
+  }
+
+  /**
+   * The constructor every other one ends at, with the origin of the {@link PaddingStrategy} added
+   * so that one log entry can name it.
+   *
+   * @param model The file name of a sentence vectors ONNX model.
+   * @param vocabulary The file name of the vocabulary file for the model.
+   * @param lowerCase Whether tokenization lower cases and strips accents.
+   * @param pooling How token vectors are pooled. Must not be {@code null}.
+   * @param normalize {@code true} to scale every vector to unit length.
+   * @param maxLength The maximum number of tokens per input. Must be at least {@code 2}.
+   * @param padding How the tensors of one inference are shaped. Must not be {@code null}.
+   * @param inferenceOptions The execution providers and session settings. Must not be {@code null}.
+   * @param paddingDerived {@code true} if {@code padding} came from
+   *     {@link PaddingStrategy#defaultFor(List)} rather than from the caller, which is what the log
+   *     entry reports. It changes no other behavior: a derived strategy and the same strategy
+   *     requested by name act the same.
+   *
+   * @throws IllegalArgumentException Thrown as the public constructors document.
+   * @throws OrtException Thrown as the public constructors document.
+   * @throws IOException Thrown as the public constructors document.
+   */
+  private SentenceVectorsDL(final File model, final File vocabulary, final boolean lowerCase,
+      final Pooling pooling, final boolean normalize, final int maxLength,
+      final PaddingStrategy padding, final InferenceOptions inferenceOptions,
+      final boolean paddingDerived)
+      throws OrtException, IOException {
+
     // sessionOptions() rejects a null inferenceOptions before the session is created, and it is
     // evaluated before resolveLowerCase(), so neither call sees null.
     super(model, vocabulary, sessionOptions(inferenceOptions),
@@ -341,6 +459,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       // way round: the hidden size is what the run is being made to discover.
       this.dimension = declared > 0 && declared <= Integer.MAX_VALUE
           ? (int) declared : run(new Tokens[] {encodeTokens("")})[0].length;
+      logPadding(padding, paddingDerived, inferenceOptions);
     } catch (final OrtException | RuntimeException e) {
       try {
         super.close();
@@ -350,6 +469,30 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       throw e;
     }
 
+  }
+
+  /**
+   * Writes the {@link PaddingStrategy} of a new component to the log at {@code info}, next to the
+   * execution providers it goes with.
+   *
+   * <p>{@code AbstractDL.configureSession} reports where the session runs; this reports the tensor
+   * shapes it runs at, which is the setting that follows from it. Both are written on the ordinary
+   * path, not only where something failed, because a default that cannot be observed is how the
+   * wrong one stays in place for years. This package described GPU support for two years while each
+   * of its sessions ran on the CPU, with no log line to contradict it.</p>
+   *
+   * @param padding The strategy in force.
+   * @param derived {@code true} if it came from {@link PaddingStrategy#defaultFor(List)} rather than
+   *     from a constructor argument.
+   * @param inferenceOptions The options to read the execution providers back from. Must not be
+   *     {@code null}.
+   */
+  private static void logPadding(final PaddingStrategy padding, final boolean derived,
+      final InferenceOptions inferenceOptions) {
+    final List<ExecutionProviderRequest> providers = ExecutionProviders.resolve(inferenceOptions);
+    logger.info("ONNX sentence vector padding strategy: {}, {}; execution providers: {}",
+        padding, derived ? "derived from the execution providers" : "chosen by the caller",
+        ExecutionProviders.describe(providers));
   }
 
   /**

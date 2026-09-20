@@ -71,8 +71,10 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
   public static final String MAX_LENGTH_OPTION = "maxLength";
 
   /**
-   * The option that selects the {@link PaddingStrategy}: {@code exact_length} by default,
-   * {@code longest} or {@code max_length}.
+   * The option that selects the {@link PaddingStrategy}: {@code exact_length}, {@code longest} or
+   * {@code max_length}. Left out, the strategy follows the execution provider through
+   * {@link PaddingStrategy#defaultFor(java.util.List)}, which gives {@code longest} where
+   * {@value #GPU_OPTION} is {@code true} and {@code exact_length} where it is not.
    */
   public static final String PADDING_OPTION = "padding";
 
@@ -150,10 +152,16 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
     final boolean normalize = booleanOption(spec, NORMALIZE_OPTION);
     final Pooling pooling = poolingOption(spec);
     final int maxLength = maxLengthOption(spec);
-    final PaddingStrategy padding = paddingOption(spec);
     final InferenceOptions inferenceOptions = inferenceOptions(spec);
+    final PaddingStrategy padding = paddingOption(spec);
     final Path vocabularyPath = model.toAbsolutePath().getParent().resolve(vocabulary);
     try {
+      // A spec without a padding option leaves the strategy to the execution provider, the way a
+      // caller of withDerivedPadding does.
+      if (padding == null) {
+        return SentenceVectorsDL.withDerivedPadding(model.toFile(), vocabularyPath.toFile(),
+            lowerCase, pooling, normalize, maxLength, inferenceOptions);
+      }
       return new SentenceVectorsDL(model.toFile(), vocabularyPath.toFile(), lowerCase, pooling,
           normalize, maxLength, padding, inferenceOptions);
     } catch (final OrtException e) {
@@ -270,14 +278,22 @@ public final class OnnxTextEmbedderProvider implements TextEmbedderProvider {
   /**
    * Reads the {@value #PADDING_OPTION} option.
    *
+   * <p>{@code null} for an option that is not set, which leaves the choice to the execution
+   * provider: {@link #create(ProviderSpec)} then goes through
+   * {@link SentenceVectorsDL#withDerivedPadding(java.io.File, java.io.File, boolean, Pooling,
+   * boolean, int, InferenceOptions)}, so a spec that requests the GPU without a padding option gets
+   * the strategy that gives six to eight times the throughput there. A spec that names a strategy
+   * gets that strategy on any execution provider.</p>
+   *
    * @param spec The spec to read.
-   * @return The padding strategy, {@link SentenceVectorsDL#DEFAULT_PADDING} if the option is not
-   *     set.
+   * @return The padding strategy, or {@code null} if the option is not set.
    * @throws IllegalArgumentException Thrown if the value names no {@link PaddingStrategy}.
    */
   private PaddingStrategy paddingOption(final ProviderSpec spec) {
-    final String value = spec.option(PADDING_OPTION,
-        SentenceVectorsDL.DEFAULT_PADDING.name().toLowerCase(Locale.ROOT));
+    final String value = spec.option(PADDING_OPTION, null);
+    if (value == null) {
+      return null;
+    }
     if (EXACT_LENGTH.equals(value)) {
       return PaddingStrategy.EXACT_LENGTH;
     }

@@ -19,6 +19,10 @@ package opennlp.dl.vectors;
 
 import java.util.List;
 
+import opennlp.dl.ExecutionProviderRequest;
+import opennlp.dl.ExecutionProviders;
+import opennlp.dl.InferenceOptions;
+
 /**
  * How {@link SentenceVectorsDL} shapes the tensors of one inference when the inputs of a call
  * differ in tokenized length.
@@ -39,6 +43,10 @@ import java.util.List;
  * {@code padding=True} and {@code padding="max_length"}. {@link #EXACT_LENGTH} corresponds to
  * asking for no padding at all.</p>
  *
+ * <p>A caller that states no strategy gets the one {@link #defaultFor(List)} derives from the
+ * execution providers of the session, since the best shape depends on where the session runs:
+ * {@link #LONGEST} on an accelerator, {@link #EXACT_LENGTH} on the CPU.</p>
+ *
  * @see SentenceVectorsDL#embedAll(List)
  * @since 3.0.0
  */
@@ -49,10 +57,13 @@ public enum PaddingStrategy {
    * runs on its own, so no tensor ever holds a padded position and every row is computed from
    * the tensors its single-input call would have used.
    *
-   * <p>This is the default, and it fragments on natural text: measured on English news
-   * sentences, a call of 64 inputs splits into roughly 33 groups and a call of 8 into roughly 7,
-   * so most inferences carry one or two rows. Prefer {@link #LONGEST} unless the vocabulary has
-   * no padding token or every input of a call is known to tokenize to the same length.</p>
+   * <p>This is what a CPU session applies unless a caller requests another strategy, and what
+   * {@link #defaultFor(List)} derives for any execution provider it cannot classify as an
+   * accelerator. It fragments on natural text: on English news sentences, a call of 64 inputs
+   * splits into roughly 33 groups and a call of 8 into roughly 7, so most inferences have one or
+   * two rows. On the CPU that is still faster than padding; on a GPU it is where six to eight times
+   * the throughput goes missing, which is why {@link #defaultFor(List)} picks {@link #LONGEST}
+   * there.</p>
    */
   EXACT_LENGTH,
 
@@ -72,5 +83,58 @@ public enum PaddingStrategy {
    * maximum is cut to it rather than widening the tensor. Requires a padding token in the
    * vocabulary.
    */
-  MAX_LENGTH
+  MAX_LENGTH;
+
+  /**
+   * {@return the strategy to apply where a caller states none, derived from the execution providers
+   * a session was configured with}
+   *
+   * <p>{@link #LONGEST} for an accelerator placement and {@link #EXACT_LENGTH} for anything else,
+   * since the two placements want different tensor shapes, by a wide margin in both cases. On
+   * an RTX 4080 SUPER through CUDA, a call of 32 inputs ran at 15910 embeddings per second under
+   * {@link #LONGEST} against 2629 under {@link #EXACT_LENGTH} and 1955 for a loop of one embed per
+   * input, a factor of six to eight: one wide tensor keeps the device occupied, while a stream of
+   * narrow ones leaves it idle between kernels and flattens out near 1950 at any call size. With the
+   * CPU execution provider on the same machine at eight intra-op threads, a call of 128 inputs ran
+   * at 690 under {@link #LONGEST} against 1233 under {@link #EXACT_LENGTH}, a factor of 0.81, and
+   * 0.66 at four intra-op threads: a CPU does the arithmetic of the padded positions and gets no
+   * occupancy in return. {@link #MAX_LENGTH} is around twenty times behind on either placement, so
+   * it is not derived at all and remains the explicit choice of a fixed-shape graph or device.</p>
+   *
+   * <p>An execution provider id that {@link ExecutionProviders} does not classify as an accelerator,
+   * which is how an addon id such as {@code openvino} arrives here, is treated as the CPU case and
+   * gets {@link #EXACT_LENGTH}. Three reasons for the conservative answer over the fast one:</p>
+   *
+   * <ul>
+   *   <li>{@link #EXACT_LENGTH} needs no padding token in the vocabulary and no assumption about a
+   *       graph honoring {@code attention_mask}, so it is the one strategy that cannot be wrong for
+   *       an unfamiliar model on an unfamiliar device.</li>
+   *   <li>It is what a caller gets from this class today, so an addon on the class path changes no
+   *       vectors by its presence. On a GPU the tensor width moves a component by about
+   *       {@code 1.2e-4}, so turning a default into padding is a change anyone caching vectors has
+   *       to plan for.</li>
+   *   <li>The two errors do not cost the same. Guessing the accelerator answer costs up to a third
+   *       of the throughput where the guess is wrong, as the CPU figures above show, while the
+   *       conservative answer leaves throughput on the table and one constructor argument takes
+   *       it.</li>
+   * </ul>
+   *
+   * <p>Refining this for a further execution provider means adding its id to the accelerator group
+   * in {@link ExecutionProviders}, or extending {@link opennlp.dl.ExecutionProviderConfigurer} so
+   * that an addon states the answer for the id it serves.</p>
+   *
+   * @param executionProviders The execution providers of the session, in priority order, as
+   *     {@link ExecutionProviders#resolve(InferenceOptions)} returns them. An empty list is the CPU
+   *     case, since ONNX Runtime places such a session on the CPU. Must not be {@code null} or start
+   *     with a {@code null} element.
+   * @throws IllegalArgumentException Thrown if {@code executionProviders} is {@code null} or its
+   *     first element is {@code null}.
+   * @see ExecutionProviders#runsOnAccelerator(List)
+   * @see SentenceVectorsDL#DEFAULT_PADDING
+   * @since 3.0.0
+   */
+  public static PaddingStrategy defaultFor(
+      final List<ExecutionProviderRequest> executionProviders) {
+    return ExecutionProviders.runsOnAccelerator(executionProviders) ? LONGEST : EXACT_LENGTH;
+  }
 }

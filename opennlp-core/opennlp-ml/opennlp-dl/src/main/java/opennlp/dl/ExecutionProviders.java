@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 
 import ai.onnxruntime.OrtEnvironment;
@@ -76,6 +77,22 @@ public final class ExecutionProviders {
   private static final Map<String, ExecutionProviderConfigurer> BUILT_IN =
       Map.of(CPU, new CpuExecutionProviderConfigurer(), CUDA, new CudaExecutionProviderConfigurer());
 
+  /**
+   * The execution provider ids classified as an accelerator by {@link #runsOnAccelerator(List)}, the
+   * question a default derived from where a session runs comes down to. Today that is
+   * {@value #CUDA}, the one accelerator {@code opennlp-dl} can register through the base ONNX
+   * Runtime API.
+   *
+   * <p>This field is the single point where an id joins the group, so a later stage or an addon has
+   * one place to change. An addon that registers a configurer for OpenVINO, DirectML or TensorRT
+   * contributes an id this class cannot classify, and {@link #runsOnAccelerator(List)} answers
+   * {@code false} for it, which keeps the conservative default rather than guessing on its behalf.
+   * The alternative to editing this set is to let {@link ExecutionProviderConfigurer} state the
+   * answer for the id it serves, which would let an addon classify itself; that is a design decision
+   * for the first addon, not something to add while CUDA is the only entry.</p>
+   */
+  private static final Set<String> ACCELERATOR_IDS = Set.of(CUDA);
+
   private ExecutionProviders() {
   }
 
@@ -122,6 +139,41 @@ public final class ExecutionProviders {
     return List.of(ExecutionProviderRequest.of(CUDA,
         Map.of(CudaExecutionProviderConfigurer.DEVICE_ID_OPTION,
             Integer.toString(inferenceOptions.getGpuDeviceId()))));
+  }
+
+  /**
+   * {@return whether the first of {@code requests} names an accelerator execution provider, which is
+   * the test a setting derived from the placement of a session comes down to}
+   *
+   * <p>The first request answers the question because ONNX Runtime offers each node to the execution
+   * providers in the order they were appended and passes on only what one rejects. A list of
+   * {@code [cuda, cpu]} therefore runs an encoder graph on the GPU, and this returns {@code true}
+   * for it, while {@code [cpu, cuda]} runs on the CPU, because the CPU execution provider accepts
+   * any node and leaves the one behind it with none, and this returns {@code false}.</p>
+   *
+   * <p>An empty list returns {@code false}: ONNX Runtime places such a session on the CPU by itself.
+   * So does an id that is not classified here, which is how any addon execution provider appears.
+   * The {@code ACCELERATOR_IDS} field states what that costs and how to widen the group.</p>
+   *
+   * @param requests The requests, in priority order, as {@link #resolve(InferenceOptions)} returns
+   *     them. Must not be {@code null} or start with a {@code null} element.
+   * @throws IllegalArgumentException Thrown if {@code requests} is {@code null} or its first element
+   *     is {@code null}.
+   * @see opennlp.dl.vectors.PaddingStrategy#defaultFor(List)
+   * @since 3.0.0
+   */
+  public static boolean runsOnAccelerator(final List<ExecutionProviderRequest> requests) {
+    if (requests == null) {
+      throw new IllegalArgumentException("The requests must not be null.");
+    }
+    if (requests.isEmpty()) {
+      return false;
+    }
+    final ExecutionProviderRequest first = requests.get(0);
+    if (first == null) {
+      throw new IllegalArgumentException("The requests must not hold a null element.");
+    }
+    return ACCELERATOR_IDS.contains(first.id());
   }
 
   /**
