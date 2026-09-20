@@ -25,8 +25,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import opennlp.morfologik.AbstractMorfologikTest;
 import opennlp.morfologik.lemmatizer.MorfologikLemmatizer;
@@ -88,14 +86,15 @@ public class MorfologikDictionaryBuilderTest extends AbstractMorfologikTest {
     Assertions.assertEquals(rawLemmaDictionary.getParent(), output.getParent());
   }
 
-  @ParameterizedTest
-  @CsvSource(delimiter = '|', value = {
-      "dictionaryWithLemma.info|dictionaryWithLemma.dict",
-      "a.info.info|a.info.dict",
-      ".info|.dict",
-      "info.info|info.dict"})
-  public void testToDictionaryFileNameExchangesTheTrailingSuffixOnly(String input, String expected) {
-    Assertions.assertEquals(expected, new MorfologikDictionaryBuilder().toDictionaryFileName(input));
+  @Test
+  public void testToDictionaryFileNameExchangesTheTrailingSuffixOnly() {
+    MorfologikDictionaryBuilder builder = new MorfologikDictionaryBuilder();
+    Assertions.assertAll(
+        () -> Assertions.assertEquals("dictionaryWithLemma.dict",
+            builder.toDictionaryFileName("dictionaryWithLemma.info")),
+        () -> Assertions.assertEquals("a.info.dict", builder.toDictionaryFileName("a.info.info")),
+        () -> Assertions.assertEquals(".dict", builder.toDictionaryFileName(".info")),
+        () -> Assertions.assertEquals("info.dict", builder.toDictionaryFileName("info.info")));
   }
 
 }
