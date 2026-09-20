@@ -17,7 +17,9 @@
 
 package opennlp.tools.formats.conllu;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,18 @@ import opennlp.tools.tokenize.TokenSample;
 import opennlp.tools.util.ObjectStream;
 
 public class ConlluTokenSampleStreamTest extends AbstractConlluSampleStreamTest<TokenSample> {
+
+  @Test
+  void testMissingTokenDiagnosticPreservesLiteralText() throws IOException {
+    String input = "# sent_id = témoin%s\n# text = café 😀\n"
+        + "1\tabsent%😀\t_\t_\t_\t_\t0\t_\t_\t_\n\n";
+    try (var stream = new ConlluTokenSampleStream(new ConlluStream(
+        () -> new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8))))) {
+      IOException error = Assertions.assertThrows(IOException.class, stream::read);
+      Assertions.assertEquals("Failed to match token [absent%😀] in sentence [témoin%s]"
+          + " with text [café 😀]", error.getMessage());
+    }
+  }
 
   @Test
   void testParseTwoSentences() throws IOException {

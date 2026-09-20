@@ -54,8 +54,8 @@ public class ConlluTokenSampleStream extends FilterObjectStream<ConlluSentence, 
           int tokenIndex = text.indexOf(token, searchIndex);
 
           if (tokenIndex == -1) {
-            throw new IOException(String.format("Failed to match token [%s] in sentence [%s] with text [%s]",
-                token, sentence.getSentenceIdComment(), text));
+            throw new IOException("Failed to match token [" + token + "] in sentence ["
+                + sentence.getSentenceIdComment() + "] with text [" + text + "]");
           }
 
           searchIndex = tokenIndex + token.length();

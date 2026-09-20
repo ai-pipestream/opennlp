@@ -142,8 +142,8 @@ public class BratAnnotationStream implements ObjectStream<BratAnnotation> {
       String[] typeParts = StringUtil.split(tokens[TYPE_OFFSET].getCoveredText(line).toString(), ':');
 
       if (typeParts.length != 2) {
-        throw new InvalidFormatException(String.format(
-            "Failed to parse [%s], type part must be in the format type:trigger", line));
+        throw new InvalidFormatException(
+            "Failed to parse [" + line + "], type part must be in the format type:trigger");
       }
 
       String type = typeParts[0];
@@ -155,8 +155,8 @@ public class BratAnnotationStream implements ObjectStream<BratAnnotation> {
         String[] parts = StringUtil.split(tokens[i].getCoveredText(line).toString(), ':');
 
         if (parts.length != 2) {
-          throw new InvalidFormatException(String.format(
-              "Failed to parse [%s], argument parts must be in form argument:value", line));
+          throw new InvalidFormatException(
+              "Failed to parse [" + line + "], argument parts must be in form argument:value");
         }
 
         arguments.put(parts[0], parts[1]);
@@ -267,7 +267,7 @@ public class BratAnnotationStream implements ObjectStream<BratAnnotation> {
           return parser.parse(tokens, line);
         }
         catch (IOException e)  {
-          throw new IOException(String.format("Failed to parse ann document with id [%s.ann]", id), e);
+          throw new IOException("Failed to parse ann document with id [" + id + ".ann]", e);
         }
       }
     }

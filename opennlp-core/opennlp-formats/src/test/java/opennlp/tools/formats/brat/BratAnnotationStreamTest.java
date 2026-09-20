@@ -17,7 +17,9 @@
 
 package opennlp.tools.formats.brat;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -29,9 +31,32 @@ import opennlp.tools.util.ObjectStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 public class BratAnnotationStreamTest extends AbstractBratTest {
+
+  @Test
+  void testEventTypeDiagnosticPreservesDocumentAndCause() throws IOException {
+    assertEventDiagnostic("E1 échec%s argument:T1",
+        "type part must be in the format type:trigger");
+  }
+
+  @Test
+  void testEventArgumentDiagnosticPreservesDocumentAndCause() throws IOException {
+    assertEventDiagnostic("E1 évènement:T1 argument%😀",
+        "argument parts must be in form argument:value");
+  }
+
+  private void assertEventDiagnostic(String line, String detail) throws IOException {
+    try (var stream = new BratAnnotationStream(new AnnotationConfiguration(typeToClassMap),
+        "document%😀", new ByteArrayInputStream(line.getBytes(StandardCharsets.UTF_8)))) {
+      IOException error = assertThrows(IOException.class, stream::read);
+      assertEquals("Failed to parse ann document with id [document%😀.ann]", error.getMessage());
+      assertNotNull(error.getCause());
+      assertEquals("Failed to parse [" + line + "], " + detail, error.getCause().getMessage());
+    }
+  }
 
   /* Expectations */
   private static final String[] VOA_PERSONS = new String[]{

@@ -76,8 +76,8 @@ public class LeipzigLanguageSampleStream implements ObjectStream<LanguageSample>
 
       if (totalLineCount < requiredLines)
         throw new InvalidFormatException(
-                String.format("%s does not contain enough lines (%d lines < %d required lines).",
-                        sentencesFile.getPath(), totalLineCount, requiredLines));
+            sentencesFile.getPath() + " does not contain enough lines (" + totalLineCount
+                + " lines < " + requiredLines + " required lines).");
 
       List<Integer> indexes = IntStream.range(0, totalLineCount)
           .boxed().collect(Collectors.toList());

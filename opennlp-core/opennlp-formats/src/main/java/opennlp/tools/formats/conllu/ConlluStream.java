@@ -46,8 +46,6 @@ public class ConlluStream implements ObjectStream<ConlluSentence> {
 
   private static final String TEXT_LANG_PREFIX = "text_";
   private static final String INVALID_ID = "Invalid CoNLL-U id: ";
-  private static final String MISSING_MULTIWORD_LINE =
-      "Multiword token %s has no word line for id %s";
 
   private record MultiwordRange(int start, int end) {
   }
@@ -189,7 +187,7 @@ public class ConlluStream implements ObjectStream<ConlluSentence> {
           String js = Long.toString(j);
           if (!index.containsKey(js)) {
             throw new InvalidFormatException(
-                String.format(MISSING_MULTIWORD_LINE, line.getId(), js));
+                "Multiword token " + line.getId() + " has no word line for id " + js);
           }
           if (!linesToDelete.add(js)) {
             throw new InvalidFormatException("Overlapping multiword token range: " + line.getId());
