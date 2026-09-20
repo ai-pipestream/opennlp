@@ -18,8 +18,12 @@
 
 package opennlp.tools.log;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
-import java.util.Objects;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import org.slf4j.Logger;
 import org.slf4j.event.Level;
@@ -28,12 +32,11 @@ import opennlp.tools.commons.Internal;
 
 /**
  * This class serves as an adapter for a {@link Logger} used within a {@link PrintStream}.
+ * General-purpose formatted output is not supported; callers must pass complete text to the
+ * {@code print}, {@code append}, or {@code println} methods.
  */
 @Internal
 public class LogPrintStream extends PrintStream {
-
-  private final Logger logger;
-  private final Level level;
 
   /**
    * Creates a {@link LogPrintStream} for the given {@link Logger}.
@@ -52,41 +55,106 @@ public class LogPrintStream extends PrintStream {
    * @param level  must not be {@code null}
    */
   public LogPrintStream(Logger logger, Level level) {
-    super(nullOutputStream());
-    Objects.requireNonNull(logger, "logger must not be NULL.");
-    Objects.requireNonNull(level, "log level must not be NULL.");
-    this.logger = logger;
-    this.level = level;
+    super(new LoggingOutputStream(requireArgument(logger, "logger"),
+        requireArgument(level, "level")), false, StandardCharsets.UTF_8);
   }
 
   @Override
   public PrintStream printf(String format, Object... args) {
-    log(String.format(format, args));
-    return this;
+    throw unsupportedFormatting();
   }
 
   @Override
-  public void println(String msg) {
-    log(msg);
+  public PrintStream printf(Locale locale, String format, Object... args) {
+    throw unsupportedFormatting();
   }
 
-  private void log(String msg) {
-    switch (level) {
-      case TRACE:
-        logger.trace(msg);
-        break;
-      case DEBUG:
-        logger.debug(msg);
-        break;
-      case INFO:
-        logger.info(msg);
-        break;
-      case WARN:
-        logger.warn(msg);
-        break;
-      case ERROR:
-        logger.error(msg);
-        break;
+  @Override
+  public PrintStream format(String format, Object... args) {
+    throw unsupportedFormatting();
+  }
+
+  @Override
+  public PrintStream format(Locale locale, String format, Object... args) {
+    throw unsupportedFormatting();
+  }
+
+  private static UnsupportedOperationException unsupportedFormatting() {
+    return new UnsupportedOperationException("LogPrintStream does not support formatted output");
+  }
+
+  private static <T> T requireArgument(T value, String name) {
+    if (value == null) {
+      throw new IllegalArgumentException(name + " must not be null");
+    }
+    return value;
+  }
+
+  private static final class LoggingOutputStream extends OutputStream {
+
+    private final Logger logger;
+    private final Level level;
+    private final ByteArrayOutputStream line = new ByteArrayOutputStream();
+
+    private LoggingOutputStream(Logger logger, Level level) {
+      this.logger = logger;
+      this.level = level;
+    }
+
+    @Override
+    public synchronized void write(int value) {
+      if (value == '\n') {
+        logLine();
+      } else {
+        line.write(value);
+      }
+    }
+
+    @Override
+    public synchronized void write(byte[] bytes, int offset, int length) {
+      for (int i = offset; i < offset + length; i++) {
+        write(bytes[i] & 0xff);
+      }
+    }
+
+    @Override
+    public synchronized void flush() {
+      if (line.size() > 0) {
+        logLine();
+      }
+    }
+
+    @Override
+    public synchronized void close() throws IOException {
+      flush();
+      line.close();
+    }
+
+    private void logLine() {
+      byte[] bytes = line.toByteArray();
+      int length = bytes.length;
+      if (length > 0 && bytes[length - 1] == '\r') {
+        length--;
+      }
+      String message = new String(bytes, 0, length, StandardCharsets.UTF_8);
+      line.reset();
+      switch (level) {
+        case TRACE:
+          logger.trace(message);
+          break;
+        case DEBUG:
+          logger.debug(message);
+          break;
+        case INFO:
+          logger.info(message);
+          break;
+        case WARN:
+          logger.warn(message);
+          break;
+        case ERROR:
+          logger.error(message);
+          break;
+      }
     }
   }
 }

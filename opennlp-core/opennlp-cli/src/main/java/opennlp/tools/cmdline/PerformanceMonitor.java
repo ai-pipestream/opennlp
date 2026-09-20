@@ -19,6 +19,10 @@
 package opennlp.tools.cmdline;
 
 import java.io.PrintStream;
+import java.math.RoundingMode;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -134,8 +138,9 @@ public class PerformanceMonitor {
           averageThroughput = 0;
         }
 
-        out.printf("current: %.1f " + unit + "/s avg: %.1f " + unit + "/s total: %d "
-            + unit + "%n", currentThroughput, averageThroughput, counter);
+        out.println("current: " + formatOneDecimal(currentThroughput) + " " + unit
+            + "/s avg: " + formatOneDecimal(averageThroughput) + " " + unit
+            + "/s total: " + counter + " " + unit);
 
         lastTimeStamp = System.currentTimeMillis();
         lastCount = counter;
@@ -168,8 +173,20 @@ public class PerformanceMonitor {
       average = 0;
     }
 
-    out.printf("Average: %.1f " + unit + "/s %n", average);
+    out.println("Average: " + formatOneDecimal(average) + " " + unit + "/s ");
     out.println("Total: " + counter + " " + unit);
     out.println("Runtime: " + timePassed / 1000d + "s");
+  }
+
+  static String formatOneDecimal(double value) {
+    if (Double.isNaN(value)) {
+      return "NaN";
+    }
+    if (Double.isInfinite(value)) {
+      return value < 0 ? "-Infinity" : "Infinity";
+    }
+    DecimalFormat format = new DecimalFormat("0.0", DecimalFormatSymbols.getInstance(Locale.ROOT));
+    format.setRoundingMode(RoundingMode.HALF_UP);
+    return format.format(value);
   }
 }

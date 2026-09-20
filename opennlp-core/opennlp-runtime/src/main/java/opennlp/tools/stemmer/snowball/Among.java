@@ -36,7 +36,6 @@ package opennlp.tools.stemmer.snowball;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.util.Locale;
 
 /**
  * Internal class used by Snowball stemmers
@@ -60,10 +59,8 @@ public class Among {
         this.method = methodobject.findVirtual(clazz, methodname, MethodType.methodType(boolean.class))
             .asType(MethodType.methodType(boolean.class, SnowballProgram.class));
       } catch (NoSuchMethodException | IllegalAccessException e) {
-        throw new RuntimeException(String.format(Locale.ENGLISH,
-            "Snowball program '%s' is broken, cannot access method: boolean %s()",
-            clazz.getSimpleName(), methodname
-        ), e);
+        throw new RuntimeException("Snowball program '" + clazz.getSimpleName()
+            + "' is broken, cannot access method: boolean " + methodname + "()", e);
       }
     } else {
       this.method = null;
