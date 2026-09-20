@@ -23,168 +23,185 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 public class GlobMatcherTest {
+
+  private record TestArguments(Object... values) {
+    static TestArguments of(Object... values) {
+      return new TestArguments(values);
+    }
+
+    String string(int index) {
+      return (String) values[index];
+    }
+
+    boolean bool(int index) {
+      return (boolean) values[index];
+    }
+  }
 
   private static final String MODEL_URL =
       "jar:file:/repo/opennlp-models-pos-en-1.2.0.jar!/opennlp/models/en-pos.bin";
 
   private static final String SMILEY = "\uD83D\uDE00";
 
-  private static Stream<Arguments> accepted() {
+  private static Stream<TestArguments> accepted() {
     return Stream.of(
-        Arguments.of("*", ""),
-        Arguments.of("*", "anything at all"),
-        Arguments.of("**", "ab"),
-        Arguments.of("", ""),
-        Arguments.of("a", "a"),
-        Arguments.of("a*", "a"),
-        Arguments.of("a*", "abc"),
-        Arguments.of("*a", "a"),
-        Arguments.of("*a", "bca"),
-        Arguments.of("*a*b*", "xaybz"),
-        Arguments.of("a?c", "abc"),
-        Arguments.of("a?c", "a.c"),
-        Arguments.of("?", "a"),
-        Arguments.of("?", SMILEY),
-        Arguments.of("*.bin", "en-pos.bin"),
-        Arguments.of("*.bin", ".bin"),
-        Arguments.of("*model.properties", "/x/opennlp-models-pos-en-1.2.0.jar!/model.properties"),
-        Arguments.of("*opennlp-models-*", "/repo/opennlp-models-pos-en-1.2.0.jar"),
-        Arguments.of("*opennlp-models-*.jar", "/repo/opennlp-models-pos-en-1.2.0.jar"),
-        Arguments.of("*-en-*.jar", "/repo/opennlp-models-pos-en-1.2.0.jar"),
-        Arguments.of("(a)", "(a)"),
-        Arguments.of("[ab]", "[ab]"),
-        Arguments.of("a$", "a$"),
-        Arguments.of("a+", "a+"),
-        Arguments.of("a\\b", "a\\b"),
-        Arguments.of("*" + SMILEY + "*", "a" + SMILEY + "b"),
-        Arguments.of(SMILEY + "?", SMILEY + SMILEY),
+        TestArguments.of("*", ""),
+        TestArguments.of("*", "anything at all"),
+        TestArguments.of("**", "ab"),
+        TestArguments.of("", ""),
+        TestArguments.of("a", "a"),
+        TestArguments.of("a*", "a"),
+        TestArguments.of("a*", "abc"),
+        TestArguments.of("*a", "a"),
+        TestArguments.of("*a", "bca"),
+        TestArguments.of("*a*b*", "xaybz"),
+        TestArguments.of("a?c", "abc"),
+        TestArguments.of("a?c", "a.c"),
+        TestArguments.of("?", "a"),
+        TestArguments.of("?", SMILEY),
+        TestArguments.of("*.bin", "en-pos.bin"),
+        TestArguments.of("*.bin", ".bin"),
+        TestArguments.of("*model.properties", "/x/opennlp-models-pos-en-1.2.0.jar!/model.properties"),
+        TestArguments.of("*opennlp-models-*", "/repo/opennlp-models-pos-en-1.2.0.jar"),
+        TestArguments.of("*opennlp-models-*.jar", "/repo/opennlp-models-pos-en-1.2.0.jar"),
+        TestArguments.of("*-en-*.jar", "/repo/opennlp-models-pos-en-1.2.0.jar"),
+        TestArguments.of("(a)", "(a)"),
+        TestArguments.of("[ab]", "[ab]"),
+        TestArguments.of("a$", "a$"),
+        TestArguments.of("a+", "a+"),
+        TestArguments.of("a\\b", "a\\b"),
+        TestArguments.of("*" + SMILEY + "*", "a" + SMILEY + "b"),
+        TestArguments.of(SMILEY + "?", SMILEY + SMILEY),
         // an unpaired surrogate is one character
-        Arguments.of("?", "\uD83D"),
-        Arguments.of("*", "\uD83D"),
-        Arguments.of("a?c", "a\uDE00c"),
-        Arguments.of("a*b*c", "abc"),
-        Arguments.of("*?", "a"),
-        Arguments.of("?*", "a"),
-        Arguments.of("*\n*", "a\nb"),
-        Arguments.of("a\nb", "a\nb"),
-        Arguments.of("*\n*\n*", "a\nb\nc"),
-        Arguments.of("*\r\n*", "a\r\nb"),
+        TestArguments.of("?", "\uD83D"),
+        TestArguments.of("*", "\uD83D"),
+        TestArguments.of("a?c", "a\uDE00c"),
+        TestArguments.of("a*b*c", "abc"),
+        TestArguments.of("*?", "a"),
+        TestArguments.of("?*", "a"),
+        TestArguments.of("*\n*", "a\nb"),
+        TestArguments.of("a\nb", "a\nb"),
+        TestArguments.of("*\n*\n*", "a\nb\nc"),
+        TestArguments.of("*\r\n*", "a\r\nb"),
         // a wildcard covers a line terminator like any other character
-        Arguments.of("*", "a\nb"),
-        Arguments.of("*", "\n"),
-        Arguments.of("*.bin", "a\n.bin"),
-        Arguments.of("*a*b", "a\nab"),
-        Arguments.of("?", "\n"),
-        Arguments.of("a?b", "a\nb"),
-        Arguments.of("*", "a\rb"),
-        Arguments.of("*", "a\u0085b"),
-        Arguments.of("*", "a\u2028b"),
-        Arguments.of("*", "a\u2029b"),
-        Arguments.of("**", ""),
-        Arguments.of("***", "abc"),
-        Arguments.of("a**b", "ab"),
-        Arguments.of("a**b", "axyzb"),
-        Arguments.of("*?*", "a"),
-        Arguments.of("abc*", "abc"),
-        Arguments.of("*.bin*", ".bin"),
-        Arguments.of("[", "["),
-        Arguments.of("[a-z]", "[a-z]"),
-        Arguments.of("\\", "\\"),
-        Arguments.of("\\*", "\\lib\\a.jar"),
-        Arguments.of("\\Q*\\E", "\\Qx\\E"),
+        TestArguments.of("*", "a\nb"),
+        TestArguments.of("*", "\n"),
+        TestArguments.of("*.bin", "a\n.bin"),
+        TestArguments.of("*a*b", "a\nab"),
+        TestArguments.of("?", "\n"),
+        TestArguments.of("a?b", "a\nb"),
+        TestArguments.of("*", "a\rb"),
+        TestArguments.of("*", "a\u0085b"),
+        TestArguments.of("*", "a\u2028b"),
+        TestArguments.of("*", "a\u2029b"),
+        TestArguments.of("**", ""),
+        TestArguments.of("***", "abc"),
+        TestArguments.of("a**b", "ab"),
+        TestArguments.of("a**b", "axyzb"),
+        TestArguments.of("*?*", "a"),
+        TestArguments.of("abc*", "abc"),
+        TestArguments.of("*.bin*", ".bin"),
+        TestArguments.of("[", "["),
+        TestArguments.of("[a-z]", "[a-z]"),
+        TestArguments.of("\\", "\\"),
+        TestArguments.of("\\*", "\\lib\\a.jar"),
+        TestArguments.of("\\Q*\\E", "\\Qx\\E"),
         // path separators are plain characters
-        Arguments.of("*/models/*.bin", "/x/models/en.bin"),
-        Arguments.of("/*.bin", "/en.bin"),
-        Arguments.of("*/*", "a/"),
-        Arguments.of("*/*", "/"),
-        Arguments.of("*\\*", "C:\\lib\\a.jar"),
+        TestArguments.of("*/models/*.bin", "/x/models/en.bin"),
+        TestArguments.of("/*.bin", "/en.bin"),
+        TestArguments.of("*/*", "a/"),
+        TestArguments.of("*/*", "/"),
+        TestArguments.of("*\\*", "C:\\lib\\a.jar"),
         // a wildcard covers the jar separator and the entry path
-        Arguments.of("*.jar!/*.bin", "/repo/a.jar!/opennlp/en.bin"),
-        Arguments.of("*.jar!/opennlp/*", "/repo/a.jar!/opennlp/"),
-        Arguments.of("*!/*", "/repo/a.jar!/"),
+        TestArguments.of("*.jar!/*.bin", "/repo/a.jar!/opennlp/en.bin"),
+        TestArguments.of("*.jar!/opennlp/*", "/repo/a.jar!/opennlp/"),
+        TestArguments.of("*!/*", "/repo/a.jar!/"),
         // a drive letter in the file part of a file URL
-        Arguments.of("/C:/*.jar", "/C:/lib/a.jar"),
-        Arguments.of("*:/lib/*", "/C:/lib/a.jar"),
+        TestArguments.of("/C:/*.jar", "/C:/lib/a.jar"),
+        TestArguments.of("*:/lib/*", "/C:/lib/a.jar"),
         // percent-encoded file parts match as written
-        Arguments.of("*%20*", "/my%20models/en.bin"),
-        Arguments.of("/my%20models/*", "/my%20models/en.bin"),
-        Arguments.of("?%20?", "a%20b"),
-        Arguments.of("*" + SMILEY + "?", SMILEY + SMILEY));
+        TestArguments.of("*%20*", "/my%20models/en.bin"),
+        TestArguments.of("/my%20models/*", "/my%20models/en.bin"),
+        TestArguments.of("?%20?", "a%20b"),
+        TestArguments.of("*" + SMILEY + "?", SMILEY + SMILEY));
   }
 
-  @ParameterizedTest
-  @MethodSource("accepted")
-  void testMatchesAccepts(String glob, String input) {
-    Assertions.assertTrue(GlobMatcher.matches(glob, input),
-        "glob '" + glob + "' should accept '" + input + "'");
+  @Test
+  void testMatchesAccepts() {
+    Assertions.assertAll(accepted().map(arguments -> () -> {
+      String glob = arguments.string(0);
+      String input = arguments.string(1);
+      Assertions.assertTrue(GlobMatcher.matches(glob, input),
+          "glob '" + glob + "' should accept '" + input + "'");
+    }));
   }
 
-  private static Stream<Arguments> rejected() {
+  private static Stream<TestArguments> rejected() {
     return Stream.of(
-        Arguments.of("a", ""),
-        Arguments.of("", "a"),
-        Arguments.of("a", "b"),
-        Arguments.of("a", "ab"),
-        Arguments.of("ab", "a"),
-        Arguments.of("a*", "ba"),
-        Arguments.of("*a", "ab"),
-        Arguments.of("a?c", "ac"),
-        Arguments.of("a?c", "abbc"),
-        Arguments.of("?", ""),
-        Arguments.of("?", "ab"),
-        Arguments.of("*.bin", "en-pos.bini"),
-        Arguments.of("*.bin", "en-posxbin"),
-        Arguments.of("*.bin", "en-pos.BIN"),
-        Arguments.of("*model.properties", "/x/model.properties.bak"),
-        Arguments.of("*opennlp-models-*", "/repo/opennlp-model-pos-en-1.2.0.jar"),
-        Arguments.of("(a)", "a"),
-        Arguments.of("[ab]", "a"),
-        Arguments.of("a+", "aa"),
-        Arguments.of("a\\b", "a"),
-        Arguments.of(SMILEY, "\uD83D"),
-        Arguments.of("??", SMILEY),
-        Arguments.of("*.BIN", "en-pos.bin"),
-        Arguments.of("*?", ""),
-        Arguments.of("?*", ""),
-        Arguments.of("a\nb", "a b"),
-        Arguments.of("a\nb", "a\rb"),
-        Arguments.of("abcd", "abc"),
-        Arguments.of("a?cd", "abc"),
-        Arguments.of("*abcd", "abc"),
-        Arguments.of("abc?", "abc"),
-        Arguments.of("a**b", "a"),
-        Arguments.of("a**b", "ba"),
-        Arguments.of("*?*", ""),
-        Arguments.of("[a-z]", "b"),
-        Arguments.of("[", ""),
-        Arguments.of("\\", "\\\\"),
-        Arguments.of("\\Q*\\E", "x"),
-        Arguments.of("a/b", "a\\b"),
-        Arguments.of("a\\b", "a/b"),
-        Arguments.of("/*.bin", "en.bin"),
-        Arguments.of("*/models/*.bin", "/x/model/en.bin"),
-        Arguments.of("*.jar!/en.bin", "/repo/a.jar!/models/en.bin"),
-        Arguments.of("*.jar!/*", "/repo/a.jar/en.bin"),
-        Arguments.of("/C:/*.jar", "/D:/lib/a.jar"),
-        Arguments.of("C:/*.jar", "/C:/lib/a.jar"),
-        Arguments.of("*my models*", "/my%20models/en.bin"),
-        Arguments.of("*%20*", "/my models/en.bin"),
-        Arguments.of("?%20?", "a b"),
-        Arguments.of("?", "\r\n"),
-        Arguments.of("*" + SMILEY + "?", SMILEY),
-        Arguments.of(SMILEY + "*", "\uD83D"));
+        TestArguments.of("a", ""),
+        TestArguments.of("", "a"),
+        TestArguments.of("a", "b"),
+        TestArguments.of("a", "ab"),
+        TestArguments.of("ab", "a"),
+        TestArguments.of("a*", "ba"),
+        TestArguments.of("*a", "ab"),
+        TestArguments.of("a?c", "ac"),
+        TestArguments.of("a?c", "abbc"),
+        TestArguments.of("?", ""),
+        TestArguments.of("?", "ab"),
+        TestArguments.of("*.bin", "en-pos.bini"),
+        TestArguments.of("*.bin", "en-posxbin"),
+        TestArguments.of("*.bin", "en-pos.BIN"),
+        TestArguments.of("*model.properties", "/x/model.properties.bak"),
+        TestArguments.of("*opennlp-models-*", "/repo/opennlp-model-pos-en-1.2.0.jar"),
+        TestArguments.of("(a)", "a"),
+        TestArguments.of("[ab]", "a"),
+        TestArguments.of("a+", "aa"),
+        TestArguments.of("a\\b", "a"),
+        TestArguments.of(SMILEY, "\uD83D"),
+        TestArguments.of("??", SMILEY),
+        TestArguments.of("*.BIN", "en-pos.bin"),
+        TestArguments.of("*?", ""),
+        TestArguments.of("?*", ""),
+        TestArguments.of("a\nb", "a b"),
+        TestArguments.of("a\nb", "a\rb"),
+        TestArguments.of("abcd", "abc"),
+        TestArguments.of("a?cd", "abc"),
+        TestArguments.of("*abcd", "abc"),
+        TestArguments.of("abc?", "abc"),
+        TestArguments.of("a**b", "a"),
+        TestArguments.of("a**b", "ba"),
+        TestArguments.of("*?*", ""),
+        TestArguments.of("[a-z]", "b"),
+        TestArguments.of("[", ""),
+        TestArguments.of("\\", "\\\\"),
+        TestArguments.of("\\Q*\\E", "x"),
+        TestArguments.of("a/b", "a\\b"),
+        TestArguments.of("a\\b", "a/b"),
+        TestArguments.of("/*.bin", "en.bin"),
+        TestArguments.of("*/models/*.bin", "/x/model/en.bin"),
+        TestArguments.of("*.jar!/en.bin", "/repo/a.jar!/models/en.bin"),
+        TestArguments.of("*.jar!/*", "/repo/a.jar/en.bin"),
+        TestArguments.of("/C:/*.jar", "/D:/lib/a.jar"),
+        TestArguments.of("C:/*.jar", "/C:/lib/a.jar"),
+        TestArguments.of("*my models*", "/my%20models/en.bin"),
+        TestArguments.of("*%20*", "/my models/en.bin"),
+        TestArguments.of("?%20?", "a b"),
+        TestArguments.of("?", "\r\n"),
+        TestArguments.of("*" + SMILEY + "?", SMILEY),
+        TestArguments.of(SMILEY + "*", "\uD83D"));
   }
 
-  @ParameterizedTest
-  @MethodSource("rejected")
-  void testMatchesRejects(String glob, String input) {
-    Assertions.assertFalse(GlobMatcher.matches(glob, input),
-        "glob '" + glob + "' should reject '" + input + "'");
+  @Test
+  void testMatchesRejects() {
+    Assertions.assertAll(rejected().map(arguments -> () -> {
+      String glob = arguments.string(0);
+      String input = arguments.string(1);
+      Assertions.assertFalse(GlobMatcher.matches(glob, input),
+          "glob '" + glob + "' should reject '" + input + "'");
+    }));
   }
 
   /**
@@ -206,164 +223,122 @@ public class GlobMatcherTest {
     };
   }
 
-  private static Stream<Arguments> urlsAndWildcards() {
+  private static Stream<TestArguments> urlsAndWildcards() {
     return Stream.of(
-        Arguments.of(MODEL_URL, "*.bin", true),
-        Arguments.of(MODEL_URL, "*.jar!/opennlp/models/*.bin", true),
-        Arguments.of(MODEL_URL, "*.jar!/*", true),
-        Arguments.of(MODEL_URL, "*.jar!/en-pos.bin", false),
-        Arguments.of(MODEL_URL, "*.jar", false),
-        Arguments.of(MODEL_URL, "*opennlp-models-???-en-*", true),
-        Arguments.of(MODEL_URL, "*opennlp-models-??-en-*", false),
+        TestArguments.of(MODEL_URL, "*.bin", true),
+        TestArguments.of(MODEL_URL, "*.jar!/opennlp/models/*.bin", true),
+        TestArguments.of(MODEL_URL, "*.jar!/*", true),
+        TestArguments.of(MODEL_URL, "*.jar!/en-pos.bin", false),
+        TestArguments.of(MODEL_URL, "*.jar", false),
+        TestArguments.of(MODEL_URL, "*opennlp-models-???-en-*", true),
+        TestArguments.of(MODEL_URL, "*opennlp-models-??-en-*", false),
         // the file part of a file URL starts with a slash, the drive letter follows
-        Arguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "/C:/*.jar", true),
-        Arguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "C:/*.jar", false),
-        Arguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "*opennlp-models-*", true),
+        TestArguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "/C:/*.jar", true),
+        TestArguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "C:/*.jar", false),
+        TestArguments.of("file:/C:/lib/opennlp-models-pos-en-1.2.0.jar", "*opennlp-models-*", true),
         // the file part of a jar URL is the inner URL, scheme included
-        Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "file:/C:/*.jar!/*.bin", true),
-        Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "/C:/*.jar!/*.bin", false),
-        Arguments.of(MODEL_URL, "file:/repo/*.jar!/opennlp/models/en-pos.bin", true),
-        Arguments.of(MODEL_URL, "/repo/*.jar!/opennlp/models/en-pos.bin", false),
-        Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*/en-pos.bin", true),
-        Arguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*\\en-pos.bin", false),
+        TestArguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "file:/C:/*.jar!/*.bin", true),
+        TestArguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "/C:/*.jar!/*.bin", false),
+        TestArguments.of(MODEL_URL, "file:/repo/*.jar!/opennlp/models/en-pos.bin", true),
+        TestArguments.of(MODEL_URL, "/repo/*.jar!/opennlp/models/en-pos.bin", false),
+        TestArguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*/en-pos.bin", true),
+        TestArguments.of("jar:file:/C:/lib/a.jar!/opennlp/en-pos.bin", "*\\en-pos.bin", false),
         // URI escapes are decoded once, while literal plus signs are preserved
-        Arguments.of("file:/my%20models/en-pos.bin", "*%20*", false),
-        Arguments.of("file:/my%20models/en-pos.bin", "*my models*", true),
-        Arguments.of("file:/my%20models/en-pos.bin", "/my models/*.bin", true),
-        Arguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-?.jar", true),
-        Arguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-??.jar", false),
-        Arguments.of("file:/models/model-%2520.jar", "*model-%20.jar", true),
-        Arguments.of("file:/models/model-%2520.jar", "*model- .jar", false),
-        Arguments.of("file:/models/model+1.jar", "*model+1.jar", true),
-        Arguments.of("file:/models/model+1.jar", "*model 1.jar", false),
-        Arguments.of("jar:file:/my%20models/a.jar!/caf%C3%A9/%F0%9F%98%80.bin",
+        TestArguments.of("file:/my%20models/en-pos.bin", "*%20*", false),
+        TestArguments.of("file:/my%20models/en-pos.bin", "*my models*", true),
+        TestArguments.of("file:/my%20models/en-pos.bin", "/my models/*.bin", true),
+        TestArguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-?.jar", true),
+        TestArguments.of("file:/models/model-%F0%9F%98%80.jar", "*model-??.jar", false),
+        TestArguments.of("file:/models/model-%2520.jar", "*model-%20.jar", true),
+        TestArguments.of("file:/models/model-%2520.jar", "*model- .jar", false),
+        TestArguments.of("file:/models/model+1.jar", "*model+1.jar", true),
+        TestArguments.of("file:/models/model+1.jar", "*model 1.jar", false),
+        TestArguments.of("jar:file:/my%20models/a.jar!/caf%C3%A9/%F0%9F%98%80.bin",
             "file:/my models/a.jar!/café/?.bin", true),
-        Arguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model%20.bin", true),
-        Arguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model .bin", false),
-        Arguments.of("jar:file:/models/a.jar!/model%23x.bin", "*model#x.bin", true),
-        Arguments.of("jar:file:/models/a.jar!/model%3Fx.bin", "*model?x.bin", true),
+        TestArguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model%20.bin", true),
+        TestArguments.of("jar:file:/models/a.jar!/model%2520.bin", "*model .bin", false),
+        TestArguments.of("jar:file:/models/a.jar!/model%23x.bin", "*model#x.bin", true),
+        TestArguments.of("jar:file:/models/a.jar!/model%3Fx.bin", "*model?x.bin", true),
         // a query is part of the file part, a fragment is not
-        Arguments.of("http://host/models/en-pos.bin?x=1", "*.bin", false),
-        Arguments.of("http://host/models/en-pos.bin?x=1", "*.bin?x=1", true),
-        Arguments.of("http://host/models/en-pos.bin#top", "*.bin", true),
-        Arguments.of("file:/models/en-pos.bin", "*", true),
-        Arguments.of("file:/models/en-pos.bin", "", false),
-        Arguments.of("file:/models/en-pos.bin", "?", false));
+        TestArguments.of("http://host/models/en-pos.bin?x=1", "*.bin", false),
+        TestArguments.of("http://host/models/en-pos.bin?x=1", "*.bin?x=1", true),
+        TestArguments.of("http://host/models/en-pos.bin#top", "*.bin", true),
+        TestArguments.of("file:/models/en-pos.bin", "*", true),
+        TestArguments.of("file:/models/en-pos.bin", "", false),
+        TestArguments.of("file:/models/en-pos.bin", "?", false));
   }
 
   /**
    * Checks decoded file part matching against jar, file, and http URLs.
    */
-  @ParameterizedTest
-  @MethodSource("urlsAndWildcards")
-  void testMatchesWildcardOnUrlFilePart(String url, String wildcard, boolean expected)
-      throws Exception {
-    final AbstractClassPathModelFinder finder = newProbeFinder();
-    final URL parsed = new URI(url).toURL();
-    Assertions.assertEquals(expected, finder.matchesWildcard(parsed, wildcard),
-        "wildcard '" + wildcard + "' on '" + parsed.getFile() + "'");
+  @Test
+  void testMatchesWildcardOnUrlFilePart() {
+    Assertions.assertAll(urlsAndWildcards().map(arguments -> () -> {
+      String url = arguments.string(0);
+      String wildcard = arguments.string(1);
+      boolean expected = arguments.bool(2);
+      final AbstractClassPathModelFinder finder = newProbeFinder();
+      final URL parsed = new URI(url).toURL();
+      Assertions.assertEquals(expected, finder.matchesWildcard(parsed, wildcard),
+          "wildcard '" + wildcard + "' on '" + parsed.getFile() + "'");
+    }));
   }
 
-  private static Stream<Arguments> literalGlobs() {
+  private static Stream<TestArguments> literalGlobs() {
     return Stream.of(
-        Arguments.of("*.bin", "en-pos.bin", "en-posxbin"),
-        Arguments.of("*.bin", ".bin", "en-pos.bin.bak"),
-        Arguments.of("a?c", "abc", "ac"),
-        Arguments.of("a?c", "a\nc", "abbc"),
-        Arguments.of("*a*b*", "xa\nyb\nz", "ba"),
-        Arguments.of("(a)", "(a)", "a"),
-        Arguments.of("[ab]", "[ab]", "a"),
-        Arguments.of("a+", "a+", "aa"),
-        Arguments.of("a$", "a$", "a"),
-        Arguments.of("a\\b", "a\\b", "ab"),
-        Arguments.of("\\Q*\\E", "\\Qx\\E", "x"),
-        Arguments.of("[", "[", ""),
-        Arguments.of("[a-z]", "[a-z]", "b"),
-        Arguments.of("\\", "\\", "\\\\"),
-        Arguments.of("a**", "a", "ba"),
-        Arguments.of("*a", "\na", "\n"),
-        Arguments.of("a*", "a\r\n", "\na"),
-        Arguments.of("?", "\n", "\r\n"),
-        Arguments.of("?", "\uD83D", SMILEY + SMILEY),
-        Arguments.of("*.jar!/*.bin", "/repo/a.jar!/en.bin", "/repo/a.jar/en.bin"),
-        Arguments.of("/C:/*", "/C:/lib/a.jar", "C:/lib/a.jar"),
-        Arguments.of("*%20*", "/my%20models", "/my models"),
-        Arguments.of(SMILEY + "?", SMILEY + SMILEY, SMILEY),
-        Arguments.of("", "", "a"));
+        TestArguments.of("*.bin", "en-pos.bin", "en-posxbin"),
+        TestArguments.of("*.bin", ".bin", "en-pos.bin.bak"),
+        TestArguments.of("a?c", "abc", "ac"),
+        TestArguments.of("a?c", "a\nc", "abbc"),
+        TestArguments.of("*a*b*", "xa\nyb\nz", "ba"),
+        TestArguments.of("(a)", "(a)", "a"),
+        TestArguments.of("[ab]", "[ab]", "a"),
+        TestArguments.of("a+", "a+", "aa"),
+        TestArguments.of("a$", "a$", "a"),
+        TestArguments.of("a\\b", "a\\b", "ab"),
+        TestArguments.of("\\Q*\\E", "\\Qx\\E", "x"),
+        TestArguments.of("[", "[", ""),
+        TestArguments.of("[a-z]", "[a-z]", "b"),
+        TestArguments.of("\\", "\\", "\\\\"),
+        TestArguments.of("a**", "a", "ba"),
+        TestArguments.of("*a", "\na", "\n"),
+        TestArguments.of("a*", "a\r\n", "\na"),
+        TestArguments.of("?", "\n", "\r\n"),
+        TestArguments.of("?", "\uD83D", SMILEY + SMILEY),
+        TestArguments.of("*.jar!/*.bin", "/repo/a.jar!/en.bin", "/repo/a.jar/en.bin"),
+        TestArguments.of("/C:/*", "/C:/lib/a.jar", "C:/lib/a.jar"),
+        TestArguments.of("*%20*", "/my%20models", "/my models"),
+        TestArguments.of(SMILEY + "?", SMILEY + SMILEY, SMILEY),
+        TestArguments.of("", "", "a"));
   }
 
   /** Checks literal characters and both wildcards against explicit accept/reject examples. */
-  @ParameterizedTest
-  @MethodSource("literalGlobs")
-  void testLiteralGlobSemantics(String glob, String accepted, String rejected) {
-    Assertions.assertTrue(GlobMatcher.matches(glob, accepted));
-    Assertions.assertFalse(GlobMatcher.matches(glob, rejected));
-  }
-
-  /**
-   * An example finder using the supported wildcard API.
-   */
-  private static final class WildcardFinder extends AbstractClassPathModelFinder {
-
-    private final List<URL> candidates;
-
-    WildcardFinder(List<URL> candidates) {
-      this.candidates = candidates;
-    }
-
-    @Override
-    protected Object getContext() {
-      return null;
-    }
-
-    @Override
-    protected List<URI> getMatchingURIs(String wildcardPattern, Object context) {
-      final List<URI> matches = new java.util.ArrayList<>();
-      for (URL candidate : candidates) {
-        if (matchesWildcard(candidate, "*" + wildcardPattern)) {
-          try {
-            matches.add(candidate.toURI());
-          } catch (java.net.URISyntaxException e) {
-            throw new IllegalStateException(e);
-          }
-        }
-      }
-      return matches;
-    }
-  }
-
-  /**
-   * Checks that a custom finder filters through the supported wildcard API.
-   */
   @Test
-  void testCustomSubclassFilters() throws Exception {
-    final URL bin = new URI(MODEL_URL).toURL();
-    final URL properties = new URI(
-        "jar:file:/repo/opennlp-models-pos-en-1.2.0.jar!/opennlp/models/model.properties").toURL();
-    final URL other = new URI("jar:file:/repo/other.jar!/x/readme.txt").toURL();
-    final WildcardFinder finder = new WildcardFinder(List.of(bin, properties, other));
-    Assertions.assertEquals(List.of(bin.toURI()), finder.getMatchingURIs("*.bin", null));
-    Assertions.assertEquals(List.of(properties.toURI()),
-        finder.getMatchingURIs("model.properties", null));
-    Assertions.assertEquals(List.of(bin.toURI(), properties.toURI()),
-        finder.getMatchingURIs("opennlp-models-*", null));
-    Assertions.assertEquals(List.of(), finder.getMatchingURIs("(x)", null));
+  void testLiteralGlobSemantics() {
+    Assertions.assertAll(literalGlobs().map(arguments -> () -> {
+      String glob = arguments.string(0);
+      String accepted = arguments.string(1);
+      String rejected = arguments.string(2);
+      Assertions.assertTrue(GlobMatcher.matches(glob, accepted));
+      Assertions.assertFalse(GlobMatcher.matches(glob, rejected));
+    }));
   }
 
-  private static Stream<Arguments> nullInputs() {
+  private static Stream<TestArguments> nullInputs() {
     return Stream.of(
-        Arguments.of(null, "a"),
-        Arguments.of("a", null),
-        Arguments.of(null, null));
+        TestArguments.of(null, "a"),
+        TestArguments.of("a", null),
+        TestArguments.of(null, null));
   }
 
   /**
    * Checks that null glob or input fails fast instead of matching.
    */
-  @ParameterizedTest
-  @MethodSource("nullInputs")
-  void testMatchesRejectsNull(String glob, String input) {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> GlobMatcher.matches(glob, input));
+  @Test
+  void testMatchesRejectsNull() {
+    Assertions.assertAll(nullInputs().map(arguments -> () ->
+        Assertions.assertThrows(IllegalArgumentException.class,
+            () -> GlobMatcher.matches(arguments.string(0), arguments.string(1)))));
   }
 
   /**

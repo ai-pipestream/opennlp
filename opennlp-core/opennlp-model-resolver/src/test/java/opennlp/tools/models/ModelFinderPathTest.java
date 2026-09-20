@@ -31,15 +31,19 @@ import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.models.dir.DirectoryModelFinder;
 import opennlp.tools.models.simple.SimpleClassPathModelFinder;
 
 class ModelFinderPathTest {
+
+  private record TestArguments(Object... values) {
+    static TestArguments of(Object... values) {
+      return new TestArguments(values);
+    }
+  }
 
   private static final byte[] MODEL = {1, 2, 3};
   private static final byte[] PROPERTIES = {4, 5, 6};
@@ -47,55 +51,66 @@ class ModelFinderPathTest {
   @TempDir
   private Path directory;
 
-  private static Stream<Arguments> jarMasks() {
+  private static Stream<TestArguments> jarMasks() {
     return Stream.of(false, true).flatMap(simple -> Stream.of(
-        Arguments.of(simple, "model space.jar", "model space.jar", true),
-        Arguments.of(simple, "model space.jar", "model%20space.jar", false),
-        Arguments.of(simple, "model-é.jar", "model-é.jar", true),
-        Arguments.of(simple, "model-é.jar", "model-?.jar", true),
-        Arguments.of(simple, "model-😀.jar", "model-😀.jar", true),
-        Arguments.of(simple, "model-😀.jar", "model-?.jar", true),
-        Arguments.of(simple, "model-😀.jar", "model-??.jar", false),
-        Arguments.of(simple, "model-😀😀.jar", "model-?.jar", false),
-        Arguments.of(simple, "model[1].jar", "model[1].jar", true),
-        Arguments.of(simple, "model[1].jar", "model1.jar", false),
-        Arguments.of(simple, "model+1.jar", "model+1.jar", true),
-        Arguments.of(simple, "model+1.jar", "model 1.jar", false),
-        Arguments.of(simple, "model%.jar", "model%.jar", true),
-        Arguments.of(simple, "model%20.jar", "model%20.jar", true),
-        Arguments.of(simple, "model%20.jar", "model .jar", false),
-        Arguments.of(simple, "model%F0%9F%98%80.jar", "model😀.jar", false),
-        Arguments.of(simple, "model#1.jar", "model#1.jar", true)));
+        TestArguments.of(simple, "model space.jar", "model space.jar", true),
+        TestArguments.of(simple, "model space.jar", "model%20space.jar", false),
+        TestArguments.of(simple, "model-é.jar", "model-é.jar", true),
+        TestArguments.of(simple, "model-é.jar", "model-?.jar", true),
+        TestArguments.of(simple, "model-😀.jar", "model-😀.jar", true),
+        TestArguments.of(simple, "model-😀.jar", "model-?.jar", true),
+        TestArguments.of(simple, "model-😀.jar", "model-??.jar", false),
+        TestArguments.of(simple, "model-😀😀.jar", "model-?.jar", false),
+        TestArguments.of(simple, "model[1].jar", "model[1].jar", true),
+        TestArguments.of(simple, "model[1].jar", "model1.jar", false),
+        TestArguments.of(simple, "model+1.jar", "model+1.jar", true),
+        TestArguments.of(simple, "model+1.jar", "model 1.jar", false),
+        TestArguments.of(simple, "model%.jar", "model%.jar", true),
+        TestArguments.of(simple, "model%20.jar", "model%20.jar", true),
+        TestArguments.of(simple, "model%20.jar", "model .jar", false),
+        TestArguments.of(simple, "model%F0%9F%98%80.jar", "model😀.jar", false),
+        TestArguments.of(simple, "model#1.jar", "model#1.jar", true)));
   }
 
-  @ParameterizedTest(name = "simple={0}, jar={1}, mask={2}, matches={3}")
-  @MethodSource("jarMasks")
-  void testJarMaskUsesFileName(boolean simple, String jarName, String mask, boolean matches)
-      throws Exception {
-    final Path jar = createJar(jarName, "nested/en.bin", "nested/model.properties");
-    final Set<ClassPathModelEntry> models = findModels(simple, jar, mask);
-    Assertions.assertEquals(matches ? 1 : 0, models.size());
-    if (matches) {
-      assertReadable(models.iterator().next(), "nested/en.bin", "nested/model.properties");
-    }
+  @Test
+  void testJarMaskUsesFileName() {
+    Assertions.assertAll(jarMasks().map(arguments -> () -> {
+      boolean simple = (boolean) arguments.values()[0];
+      String jarName = (String) arguments.values()[1];
+      String mask = (String) arguments.values()[2];
+      boolean matches = (boolean) arguments.values()[3];
+      final Path jar = createJar(jarName, "nested/en.bin", "nested/model.properties");
+      try {
+        final Set<ClassPathModelEntry> models = findModels(simple, jar, mask);
+        Assertions.assertEquals(matches ? 1 : 0, models.size());
+        if (matches) {
+          assertReadable(models.iterator().next(), "nested/en.bin", "nested/model.properties");
+        }
+      } finally {
+        Files.deleteIfExists(jar);
+      }
+    }));
   }
 
-  private static Stream<Arguments> entryNames() {
+  private static Stream<TestArguments> entryNames() {
     return Stream.of(false, true).flatMap(simple -> Stream.of(
         "my models", "café", "😀", "[models]", "models+1", "models%", "models%20",
         "models#1", "models?1", "models!/nested")
-        .map(name -> Arguments.of(simple, name)));
+        .map(name -> TestArguments.of(simple, name)));
   }
 
-  @ParameterizedTest(name = "simple={0}, name={1}")
-  @MethodSource("entryNames")
-  void testJarEntryUrisRemainReadable(boolean simple, String name) throws Exception {
-    final String entry = name + "/" + name.substring(name.lastIndexOf('/') + 1) + ".bin";
-    final String properties = name + "/model.properties";
-    final Path jar = createJar("model.jar", entry, properties);
-    final Set<ClassPathModelEntry> models = findModels(simple, jar, "model.jar");
-    Assertions.assertEquals(1, models.size());
-    assertReadable(models.iterator().next(), entry, properties);
+  @Test
+  void testJarEntryUrisRemainReadable() {
+    Assertions.assertAll(entryNames().map(arguments -> () -> {
+      boolean simple = (boolean) arguments.values()[0];
+      String name = (String) arguments.values()[1];
+      final String entry = name + "/" + name.substring(name.lastIndexOf('/') + 1) + ".bin";
+      final String properties = name + "/model.properties";
+      final Path jar = createJar("model.jar", entry, properties);
+      final Set<ClassPathModelEntry> models = findModels(simple, jar, "model.jar");
+      Assertions.assertEquals(1, models.size());
+      assertReadable(models.iterator().next(), entry, properties);
+    }));
   }
 
   private Path createJar(String name, String entry, String properties) throws IOException {
