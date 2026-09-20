@@ -51,6 +51,13 @@ public class ParseParseBenchmark {
         case "long64k" -> longTree(64 * 1024);
         default -> throw new IllegalArgumentException("Unknown workload: " + workload);
       };
+      Parse parsed = Parse.parseParse(input);
+      if (parsed.getTagNodes().length == 0) {
+        throw new IllegalStateException("Benchmark fixture did not produce tagged tokens");
+      }
+      System.out.println("Treebank fixture " + workload + ": tags="
+          + parsed.getTagNodes().length + ", outputHash="
+          + Integer.toHexString(parsed.toStringPennTreebank().hashCode()));
     }
   }
 

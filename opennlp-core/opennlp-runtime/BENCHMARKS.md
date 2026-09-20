@@ -58,7 +58,9 @@ java -cp "$CP" org.openjdk.jmh.Main POSTaggerMEBenchmark
 ### Parser scan baselines
 
 The parser benchmarks construct their immutable input strings during trial setup, so measured
-operations cover only the public parsing calls. Run both benchmark classes with two independent
+operations cover only the public parsing calls. Setup checks that the fixtures produce tokens and
+prints token or tag counts and a deterministic output hash. Retain these diagnostics with each
+run and investigate differences before comparing timings. Run both benchmark classes with two independent
 forks and enough warmup and measurement iterations for a bounded baseline. Run on an otherwise
 idle machine and retain the raw output:
 

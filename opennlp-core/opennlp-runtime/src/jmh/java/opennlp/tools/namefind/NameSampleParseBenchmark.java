@@ -44,7 +44,7 @@ public class NameSampleParseBenchmark {
     String input;
 
     @Setup(Level.Trial)
-    public void prepare() {
+    public void prepare() throws IOException {
       input = switch (workload) {
         case "normalUnicode" -> normalUnicode();
         case "markupHeavy" -> repeated(markupHeavySentence(), 80);
@@ -52,6 +52,13 @@ public class NameSampleParseBenchmark {
         case "long64k" -> toMinimumLength(normalUnicode(), 64 * 1024);
         default -> throw new IllegalArgumentException("Unknown workload: " + workload);
       };
+      NameSample sample = NameSample.parse(input, false);
+      if (sample.getSentence().length == 0 || sample.getNames().length == 0) {
+        throw new IllegalStateException("Benchmark fixture did not produce annotated tokens");
+      }
+      System.out.println("NameSample fixture " + workload + ": tokens="
+          + sample.getSentence().length + ", names=" + sample.getNames().length
+          + ", outputHash=" + Integer.toHexString(sample.toString().hashCode()));
     }
   }
 
