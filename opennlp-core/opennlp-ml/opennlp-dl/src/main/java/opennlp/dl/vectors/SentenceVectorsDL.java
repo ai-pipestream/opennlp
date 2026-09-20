@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.FloatBuffer;
+import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -69,10 +70,10 @@ import opennlp.tools.embeddings.TextEmbedder;
  *
  * <p>This class is thread-safe and may be shared across threads: the inference methods hold no
  * per-call instance state and the underlying {@link OrtSession} supports concurrent execution. The
- * reusable direct output buffer each inference writes into is confined to the thread that runs the
- * inference, so no two threads share one, and the total such buffers hold is bounded; see
- * {@code OnnxInference}. This thread-safety guarantee applies until {@link #close()} is called;
- * callers must not race {@code close()} with inference methods.</p>
+ * reusable direct buffers each inference stages its inputs into and writes its output back through are
+ * confined to the thread that runs the inference, so no two threads share one, and the total such
+ * buffers hold is bounded; see {@code OnnxInference}. This thread-safety guarantee applies until
+ * {@link #close()} is called; callers must not race {@code close()} with inference methods.</p>
  *
  * <p>{@link #embedAll(List)} turns a call into as few inferences as the configured
  * {@link PaddingStrategy} allows. By default it pads nothing and runs one inference per distinct
@@ -115,10 +116,12 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * output with a hidden size of 768 holds around 48 MiB of {@code float}. A single input longer
    * than the bound still runs on its own rather than being dropped or truncated further.
    *
-   * <p>This is also what decides how large one reusable pinned output buffer can grow, so it is
-   * paired with {@code OnnxInference.DEFAULT_MAX_PINNED_OUTPUT_BYTES}, which bounds how many such
-   * buffers one component may hold across its threads. Changing either number means revisiting the
-   * other.</p>
+   * <p>This is also what decides how large one reusable direct buffer can grow, on the input side and
+   * on the output side alike, so it is paired with
+   * {@code OnnxInference.DEFAULT_MAX_PINNED_OUTPUT_BYTES} and
+   * {@code OnnxInference.DEFAULT_MAX_INPUT_STAGING_BYTES}, which bound how many such buffers one
+   * component may hold across its threads. Changing any of the three numbers means revisiting the
+   * others.</p>
    */
   public static final int MAX_BATCH_TOKEN_POSITIONS = 16384;
 
@@ -608,9 +611,10 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * order.
    *
    * <p>Rows shorter than the batch's row width, which {@link #width(Tokens[])} decides from the
-   * configured {@link PaddingStrategy}, are padded to it: {@code input_ids} with the vocabulary's
-   * padding token id, {@code attention_mask} with {@code 0} and {@code token_type_ids} with
-   * {@code 0}. A padded position therefore changes no output vector, whether the sentence vector
+   * configured {@link PaddingStrategy}, are padded to it by
+   * {@link #stage(Tokens[], int, LongBuffer, LongBuffer, LongBuffer)}: {@code input_ids} with the
+   * vocabulary's padding token id, {@code attention_mask} with {@code 0} and {@code token_type_ids}
+   * with {@code 0}. A padded position therefore changes no output vector, whether the sentence vector
    * comes from an in-graph {@code sentence_embedding} output that honors the mask or from
    * {@link #pool(FloatBuffer, int, int, long[])}, which reads only the positions the row's own mask
    * covers. Every row's vector equals the vector the row would get in a batch of its own, exactly on
@@ -636,26 +640,53 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   private float[][] run(final Tokens[] batch) throws OrtException {
 
     final int length = width(batch);
-    final long[] ids = new long[batch.length * length];
-    final long[] mask = new long[batch.length * length];
-    final long[] types = new long[batch.length * length];
-    for (int b = 0; b < batch.length; b++) {
-      final int rowLength = batch[b].ids().length;
-      System.arraycopy(batch[b].ids(), 0, ids, b * length, rowLength);
-      System.arraycopy(batch[b].mask(), 0, mask, b * length, rowLength);
-      System.arraycopy(batch[b].types(), 0, types, b * length, rowLength);
-      // mask and types stay 0 past the row, which is what padding requires; only the ids differ
-      // from 0 for a vocabulary whose padding token is not id 0.
-      Arrays.fill(ids, b * length + rowLength, (b + 1) * length, padTokenId);
-    }
-
     // The tensors, the run and the release of every native handle belong to OnnxInference; what is
-    // left here is the batch this component staged and what it makes of the numbers. The values are
-    // read inside the reader, while the output memory is still the run's, and what leaves the reader
-    // is the pooled vectors, which are this class's own arrays.
-    return inference.run(new long[] {batch.length, length}, ids, mask, types, outputName,
+    // left here is what each row of the batch puts into the tensors and what this class makes of the
+    // numbers that come back. The rows are written straight into the direct memory the inputs are
+    // staged in, so the three flat long[rows * length] arrays this used to build, around 170 KB of
+    // them at a batch of 128 rows padded to 56 positions, are not built and not copied out of. The
+    // values are read inside the reader, while the output memory is still the run's, and what leaves
+    // the reader is the pooled vectors, which are this class's own arrays.
+    return inference.run(new long[] {batch.length, length},
+        (ids, mask, types) -> stage(batch, length, ids, mask, types), outputName,
         pinnableOutputShape(batch.length, length),
         (values, shape) -> vectors(batch, values, shape));
+  }
+
+  /**
+   * Writes one inference's rows into the three input buffers, row after row, padding each row out to
+   * the width of the run.
+   *
+   * <p>Every position of all three buffers is written, which is what the buffers being reused across
+   * inferences requires: a position left unwritten would hold whatever the previous inference of this
+   * thread put there, and the model would embed that instead. The padded tail of a row is written too
+   * rather than assumed to be zero already, including {@code token_type_ids}, which is zero for every
+   * row of every batch this class stages and would therefore be the one input a shortcut looked safe
+   * for. It is not safe: what makes it zero is this method, so skipping it would make the values of
+   * one inference depend on what the inferences before it happened to write.</p>
+   *
+   * @param batch The encodings of the inference, in the order their rows are staged.
+   * @param length The row width of the run, at least the longest row of {@code batch}.
+   * @param ids The {@code input_ids} buffer, positioned at the first value to write.
+   * @param mask The {@code attention_mask} buffer, positioned at the first value to write.
+   * @param types The {@code token_type_ids} buffer, positioned at the first value to write.
+   */
+  private void stage(final Tokens[] batch, final int length, final LongBuffer ids,
+      final LongBuffer mask, final LongBuffer types) {
+    for (final Tokens row : batch) {
+      final int rowLength = row.ids().length;
+      ids.put(row.ids(), 0, rowLength);
+      mask.put(row.mask(), 0, rowLength);
+      types.put(row.types(), 0, rowLength);
+      // A padded position carries the vocabulary's padding token id, a 0 attention mask so that no
+      // output vector depends on it, and a 0 token type. Only the ids differ from 0, and only for a
+      // vocabulary whose padding token is not id 0.
+      for (int p = rowLength; p < length; p++) {
+        ids.put(padTokenId);
+        mask.put(0L);
+        types.put(0L);
+      }
+    }
   }
 
   /**
