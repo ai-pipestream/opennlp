@@ -36,6 +36,16 @@ import opennlp.tools.util.Span;
 
 public class NameSampleTest {
 
+  @Test
+  void testOverlappingSpanMessage() {
+    RuntimeException exception = Assertions.assertThrows(RuntimeException.class,
+        () -> new NameSample("names.txt", new String[] {"Ada", "Lovelace", "Byron"},
+            new Span[] {new Span(0, 2, "person"), new Span(1, 3, "person")}, null, false));
+
+    Assertions.assertEquals("name spans [0..2) person and [1..3) person are overlapped in file: "
+        + "names.txt, sentence: [Ada, Lovelace, Byron]", exception.getMessage());
+  }
+
   /**
    * Create a NameSample from scratch and validate it.
    *

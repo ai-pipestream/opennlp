@@ -72,10 +72,11 @@ public class SentenceSampleTest {
 
   @Test
   void testInvalidSpansFailFast() {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> {
-      SentenceSample sample = new SentenceSample("1. 2.",
-          new Span(0, 2), new Span(5, 7));
-    });
+    IllegalArgumentException exception = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new SentenceSample("1. 2.", new Span(0, 2), new Span(5, 7)));
+    Assertions.assertEquals(
+        "Sentence span is outside of document text [len 5] and span [5..7)",
+        exception.getMessage());
   }
 
   @Test

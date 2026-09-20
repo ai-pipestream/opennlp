@@ -66,7 +66,9 @@ public class ArgumentParser {
 
   private interface ArgumentFactory {
 
-    String INVALID_ARG = "Invalid argument: %s %s \n";
+    static String invalidArgument(String name, String value) {
+      return "Invalid argument: " + name + " " + value + " \n";
+    }
 
     Object parseArgument(Method method, String argName, String argValue);
   }
@@ -82,7 +84,7 @@ public class ArgumentParser {
         value = Integer.parseInt(argValue);
       }
       catch (NumberFormatException e) {
-        throw new TerminateToolException(1, String.format(INVALID_ARG, argName, argValue) +
+        throw new TerminateToolException(1, ArgumentFactory.invalidArgument(argName, argValue) +
             "Value must be an integer!", e);
       }
 
@@ -101,7 +103,7 @@ public class ArgumentParser {
         value = Long.parseLong(argValue);
       }
       catch (NumberFormatException e) {
-        throw new TerminateToolException(1, String.format(INVALID_ARG, argName, argValue) +
+        throw new TerminateToolException(1, ArgumentFactory.invalidArgument(argName, argValue) +
             "Value must be a long!", e);
       }
 
@@ -144,11 +146,11 @@ public class ArgumentParser {
         } else if (Charset.isSupported(charsetName)) {
           return Charset.forName(charsetName);
         } else {
-          throw new TerminateToolException(1,  String.format(INVALID_ARG, argName, charsetName) +
+          throw new TerminateToolException(1, ArgumentFactory.invalidArgument(argName, charsetName) +
               "Encoding not supported on this platform.");
         }
       } catch (IllegalCharsetNameException e) {
-        throw new TerminateToolException(1, String.format(INVALID_ARG, argName, charsetName) +
+        throw new TerminateToolException(1, ArgumentFactory.invalidArgument(argName, charsetName) +
             "Illegal encoding name.");
       }
     }

@@ -117,8 +117,11 @@ public class UnicodeDashTest {
   void testSupplementaryDashesArePresent() {
     for (final int codePoint : new int[] {0x10D6E, 0x10EAD}) {
       assertTrue(UnicodeDash.isDash(codePoint));
-      assertTrue(UnicodeDash.byCodePoint(codePoint).orElseThrow().isSupplementary());
+      final DashCharacter dash = UnicodeDash.byCodePoint(codePoint).orElseThrow();
+      assertTrue(dash.isSupplementary());
     }
+    assertEquals("U+10D6E", UnicodeDash.byCodePoint(0x10D6E).orElseThrow().toUnicodeNotation());
+    assertEquals("U+10EAD", UnicodeDash.byCodePoint(0x10EAD).orElseThrow().toUnicodeNotation());
   }
 
   @Test

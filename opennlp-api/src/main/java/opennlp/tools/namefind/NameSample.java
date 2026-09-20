@@ -96,9 +96,9 @@ public class NameSample implements Sample {
     if (this.names.size() > 1) {
       for (int i = 1; i < this.names.size(); i++) {
         if (this.names.get(i).getStart() < this.names.get(i - 1).getEnd()) {
-          throw new RuntimeException(String.format("name spans %s and %s are overlapped in file: %s," +
-                  " sentence: %s",
-              this.names.get(i - 1), this.names.get(i), id, this.sentence.toString()));
+          throw new RuntimeException("name spans " + this.names.get(i - 1) + " and "
+              + this.names.get(i) + " are overlapped in file: " + id + ", sentence: "
+              + this.sentence);
         }
       }
     }

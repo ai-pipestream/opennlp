@@ -20,9 +20,9 @@ package opennlp.tools.tokenize.lattice;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import opennlp.tools.tokenize.lattice.MecabDictionary.Category;
@@ -37,6 +37,8 @@ import opennlp.tools.tokenize.lattice.MecabDictionary.Category;
  * binary search, because dictionaries map them in a handful of large blocks.</p>
  */
 final class CategoryTable {
+
+  private static final HexFormat UPPERCASE_HEX = HexFormat.of().withUpperCase();
 
   private final CategoryAssignment[] bmp;
   private final int[] rangeStart;
@@ -272,14 +274,18 @@ final class CategoryTable {
       for (int i = 0; i < names.length; i++) {
         resolved[i] = categories.get(names[i]);
         if (resolved[i] == null) {
-          throw new IOException(String.format(Locale.ROOT,
-              MecabDictionary.CHAR_DEF + " declaration at U+%04X names the"
-                  + " undefined category %s", codePoint, names[i]));
+          throw new IOException(MecabDictionary.CHAR_DEF + " declaration at "
+              + unicodeNotation(codePoint) + " names the undefined category " + names[i]);
         }
       }
       final CategoryAssignment assignment = new CategoryAssignment(resolved);
       resolvedAssignments.put(names, assignment);
       return assignment;
+    }
+
+    private static String unicodeNotation(int codePoint) {
+      int digits = Math.max(4, (Integer.SIZE - Integer.numberOfLeadingZeros(codePoint) + 3) / 4);
+      return "U+" + UPPERCASE_HEX.toHexDigits((long) codePoint, digits);
     }
 
     /**

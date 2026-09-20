@@ -117,7 +117,7 @@ public final class Providers<P extends Provider<?>> {
   private static final String PACKAGE_SEPARATOR = ".";
   private static final char BYTE_ORDER_MARK = '\uFEFF';
   private static final int MAX_NAME_LENGTH = 64;
-  private static final String LOOKUP_FAILED = "Cannot look up %s providers with %s";
+  private static final String LOOKUP_FAILED_PREFIX = "Cannot look up ";
   private static final String SKIPPED_ENTRY = "Skipping a {} provider registered with {}: {}";
   private static final String SKIPPED_CALL = "Skipping {} provider {}: {}() failed: {}";
   private static final String NAME_METHOD = "name";
@@ -926,8 +926,8 @@ public final class Providers<P extends Provider<?>> {
   }
 
   private ProviderResolutionException lookupFailed(final Throwable cause) {
-    return new ProviderResolutionException(String.format(LOOKUP_FAILED, spi.getName(), loaderName),
-        cause);
+    return new ProviderResolutionException(LOOKUP_FAILED_PREFIX + spi.getName() + " providers with "
+        + loaderName, cause);
   }
 
   /**

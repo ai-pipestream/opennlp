@@ -50,9 +50,8 @@ public class SentenceSample implements Sample {
     // validate that all spans are inside the document text
     for (Span sentence : sentences) {
       if (sentence.getEnd() > document.length()) {
-        throw new IllegalArgumentException(
-            String.format("Sentence span is outside of document text [len %d] and span %s",
-            document.length(), sentence));
+        throw new IllegalArgumentException("Sentence span is outside of document text [len "
+            + document.length() + "] and span " + sentence);
       }
     }
   }

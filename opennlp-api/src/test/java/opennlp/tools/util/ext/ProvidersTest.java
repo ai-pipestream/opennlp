@@ -545,7 +545,9 @@ class ProvidersTest {
     try (URLClassLoader loader = failing(new IOException("unreadable"))) {
       final ProviderResolutionException e = assertThrows(ProviderResolutionException.class,
           () -> Providers.of(SourceProvider.class, loader));
-      assertTrue(e.getMessage().contains(SourceProvider.class.getName()), e.getMessage());
+      assertEquals("Cannot look up " + SourceProvider.class.getName() + " providers with "
+          + loader.getClass().getName() + '@'
+          + Integer.toHexString(System.identityHashCode(loader)), e.getMessage());
     }
   }
 

@@ -104,8 +104,10 @@ public class ArgumentParserTest {
   @Test
   void testLongArgumentRejectsNonNumeric() {
     String[] args = "-corpusWordCount notALong".split(" ");
-    Assertions.assertThrows(TerminateToolException.class,
+    TerminateToolException exception = Assertions.assertThrows(TerminateToolException.class,
         () -> ArgumentParser.parse(args, LongArgument.class));
+    Assertions.assertEquals("Invalid argument: -corpusWordCount notALong \n"
+        + "Value must be a long!", exception.getMessage());
   }
 
 

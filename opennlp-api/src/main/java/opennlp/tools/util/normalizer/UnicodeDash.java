@@ -80,7 +80,7 @@ public final class UnicodeDash {
 
     /** {@return the {@code U+XXXX} notation for this code point} */
     public String toUnicodeNotation() {
-      return String.format("U+%04X", codePoint);
+      return UnicodeNotation.of(codePoint);
     }
   }
 
