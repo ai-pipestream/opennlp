@@ -27,7 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,10 +40,10 @@ import opennlp.tools.util.StringUtil;
 /**
  * An immutable, in-memory dictionary in the
  * <a href="https://taku910.github.io/mecab/">MeCab</a> directory format: lexicon entries
- * from the {@code *.csv} files, connection costs from {@code matrix.def}, character
- * categories from {@code char.def}, and unknown-word templates from {@code unk.def},
- * loaded from a user-supplied dictionary directory. No dictionary data is bundled or
- * downloaded by this class.
+ * from regular files with names ending in lowercase {@code .csv}, connection costs from
+ * {@code matrix.def}, character categories from {@code char.def}, and unknown-word
+ * templates from {@code unk.def}, loaded from a user-supplied dictionary directory.
+ * No dictionary data is bundled or downloaded by this class.
  *
  * <p>The same format serves multiple languages: the Japanese
  * <a href="https://sourceforge.net/projects/mecab/">IPADIC</a> and
@@ -97,7 +97,6 @@ public final class MecabDictionary {
   static final String LEXICON_EXTENSION = ".csv";
   static final String DEFINITION_EXTENSION = ".def";
   static final String CONFIGURATION_FILE = "dicrc";
-  private static final String LEXICON_GLOB = "*" + LEXICON_EXTENSION;
   private static final char COMMENT_MARKER = '#';
 
   /** The code point prefix used by {@code char.def}, in either letter case. */
@@ -199,9 +198,9 @@ public final class MecabDictionary {
   /**
    * Loads a dictionary directory.
    *
-   * @param directory The unpacked dictionary directory holding the {@code *.csv}
-   *                  lexicon files, {@code matrix.def}, {@code char.def}, and
-   *                  {@code unk.def}. Must not be {@code null}.
+   * @param directory The unpacked dictionary directory holding regular files whose
+   *                  names end in lowercase {@code .csv}, plus {@code matrix.def},
+   *                  {@code char.def}, and {@code unk.def}. Must not be {@code null}.
    * @param charset The encoding the distribution uses, for example UTF-8 or EUC-JP.
    *                Must not be {@code null}.
    * @return The loaded dictionary. Never {@code null}.
@@ -307,12 +306,15 @@ public final class MecabDictionary {
 
     final Map<String, List<WordEntry>> lexicon = new HashMap<>();
     final List<Path> csvFiles = new ArrayList<>();
-    try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, LEXICON_GLOB)) {
-      for (final Path csv : stream) {
-        csvFiles.add(csv);
+    try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+      for (final Path entry : stream) {
+        if (Files.isRegularFile(entry)
+            && entry.getFileName().toString().endsWith(LEXICON_EXTENSION)) {
+          csvFiles.add(entry);
+        }
       }
     }
-    Collections.sort(csvFiles);
+    csvFiles.sort(Comparator.comparing(path -> path.getFileName().toString()));
     final int[] entryCount = {0};
     for (final Path csv : csvFiles) {
       readLexicon(csv, charset, lexicon, leftSize, rightSize, entryCount);

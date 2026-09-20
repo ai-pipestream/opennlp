@@ -37,6 +37,12 @@ alongside them. `ResourceInstaller` rejects paths outside the staging directory,
 then `MecabDictionaryInstaller` flattens the selected files into the target. The
 returned value is the number of dictionary files installed.
 
+When loading an unpacked dictionary, `MecabDictionary` reads regular files whose names
+end with the literal lowercase suffix `.csv`, in Unicode filename order. Names ending
+in uppercase `.CSV`, directories named with a `.csv` suffix, and near misses such as
+`.csv.bak` are not lexicon files. Characters such as `*`, `?`, and `[` in a filename
+have no special meaning.
+
 ## Option A: opt-in catalog install
 
 Applications supply the catalog. Catalog URLs are inactive until you set

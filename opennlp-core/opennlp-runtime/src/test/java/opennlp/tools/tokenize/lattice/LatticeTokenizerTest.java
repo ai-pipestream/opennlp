@@ -562,6 +562,47 @@ public class LatticeTokenizerTest {
     write(target, UNK_DEF, DEFAULT_UNKNOWN_TEMPLATE + "\n");
   }
 
+  @Test
+  void testLexiconDiscoveryUsesLowercaseCsvRegularFilesOnly(@TempDir Path dictionary)
+      throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "valid.csv", "\u6771,0,0,3000,valid\n");
+    Files.createDirectory(dictionary.resolve("directory.csv"));
+    write(dictionary, "uppercase.CSV", "broken\n");
+    write(dictionary, "near.csv.bak", "broken\n");
+
+    List<Morpheme> morphemes = new LatticeTokenizer(MecabDictionary.load(dictionary))
+        .analyze("\u6771");
+
+    Assertions.assertEquals(List.of("valid"), morphemes.get(0).features());
+  }
+
+  @Test
+  void testLexiconDiscoveryAcceptsUnicodeAndMetacharacterFilenames(
+      @TempDir Path dictionary) throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "\u8A9E[1]*?.csv", "\u6771,0,0,3000,unicode-name\n");
+
+    List<Morpheme> morphemes = new LatticeTokenizer(MecabDictionary.load(dictionary))
+        .analyze("\u6771");
+
+    Assertions.assertEquals(List.of("unicode-name"), morphemes.get(0).features());
+  }
+
+  @Test
+  void testLexiconFilesAreReadInFilenameOrder(@TempDir Path dictionary)
+      throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "z.csv", "broken-z\n");
+    write(dictionary, "a.csv", "broken-a\n");
+
+    IOException error = Assertions.assertThrows(IOException.class,
+        () -> MecabDictionary.load(dictionary));
+
+    Assertions.assertTrue(error.getMessage().contains(dictionary.resolve("a.csv").toString()),
+        error.getMessage());
+  }
+
   /**
    * Verifies that a lexicon row whose right context id is outside the
    * {@code matrix.def} dimensions is rejected at load time, naming the file, the line,
