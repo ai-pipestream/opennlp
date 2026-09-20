@@ -35,7 +35,7 @@ public class IterDeltaAccuracyUnderTolerance implements StopCriteria<Double> {
 
   @Override
   public String getMessageIfSatisfied() {
-    return String.format(STOP, getTolerance());
+    return "Stopping: change in training set accuracy less than {" + getTolerance() + '}';
   }
 
   @Override

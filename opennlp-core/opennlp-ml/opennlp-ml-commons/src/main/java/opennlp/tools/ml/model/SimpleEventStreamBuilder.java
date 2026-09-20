@@ -36,7 +36,7 @@ public class SimpleEventStreamBuilder {
   public SimpleEventStreamBuilder add(String event) {
     String[] ss = event.split("/");
     if (ss.length != 2) {
-      throw new RuntimeException(String.format("format error of the event \"%s\"", event));
+      throw new RuntimeException("format error of the event \"" + event + '"');
     }
 
     // look for context (and values)
@@ -47,8 +47,8 @@ public class SimpleEventStreamBuilder {
       for (int i = 0; i < cvPairs.length; i++) {
         String[] pair = cvPairs[i].split(";");
         if (pair.length != 2) {
-          throw new RuntimeException(String.format("format error of the event \"%s\". "
-              + "\"%s\" doesn't have value", event, Arrays.toString(pair)));
+          throw new RuntimeException("format error of the event \"" + event + "\". \""
+              + Arrays.toString(pair) + "\" doesn't have value");
         }
         context[i] = pair[0];
         values[i] = Float.parseFloat(pair[1]);

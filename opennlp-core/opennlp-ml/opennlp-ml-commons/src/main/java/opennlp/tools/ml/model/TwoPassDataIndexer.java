@@ -109,7 +109,8 @@ public class TwoPassDataIndexer extends AbstractDataIndexer<TrainingParameters> 
         logger.info("Collecting events... ");
       }
       sortAndMerge(eventsToCompare,sort);
-      logger.info(String.format("Done indexing in %.2f s.", (System.currentTimeMillis() - start) / 1000d));
+      logger.info("Done indexing in "
+          + ElapsedTimeFormatter.seconds(System.currentTimeMillis() - start) + " s.");
     }
   }
 

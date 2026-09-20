@@ -37,7 +37,8 @@ public class LogLikelihoodThresholdBreached implements StopCriteria<Double> {
 
   @Override
   public String getMessageIfSatisfied() {
-    return String.format(STOP, getThreshold());
+    return "Stopping: Difference between log likelihood of current and previous iteration"
+        + " is less than threshold " + getThreshold() + " .";
 
   }
 

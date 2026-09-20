@@ -24,8 +24,6 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static opennlp.tools.monitoring.StopCriteria.FINISHED;
-
 /**
  * The default implementation of {@link TrainingProgressMonitor}.
  * This publishes model training progress to the chosen logging destination.
@@ -54,8 +52,8 @@ public class DefaultTrainingProgressMonitor implements TrainingProgressMonitor {
   @Override
   public synchronized void finishedIteration(int iteration, int numberCorrectEvents, int totalEvents,
                                              TrainingMeasure measure, double measureValue) {
-    progress.add(String.format("%s: (%s/%s) %s : %s", iteration, numberCorrectEvents, totalEvents,
-        measure.getMeasureName(), measureValue));
+    progress.add(iteration + ": (" + numberCorrectEvents + '/' + totalEvents + ") "
+        + measure.getMeasureName() + " : " + measureValue);
   }
 
   /**
@@ -66,7 +64,8 @@ public class DefaultTrainingProgressMonitor implements TrainingProgressMonitor {
     if (!Objects.isNull(stopCriteria)) {
       progress.add(stopCriteria.getMessageIfSatisfied());
     } else {
-      progress.add(String.format(FINISHED, iterations));
+      progress.add("Training finished after completing " + iterations
+          + " iterations successfully.");
     }
     isTrainingFinished = true;
   }
