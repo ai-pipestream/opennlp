@@ -21,7 +21,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.StringReader;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -34,7 +33,6 @@ import java.nio.file.StandardCopyOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Formatter;
 import java.util.HashMap;
@@ -42,14 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import nu.validator.htmlparser.common.XmlViolationPolicy;
-import nu.validator.htmlparser.sax.HtmlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xml.sax.Attributes;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
-import org.xml.sax.helpers.DefaultHandler;
 
 import opennlp.tools.commons.Internal;
 import opennlp.tools.models.ModelType;
@@ -327,7 +319,7 @@ public class DownloadUtil {
   }
 
   /**
-   * Reads model links from an HTML directory index using the HTML parsing algorithm.
+   * Reads model links from HTML directory-index source without building a document tree.
    */
   @Internal
   static class DownloadParser {
@@ -341,25 +333,7 @@ public class DownloadUtil {
 
     Map<String, Map<ModelType, URL>> getAvailableModels()
         throws MalformedURLException, URISyntaxException {
-      final List<String> links = new ArrayList<>();
-      HtmlParser parser = new HtmlParser(XmlViolationPolicy.ALLOW);
-      parser.setContentHandler(new DefaultHandler() {
-        @Override
-        public void startElement(String uri, String localName, String name, Attributes attributes) {
-          if ("http://www.w3.org/1999/xhtml".equals(uri) && "a".equals(localName)) {
-            String href = attributes.getValue("href");
-            if (href != null) {
-              links.add(href);
-            }
-          }
-        }
-      });
-      try {
-        parser.parse(new InputSource(new StringReader(fetchPageIndex())));
-      } catch (IOException | SAXException e) {
-        logger.error("Could not parse page index from {}", indexUrl, e);
-      }
-      return toMap(links);
+      return toMap(HtmlLinkScanner.links(fetchPageIndex()));
     }
 
     private Map<String, Map<ModelType, URL>> toMap(List<String> links)
@@ -467,9 +441,10 @@ public class DownloadUtil {
       final StringBuilder html = new StringBuilder();
       try (BufferedReader br = new BufferedReader(
           new InputStreamReader(indexUrl.openStream(), StandardCharsets.UTF_8))) {
-        String line;
-        while ((line = br.readLine()) != null) {
-          html.append(line);
+        char[] buffer = new char[8192];
+        int read;
+        while ((read = br.read(buffer)) != -1) {
+          html.append(buffer, 0, read);
         }
       } catch (IOException e) {
         logger.error("Could not read page index from {}", indexUrl, e);

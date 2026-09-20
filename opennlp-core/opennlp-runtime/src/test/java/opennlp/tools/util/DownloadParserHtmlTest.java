@@ -20,6 +20,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -28,12 +29,55 @@ import org.junit.jupiter.api.io.TempDir;
 import opennlp.tools.models.ModelType;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DownloadParserHtmlTest {
 
   @TempDir
   Path tempDir;
+
+  @Test
+  void testPreservesWhitespaceBetweenTagNameAndAttributes() throws Exception {
+    String html = "<a\nhref='opennlp-en-ud-ewt-tokens-newline.bin'>model</a>"
+        + "<a\r\nhref='opennlp-fr-ud-gsd-pos-newline.bin'>model</a>";
+    Map<String, Map<ModelType, URL>> models = parse(html);
+    assertUrlEndsWith(models, "en", ModelType.TOKENIZER,
+        "opennlp-en-ud-ewt-tokens-newline.bin");
+    assertUrlEndsWith(models, "fr", ModelType.POS, "opennlp-fr-ud-gsd-pos-newline.bin");
+  }
+
+  @Test
+  void testScriptEscapingAndFirstDuplicateAttribute() throws Exception {
+    String fake = "<a href='opennlp-fr-ud-gsd-pos-fake.bin'>";
+    String html = "<script><!--<script></script>" + fake + "</script>"
+        + "<a href='opennlp-en-ud-ewt-tokens-first.bin'"
+        + " HREF='opennlp-fr-ud-gsd-pos-second.bin'>real</a>";
+    Map<String, Map<ModelType, URL>> models = parse(html);
+    assertEquals(1, models.size());
+    assertUrlEndsWith(models, "en", ModelType.TOKENIZER, "opennlp-en-ud-ewt-tokens-first.bin");
+  }
+
+  @Test
+  void testAbruptlyClosedCommentsDoNotHideLinks() throws Exception {
+    for (String comment : List.of("<!-->", "<!--->", "<!-- --!>")) {
+      assertUrlEndsWith(parse(comment + "<a href='opennlp-en-ud-ewt-tokens-real.bin'>"),
+          "en", ModelType.TOKENIZER, "opennlp-en-ud-ewt-tokens-real.bin");
+    }
+  }
+
+  @Test
+  void testForeignContentAndHtmlIntegrationPoints() throws Exception {
+    String fake = "<a href='opennlp-fr-ud-gsd-pos-fake.bin'>fake</a>";
+    String html = "<svg>" + fake + "<![CDATA[" + fake + "]]>"
+        + "<foreignObject><a href='opennlp-en-ud-ewt-tokens-real.bin'>real</a>"
+        + "</foreignObject></svg>"
+        + "<math><mtext><a href='opennlp-de-ud-gsd-pos-real.bin'>real</a></mtext></math>";
+    Map<String, Map<ModelType, URL>> models = parse(html);
+    assertEquals(2, models.size());
+    assertUrlEndsWith(models, "en", ModelType.TOKENIZER, "opennlp-en-ud-ewt-tokens-real.bin");
+    assertUrlEndsWith(models, "de", ModelType.POS, "opennlp-de-ud-gsd-pos-real.bin");
+  }
 
   @Test
   void testReadsHtml32AnchorAttributeForms() throws Exception {
@@ -123,7 +167,9 @@ class DownloadParserHtmlTest {
 
   private static void assertUrlEndsWith(Map<String, Map<ModelType, URL>> models,
       String language, ModelType type, String expectedFilename) {
+    assertNotNull(models.get(language), "Missing models for " + language);
     URL url = models.get(language).get(type);
+    assertNotNull(url, "Missing " + type + " model for " + language);
     assertEquals(expectedFilename, url.toString().substring(url.toString().lastIndexOf('/') + 1));
   }
 }

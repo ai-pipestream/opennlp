@@ -44,7 +44,7 @@ under the License.
     <section xml:id="intro.model.directory.links">
         <title>Model directory links</title>
         <para>
-            Automatic model discovery reads HTML directory indexes with the Validator.nu HTML parser.
+            Automatic model discovery scans HTML directory-index source for anchor links.
             Anchor names and attribute names are case insensitive. Attribute order, quotation style,
             and character references do not change which download target is selected. Apparent links
             inside comments or text elements such as <literal>script</literal> and
@@ -54,9 +54,14 @@ under the License.
             For example, <literal>&lt;A class="download"
             HREF='opennlp-en-ud-ewt-tokens-a&amp;amp;b.bin'&gt;model&lt;/A&gt;</literal>
             identifies the filename <literal>opennlp-en-ud-ewt-tokens-a&amp;b.bin</literal>.
-            The parser follows the
-            <ulink url="https://html.spec.whatwg.org/multipage/parsing.html">HTML parsing algorithm</ulink>;
-            model filename recognition and checksum verification are separate steps.
+            Attribute character references and text states follow the
+            <ulink url="https://html.spec.whatwg.org/multipage/parsing.html#tokenization">HTML tokenization rules</ulink>.
+            Links are read in source order, with the first occurrence of a duplicate attribute
+            taking precedence. The scanner preserves line breaks and recognizes HTML links within
+            SVG and MathML integration points. It does not execute scripts or construct a browser
+            document tree; browser tree repair and ignored-element insertion rules are outside this
+            directory-index reader's contract. Model filename recognition and checksum verification
+            are separate steps.
         </para>
     </section>
 
