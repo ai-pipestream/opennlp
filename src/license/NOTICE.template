@@ -117,11 +117,16 @@ Inc. (https://www.unicode.org/Public/).
     filtered subset; the upstream file additionally carries the Emoji,
     Emoji_Presentation, Emoji_Modifier, Emoji_Modifier_Base, and
     Emoji_Component properties, which are not retained.
+  * opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/emoji/EmojiSequences-17.0.txt
+    is a generated inventory of fully-qualified emoji sequences from
+    emoji-test.txt and Emoji_Component ranges from emoji-data.txt, both
+    Unicode Emoji version 17.0.
 
 The original Unicode copyright and license header is preserved verbatim at the
-top of each bundled file. These files are distributed under the Unicode License
-V3, the full text of which is reproduced in the LICENSE file accompanying this
-distribution.
+top of each copied or filtered data file. Generated inventories identify their
+Unicode sources and license in their headers. These files and derived values are
+distributed under the Unicode License V3, the full text of which is reproduced
+in the LICENSE file accompanying this distribution.
 
 The project-authored annotation table
 opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/emoji-annotations.txt
