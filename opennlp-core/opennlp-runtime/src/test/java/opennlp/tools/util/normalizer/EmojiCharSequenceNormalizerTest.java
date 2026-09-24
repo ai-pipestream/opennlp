@@ -142,6 +142,32 @@ public class EmojiCharSequenceNormalizerTest {
     Assertions.assertEquals("a" + malformed + "b", NORMALIZER.normalize("a" + malformed + "b"));
   }
 
+  /**
+   * A stray joiner, modifier, selector, flag letter or tag connects only to the complete
+   * sequence right before it and to the one right after it. Complete sequences that merely
+   * touch that malformed part are removed as usual.
+   */
+  private static Stream<Arguments> malformedTails() {
+    return Stream.of(
+        Arguments.of(cp(0x1F600, 0x1F600, 0x1F600) + "\u200D", " " + cp(0x1F600) + "\u200D"),
+        Arguments.of(cp(0x1F600, 0x1F600, 0x1F1E9), " " + cp(0x1F600, 0x1F1E9)),
+        Arguments.of(cp(0x1F1E9, 0x1F1EA, 0x1F1EB, 0x1F1F7, 0x1F1EE),
+            " " + cp(0x1F1EB, 0x1F1F7, 0x1F1EE)),
+        Arguments.of(cp(0x1F600) + "\u200D" + cp(0x1F600, 0x1F600),
+            cp(0x1F600) + "\u200D" + cp(0x1F600) + " "),
+        Arguments.of(cp(0x1F600, 0x1F600) + "\u200D" + cp(0x1F600, 0x1F600),
+            " " + cp(0x1F600) + "\u200D" + cp(0x1F600) + " "),
+        Arguments.of(cp(0x1F600, 0x1F600, 0x1F3FD, 0x1F600),
+            " " + cp(0x1F600, 0x1F3FD) + " "));
+  }
+
+  @ParameterizedTest
+  @MethodSource("malformedTails")
+  void normalizeEndsRunAtTheLastCompleteSequenceBeforeAMalformedTail(String text,
+                                                                     String expected) {
+    Assertions.assertEquals("a" + expected + "b", NORMALIZER.normalize("a" + text + "b"));
+  }
+
   @Test
   void normalizePreservesOrphanComponents() {
     String text = "a\u200D\uFE0F\u20E3" + cp(0x1F3FD, 0xE0067, 0xE007F) + "b";
