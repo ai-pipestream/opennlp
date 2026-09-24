@@ -292,6 +292,29 @@ public final class JsonScan {
   }
 
   /**
+   * Reads the value of a member as a boolean.
+   *
+   * @param text The JSON text. Must not be {@code null}.
+   * @param member The member, inside the text. Must not be {@code null}.
+   * @return {@code true} for the literal {@code true}, {@code false} for {@code false}.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null}, the member lies
+   *     outside the text, or the value is neither literal.
+   */
+  static boolean booleanValue(String text, Member member) {
+    requireMember(text, member);
+    final int start = member.valueStart();
+    final int end = member.valueEnd();
+    if (text.startsWith(TRUE, start) && end - start == TRUE.length()) {
+      return true;
+    }
+    if (text.startsWith(FALSE, start) && end - start == FALSE.length()) {
+      return false;
+    }
+    throw new IllegalArgumentException("Value of \"" + member.key() + "\" must be " + TRUE
+        + " or " + FALSE + ": " + text.substring(start, end));
+  }
+
+  /**
    * Reads the value of a member as a non-negative integer: a run of ASCII digits with no sign,
    * fraction, or exponent that fits into an {@code int}.
    *

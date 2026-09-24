@@ -105,11 +105,14 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param sessionOptions The session options (e.g. CUDA execution provider); build with
    *     {@link #sessionOptions(InferenceOptions)} when honoring {@link InferenceOptions}.
    * @param lowerCase {@code true} for uncased models (lower casing and accent stripping
-   *     during tokenization), {@code false} for cased models.
+   *     during tokenization), {@code false} for cased models. A {@code tokenizer.json} that
+   *     sets {@code normalizer.lowercase} must agree with it.
    *
    * @throws OrtException Thrown if the {@code model} cannot be loaded.
    * @throws IOException Thrown if the {@code model} or {@code vocabulary} cannot be read.
-   * @throws InvalidFormatException Thrown if a JSON {@code vocabulary} is malformed.
+   * @throws InvalidFormatException Thrown if a JSON {@code vocabulary} is malformed, has an
+   *     unsupported layout, or sets {@code normalizer.lowercase} to the other value than
+   *     {@code lowerCase}.
    */
   protected AbstractDL(final File model, final File vocabulary,
                        final OrtSession.SessionOptions sessionOptions, final boolean lowerCase)
@@ -122,7 +125,9 @@ public abstract class AbstractDL implements AutoCloseable {
     try (sessionOptions) {
       final OrtSession createdSession = env.createSession(model.getPath(), sessionOptions);
       try {
-        this.vocab = Map.copyOf(loadVocabFile(vocabulary));
+        final Vocabulary loaded = readVocabFile(vocabulary);
+        requireLowerCase(vocabulary, loaded, lowerCase);
+        this.vocab = Map.copyOf(loaded.ids());
         this.tokenizer = createWordpieceEncoder(vocab, lowerCase);
       } catch (IOException | RuntimeException e) {
         // Vocabulary/tokenizer init failed after the native session was created; close it
@@ -633,7 +638,7 @@ public abstract class AbstractDL implements AutoCloseable {
         final Map<String, Integer> vocab =
             tokenizerVocab(json, modelMembers, JsonScan.stringValue(json, type));
         addTokens(json, document, vocab);
-        return new Vocabulary(vocab, null);
+        return new Vocabulary(vocab, lowercaseSetting(json, document));
       }
     }
     final Map<String, Integer> vocab = new HashMap<>();
@@ -695,6 +700,35 @@ public abstract class AbstractDL implements AutoCloseable {
       }
     }
     return ids;
+  }
+
+  /**
+   * Reads the {@code normalizer.lowercase} setting of a {@code tokenizer.json}.
+   *
+   * @param json The JSON text.
+   * @param document The members of the top-level object.
+   * @return The setting, or {@code null} if there is no {@code normalizer} object or it has no
+   *     {@code lowercase} member.
+   * @throws IllegalArgumentException Thrown if the setting is neither {@code true} nor
+   *     {@code false}.
+   */
+  private static Boolean lowercaseSetting(final String json,
+      final List<JsonScan.Member> document) {
+    final JsonScan.Member normalizer = JsonScan.member(document, TOKENIZER_NORMALIZER_KEY);
+    if (normalizer == null || !JsonScan.isObject(json, normalizer)) {
+      return null;
+    }
+    final JsonScan.Member lowercase = JsonScan.member(
+        JsonScan.members(json, normalizer.valueStart()), TOKENIZER_LOWERCASE_KEY);
+    if (lowercase == null) {
+      return null;
+    }
+    try {
+      return JsonScan.booleanValue(json, lowercase);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_NORMALIZER_KEY + ": "
+          + e.getMessage(), e);
+    }
   }
 
   /**

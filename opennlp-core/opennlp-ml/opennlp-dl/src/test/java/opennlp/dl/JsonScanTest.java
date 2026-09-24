@@ -153,6 +153,20 @@ public class JsonScanTest {
   }
 
   @Test
+  void testBooleanValueReadsTheTwoLiterals() {
+    final String text = "{\"a\": true, \"b\":false, \"c\": [true], \"d\": \"true\", \"e\": null,"
+        + " \"f\": 1, \"g\": {}}";
+    final List<Member> members = JsonScan.document(text);
+    Assertions.assertTrue(JsonScan.booleanValue(text, JsonScan.member(members, "a")));
+    Assertions.assertFalse(JsonScan.booleanValue(text, JsonScan.member(members, "b")));
+    for (String key : List.of("c", "d", "e", "f", "g")) {
+      final IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+          () -> JsonScan.booleanValue(text, JsonScan.member(members, key)), key);
+      Assertions.assertTrue(e.getMessage().contains("\"" + key + "\""), e.getMessage());
+    }
+  }
+
+  @Test
   void testIsStringTellsStringValuesFromOthers() {
     final String text = "{\"a\": \"x\", \"b\": \"\", \"c\": 1, \"d\": {}, \"e\": [\"x\"], \"f\": null}";
     final List<Member> members = JsonScan.document(text);
@@ -479,6 +493,8 @@ public class JsonScanTest {
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isObject("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isString("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isArray("{}", outside));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> JsonScan.booleanValue("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.stringValue("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> JsonScan.nonNegativeIntValue("{}", outside));
