@@ -106,14 +106,13 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
       final boolean first = offset == 0;
       char unit = input.charAt(offset);
       final int codePoint;
-      if (unit >= Character.MIN_HIGH_SURROGATE && unit <= Character.MAX_HIGH_SURROGATE) {
-        if (offset + 1 >= input.length() || input.charAt(offset + 1) < Character.MIN_LOW_SURROGATE
-            || input.charAt(offset + 1) > Character.MAX_LOW_SURROGATE) {
+      if (Character.isHighSurrogate(unit)) {
+        if (offset + 1 >= input.length() || !Character.isLowSurrogate(input.charAt(offset + 1))) {
           return false;
         }
         codePoint = Character.toCodePoint(unit, input.charAt(offset + 1));
         offset += 2;
-      } else if (unit >= Character.MIN_LOW_SURROGATE && unit <= Character.MAX_LOW_SURROGATE) {
+      } else if (Character.isLowSurrogate(unit)) {
         return false;
       } else {
         codePoint = unit;
