@@ -18,6 +18,7 @@
 package opennlp.tools.formats.masc;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import org.xml.sax.helpers.DefaultHandler;
@@ -25,7 +26,7 @@ import org.xml.sax.helpers.DefaultHandler;
 import opennlp.tools.util.XmlUtil;
 
 /**
- * Runs a MASC annotation handler over an XML document given as text.
+ * Feeds MASC annotation text to a handler or a document parser.
  */
 final class MascParserTestUtil {
 
@@ -44,5 +45,15 @@ final class MascParserTestUtil {
     XmlUtil.createSaxParser().parse(
         new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), handler);
     return handler;
+  }
+
+  /**
+   * Wraps {@code text} as a UTF-8 input stream.
+   *
+   * @param text The document text.
+   * @return A stream over the UTF-8 bytes of {@code text}.
+   */
+  static InputStream input(String text) {
+    return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
   }
 }
