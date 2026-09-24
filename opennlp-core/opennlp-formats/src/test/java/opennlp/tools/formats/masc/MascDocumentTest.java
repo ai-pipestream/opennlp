@@ -30,6 +30,9 @@ public class MascDocumentTest {
 
   private static final String ONE_SENTENCE = "<graph><region anchors=\"0 11\"/></graph>";
 
+  private static final String ONE_WORD =
+      "<graph><region xml:id=\"seg-r0\" anchors=\"0 4\"/></graph>";
+
   @Test
   void testDocumentKeepsOffsetsOfSupplementaryAndCombiningText() throws IOException {
     // guards the offsets only: a surrogate pair and a combining mark count as two code units
@@ -63,5 +66,17 @@ public class MascDocumentTest {
             null, MascParserTestUtil.input(ONE_SENTENCE), null));
     Assertions.assertInstanceOf(SAXException.class, error.getCause());
     Assertions.assertNotNull(error.getCause().getCause());
+  }
+
+  @Test
+  void testDocumentKeepsPennAttachFailureCause() {
+    // the token also links a quark that no region declares
+    String penn = "<graph><node xml:id=\"penn-n0\"><link targets=\"seg-r0 seg-r9\"/></node></graph>";
+    IOException error = Assertions.assertThrows(IOException.class,
+        () -> MascDocument.parseDocument("broken", MascParserTestUtil.input("text"),
+            MascParserTestUtil.input(ONE_WORD), MascParserTestUtil.input(penn),
+            MascParserTestUtil.input(ONE_SENTENCE), null));
+    Assertions.assertEquals("Could not attach POS tags to words", error.getMessage());
+    Assertions.assertInstanceOf(IOException.class, error.getCause());
   }
 }
