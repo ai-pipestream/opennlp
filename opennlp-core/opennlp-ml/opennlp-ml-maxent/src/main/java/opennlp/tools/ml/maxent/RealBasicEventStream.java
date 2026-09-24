@@ -27,7 +27,7 @@ import opennlp.tools.util.ObjectStream;
 /**
  * Class for real-valued {@link Event events} as an
  * {@link ObjectStream event stream}.
- * .
+ *
  * @see Event
  * @see ObjectStream
  */
@@ -35,6 +35,11 @@ public class RealBasicEventStream implements ObjectStream<Event> {
 
   private final ObjectStream<String> ds;
 
+  /**
+   * Instantiates a {@link RealBasicEventStream} over a stream of event lines.
+   *
+   * @param ds The {@link ObjectStream} of lines, one event per line.
+   */
   public RealBasicEventStream(ObjectStream<String> ds) {
     this.ds = ds;
   }
@@ -42,7 +47,9 @@ public class RealBasicEventStream implements ObjectStream<Event> {
   /**
    * {@inheritDoc}
    * <p>
-   * Each line is parsed by {@link RealValueFileEventStream#parseEvent(String)}.
+   * Each line is parsed by {@link RealValueFileEventStream#parseEvent(String)}. Since 3.0, a line
+   * with only an outcome is an event without contexts; earlier versions ended the stream at
+   * such a line.
    *
    * @throws IOException Thrown if there is an error during reading.
    * @throws InvalidFormatException Thrown if a line is blank.

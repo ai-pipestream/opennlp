@@ -32,8 +32,8 @@ import opennlp.tools.util.ObjectStream;
  * Class for using a file of real-valued {@link Event events} as an
  * {@link ObjectStream event stream}.
  * The format of the file is one event per line with
- * each line consisting of outcome followed by contexts, separated by fixed event delimiters,
- * see {@link #parseEvent(String)}.
+ * each line consisting of outcome followed by contexts, separated by
+ * space, tab, carriage return, line feed or form feed, see {@link #parseEvent(String)}.
  *
  * @see Event
  * @see FileEventStream
@@ -133,12 +133,8 @@ public class RealValueFileEventStream extends FileEventStream {
 
   /**
    * Parses one event line. Fields are separated by runs of space, tab, carriage return,
-   * line feed, and form feed, as in {@link FileEventStream}. Other characters, including
-   * non-ASCII whitespace, remain in the fields. The delimiters do not depend on
-   * {@code opennlp.whitespace.mode} or tokenizer configuration.
-   * Leading, trailing, and repeated delimiters are ignored; the first field is the outcome and
-   * each further field is a context with an optional real value, see
-   * {@link #parseContexts(String[])}.
+   * line feed and form feed, as in {@link FileEventStream}; the first field is the outcome,
+   * the rest are contexts parsed by {@link #parseContexts(String[])}.
    *
    * @param line The event line. Must not be {@code null}.
    * @return The event; a line with only an outcome gives an event without contexts.

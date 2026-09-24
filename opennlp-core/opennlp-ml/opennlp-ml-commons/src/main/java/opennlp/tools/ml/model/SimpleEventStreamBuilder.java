@@ -22,6 +22,10 @@ import java.util.List;
 
 import opennlp.tools.util.ObjectStream;
 
+/**
+ * Builds an in-memory {@link ObjectStream} of {@link Event events} from text lines,
+ * mainly for tests. See {@link #add(String)} for the format.
+ */
 public class SimpleEventStreamBuilder {
 
   private static final char OUTCOME_SEPARATOR = '/';
@@ -35,9 +39,8 @@ public class SimpleEventStreamBuilder {
 
   /**
    * Adds one event. The outcome runs up to the first {@code /}; the contexts follow it, separated
-   * by runs of space, tab, carriage return, line feed, and form feed, as in
-   * {@link FileEventStream}. Other characters remain in the context names. Delimiters are
-   * independent of tokenizer configuration and {@code opennlp.whitespace.mode}.
+   * by runs of space, tab, carriage return, line feed and form feed, as in
+   * {@link FileEventStream}. Other characters remain in the context names.
    * Each context can have a value after a {@code ;}:
    * <pre>
    * other/w=he n1w=belongs n2w=to po=other pow=other,He powf=other,ic
@@ -97,6 +100,10 @@ public class SimpleEventStreamBuilder {
     return this;
   }
 
+  /**
+   * @return An {@link ObjectStream} over the added events, in insertion order. The stream
+   *         does not support {@link ObjectStream#reset()}.
+   */
   public ObjectStream<Event> build() {
     return () -> {
       if (eventList.size() <= pos) {
