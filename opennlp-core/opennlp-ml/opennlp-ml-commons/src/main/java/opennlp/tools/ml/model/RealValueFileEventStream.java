@@ -149,7 +149,7 @@ public class RealValueFileEventStream extends FileEventStream {
     }
     String[] fields = EventFields.split(line);
     if (fields.length == 0) {
-      throw new InvalidFormatException("An event line must start with an outcome: \"" + line + "\"");
+      throw new InvalidFormatException(EventFields.MISSING_OUTCOME + line + "\"");
     }
     String[] contexts = Arrays.copyOfRange(fields, 1, fields.length);
     return new Event(fields[0], contexts, parseContexts(contexts));

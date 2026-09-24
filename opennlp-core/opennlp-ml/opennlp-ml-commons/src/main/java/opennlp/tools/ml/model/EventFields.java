@@ -19,11 +19,17 @@ package opennlp.tools.ml.model;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Field delimiters and messages shared by the textual event formats. */
+/**
+ * Field delimiters and messages shared by {@link FileEventStream},
+ * {@link RealValueFileEventStream} and {@link SimpleEventStreamBuilder}.
+ */
 final class EventFields {
 
   /** Message prefix for a negative context value; the offending context follows. */
   static final String NEGATIVE_VALUE = "Negative values are not allowed: ";
+
+  /** Message prefix for a blank line; the quoted line follows. */
+  static final String MISSING_OUTCOME = "An event line must start with an outcome: \"";
 
   private static final char SPACE = ' ';
   private static final char TAB = '\t';
