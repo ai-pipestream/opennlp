@@ -56,7 +56,6 @@ public final class JsonScan {
   private static final String NEGATIVE_INFINITY = "-Infinity";
   private static final String[] LITERALS = {TRUE, FALSE, NULL, NAN, INFINITY, NEGATIVE_INFINITY};
 
-  private static final char BYTE_ORDER_MARK = (char) 0xFEFF;
   private static final char OBJECT_OPEN = '{';
   private static final char OBJECT_CLOSE = '}';
   private static final char ARRAY_OPEN = '[';
@@ -283,7 +282,7 @@ public final class JsonScan {
    * @return {@code 1} if the text starts with a byte order mark, {@code 0} otherwise.
    */
   private static int afterByteOrderMark(String text) {
-    return !text.isEmpty() && text.charAt(0) == BYTE_ORDER_MARK ? 1 : 0;
+    return StringUtil.startsWithByteOrderMark(text) ? 1 : 0;
   }
 
   /**
