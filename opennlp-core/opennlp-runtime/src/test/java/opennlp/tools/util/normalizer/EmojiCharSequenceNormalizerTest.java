@@ -168,6 +168,30 @@ public class EmojiCharSequenceNormalizerTest {
     Assertions.assertEquals("a" + expected + "b", NORMALIZER.normalize("a" + text + "b"));
   }
 
+  /**
+   * Keyboards and older text often add U+FE0F after an emoji that already has emoji
+   * presentation. One such selector right after a complete sequence is removed with it; a
+   * second one is a stray component like any other.
+   */
+  private static Stream<Arguments> redundantEmojiPresentationSelectors() {
+    return Stream.of(
+        Arguments.of(cp(0x1F600) + "\uFE0F", " "),
+        Arguments.of(cp(0x1F44D) + "\uFE0F", " "),
+        Arguments.of("\u231A\uFE0F", " "),
+        Arguments.of("\u2764\uFE0F\uFE0F", " "),
+        Arguments.of(cp(0x1F44D, 0x1F3FD) + "\uFE0F", " "),
+        Arguments.of(cp(0x1F600) + "\uFE0F" + cp(0x1F603), " "),
+        Arguments.of(cp(0x1F600) + "\uFE0F\uFE0F", cp(0x1F600) + "\uFE0F\uFE0F"),
+        Arguments.of(cp(0x1F600) + "\uFE0F\u200D", cp(0x1F600) + "\uFE0F\u200D"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("redundantEmojiPresentationSelectors")
+  void normalizeRemovesOneRedundantEmojiPresentationSelectorWithTheEmoji(String text,
+                                                                         String expected) {
+    Assertions.assertEquals("a" + expected + "b", NORMALIZER.normalize("a" + text + "b"));
+  }
+
   @Test
   void normalizePreservesOrphanComponents() {
     String text = "a\u200D\uFE0F\u20E3" + cp(0x1F3FD, 0xE0067, 0xE007F) + "b";
