@@ -24,13 +24,8 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Shared handling of the identifier attributes in MASC annotation files. Node, region,
- * and named entity identifiers are a fixed text prefix followed by a number, as in
- * {@code penn-n7}; the parsers read the number and require the prefix. Attribute values
- * that list several items use XML whitespace: space, tab, carriage return, and line feed.
- * SAX normalizes literal whitespace in attributes but preserves character references, see
- * <a href="https://www.w3.org/TR/xml/#AVNormalize">XML 1.0, attribute-value
- * normalization</a>.
+ * Parses MASC identifier and anchor attributes; lists are separated by
+ * <a href="https://www.w3.org/TR/xml/#NT-S">XML whitespace</a>.
  */
 final class MascIdentifiers {
 
@@ -65,6 +60,7 @@ final class MascIdentifiers {
     try {
       return parseAsciiInt(id, prefix.length());
     } catch (NumberFormatException e) {
+      // reached only when the digits overflow an int
       throw new IllegalArgumentException("MASC identifier number does not fit an int: " + id, e);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(
@@ -74,7 +70,7 @@ final class MascIdentifiers {
 
   /**
    * Parses an XML whitespace separated list of identifiers as {@link #parseId(String, String)}
-   * does. Leading, trailing, and repeated separators are ignored.
+   * does.
    *
    * @param ids The identifiers, such as {@code seg-r1 seg-r2}.
    * @param prefix The expected prefix of each identifier.
@@ -162,7 +158,13 @@ final class MascIdentifiers {
     return Integer.parseInt(text, from, end, 10);
   }
 
-  /** Returns whether a character belongs to the XML whitespace production S. */
+  /**
+   * Tests for <a href="https://www.w3.org/TR/xml/#NT-S">XML whitespace</a>: space, tab,
+   * carriage return or line feed.
+   *
+   * @param c The character to test.
+   * @return {@code true} if {@code c} is XML whitespace, {@code false} otherwise.
+   */
   private static boolean isXmlWhitespace(char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
   }
