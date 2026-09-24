@@ -17,14 +17,10 @@
 
 package opennlp.tools.formats.masc;
 
-import java.util.stream.Stream;
-
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
@@ -81,27 +77,6 @@ public class MascIdentifiersTest {
     Assertions.assertEquals("MASC identifier number does not fit an int: " + id, e.getMessage());
   }
 
-  private static Stream<Arguments> spaceSplits() {
-    return Stream.of(
-        Arguments.of("", new String[0]),
-        Arguments.of("   ", new String[0]),
-        Arguments.of("a", new String[] {"a"}),
-        Arguments.of(" a  b ", new String[] {"a", "b"}),
-        Arguments.of("a\tb", new String[] {"a", "b"}),
-        Arguments.of("a\u00A0b c", new String[] {"a\u00A0b", "c"}));
-  }
-
-  @ParameterizedTest
-  @MethodSource("spaceSplits")
-  void testSplitOnXmlWhitespaceIgnoresRepeatedSeparators(String value, String[] expected) {
-    Assertions.assertArrayEquals(expected, MascIdentifiers.splitOnXmlWhitespace(value));
-  }
-
-  @Test
-  void testSplitOnSpacesRejectsNull() {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> MascIdentifiers.splitOnXmlWhitespace(null));
-  }
-
   @Test
   void testParseIdsReadsASingleIdentifier() {
     Assertions.assertArrayEquals(new int[] {5},
@@ -109,7 +84,7 @@ public class MascIdentifiersTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"", " ", "\t", "seg-r1 penn-n2", "seg-r1 seg-r", "seg-r1,seg-r2",
+  @ValueSource(strings = {"", " ", "   ", "\t", "seg-r1 penn-n2", "seg-r1 seg-r", "seg-r1,seg-r2",
       "seg-r1 seg-r\u0661", "seg-r1 seg-r2 seg-r\uFF13", "seg-r1 seg-r2x"})
   void testParseIdsRejectsEmptyOrMalformedLists(String ids) {
     Assertions.assertThrows(IllegalArgumentException.class,

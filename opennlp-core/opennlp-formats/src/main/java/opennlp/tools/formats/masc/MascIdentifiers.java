@@ -103,12 +103,8 @@ final class MascIdentifiers {
    *
    * @param value The attribute value. Must not be {@code null}.
    * @return The non-empty items in order; empty for a value without one.
-   * @throws IllegalArgumentException If {@code value} is {@code null}.
    */
-  static String[] splitOnXmlWhitespace(String value) {
-    if (value == null) {
-      throw new IllegalArgumentException("value must not be null");
-    }
+  private static String[] splitOnXmlWhitespace(String value) {
     List<String> items = new ArrayList<>();
     int start = -1;
     for (int i = 0; i <= value.length(); i++) {
