@@ -17,10 +17,10 @@
 
 package opennlp.tools.formats.masc;
 
-
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.xml.sax.SAXException;
 
@@ -28,6 +28,16 @@ public class MascPennTagParserTest {
 
   private static MascPennTagParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascPennTagParser());
+  }
+
+  private static String tokenWithTargets(String id, String targets) {
+    return "<graph><node xml:id=\"" + id + "\"><link targets=\"" + targets + "\"/></node></graph>";
+  }
+
+  private static SAXException assertRejected(String xml) {
+    SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
+    Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());
+    return e;
   }
 
   @Test
@@ -45,13 +55,10 @@ public class MascPennTagParserTest {
 
   @ParameterizedTest
   // a tab or a line break written directly into the attribute is a space after XML
-  // attribute-value normalization
-  @ValueSource(strings = {"seg-r0 seg-r1", "  seg-r0   seg-r1  ", "seg-r0\tseg-r1", "seg-r0\nseg-r1",
-      "seg-r0&#9;seg-r1", "seg-r0&#10;seg-r1", "seg-r0&#13;seg-r1"})
-  void testLinkTargetsUseXmlWhitespace(String targets) throws Exception {
-    MascPennTagParser parser = parse("<graph>"
-        + "<node xml:id=\"penn-n10\"><link targets=\"" + targets + "\"/></node>"
-        + "</graph>");
+  // attribute-value normalization, a character reference keeps the character
+  @MethodSource("opennlp.tools.formats.masc.MascParserTestUtil#xmlWhitespaceSeparators")
+  void testLinkTargetsUseXmlWhitespace(String separator) throws Exception {
+    MascPennTagParser parser = parse(tokenWithTargets("penn-n10", " seg-r0" + separator + "seg-r1 "));
     Assertions.assertArrayEquals(new int[] {0, 1}, parser.getTokenToQuarks().get(10));
   }
 
@@ -59,26 +66,21 @@ public class MascPennTagParserTest {
   // these characters are not XML whitespace, even when introduced through a reference
   @ValueSource(strings = {"seg-r0&#xA0;seg-r1", "seg-r0&#x3000;seg-r1", "seg-r0&#x85;seg-r1"})
   void testLinkTargetsSeparatedByOtherWhitespaceAreRejected(String targets) {
-    Assertions.assertThrows(SAXException.class, () -> parse("<graph>"
-        + "<node xml:id=\"penn-n10\"><link targets=\"" + targets + "\"/></node>"
-        + "</graph>"));
+    assertRejected(tokenWithTargets("penn-n10", targets));
   }
 
   @ParameterizedTest
   // doubled prefix, missing prefix, other prefix, no digits, trailing text
   @ValueSource(strings = {"penn-npenn-n2", "2", "ne-n2", "penn-n", "penn-n2x"})
   void testMalformedTokenIdsAreRejected(String id) {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><node xml:id=\"" + id + "\"><link targets=\"seg-r0\"/></node></graph>"));
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><a ref=\"" + id + "\"><fs><f name=\"msd\" value=\"NN\"/></fs></a></graph>"));
+    assertRejected(tokenWithTargets(id, "seg-r0"));
+    assertRejected("<graph><a ref=\"" + id + "\"><fs><f name=\"msd\" value=\"NN\"/></fs></a></graph>");
   }
 
   @ParameterizedTest
   // empty list, one malformed entry, other prefix, comma separated
   @ValueSource(strings = {"", " ", "seg-r0 seg-r", "seg-r0 penn-n1", "seg-r0,seg-r1"})
   void testMalformedLinkTargetsAreRejected(String targets) {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><node xml:id=\"penn-n2\"><link targets=\"" + targets + "\"/></node></graph>"));
+    assertRejected(tokenWithTargets("penn-n2", targets));
   }
 }

@@ -17,15 +17,13 @@
 
 package opennlp.tools.formats.masc;
 
-import java.util.stream.Stream;
-
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import opennlp.tools.util.Span;
 
 public class MascIdentifiersTest {
 
@@ -38,11 +36,10 @@ public class MascIdentifiersTest {
 
   @ParameterizedTest
   // other or missing prefix, prefix later in the text, doubled prefix, no digits, sign,
-  // digits of another script, trailing text, whitespace, and an overflowing number
+  // digits of another script, trailing text, whitespace, and empty
   @ValueSource(strings = {"7", "xne-n7", "NE-N7", "ne\u2011n7", "ne-nne-n7", "ne-n", "ne-n-7",
       "ne-n+7", "ne-n\u0661", "ne-n\uFF17", "ne-n7\u0661", "ne-n\u06F7", "ne-n\u00B2", "ne-n\u2167",
-      "ne-n\uD835\uDFCE", "ne-n7x", "ne-n7 ", " ne-n7", "ne-n7\n", "ne-n2147483648",
-      "ne-n99999999999", ""})
+      "ne-n\uD835\uDFCE", "ne-n7x", "ne-n7 ", " ne-n7", "ne-n7\n", ""})
   void testParseIdRejectsAnythingElse(String id) {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> MascIdentifiers.parseId(id, MascIdentifiers.NAMED_ENTITY_ID_PREFIX));
@@ -79,27 +76,6 @@ public class MascIdentifiersTest {
     Assertions.assertEquals("MASC identifier number does not fit an int: " + id, e.getMessage());
   }
 
-  private static Stream<Arguments> spaceSplits() {
-    return Stream.of(
-        Arguments.of("", new String[0]),
-        Arguments.of("   ", new String[0]),
-        Arguments.of("a", new String[] {"a"}),
-        Arguments.of(" a  b ", new String[] {"a", "b"}),
-        Arguments.of("a\tb", new String[] {"a", "b"}),
-        Arguments.of("a\u00A0b c", new String[] {"a\u00A0b", "c"}));
-  }
-
-  @ParameterizedTest
-  @MethodSource("spaceSplits")
-  void testSplitOnXmlWhitespaceIgnoresRepeatedSeparators(String value, String[] expected) {
-    Assertions.assertArrayEquals(expected, MascIdentifiers.splitOnXmlWhitespace(value));
-  }
-
-  @Test
-  void testSplitOnSpacesRejectsNull() {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> MascIdentifiers.splitOnXmlWhitespace(null));
-  }
-
   @Test
   void testParseIdsReadsASingleIdentifier() {
     Assertions.assertArrayEquals(new int[] {5},
@@ -107,7 +83,7 @@ public class MascIdentifiersTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"", " ", "\t", "seg-r1 penn-n2", "seg-r1 seg-r", "seg-r1,seg-r2",
+  @ValueSource(strings = {"", " ", "   ", "\t", "seg-r1 penn-n2", "seg-r1 seg-r", "seg-r1,seg-r2",
       "seg-r1 seg-r\u0661", "seg-r1 seg-r2 seg-r\uFF13", "seg-r1 seg-r2x"})
   void testParseIdsRejectsEmptyOrMalformedLists(String ids) {
     Assertions.assertThrows(IllegalArgumentException.class,
@@ -118,5 +94,28 @@ public class MascIdentifiersTest {
   void testParseIdsRejectsNull() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> MascIdentifiers.parseIds(null, MascIdentifiers.REGION_ID_PREFIX));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"'0 4', 0, 4", "'0 0', 0, 0", "'\t3\n5 ', 3, 5",
+      "'  12   2147483647  ', 12, 2147483647"})
+  void testParseAnchorsReadsTwoOrderedOffsets(String anchors, int start, int end) {
+    Assertions.assertEquals(new Span(start, end), MascIdentifiers.parseAnchors(anchors));
+  }
+
+  @ParameterizedTest
+  // sign, digits of another script, reversed, negative, overflowing, wrong arity,
+  // other whitespace, text, and empty
+  @ValueSource(strings = {"+0 4", "0 +4", "0 \u0664", "0 \uFF14", "\u0660 4", "4 0", "-1 4",
+      "0 2147483648", "0", "0 4 5", "0\u00A04", "0 x", "", " "})
+  void testParseAnchorsRejectsAnythingElse(String anchors) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> MascIdentifiers.parseAnchors(anchors));
+  }
+
+  @Test
+  void testParseAnchorsRejectsNull() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> MascIdentifiers.parseAnchors(null));
   }
 }

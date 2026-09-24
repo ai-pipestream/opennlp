@@ -24,13 +24,8 @@ import opennlp.tools.util.Span;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Shared handling of the identifier attributes in MASC annotation files. Node, region,
- * and named entity identifiers are a fixed text prefix followed by a number, as in
- * {@code penn-n7}; the parsers read the number and require the prefix. Attribute values
- * that list several items use XML whitespace: space, tab, carriage return, and line feed.
- * SAX normalizes literal whitespace in attributes but preserves character references, see
- * <a href="https://www.w3.org/TR/xml/#AVNormalize">XML 1.0, attribute-value
- * normalization</a>.
+ * Parses MASC identifier and anchor attributes; lists are separated by
+ * <a href="https://www.w3.org/TR/xml/#NT-S">XML whitespace</a>.
  */
 final class MascIdentifiers {
 
@@ -53,31 +48,45 @@ final class MascIdentifiers {
    * @param id The identifier, such as {@code penn-n7}.
    * @param prefix The expected prefix, such as {@link #PENN_TOKEN_ID_PREFIX}.
    * @return The number after the prefix.
-   * @throws IllegalArgumentException If {@code id} is {@code null}, does not start with
+   * @throws IllegalArgumentException Thrown if {@code id} is {@code null}, does not start with
    *         {@code prefix}, is not followed by digits only, or the number does not fit
    *         an {@code int}.
    */
   static int parseId(String id, String prefix) {
-    if (id == null || !id.startsWith(prefix) || id.length() == prefix.length()
-        || StringUtil.endOfAsciiDigits(id, prefix.length()) != id.length()) {
-      throw new IllegalArgumentException(
-          "MASC identifier must be " + prefix + " followed by digits: " + id);
+    if (id == null || !id.startsWith(prefix)) {
+      throw invalidId(id, prefix, null);
     }
     try {
-      return Integer.parseInt(id, prefix.length(), id.length(), 10);
+      return parseAsciiInt(id, prefix.length());
     } catch (NumberFormatException e) {
+      // reached only when the digits overflow an int
       throw new IllegalArgumentException("MASC identifier number does not fit an int: " + id, e);
+    } catch (IllegalArgumentException e) {
+      throw invalidId(id, prefix, e);
     }
   }
 
   /**
+   * Describes an identifier that is not {@code prefix} followed by ASCII digits.
+   *
+   * @param id The rejected identifier.
+   * @param prefix The expected prefix.
+   * @param cause The underlying error, or {@code null}.
+   * @return The exception to throw.
+   */
+  private static IllegalArgumentException invalidId(String id, String prefix, Throwable cause) {
+    return new IllegalArgumentException(
+        "MASC identifier must be " + prefix + " followed by digits: " + id, cause);
+  }
+
+  /**
    * Parses an XML whitespace separated list of identifiers as {@link #parseId(String, String)}
-   * does. Leading, trailing, and repeated separators are ignored.
+   * does.
    *
    * @param ids The identifiers, such as {@code seg-r1 seg-r2}.
    * @param prefix The expected prefix of each identifier.
    * @return The numbers in order.
-   * @throws IllegalArgumentException If {@code ids} is {@code null}, names no identifier, or
+   * @throws IllegalArgumentException Thrown if {@code ids} is {@code null}, names no identifier, or
    *         contains one that {@link #parseId(String, String)} rejects.
    */
   static int[] parseIds(String ids, String prefix) {
@@ -101,12 +110,8 @@ final class MascIdentifiers {
    *
    * @param value The attribute value. Must not be {@code null}.
    * @return The non-empty items in order; empty for a value without one.
-   * @throws IllegalArgumentException If {@code value} is {@code null}.
    */
-  static String[] splitOnXmlWhitespace(String value) {
-    if (value == null) {
-      throw new IllegalArgumentException("value must not be null");
-    }
+  private static String[] splitOnXmlWhitespace(String value) {
     List<String> items = new ArrayList<>();
     int start = -1;
     for (int i = 0; i <= value.length(); i++) {
@@ -127,7 +132,7 @@ final class MascIdentifiers {
    *
    * @param anchors The XML whitespace separated offsets.
    * @return The region span.
-   * @throws IllegalArgumentException If the anchors are missing, malformed, out of range,
+   * @throws IllegalArgumentException Thrown if the anchors are missing, malformed, out of range,
    *         negative, or reversed.
    */
   static Span parseAnchors(String anchors) {
@@ -139,13 +144,38 @@ final class MascIdentifiers {
       throw new IllegalArgumentException("MASC region anchors must contain exactly two offsets: " + anchors);
     }
     try {
-      return new Span(Integer.parseInt(items[0]), Integer.parseInt(items[1]));
+      return new Span(parseAsciiInt(items[0], 0), parseAsciiInt(items[1], 0));
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("Invalid MASC region anchors: " + anchors, e);
     }
   }
 
-  /** Returns whether a character belongs to the XML whitespace production S. */
+  /**
+   * Parses the ASCII digits from {@code from} to the end of {@code text} as a nonnegative
+   * {@code int}. A sign and digits of other scripts are not accepted.
+   *
+   * @param text The text holding the digits.
+   * @param from The index of the first digit.
+   * @return The number.
+   * @throws IllegalArgumentException Thrown if there is no digit at {@code from} or the digits
+   *         do not reach the end of {@code text}.
+   * @throws NumberFormatException Thrown if the number does not fit an {@code int}.
+   */
+  private static int parseAsciiInt(String text, int from) {
+    int end = StringUtil.endOfAsciiDigits(text, from);
+    if (end == from || end != text.length()) {
+      throw new IllegalArgumentException("Expected ASCII digits only: " + text.substring(from));
+    }
+    return Integer.parseInt(text, from, end, 10);
+  }
+
+  /**
+   * Tests for <a href="https://www.w3.org/TR/xml/#NT-S">XML whitespace</a>: space, tab,
+   * carriage return or line feed.
+   *
+   * @param c The character to test.
+   * @return {@code true} if {@code c} is XML whitespace, {@code false} otherwise.
+   */
   private static boolean isXmlWhitespace(char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
   }
