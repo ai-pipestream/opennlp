@@ -40,8 +40,8 @@ class MascSentenceParserTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0&#x85;4", "0 x", "-1 4",
-      "4 0", "0 2147483648", "", " "})
+  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0&#x85;4", "0 x", "+0 4", "0 \u0664",
+      "0 \uFF14", "-1 4", "4 0", "0 2147483648", "", " "})
   void testMalformedSentenceAnchorsPreserveTheCause(String anchors) {
     SAXException error = Assertions.assertThrows(SAXException.class,
         () -> MascParserTestUtil.parse("<graph><region anchors=\"" + anchors + "\"/></graph>",

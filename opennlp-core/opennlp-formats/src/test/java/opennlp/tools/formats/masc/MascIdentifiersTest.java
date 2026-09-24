@@ -27,6 +27,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.util.Span;
+
 public class MascIdentifiersTest {
 
   @ParameterizedTest
@@ -118,5 +120,28 @@ public class MascIdentifiersTest {
   void testParseIdsRejectsNull() {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> MascIdentifiers.parseIds(null, MascIdentifiers.REGION_ID_PREFIX));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"'0 4', 0, 4", "'0 0', 0, 0", "'\t3\n5 ', 3, 5",
+      "'  12   2147483647  ', 12, 2147483647"})
+  void testParseAnchorsReadsTwoOrderedOffsets(String anchors, int start, int end) {
+    Assertions.assertEquals(new Span(start, end), MascIdentifiers.parseAnchors(anchors));
+  }
+
+  @ParameterizedTest
+  // sign, digits of another script, reversed, negative, overflowing, wrong arity,
+  // other whitespace, text, and empty
+  @ValueSource(strings = {"+0 4", "0 +4", "0 \u0664", "0 \uFF14", "\u0660 4", "4 0", "-1 4",
+      "0 2147483648", "0", "0 4 5", "0\u00A04", "0 x", "", " "})
+  void testParseAnchorsRejectsAnythingElse(String anchors) {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> MascIdentifiers.parseAnchors(anchors));
+  }
+
+  @Test
+  void testParseAnchorsRejectsNull() {
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> MascIdentifiers.parseAnchors(null));
   }
 }

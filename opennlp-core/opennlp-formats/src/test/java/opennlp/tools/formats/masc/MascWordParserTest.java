@@ -65,8 +65,10 @@ public class MascWordParserTest {
   }
 
   @ParameterizedTest
-  // wrong arity, non-XML whitespace, text, negative, reversed, overflowing, or missing
-  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0 x", "-1 4", "4 0", "0 2147483648", "", " "})
+  // wrong arity, non-XML whitespace, text, sign, digits of another script, negative, reversed,
+  // overflowing, or missing
+  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0 x", "+0 4", "0 \u0664", "0 \uFF14", "-1 4",
+      "4 0", "0 2147483648", "", " "})
   void testMalformedAnchorsAreRejectedWithTheReason(String anchors) {
     SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(
         "<graph><region xml:id=\"seg-r0\" anchors=\"" + anchors + "\"/></graph>"));
