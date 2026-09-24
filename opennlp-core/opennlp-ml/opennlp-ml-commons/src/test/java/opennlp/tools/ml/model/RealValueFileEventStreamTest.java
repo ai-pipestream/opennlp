@@ -33,8 +33,6 @@ import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
 
-import static org.junit.jupiter.api.Assertions.fail;
-
 /**
  * Verifies that the textual event (input) format in {@link RealValueFileEventStream} is:
  * <br/>
@@ -73,21 +71,6 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
       Assertions.assertEquals("other [wc=other=1.0 w&c=.,other=2.0 p1wc=ic=3.0]",
           eventStream.read().toString());
       Assertions.assertNull(eventStream.read());
-    }
-  }
-
-  @Test
-  void testReadWithInvalidNegativeValues() throws IOException {
-    try (RealValueFileEventStream eventStream = createEventStream(EVENTS_INVALID_NEGATIVE)) {
-      eventStream.read();
-      fail("Negative values should not be tolerated as input!");
-    } catch (RuntimeException rte) {
-      //noinspection StatementWithEmptyBody
-      if (rte.getMessage().startsWith("Negative values are not allowed")) {
-        // expected behviour
-      } else {
-        fail(rte);
-      }
     }
   }
 
@@ -241,7 +224,7 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
   @ParameterizedTest
   @ValueSource(strings = {"wc=ic=-1", "wc=ic=-0.5", "wc=ic=-1e2", "wc=ic=-1E-2"})
   void testNegativeValueIsRejectedWithTheContextNamed(String context) {
-    RuntimeException e = Assertions.assertThrows(RuntimeException.class,
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
         () -> RealValueFileEventStream.parseEvent("other " + context));
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
   }

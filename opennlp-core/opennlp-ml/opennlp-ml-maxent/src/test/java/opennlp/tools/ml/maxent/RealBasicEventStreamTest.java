@@ -84,15 +84,9 @@ public class RealBasicEventStreamTest extends AbstractEventStreamTest {
   @Test
   void testReadWithInvalidNegativeValues() throws IOException {
     try (RealBasicEventStream eventStream = createEventStream(EVENTS_INVALID_NEGATIVE)) {
-      eventStream.read();
-      fail("Negative values should not be tolerated as input!");
-    } catch (RuntimeException rte) {
-      //noinspection StatementWithEmptyBody
-      if (rte.getMessage().startsWith("Negative values are not allowed")) {
-        // expected behviour
-      } else {
-        fail(rte);
-      }
+      IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+          eventStream::read);
+      Assertions.assertEquals("Negative values are not allowed: wc=ic=-1.0", e.getMessage());
     }
   }
 
