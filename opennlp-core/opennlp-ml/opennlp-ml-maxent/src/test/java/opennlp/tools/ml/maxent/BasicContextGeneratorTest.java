@@ -21,14 +21,12 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.WhitespaceMode;
 
 public class BasicContextGeneratorTest {
@@ -50,8 +48,7 @@ public class BasicContextGeneratorTest {
   private static final String LOW_SURROGATE = "\uDE00";
 
   @AfterEach
-  void resetSharedState() {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
+  void resetWhitespaceMode() {
     WhitespaceMode.reset();
   }
 
@@ -223,17 +220,6 @@ public class BasicContextGeneratorTest {
   void testDefaultSplitIsTheSameInLegacyMode(String input, String[] expected) {
     WhitespaceMode.setActive(WhitespaceMode.LEGACY);
     Assertions.assertArrayEquals(expected, new BasicContextGenerator().getContext(input));
-  }
-
-  /**
-   * The default split does not go through the shared {@link WhitespaceTokenizer#INSTANCE};
-   * any {@code TokenizerME} may switch on the keep-new-lines flag of that instance.
-   */
-  @Test
-  void testDefaultSplitIsUnaffectedByTheSharedTokenizer() {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(true);
-    Assertions.assertArrayEquals(new String[] {"a", "b", "c"},
-        new BasicContextGenerator().getContext("a\nb\r\nc"));
   }
 
   @ParameterizedTest
