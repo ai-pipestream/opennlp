@@ -318,6 +318,77 @@ public class LoadVocabTest {
     assertTrue(e.getMessage().contains("added_tokens"), e.getMessage());
   }
 
+  static Stream<Arguments> lowercaseSettings() {
+    final String model = "\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}";
+    return Stream.of(
+        Arguments.of(TOKENIZER_JSON, Boolean.TRUE),
+        Arguments.of("{\"normalizer\": {\"type\": \"BertNormalizer\", \"lowercase\": false}, " + model
+            + "}", Boolean.FALSE),
+        Arguments.of("{" + model + ", \"normalizer\": {\"lowercase\": true}}", Boolean.TRUE),
+        // a later normalizer, and a later lowercase, wins
+        Arguments.of("{\"normalizer\": {\"lowercase\": true, \"lowercase\": false}, " + model
+            + ", \"normalizer\": {\"lowercase\": false, \"lowercase\": true}}", Boolean.TRUE),
+        // no normalizer, a normalizer without the setting, or one that is not an object
+        Arguments.of("{" + model + "}", null),
+        Arguments.of("{\"normalizer\": {\"type\": \"NFC\"}, " + model + "}", null),
+        Arguments.of("{\"normalizer\": null, " + model + "}", null),
+        // a vocab.json has no setting
+        Arguments.of("{\"a\": 0, \"normalizer\": 1}", null));
+  }
+
+  @ParameterizedTest
+  @MethodSource("lowercaseSettings")
+  void testReadJsonVocabKeepsTheLowercaseSetting(String json, Boolean expected) {
+    assertEquals(expected, AbstractDL.readJsonVocab(json).lowercase());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"\"true\"", "1", "null", "{}", "[true]", "NaN"})
+  void testReadJsonVocabRejectsALowercaseSettingThatIsNotABoolean(String value) {
+    final String json = "{\"normalizer\": {\"lowercase\": " + value + "},"
+        + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}}";
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.readJsonVocab(json));
+    assertTrue(e.getMessage().contains("\"lowercase\""), e.getMessage());
+  }
+
+  @Test
+  void testReadVocabFileKeepsTheLowercaseSettingOfATokenizerJson() throws IOException {
+    final File tempFile = vocabFile("tokenizer.json", TOKENIZER_JSON);
+
+    final AbstractDL.Vocabulary vocabulary = AbstractDL.readVocabFile(tempFile);
+
+    assertEquals(TOKENIZER_VOCAB, vocabulary.ids());
+    assertEquals(Boolean.TRUE, vocabulary.lowercase());
+    assertThrows(InvalidFormatException.class,
+        () -> AbstractDL.requireLowerCase(tempFile, vocabulary, false));
+    AbstractDL.requireLowerCase(tempFile, vocabulary, true);
+  }
+
+  @Test
+  void testRequireLowerCaseNamesTheFileAndBothSettings() throws IOException {
+    final File tempFile = vocabFile("tokenizer-cased.json", "{\"normalizer\": {\"lowercase\": false},"
+        + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}}");
+    final AbstractDL.Vocabulary vocabulary = AbstractDL.readVocabFile(tempFile);
+
+    final InvalidFormatException e = assertThrows(InvalidFormatException.class,
+        () -> AbstractDL.requireLowerCase(tempFile, vocabulary, true));
+    assertTrue(e.getMessage().contains(tempFile.getName()), e.getMessage());
+    assertTrue(e.getMessage().contains("normalizer.lowercase"), e.getMessage());
+    assertTrue(e.getMessage().contains("false"), e.getMessage());
+    assertTrue(e.getMessage().contains("lowerCase true"), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void testRequireLowerCaseAcceptsAVocabularyWithoutTheSetting(boolean lowerCase)
+      throws IOException {
+    final File plain = vocabFile("vocab.txt", "[CLS]\n[SEP]\n");
+    AbstractDL.requireLowerCase(plain, AbstractDL.readVocabFile(plain), lowerCase);
+    final File flat = vocabFile("vocab.json", "{\"[CLS]\": 0}");
+    AbstractDL.requireLowerCase(flat, AbstractDL.readVocabFile(flat), lowerCase);
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"BPE", "Unigram", "WordLevel", "wordpiece", ""})
   void testLoadJsonVocabRejectsOtherModelTypes(String type) {
