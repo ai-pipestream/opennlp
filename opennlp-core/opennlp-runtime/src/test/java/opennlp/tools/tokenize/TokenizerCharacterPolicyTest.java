@@ -177,6 +177,20 @@ public class TokenizerCharacterPolicyTest {
   }
 
   @Test
+  void testFactoryMessagesNameTheOffendingCodePoint() {
+    IllegalArgumentException overlap = assertThrows(IllegalArgumentException.class,
+        () -> TokenizerCharacterPolicy.of(A, A, EMPTY));
+    IllegalArgumentException surrogate = assertThrows(IllegalArgumentException.class,
+        () -> TokenizerCharacterPolicy.of(A, SEVEN, CodePointSet.of(Character.MIN_SURROGATE)));
+    IllegalArgumentException whitespace = assertThrows(IllegalArgumentException.class,
+        () -> TokenizerCharacterPolicy.of(A, SEVEN, CodePointSet.of(' ')));
+
+    assertTrue(overlap.getMessage().contains("U+0061"), overlap.getMessage());
+    assertTrue(surrogate.getMessage().contains("U+D800"), surrogate.getMessage());
+    assertTrue(whitespace.getMessage().contains("U+0020"), whitespace.getMessage());
+  }
+
+  @Test
   void testFactoryRejectsSurrogatesInEveryCategory() {
     for (int surrogate = Character.MIN_SURROGATE;
          surrogate <= Character.MAX_SURROGATE; surrogate++) {
