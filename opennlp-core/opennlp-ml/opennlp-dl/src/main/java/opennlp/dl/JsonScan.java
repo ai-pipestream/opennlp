@@ -184,6 +184,29 @@ public final class JsonScan {
   }
 
   /**
+   * Reads the values of the array that starts at an offset. Each value is returned as a member
+   * whose key is the decimal index of the value in the array, so that a message about a value
+   * can name its position.
+   *
+   * @param text The JSON text. Must not be {@code null}.
+   * @param bracket The offset of the opening bracket.
+   * @return The values in document order, an empty list for an empty array.
+   * @throws IllegalArgumentException Thrown if {@code text} is {@code null}, {@code bracket} is
+   *     not the offset of an opening bracket inside the text, or the array is malformed.
+   */
+  static List<Member> elements(String text, int bracket) {
+    requireText(text);
+    if (bracket < 0 || bracket >= text.length()) {
+      throw new IllegalArgumentException(
+          "bracket must be an offset inside the text, not " + bracket);
+    }
+    expect(text, bracket, ARRAY_OPEN);
+    final List<Member> elements = new ArrayList<>();
+    endOfContainer(text, bracket, elements);
+    return Collections.unmodifiableList(elements);
+  }
+
+  /**
    * Finds the member with a key in a list of members. A later member with the same key
    * counts, as with a map that is filled in document order.
    *
@@ -220,6 +243,20 @@ public final class JsonScan {
   static boolean isObject(String text, Member member) {
     requireMember(text, member);
     return text.charAt(member.valueStart()) == OBJECT_OPEN;
+  }
+
+  /**
+   * Tests whether the value of a member is an array.
+   *
+   * @param text The JSON text. Must not be {@code null}.
+   * @param member The member, inside the text. Must not be {@code null}.
+   * @return {@code true} if the value starts with an opening bracket.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null} or the member lies
+   *     outside the text.
+   */
+  static boolean isArray(String text, Member member) {
+    requireMember(text, member);
+    return text.charAt(member.valueStart()) == ARRAY_OPEN;
   }
 
   /**
@@ -422,16 +459,18 @@ public final class JsonScan {
 
   /**
    * Scans an object or an array, and every value nested in it, without recursion. When a sink
-   * is given, the container is an object and its direct members are added to the sink.
+   * is given, the direct members of the object, or the values of the array under their decimal
+   * index as the key, are added to the sink.
    *
    * @param text The JSON text.
    * @param open The offset of the opening brace or bracket.
-   * @param sink The list to add the members of the object to, or {@code null} to only find
-   *     the end.
+   * @param sink The list to add the members of the object or the values of the array to, or
+   *     {@code null} to only find the end.
    * @return The offset after the closing brace or bracket.
    * @throws IllegalArgumentException Thrown if the container or a value in it is malformed.
    */
   private static int endOfContainer(String text, int open, List<Member> sink) {
+    final boolean object = text.charAt(open) == OBJECT_OPEN;
     final Deque<Boolean> objects = new ArrayDeque<>();
     String key = null;
     int valueStart = 0;
@@ -474,7 +513,7 @@ public final class JsonScan {
         elementExpected = false;
       } else {
         if (sink != null && objects.size() == 1) {
-          sink.add(new Member(key, valueStart, i));
+          sink.add(new Member(object ? key : Integer.toString(sink.size()), valueStart, i));
         }
         i = skipWhitespace(text, i);
         if (isCloser(text, i, objects.peek())) {

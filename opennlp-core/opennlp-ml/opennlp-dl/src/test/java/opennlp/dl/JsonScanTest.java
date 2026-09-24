@@ -125,6 +125,34 @@ public class JsonScanTest {
   }
 
   @Test
+  void testElementsReadsTheValuesOfAnArrayUnderTheirIndex() {
+    final String text = "{\"x\": [1, \"a\", {\"b\": [2]}, [], null], \"y\": [], \"z\": {}}";
+    final List<Member> members = JsonScan.document(text);
+    final Member x = JsonScan.member(members, "x");
+    Assertions.assertTrue(JsonScan.isArray(text, x));
+    Assertions.assertFalse(JsonScan.isArray(text, JsonScan.member(members, "z")));
+    Assertions.assertEquals(List.of("0=1", "1=\"a\"", "2={\"b\": [2]}", "3=[]", "4=null"),
+        render(text, JsonScan.elements(text, x.valueStart())));
+    Assertions.assertEquals(List.of(),
+        JsonScan.elements(text, JsonScan.member(members, "y").valueStart()));
+    Assertions.assertThrows(IllegalArgumentException.class,
+        () -> JsonScan.elements(text, JsonScan.member(members, "z").valueStart()));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"[1,]", "[,1]", "[1 2]", "[1", "[\"a]", "[{]", "[1}"})
+  void testElementsRejectsAMalformedArray(String text) {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.elements(text, 0));
+  }
+
+  @Test
+  void testElementsRejectsNullAndAnOffsetOutsideTheText() {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.elements(null, 0));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.elements("[]", -1));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.elements("[]", 2));
+  }
+
+  @Test
   void testIsStringTellsStringValuesFromOthers() {
     final String text = "{\"a\": \"x\", \"b\": \"\", \"c\": 1, \"d\": {}, \"e\": [\"x\"], \"f\": null}";
     final List<Member> members = JsonScan.document(text);
@@ -450,6 +478,7 @@ public class JsonScanTest {
     final Member outside = new Member("k", 5, 9);
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isObject("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isString("{}", outside));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isArray("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.stringValue("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> JsonScan.nonNegativeIntValue("{}", outside));
