@@ -53,7 +53,7 @@ final class MascIdentifiers {
    * @param id The identifier, such as {@code penn-n7}.
    * @param prefix The expected prefix, such as {@link #PENN_TOKEN_ID_PREFIX}.
    * @return The number after the prefix.
-   * @throws IllegalArgumentException If {@code id} is {@code null}, does not start with
+   * @throws IllegalArgumentException Thrown if {@code id} is {@code null}, does not start with
    *         {@code prefix}, is not followed by digits only, or the number does not fit
    *         an {@code int}.
    */
@@ -79,7 +79,7 @@ final class MascIdentifiers {
    * @param ids The identifiers, such as {@code seg-r1 seg-r2}.
    * @param prefix The expected prefix of each identifier.
    * @return The numbers in order.
-   * @throws IllegalArgumentException If {@code ids} is {@code null}, names no identifier, or
+   * @throws IllegalArgumentException Thrown if {@code ids} is {@code null}, names no identifier, or
    *         contains one that {@link #parseId(String, String)} rejects.
    */
   static int[] parseIds(String ids, String prefix) {
@@ -125,7 +125,7 @@ final class MascIdentifiers {
    *
    * @param anchors The XML whitespace separated offsets.
    * @return The region span.
-   * @throws IllegalArgumentException If the anchors are missing, malformed, out of range,
+   * @throws IllegalArgumentException Thrown if the anchors are missing, malformed, out of range,
    *         negative, or reversed.
    */
   static Span parseAnchors(String anchors) {
