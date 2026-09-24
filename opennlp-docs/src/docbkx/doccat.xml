@@ -177,13 +177,19 @@ String category = myCategorizer.getBestCategory(outcomes);]]>
 				the token ID, as in <code>vocab.txt</code>, or a JSON object that maps each token to a
 				non-negative integer ID, as in <code>vocab.json</code>. A file is read as JSON when its
 				first non-whitespace character is an opening brace, and a leading byte order mark is
-				ignored. A Hugging Face <code>tokenizer.json</code> is also accepted; its
-				<code>model.vocab</code> object supplies the tokens, and the entries of its
-				<code>added_tokens</code> list are part of the vocabulary only if <code>model.vocab</code>
-				lists them as well. A <code>tokenizer.json</code> of a Unigram model, whose
-				<code>model.vocab</code> is a list, is rejected. A vocabulary that cannot be read is
-				rejected with an <code>InvalidFormatException</code> that names the file and the position
-				of the problem.
+				ignored. A Hugging Face <code>tokenizer.json</code> of a WordPiece model is also
+				accepted; its <code>model.vocab</code> object supplies the tokens, and an entry of its
+				<code>added_tokens</code> list that <code>model.vocab</code> lacks is added with its ID.
+				A <code>tokenizer.json</code> of another model type, such as BPE or Unigram, is rejected,
+				and so is an added token whose ID or token conflicts with <code>model.vocab</code>. When
+				the file sets <code>normalizer.lowercase</code>, the setting must agree with the lower
+				casing the component is configured with, otherwise the file is rejected; the other
+				tokenizer settings of the file, such as <code>strip_accents</code> and the special tokens
+				of the post processor, are not read, and the special tokens are found in the vocabulary as
+				for the other formats. A vocabulary that cannot be read is rejected with an
+				<code>InvalidFormatException</code> that names the file and the position of the problem.
+				The same vocabulary files are accepted by <code>NameFinderDL</code> and
+				<code>SentenceVectorsDL</code>.
 			</para>
 			<para>
 				When a configuration file is given in place of the categories map, its top-level
