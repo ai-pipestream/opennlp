@@ -31,8 +31,7 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
  * character categories.</p>
  *
  * <p>This predicate tests a complete candidate without finding token boundaries or changing
- * its text. It does not configure {@link TokenizerME} or tokenizer training. Applications
- * can retain the category sets to reconstruct the same policy.</p>
+ * its text.</p>
  */
 public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
 
@@ -53,15 +52,17 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
   }
 
   /**
-   * Creates a policy from explicit, pairwise-disjoint Unicode scalar-value sets.
+   * Creates a policy from explicit, pairwise-disjoint code point sets. Whitespace separates
+   * tokens and so cannot be part of one; every other non-surrogate code point is left to the
+   * caller.
    *
    * @param letters Code points treated as letters.
    * @param digits Code points treated as digits.
    * @param marks Code points permitted after a letter, a digit, or another mark.
    * @return The immutable policy.
-   * @throws IllegalArgumentException Thrown if a set is {@code null}, the base sets are both
-   *     empty, a code point occurs in more than one set, or a set contains whitespace or a
-   *     surrogate code point.
+   * @throws IllegalArgumentException Thrown if a set is {@code null}, {@code letters} and
+   *     {@code digits} are both empty, a code point occurs in more than one set, or a set
+   *     contains a surrogate code point or {@link UnicodeWhitespace} member.
    */
   public static TokenizerCharacterPolicy of(
       CodePointSet letters, CodePointSet digits, CodePointSet marks) {
@@ -159,7 +160,7 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
     }
   }
 
-  /** Checks category overlap by visiting only the smaller set. */
+  /** Throws if {@code first} and {@code second} share a code point. */
   private static void requireDisjoint(
       String firstName, CodePointSet first, String secondName, CodePointSet second) {
     CodePointSet smaller = first.size() <= second.size() ? first : second;
