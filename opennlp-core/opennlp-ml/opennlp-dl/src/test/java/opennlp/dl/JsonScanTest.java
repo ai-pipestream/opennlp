@@ -125,6 +125,17 @@ public class JsonScanTest {
   }
 
   @Test
+  void testIsStringTellsStringValuesFromOthers() {
+    final String text = "{\"a\": \"x\", \"b\": \"\", \"c\": 1, \"d\": {}, \"e\": [\"x\"], \"f\": null}";
+    final List<Member> members = JsonScan.document(text);
+    Assertions.assertTrue(JsonScan.isString(text, JsonScan.member(members, "a")));
+    Assertions.assertTrue(JsonScan.isString(text, JsonScan.member(members, "b")));
+    for (String key : List.of("c", "d", "e", "f")) {
+      Assertions.assertFalse(JsonScan.isString(text, JsonScan.member(members, key)), key);
+    }
+  }
+
+  @Test
   void testMemberFindsTheLastWithAKey() {
     final String text = "{\"a\": 1, \"b\": 2, \"a\": 3}";
     final List<Member> members = JsonScan.document(text);
@@ -438,6 +449,7 @@ public class JsonScanTest {
   void testValueReadersRejectAMemberOutsideTheText() {
     final Member outside = new Member("k", 5, 9);
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isObject("{}", outside));
+    Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.isString("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class, () -> JsonScan.stringValue("{}", outside));
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> JsonScan.nonNegativeIntValue("{}", outside));
