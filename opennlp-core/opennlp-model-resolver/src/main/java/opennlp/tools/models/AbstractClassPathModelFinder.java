@@ -26,7 +26,6 @@ import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.jar.JarEntry;
@@ -64,9 +63,12 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
   /**
    * @param jarModelPrefix The leafnames of the jars that should be canned (e.g. "opennlp.jar").
    *                       May contain a wildcard glob ("opennlp-*.jar"). It must not be {@code null}.
+   * @throws IllegalArgumentException If {@code jarModelPrefix} is {@code null}.
    */
   public AbstractClassPathModelFinder(String jarModelPrefix) {
-    Objects.requireNonNull(jarModelPrefix, "jarModelPrefix must not be null");
+    if (jarModelPrefix == null) {
+      throw new IllegalArgumentException("jarModelPrefix must not be null");
+    }
     this.jarModelPrefix = jarModelPrefix;
   }
 
@@ -163,7 +165,7 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
       final URI uri = url.toURI();
       final String filePart = uri.isOpaque() ? uri.getSchemeSpecificPart()
           : uri.getPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getQuery());
-      return GlobMatcher.matches(wildcard, filePart);
+      return WildcardMatcher.matches(wildcard, filePart);
     } catch (URISyntaxException e) {
       throw new IllegalArgumentException("url must be a valid URI", e);
     }
