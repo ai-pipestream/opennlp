@@ -32,6 +32,7 @@ import opennlp.tools.depparse.DependencyModel;
 @Internal
 public class DependencyModelLoader extends ModelLoader<DependencyModel> {
 
+  /** Initializes a loader that names the model "Dependency parser" in its messages. */
   public DependencyModelLoader() {
     super("Dependency parser");
   }
