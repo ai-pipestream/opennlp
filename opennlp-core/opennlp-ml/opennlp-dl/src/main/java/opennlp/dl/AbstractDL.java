@@ -184,18 +184,21 @@ public abstract class AbstractDL implements AutoCloseable {
 
   /**
    * Loads a vocabulary {@link File} from disk. A file with an opening brace as its first
-   * non-whitespace character is read as JSON: one object that maps each token to a non-negative
-   * integer ID, as in {@code vocab.json}. Any other file is read as plain text with one token
-   * per line, the line number being the ID, as in {@code vocab.txt}. A byte order mark at the
-   * start of the file is not content in either format. The JSON layouts are those of
-   * {@link #loadJsonVocab(String)}.
+   * non-whitespace character is read as JSON, in one of two layouts: one object that maps each
+   * token to a non-negative integer ID, as in {@code vocab.json}, or a Hugging Face
+   * {@code tokenizer.json} of a WordPiece model, whose {@code model.vocab} object supplies the
+   * tokens and whose {@code added_tokens} absent from {@code model.vocab} are added with their
+   * ids. Any other file is read as plain text with one token per line, the line number being
+   * the ID, as in {@code vocab.txt}. A byte order mark at the start of the file is not content
+   * in either format.
    *
    * @param vocabFile The vocabulary file.
    * @return A map of vocabulary words to IDs.
    * @throws IOException Thrown if the vocabulary file cannot be opened or read.
-   * @throws InvalidFormatException Thrown if a JSON vocabulary is malformed, has a layout that
-   *     is not supported, or contains a value that is not a non-negative integer. The message
-   *     names the file and the offset or the token.
+   * @throws InvalidFormatException Thrown if a JSON vocabulary is malformed, contains a value
+   *     that is not a non-negative integer, or is a {@code tokenizer.json} of another model type
+   *     than WordPiece or with an added token that conflicts with the vocabulary. The message
+   *     names the file and the offset, the token, or the unsupported member.
    */
   public Map<String, Integer> loadVocab(
       final File vocabFile) throws IOException {
