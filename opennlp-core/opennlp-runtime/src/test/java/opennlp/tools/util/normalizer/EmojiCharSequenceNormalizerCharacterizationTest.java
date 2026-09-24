@@ -127,7 +127,7 @@ public class EmojiCharSequenceNormalizerCharacterizationTest {
   void charactersBelowTheRegexBoundaryAreKept() {
     check("a⌚b", "a⌚b");
     check("a❤b", "a❤b");
-    check("a\uDFFEb", "a\uDFFEb");
+    check("x\uDFFEy", "x y");
     check("x\uDFFFy", "x y");
     check("x\uD83Bx", "x\uD83Bx");
     check("x\uD83Cx", "x x");

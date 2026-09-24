@@ -56,7 +56,11 @@ under the License.
 								<code>&#x2764;</code> without U+FE0F remains text. Structurally connected
 								malformed candidates, such as an emoji followed by a trailing U+200D, are
 								preserved whole rather than leaving a fragment. Unrelated supplementary
-								letters, ideographs, private-use characters, and malformed UTF-16 are kept.</entry>
+								letters, ideographs, private-use characters, and malformed UTF-16 are kept.
+								Models trained with an earlier release saw every hyphen, every character
+								from U+E000 to U+FFFF and nearly every supplementary character removed,
+								emoji or not, and get that output again under
+								<code>-Dopennlp.compat.mode=LEGACY</code> until they are retrained.</entry>
 						</row>
 						<row>
 							<entry>UrlCharSequenceNormalizer</entry>
