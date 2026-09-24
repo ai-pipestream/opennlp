@@ -46,7 +46,7 @@ public class RealBasicEventStream implements ObjectStream<Event> {
    *
    * @throws IOException Thrown if there is an error during reading.
    * @throws InvalidFormatException Thrown if a line is blank.
-   * @throws IllegalArgumentException Thrown if a value is negative.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   @Override
   public Event read() throws IOException {

@@ -49,7 +49,7 @@ public class SimpleEventStreamBuilder {
    * @throws IllegalArgumentException Thrown if {@code event} is {@code null}, if the outcome or
    *         the contexts are missing, if the first context has a value and another one is not
    *         written as {@code name;value} with both parts present and no further {@code ;}, or
-   *         if a value is not a number or is negative.
+   *         if a value is not a number, is negative, NaN or infinite.
    */
   public SimpleEventStreamBuilder add(String event) {
     if (event == null) {
@@ -81,6 +81,9 @@ public class SimpleEventStreamBuilder {
           values[i] = Float.parseFloat(value);
         } catch (NumberFormatException e) {
           throw new IllegalArgumentException(String.format(NOT_A_NUMBER, event, value), e);
+        }
+        if (!Float.isFinite(values[i])) {
+          throw new IllegalArgumentException(EventFields.NON_FINITE_VALUE + pair);
         }
         if (values[i] < 0) {
           throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + pair);

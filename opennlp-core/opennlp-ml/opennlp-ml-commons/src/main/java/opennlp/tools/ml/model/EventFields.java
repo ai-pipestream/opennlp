@@ -28,6 +28,9 @@ final class EventFields {
   /** Message prefix for a negative context value; the offending context follows. */
   static final String NEGATIVE_VALUE = "Negative values are not allowed: ";
 
+  /** Message prefix for a NaN or infinite context value; the offending context follows. */
+  static final String NON_FINITE_VALUE = "Values must be finite: ";
+
   /** Message prefix for a blank line; the quoted line follows. */
   static final String MISSING_OUTCOME = "An event line must start with an outcome: \"";
 

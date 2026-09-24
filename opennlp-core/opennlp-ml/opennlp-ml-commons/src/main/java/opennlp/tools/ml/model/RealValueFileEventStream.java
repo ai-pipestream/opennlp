@@ -95,7 +95,7 @@ public class RealValueFileEventStream extends FileEventStream {
    * @param contexts The contexts with real values specified.
    * @return The value for each context or {@code null} if all values are unspecified.
    *
-   * @throws IllegalArgumentException Thrown if a value is negative.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   public static float[] parseContexts(String[] contexts) {
     boolean hasRealValue = false;
@@ -112,6 +112,9 @@ public class RealValueFileEventStream extends FileEventStream {
           values[ci] = 1;
         }
         if (gotReal) {
+          if (!Float.isFinite(values[ci])) {
+            throw new IllegalArgumentException(EventFields.NON_FINITE_VALUE + contexts[ci]);
+          }
           if (values[ci] < 0) {
             throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + contexts[ci]);
           }
@@ -139,7 +142,8 @@ public class RealValueFileEventStream extends FileEventStream {
    *
    * @param line The event line. Must not be {@code null}.
    * @return The event; a line with only an outcome gives an event without contexts.
-   * @throws IllegalArgumentException Thrown if {@code line} is {@code null} or a value is negative.
+   * @throws IllegalArgumentException Thrown if {@code line} is {@code null} or a value is negative,
+   *         NaN or infinite.
    * @throws InvalidFormatException Thrown if {@code line} is blank.
    */
   public static Event parseEvent(String line) throws InvalidFormatException {
@@ -159,7 +163,7 @@ public class RealValueFileEventStream extends FileEventStream {
    *
    * @throws IOException Thrown if there is an error during reading.
    * @throws InvalidFormatException Thrown if a line is blank.
-   * @throws IllegalArgumentException Thrown if a value is negative.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   @Override
   public Event read() throws IOException {
