@@ -160,6 +160,9 @@ public class FrequencyDictionaryLoaderTest {
     return Stream.of(
         Arguments.of("the", "expected 'word<sep>count'"),
         Arguments.of("the\u00A0100", "expected 'word<sep>count'"),
+        // a line of no-break spaces is not blank and holds no separator
+        Arguments.of("\u00A0", "expected 'word<sep>count'"),
+        Arguments.of("\u00A0\u00A0", "expected 'word<sep>count'"),
         Arguments.of("the\t-5", "count must not be negative"),
         Arguments.of("the\t5\u00A0", "count is not an integer"),
         // control characters next to the count are not separators and not digits
