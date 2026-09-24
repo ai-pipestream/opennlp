@@ -164,6 +164,15 @@ public class SimpleEventStreamBuilderTest {
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
   }
 
+  /** {@code Float.parseFloat} accepts these, but they are no usable feature values. */
+  @ParameterizedTest
+  @ValueSource(strings = {"w=he;NaN", "w=he;Infinity", "w=he;-Infinity"})
+  void testAddRejectsANonFiniteValueWithTheContextNamed(String context) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new SimpleEventStreamBuilder().add("other/n=x;1 " + context));
+    Assertions.assertEquals("Values must be finite: " + context, e.getMessage());
+  }
+
   private static Stream<Arguments> valuesThatAreNotNumbers() {
     return Stream.of(
         Arguments.of("other/w=he;abc", "abc"),

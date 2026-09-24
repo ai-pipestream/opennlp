@@ -229,6 +229,15 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
   }
 
+  /** {@code Float.parseFloat} accepts these, but they are no usable feature values. */
+  @ParameterizedTest
+  @ValueSource(strings = {"wc=ic=NaN", "wc=ic=Infinity", "wc=ic=-Infinity"})
+  void testNonFiniteValueIsRejectedWithTheContextNamed(String context) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> RealValueFileEventStream.parseEvent("other " + context));
+    Assertions.assertEquals("Values must be finite: " + context, e.getMessage());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"\n", "\r\n", "\r"})
   void testReadAcceptsEveryLineTerminator(String terminator) throws IOException {
