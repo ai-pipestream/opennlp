@@ -76,6 +76,7 @@ public final class JsonScan {
   private static final int MESSAGE_CONTEXT_LENGTH = 20;
 
   private static final String TEXT_MUST_NOT_BE_NULL = "text must not be null";
+  private static final String KEY_MUST_NOT_BE_NULL = "key must not be null";
 
   private JsonScan() {
   }
@@ -94,7 +95,7 @@ public final class JsonScan {
 
     Member {
       if (key == null) {
-        throw new IllegalArgumentException("key must not be null");
+        throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
       }
       if (valueStart < 0 || valueEnd < valueStart) {
         throw new IllegalArgumentException(
@@ -120,7 +121,7 @@ public final class JsonScan {
   public static Map<String, String> stringObject(String text, String key) {
     requireText(text);
     if (key == null) {
-      throw new IllegalArgumentException("key must not be null");
+      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
     }
     final Map<String, String> entries = new HashMap<>();
     if (isBlank(text)) {
@@ -196,7 +197,7 @@ public final class JsonScan {
       throw new IllegalArgumentException("members must not be null");
     }
     if (key == null) {
-      throw new IllegalArgumentException("key must not be null");
+      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
     }
     Member found = null;
     for (Member m : members) {
@@ -347,7 +348,7 @@ public final class JsonScan {
    */
   private static String unescape(String text, int start, int end) {
     final int firstBackslash = text.indexOf(BACKSLASH, start, end);
-    if (firstBackslash < 0 || firstBackslash >= end) {
+    if (firstBackslash < 0) {
       return text.substring(start, end);
     }
     final StringBuilder result = new StringBuilder(end - start);
