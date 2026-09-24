@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import opennlp.tools.models.AbstractClassPathModelFinder;
 import opennlp.tools.models.ClassPathModelFinder;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Enables the detection of OpenNLP models in the classpath via JDK classes
@@ -178,19 +179,10 @@ public class SimpleClassPathModelFinder extends AbstractClassPathModelFinder imp
     if (classPath == null) {
       throw new IllegalArgumentException("classPath must not be null");
     }
-    final char separator = isWindows ? CLASSPATH_SEPARATOR_WINDOWS : CLASSPATH_SEPARATOR_UNIX;
-    final List<String> elements = new ArrayList<>();
-    int start = 0;
-    for (int i = 0; i <= classPath.length(); i++) {
-      if (i == classPath.length() || classPath.charAt(i) == separator) {
-        if (i > start) {
-          elements.add(classPath.substring(start, i));
-        }
-        start = i + 1;
-      }
-    }
-    return elements.toArray(new String[0]);
+    return StringUtil.splitNonEmpty(classPath,
+        isWindows ? CLASSPATH_SEPARATOR_WINDOWS : CLASSPATH_SEPARATOR_UNIX);
   }
+
 
   /*
    * Java 9+ Bridge to obtain URLs from classpath.
