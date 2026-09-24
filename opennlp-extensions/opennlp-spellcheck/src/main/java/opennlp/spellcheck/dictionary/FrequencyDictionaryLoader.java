@@ -45,9 +45,9 @@ import opennlp.tools.util.StringUtil;
  *       fed to {@link SymSpell#addBigram(String, String, long)}.</li>
  * </ul>
  *
- * <p>Columns are separated by whitespace &ndash; a TAB or one or more spaces &ndash; so
- * the canonical space-delimited SymSpell reference dictionaries (e.g.
- * {@code frequency_dictionary_en_82_765.txt}) load as-is, as do TAB-delimited files.</p>
+ * <p>Columns are separated by one or more TAB or space characters, so the space-delimited
+ * SymSpell reference dictionaries load as they are, as do TAB-delimited files. The count
+ * column holds ASCII digits only.</p>
  *
  * <p>The loader is encoding-aware (UTF-8 by default) and tolerant of input noise: a
  * leading UTF-8 byte-order mark is stripped; blank lines, lines that are entirely
