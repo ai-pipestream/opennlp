@@ -83,6 +83,26 @@ public class EmojiCharSequenceNormalizerTest {
     }
   }
 
+  /**
+   * The nine code points and ten modifier sequences that Emoji 18.0 added on top of 17.0. The
+   * bundled inventory is Emoji 17.0, the same version as the other bundled Unicode data, so
+   * these are not emoji to this normalizer yet.
+   */
+  private static Stream<String> emoji18OnlySequences() {
+    return Stream.of(cp(0x1FAEB), cp(0x1FACC), cp(0x1FADD), cp(0x1F6D9), cp(0x1FA8B),
+        cp(0x1FA8C), cp(0x1FA8D), cp(0x1FAF9), cp(0x1FAFA),
+        cp(0x1FAF9, 0x1F3FB), cp(0x1FAF9, 0x1F3FC), cp(0x1FAF9, 0x1F3FD),
+        cp(0x1FAF9, 0x1F3FE), cp(0x1FAF9, 0x1F3FF),
+        cp(0x1FAFA, 0x1F3FB), cp(0x1FAFA, 0x1F3FC), cp(0x1FAFA, 0x1F3FD),
+        cp(0x1FAFA, 0x1F3FE), cp(0x1FAFA, 0x1F3FF));
+  }
+
+  @ParameterizedTest
+  @MethodSource("emoji18OnlySequences")
+  void normalizeKeepsSequencesAddedAfterEmoji17(String sequence) {
+    Assertions.assertEquals("a" + sequence + "b", NORMALIZER.normalize("a" + sequence + "b"));
+  }
+
   @Test
   void normalizeCollapsesAdjacentCompleteEmojiOnly() {
     String adjacent = cp(0x1F600) + "\u2764\uFE0F" + cp(0x1F1E9, 0x1F1EA);
