@@ -215,6 +215,9 @@ public class LoadVocabTest {
       "{\"a\": 1, \"model\": {\"vocab\": {\"b\": 2}}}",
       // model missing or not an object
       "{\"model\": \"x\"}", "{\"vocab\": {\"a\": 1}}",
+      // model.type missing or not a string: the file is not a tokenizer.json
+      "{\"model\": {\"vocab\": {\"a\": 0}}}", "{\"a\": -1, \"model\": {\"vocab\": {\"b\": 2}}}",
+      "{\"model\": {\"type\": 5, \"vocab\": {\"a\": 0}}}",
       // a config.json or a tokenizer_config.json handed over in place of the vocabulary
       "{\"architectures\": [\"BertModel\"], \"hidden_size\": 768}",
       "{\"do_lower_case\": true, \"tokenizer_class\": \"BertTokenizer\"}"})
@@ -228,12 +231,48 @@ public class LoadVocabTest {
   @ParameterizedTest
   @ValueSource(strings = {
       // model.vocab missing or not an object
-      "{\"model\": {\"type\": \"WordPiece\"}}", "{\"model\": {\"vocab\": [\"a\"]}}",
+      "{\"model\": {\"type\": \"WordPiece\"}}",
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": [\"a\"]}}",
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": \"a\"}}",
       // the same strict rules apply inside model.vocab
-      "{\"model\": {\"vocab\": {\"a\": \"1\"}}}", "{\"model\": {\"vocab\": {\"a\": -1}}}",
-      "{\"model\": {\"vocab\": {\"a\": 1,}}}"})
-  void testLoadJsonVocabRejectsOtherNestedLayouts(String json) {
-    assertThrows(IllegalArgumentException.class, () -> AbstractDL.loadJsonVocab(json));
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": \"1\"}}}",
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": -1}}}"})
+  void testLoadJsonVocabRejectsAWordPieceModelWithoutAUsableVocab(String json) {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("model.vocab"), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"BPE", "Unigram", "WordLevel", "wordpiece", ""})
+  void testLoadJsonVocabRejectsOtherModelTypes(String type) {
+    final String json = "{\"model\": {\"type\": \"" + type + "\", \"vocab\": {\"a\": 0}}}";
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("WordPiece"), e.getMessage());
+    assertTrue(e.getMessage().contains("\"" + type + "\""), e.getMessage());
+  }
+
+  @Test
+  void testLoadJsonVocabRejectsAByteLevelBpeTokenizer() {
+    // RoBERTa: without the type check this would load, and the <s> and </s> tokens would then
+    // select the RoBERTa branch of the WordPiece encoder over a byte-level vocabulary
+    final String json = "{\"model\": {\"type\": \"BPE\", \"vocab\": {\"<s>\": 0, \"</s>\": 2,"
+        + " \"<unk>\": 3, \"\u0120the\": 4}, \"merges\": [\"\u0120 t\"]}}";
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("\"BPE\""), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"\"@@\"", "\"\"", "\"#\"", "null", "7"})
+  void testLoadJsonVocabRejectsAnotherContinuingSubwordPrefix(String prefix) {
+    final String json = "{\"model\": {\"type\": \"WordPiece\", \"continuing_subword_prefix\": "
+        + prefix + ", \"vocab\": {\"a\": 0, \"##b\": 1}}}";
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("continuing_subword_prefix"), e.getMessage());
+    assertTrue(e.getMessage().contains("##"), e.getMessage());
   }
 
 
@@ -265,28 +304,38 @@ public class LoadVocabTest {
     return Stream.of(
         Arguments.of(TOKENIZER_JSON.replace("\n", "\r\n"), TOKENIZER_VOCAB),
         Arguments.of(TOKENIZER_JSON.replace("\n", "").replace("  ", ""), TOKENIZER_VOCAB),
-        // added_tokens ids that collide with vocab ids, before or after the model, are not entries
-        Arguments.of("{\"added_tokens\": [{\"id\": 2, \"content\": \"[NEW]\", \"special\": true}],"
-            + " \"model\": {\"vocab\": {\"a\": 0, \"b\": 2}}}", Map.of("a", 0, "b", 2)),
-        Arguments.of("{\"model\": {\"vocab\": {\"a\": 0, \"b\": 2}},"
-            + " \"added_tokens\": [{\"id\": 0, \"content\": \"a\"}, {\"id\": 7, \"content\": \"q\"}]}",
+        // added_tokens listed in model.vocab with the same id are entries once
+        Arguments.of("{\"added_tokens\": [{\"id\": 2, \"content\": \"b\", \"special\": true}],"
+            + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0, \"b\": 2}}}",
             Map.of("a", 0, "b", 2)),
         // an empty vocab object is an empty vocabulary
-        Arguments.of("{\"model\": {\"vocab\": {}}}", Map.of()),
-        Arguments.of("{\"model\": {\"type\": \"BPE\", \"vocab\": { }, \"merges\": []}}", Map.of()),
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\", \"vocab\": {}}}", Map.of()),
+        // the continuing subword prefix of the WordPiece encoder is accepted
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\", \"continuing_subword_prefix\": \"##\","
+            + " \"max_input_chars_per_word\": 100, \"vocab\": {\"a\": 0, \"##b\": 1}}}",
+            Map.of("a", 0, "##b", 1)),
+        // other top-level members, integers included, are not entries
+        Arguments.of("{\"version\": \"1.0\", \"truncation\": {\"max_length\": 512},"
+            + " \"padding\": null, \"vocab_size\": 1,"
+            + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}}", Map.of("a", 0)),
         // vocab objects elsewhere, at any depth, are not the vocabulary
         Arguments.of("{\"normalizer\": {\"a\": {\"b\": {\"c\": [[[{\"vocab\": {\"x\": 9}}]]]}}},"
-            + " \"model\": {\"decoder\": {\"vocab\": {\"y\": 8}}, \"merges\": [[\"a\", \"b\"]],"
-            + " \"vocab\": {\"z\": 1}}}", Map.of("z", 1)),
+            + " \"model\": {\"type\": \"WordPiece\", \"decoder\": {\"vocab\": {\"y\": 8}},"
+            + " \"merges\": [[\"a\", \"b\"]], \"vocab\": {\"z\": 1}}}", Map.of("z", 1)),
         // a later model, a later vocab, or a later token wins
-        Arguments.of("{\"model\": {\"vocab\": {\"a\": 1}}, \"model\": {\"vocab\": {\"a\": 2}}}",
-            Map.of("a", 2)),
-        Arguments.of("{\"model\": {\"vocab\": {\"a\": 1}, \"vocab\": {\"b\": 3}}}", Map.of("b", 3)),
-        Arguments.of("{\"model\": {\"vocab\": {\"a\": 1, \"a\": 5, \"\\u0061\": 6}}}", Map.of("a", 6)),
-        // the member names may be written with escapes
-        Arguments.of("{\"\\u006dodel\": {\"voc\\u0061b\": {\"a\": 1}}}", Map.of("a", 1)),
-        Arguments.of("{ \"model\"\t:\t{ \"vocab\"\r\n:\r\n{ \"a\" : 1 } } }", Map.of("a", 1)),
-        Arguments.of("{\"model\": {\"vocab\": {\"a\": 2147483647}}}", Map.of("a", Integer.MAX_VALUE)));
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 1}},"
+            + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 2}}}", Map.of("a", 2)),
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 1}, \"vocab\": {\"b\": 3}}}",
+            Map.of("b", 3)),
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\","
+            + " \"vocab\": {\"a\": 1, \"a\": 5, \"\\u0061\": 6}}}", Map.of("a", 6)),
+        // the member names and the type may be written with escapes
+        Arguments.of("{\"\\u006dodel\": {\"t\\u0079pe\": \"Word\\u0050iece\", \"voc\\u0061b\": {\"a\": 1}}}",
+            Map.of("a", 1)),
+        Arguments.of("{ \"model\"\t:\t{ \"type\" : \"WordPiece\" , \"vocab\"\r\n:\r\n{ \"a\" : 1 } } }",
+            Map.of("a", 1)),
+        Arguments.of("{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 2147483647}}}",
+            Map.of("a", Integer.MAX_VALUE)));
   }
 
   @ParameterizedTest
@@ -300,7 +349,7 @@ public class LoadVocabTest {
       "12345678901234567890"})
   void testLoadJsonVocabNamesTheTokenOfAnIdThatDoesNotFit(String id) {
     for (String json : new String[] {"{\"big\": " + id + "}",
-        "{\"model\": {\"vocab\": {\"big\": " + id + "}}}"}) {
+        "{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"big\": " + id + "}}}"}) {
       final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
           () -> AbstractDL.loadJsonVocab(json), json);
       assertTrue(e.getMessage().contains("\"big\""), e.getMessage());
@@ -309,7 +358,8 @@ public class LoadVocabTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"{\"a\": 00}", "{\"a\": 0123}", "{\"model\": {\"vocab\": {\"a\": 01}}}"})
+  @ValueSource(strings = {"{\"a\": 00}", "{\"a\": 0123}",
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 01}}}"})
   void testLoadJsonVocabRejectsLeadingZeros(String json) {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> AbstractDL.loadJsonVocab(json));
@@ -331,7 +381,8 @@ public class LoadVocabTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"{}", "x", "\uFEFF", ",", "\"vocab\"", "{\"model\": {\"vocab\": {}}}"})
+  @ValueSource(strings = {"{}", "x", "\uFEFF", ",", "\"vocab\"",
+      "{\"model\": {\"type\": \"WordPiece\", \"vocab\": {}}}"})
   void testLoadJsonVocabRejectsContentAfterTheTokenizerJson(String trailing) {
     final String json = TOKENIZER_JSON + trailing;
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
@@ -375,11 +426,11 @@ public class LoadVocabTest {
       + "\"Unigram\", \"unk_id\": 0, \"vocab\": [[\"<unk>\", 0.0], [\"a\", -1.5]]}}";
 
   @Test
-  void testLoadJsonVocabNamesTheUnsupportedUnigramLayout() {
+  void testLoadJsonVocabNamesTheUnsupportedUnigramModelType() {
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
         () -> AbstractDL.loadJsonVocab(UNIGRAM_TOKENIZER_JSON));
-    assertTrue(e.getMessage().contains("model.vocab"), e.getMessage());
-    assertTrue(e.getMessage().contains("Unigram"), e.getMessage());
+    assertTrue(e.getMessage().contains("WordPiece"), e.getMessage());
+    assertTrue(e.getMessage().contains("\"Unigram\""), e.getMessage());
   }
 
   @Test
