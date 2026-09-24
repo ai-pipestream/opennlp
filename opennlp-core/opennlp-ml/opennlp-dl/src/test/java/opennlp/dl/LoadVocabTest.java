@@ -21,12 +21,14 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -41,14 +43,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class LoadVocabTest {
 
+  @TempDir
+  private Path tempDir;
+
   private File getResource(String name) throws IOException {
     try (InputStream is = Objects.requireNonNull(
         getClass().getResourceAsStream("/opennlp/dl/" + name))) {
-      final File tempFile = File.createTempFile("vocab-test-", "-" + name);
-      tempFile.deleteOnExit();
-      Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-      return tempFile;
+      final Path file = tempDir.resolve(name);
+      Files.copy(is, file, StandardCopyOption.REPLACE_EXISTING);
+      return file.toFile();
     }
+  }
+
+  /**
+   * Writes a vocabulary file into the per-test temporary directory.
+   *
+   * @param name The file name.
+   * @param content The file content, written as UTF-8.
+   * @return The written file.
+   */
+  private File vocabFile(String name, String content) throws IOException {
+    return Files.writeString(tempDir.resolve(name), content).toFile();
   }
 
   @Test
@@ -81,11 +96,7 @@ public class LoadVocabTest {
 
   @Test
   void testJsonVocabWithEscapedCharacters() throws IOException {
-    final File tempFile = File.createTempFile("vocab-escaped", ".json");
-    tempFile.deleteOnExit();
-
-    Files.writeString(tempFile.toPath(),
-        "{\"hello\\\"world\": 0, \"back\\\\slash\": 1}");
+    final File tempFile = vocabFile("vocab-escaped.json", "{\"hello\\\"world\": 0, \"back\\\\slash\": 1}");
 
     final Map<String, Integer> vocab = AbstractDL.loadVocabFile(tempFile);
 
@@ -97,10 +108,7 @@ public class LoadVocabTest {
 
   @Test
   void testJsonVocabWithUnicodeEscapedCharacters() throws IOException {
-    final File tempFile = File.createTempFile("vocab-unicode", ".json");
-    tempFile.deleteOnExit();
-
-    Files.writeString(tempFile.toPath(),
+    final File tempFile = vocabFile("vocab-unicode.json",
         "{\"\\u0120token\": 0, \"line\\rbreak\": 1, \"form\\ffeed\": 2}");
 
     final Map<String, Integer> vocab = AbstractDL.loadVocabFile(tempFile);
@@ -184,9 +192,7 @@ public class LoadVocabTest {
       "{\"version\":\"1.0\",\"model\":{\"type\":\"Unigram\",\"vocab\":[[\"a\",0.0]]}}",
       "{\"model\":{\"vocab\":{\"a\":0}}}"})
   void testTokenizerFileIsRejectedWithTheExpectedVocabularyLayout(String json) throws IOException {
-    final File tempFile = File.createTempFile("tokenizer-unsupported", ".json");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), json);
+    final File tempFile = vocabFile("tokenizer-unsupported.json", json);
 
     final InvalidFormatException e = assertThrows(InvalidFormatException.class,
         () -> AbstractDL.loadVocabFile(tempFile));
@@ -202,18 +208,14 @@ public class LoadVocabTest {
 
   @Test
   void testJsonVocabFileWithAByteOrderMarkIsReadAsJson() throws IOException {
-    final File tempFile = File.createTempFile("vocab-bom", ".json");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "\uFEFF{\"a\": 0, \"b\": 1}\n");
+    final File tempFile = vocabFile("vocab-bom.json", "\uFEFF{\"a\": 0, \"b\": 1}\n");
 
     assertEquals(Map.of("a", 0, "b", 1), AbstractDL.loadVocabFile(tempFile));
   }
 
   @Test
   void testPlainTextVocabFileWithAByteOrderMarkKeepsTheFirstToken() throws IOException {
-    final File tempFile = File.createTempFile("vocab-bom", ".txt");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "\uFEFF[CLS]\n[SEP]\n");
+    final File tempFile = vocabFile("vocab-bom.txt", "\uFEFF[CLS]\n[SEP]\n");
 
     assertEquals(Map.of("[CLS]", 0, "[SEP]", 1), AbstractDL.loadVocabFile(tempFile));
   }
@@ -265,27 +267,21 @@ public class LoadVocabTest {
 
   @Test
   void testJsonVocabFileWithWindowsLineEndings() throws IOException {
-    final File tempFile = File.createTempFile("vocab-crlf", ".json");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "{\r\n  \"a\": 0,\r\n  \"b\": 1\r\n}\r\n");
+    final File tempFile = vocabFile("vocab-crlf.json", "{\r\n  \"a\": 0,\r\n  \"b\": 1\r\n}\r\n");
 
     assertEquals(Map.of("a", 0, "b", 1), AbstractDL.loadVocabFile(tempFile));
   }
 
   @Test
   void testPlainTextVocabFileWithWindowsLineEndings() throws IOException {
-    final File tempFile = File.createTempFile("vocab-crlf", ".txt");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "[CLS]\r\n[SEP]\r\nhello\r\n");
+    final File tempFile = vocabFile("vocab-crlf.txt", "[CLS]\r\n[SEP]\r\nhello\r\n");
 
     assertEquals(Map.of("[CLS]", 0, "[SEP]", 1, "hello", 2), AbstractDL.loadVocabFile(tempFile));
   }
 
   @Test
   void testMalformedJsonVocabFileIsReportedAsAnInvalidFormat() throws IOException {
-    final File tempFile = File.createTempFile("vocab-malformed", ".json");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "{\"a\": 1, \"b\": }");
+    final File tempFile = vocabFile("vocab-malformed.json", "{\"a\": 1, \"b\": }");
 
     final InvalidFormatException e =
         assertThrows(InvalidFormatException.class, () -> AbstractDL.loadVocabFile(tempFile));
@@ -295,9 +291,7 @@ public class LoadVocabTest {
 
   @Test
   void testJsonVocabFileWithAnInvalidEscapeIsReportedAsAnInvalidFormat() throws IOException {
-    final File tempFile = File.createTempFile("vocab-invalid-escape", ".json");
-    tempFile.deleteOnExit();
-    Files.writeString(tempFile.toPath(), "{\"bad\\xescape\": 0}");
+    final File tempFile = vocabFile("vocab-invalid-escape.json", "{\"bad\\xescape\": 0}");
 
     assertThrows(InvalidFormatException.class, () -> AbstractDL.loadVocabFile(tempFile));
   }

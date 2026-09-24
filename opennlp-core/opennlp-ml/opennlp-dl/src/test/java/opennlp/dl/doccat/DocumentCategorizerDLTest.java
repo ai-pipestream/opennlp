@@ -20,10 +20,12 @@ package opennlp.dl.doccat;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -208,11 +210,11 @@ public class DocumentCategorizerDLTest {
   }
 
 
-  private static File configFile(String json) throws IOException {
-    final File file = File.createTempFile("config", ".json");
-    file.deleteOnExit();
-    Files.writeString(file.toPath(), json);
-    return file;
+  @TempDir
+  private Path tempDir;
+
+  private File configFile(String json) throws IOException {
+    return Files.writeString(tempDir.resolve("config.json"), json).toFile();
   }
 
   @Test
