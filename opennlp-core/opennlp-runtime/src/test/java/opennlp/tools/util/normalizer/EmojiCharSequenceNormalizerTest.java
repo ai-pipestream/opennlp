@@ -181,14 +181,7 @@ public class EmojiCharSequenceNormalizerTest {
         if (!line.startsWith("S;")) {
           continue;
         }
-        StringBuilder emoji = new StringBuilder();
-        int tokenStart = 2;
-        for (int i = 2; i <= line.length(); i++) {
-          if (i == line.length() || line.charAt(i) == ' ') {
-            emoji.appendCodePoint(Integer.parseInt(line, tokenStart, i, 16));
-            tokenStart = i + 1;
-          }
-        }
+        String emoji = HexCodePoints.decodeSequence(line.substring(2));
         Assertions.assertEquals(" ", NORMALIZER.normalize(emoji), line);
         count++;
       }
