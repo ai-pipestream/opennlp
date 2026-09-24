@@ -73,6 +73,8 @@ public final class FrequencyDictionaryLoader {
   private static final char COLUMN_TAB = '\t';
   private static final char COLUMN_SPACE = ' ';
 
+  private static final char MINUS_SIGN = '-';
+
   private static final String COUNT_NEGATIVE = "count must not be negative";
   private static final String COUNT_NOT_INTEGER = "count is not an integer";
 
@@ -259,28 +261,40 @@ public final class FrequencyDictionaryLoader {
   }
 
   /**
-   * Parses the count column with {@link Long#parseLong(String)}, including the decimal
-   * digits supported by that method and an optional sign. A decimal point or exponent
-   * is malformed.
+   * Parses the count column, which holds ASCII digits only. A sign, other digits, a decimal
+   * point or an exponent are malformed.
    *
-   * @param raw The column text. Must not be {@code null}.
+   * @param raw The column text. Must not be {@code null} or empty.
    * @param lineNo The 1-based line number, for the error message.
    * @param line The whole line, for the error message.
    * @return The count, zero or more.
-   * @throws MalformedDictionaryLineException Thrown if the column is not such a number, is
-   *         negative, or does not fit in a {@code long}.
+   * @throws MalformedDictionaryLineException Thrown if the column is not ASCII digits only, is a
+   *         negative number, or does not fit in a {@code long}.
    */
   private static long parseCount(String raw, long lineNo, String line) throws IOException {
-    final long count;
+    if (raw.charAt(0) == MINUS_SIGN && isAsciiDigits(raw, 1)) {
+      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
+    }
+    if (!isAsciiDigits(raw, 0)) {
+      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
+    }
     try {
-      count = Long.parseLong(raw);
+      return Long.parseLong(raw);
     } catch (NumberFormatException e) {
       throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
     }
-    if (count < 0) {
-      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
-    }
-    return count;
+  }
+
+  /**
+   * Tests whether {@code text} holds at least one character from {@code from} on and all of them
+   * are ASCII digits.
+   *
+   * @param text The text to check. Must not be {@code null}.
+   * @param from The offset the digits start at, between {@code 0} and {@code text.length()}.
+   * @return {@code true} if the rest of {@code text} is one or more ASCII digits.
+   */
+  private static boolean isAsciiDigits(String text, int from) {
+    return from < text.length() && StringUtil.endOfAsciiDigits(text, from) == text.length();
   }
 
   private static long saturatedAdd(long a, long b) {
