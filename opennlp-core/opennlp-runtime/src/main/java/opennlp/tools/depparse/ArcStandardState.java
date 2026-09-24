@@ -37,7 +37,7 @@ import java.util.Arrays;
 final class ArcStandardState {
 
   /** The stack value representing the artificial root node. */
-  static final int ROOT = -1;
+  static final int ROOT = DependencyArc.ROOT_HEAD;
 
   /** The value returned for stack or buffer positions that do not exist. */
   static final int NONE = -2;

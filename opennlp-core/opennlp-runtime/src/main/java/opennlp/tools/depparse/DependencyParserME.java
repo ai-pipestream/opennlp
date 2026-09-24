@@ -33,8 +33,8 @@ import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.TrainingParameters;
 
 /**
- * A greedy transition-based {@link DependencyParser}: a maximum entropy classifier picks
- * the next arc-standard {@link Transition} for each configuration until the parse is
+ * A greedy transition-based {@link DependencyParser}: a classifier picks the next
+ * arc-standard {@link Transition} for each configuration until the parse is
  * complete, always taking the highest scoring transition that is applicable.
  *
  * <p>The parser holds an immutable model and no per-parse state, so one instance can be
@@ -58,12 +58,7 @@ public class DependencyParserME implements DependencyParser {
    *         outcome inventory is invalid or cannot parse a sentence.
    */
   public DependencyParserME(DependencyModel model) {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
-    this.model = model.getParserModel();
-    this.contextGenerator = new DependencyContextGenerator();
-    this.transitions = decodeOutcomes(this.model);
+    this(parserModelOf(model));
   }
 
   /**
@@ -80,6 +75,21 @@ public class DependencyParserME implements DependencyParser {
     this.model = model;
     this.contextGenerator = new DependencyContextGenerator();
     this.transitions = decodeOutcomes(model);
+  }
+
+  /**
+   * Unwraps the transition model so that the {@link DependencyModel} constructor can
+   * delegate to the {@link MaxentModel} one.
+   *
+   * @param model The model to unwrap.
+   * @return The transition classification model of {@code model}.
+   * @throws IllegalArgumentException Thrown if {@code model} is {@code null}.
+   */
+  private static MaxentModel parserModelOf(DependencyModel model) {
+    if (model == null) {
+      throw new IllegalArgumentException("model must not be null");
+    }
+    return model.getParserModel();
   }
 
   /**
@@ -126,7 +136,7 @@ public class DependencyParserME implements DependencyParser {
    */
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    DependencySample.checkTokensAndTags(tokens, tags);
+    DependencyValidation.checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));
@@ -192,27 +202,6 @@ public class DependencyParserME implements DependencyParser {
   public static DependencyModel train(String languageCode,
       ObjectStream<DependencySample> samples, TrainingParameters parameters)
       throws IOException {
-    return train(languageCode, samples, parameters, new DependencyParserFactory());
-  }
-
-  /**
-   * Trains a parser with a factory supplying model artifacts and serializers.
-   * Non-projective samples are skipped during event generation.
-   *
-   * @param languageCode The ISO language code. Must not be {@code null}.
-   * @param samples The training samples. Must not be {@code null}.
-   * @param parameters The event model training parameters. Must not be {@code null}.
-   * @param factory The model factory. Must not be {@code null}.
-   * @return The trained model.
-   * @throws IOException If reading or training fails.
-   * @throws IllegalArgumentException If an argument is {@code null} or the trainer is unsupported.
-   */
-  public static DependencyModel train(String languageCode,
-      ObjectStream<DependencySample> samples, TrainingParameters parameters,
-      DependencyParserFactory factory) throws IOException {
-    if (factory == null) {
-      throw new IllegalArgumentException("factory must not be null");
-    }
     if (languageCode == null || samples == null || parameters == null) {
       throw new IllegalArgumentException(
           "languageCode, samples and parameters must not be null");
@@ -226,6 +215,6 @@ public class DependencyParserME implements DependencyParser {
         TrainerFactory.getEventTrainer(parameters, manifestInfoEntries);
     final ObjectStream<Event> events =
         new DependencyEventStream(samples, new DependencyContextGenerator());
-    return new DependencyModel(languageCode, trainer.train(events), manifestInfoEntries, factory);
+    return new DependencyModel(languageCode, trainer.train(events), manifestInfoEntries);
   }
 }

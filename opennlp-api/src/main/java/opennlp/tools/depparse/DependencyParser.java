@@ -44,7 +44,7 @@ public interface DependencyParser {
    *             contain {@code null} entries.
    * @return A {@link DependencyGraph} over the given tokens. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code tokens} or {@code tags} is
-   *         {@code null}, empty, or of mismatched length.
+   *         {@code null}, empty, of mismatched length, or contains a {@code null} entry.
    */
   DependencyGraph parse(String[] tokens, String[] tags);
 }
