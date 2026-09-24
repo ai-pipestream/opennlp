@@ -28,7 +28,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Exact Unicode Emoji 17.0 fully-qualified emoji sequence matcher. */
+/**
+ * Finds complete emoji at a position of a text, from the bundled inventory of Unicode Emoji 17.0
+ * sequences.
+ *
+ * <p>A sequence is <em>fully-qualified</em> in the sense of
+ * <a href="https://www.unicode.org/reports/tr51/">UTS #51</a> when every code point that needs
+ * an emoji presentation selector has one: the {@code fully-qualified} lines of
+ * {@code emoji-test.txt}, which cover single emoji, emoji with U+FE0F, flags, keycaps, skin tone
+ * modifier sequences, ZWJ sequences and tag sequences. The inventory holds those sequences in a
+ * trie, plus the {@code Emoji_Component} ranges of {@code emoji-data.txt}: the joiners,
+ * modifiers, selectors, flag letters and tags that occur inside sequences. A component on its
+ * own is never an emoji, but a stray one next to an emoji marks a malformed candidate that is
+ * kept as it is.</p>
+ */
 final class UnicodeEmojiSequences {
 
   private static final String RESOURCE = "EmojiSequences.txt";
@@ -39,12 +52,24 @@ final class UnicodeEmojiSequences {
   /** Prefix of a record holding one {@code Emoji_Component} code point range. */
   private static final String COMPONENT_RECORD = "C;";
 
+  /** First character of a comment line of the data file. */
   private static final char COMMENT = '#';
 
+  /**
+   * U+FE0E asks for text presentation. It has no {@code Emoji_Component} property but it binds
+   * to the symbol before it the same way U+FE0F does, so it counts as a structural component.
+   */
   private static final int VARIATION_SELECTOR_TEXT = 0xFE0E;
+
+  /** U+FE0F asks for emoji presentation. */
   private static final int VARIATION_SELECTOR_EMOJI = 0xFE0F;
 
-  /** The bases of the keycap sequences: {@code #}, {@code *} and the ASCII digits. */
+  /**
+   * The bases of the keycap sequences: {@code #}, {@code *} and the ASCII digits. They have the
+   * {@code Emoji_Component} property, but as ordinary text characters they must never make a
+   * neighboring emoji a malformed candidate, so they are excluded from the structural
+   * components.
+   */
   private static final CodePointSet KEYCAP_BASES =
       CodePointSet.of('#', '*').union(CodePointSet.ofRange('0', '9'));
 
@@ -97,6 +122,24 @@ final class UnicodeEmojiSequences {
     return sequences;
   }
 
+  /**
+   * Finds the emoji candidate that starts at a position.
+   *
+   * <p>The candidate is a run of complete sequences, or a malformed one: an emoji with a stray
+   * component such as a trailing joiner or an extra modifier, a leading component connected to
+   * an emoji, or a prefix of a sequence that continues with a component. A stray component
+   * connects only to the complete sequence right before it and to the one right after it;
+   * complete sequences that merely touch the malformed part are not included, so the caller
+   * removes them and sees the malformed candidate at a later call. One U+FE0F right after a
+   * complete sequence is part of it.</p>
+   *
+   * @param text The text to look into. Must not be {@code null}.
+   * @param start The index the candidate must start at.
+   * @return {@code null} if no candidate starts at {@code start}; otherwise a candidate that is
+   *     {@linkplain Candidate#valid() valid} when it consists of complete sequences only, and
+   *     invalid when it holds a stray component or an incomplete sequence, with
+   *     {@link Candidate#end()} as the index after it in both cases.
+   */
   Candidate candidateAt(CharSequence text, int start) {
     int first = Character.codePointAt(text, start);
     if (!candidateStarts.get(first)) {
@@ -110,11 +153,9 @@ final class UnicodeEmojiSequences {
       if (!KEYCAP_BASES.contains(first) && prefixEnd > start && prefixEnd < text.length()
           && isStructuralComponent(Character.codePointAt(text, prefixEnd))) {
         end = prefixEnd;
-      }
-      else if (isStructuralComponent(first)) {
+      } else if (isStructuralComponent(first)) {
         end = start + Character.charCount(first);
-      }
-      else {
+      } else {
         return null;
       }
     }
@@ -151,10 +192,25 @@ final class UnicodeEmojiSequences {
     return new Candidate(position, valid);
   }
 
+  /**
+   * {@return the index after the longest complete sequence starting at {@code start}, or
+   * {@code -1} if none starts there}
+   *
+   * @param text The text to look into. Must not be {@code null}.
+   * @param start The index the sequence must start at.
+   */
   private int match(CharSequence text, int start) {
     return walk(text, start).matchEnd();
   }
 
+  /**
+   * Walks the trie along the text from a position.
+   *
+   * @param text The text to look into. Must not be {@code null}.
+   * @param start The index the walk starts at.
+   * @return The index after the longest complete sequence, or {@code -1} if none, and the
+   *     index after the longest prefix of any sequence, which is {@code start} if none.
+   */
   private Walk walk(CharSequence text, int start) {
     Node node = root;
     int longest = -1;
@@ -179,6 +235,13 @@ final class UnicodeEmojiSequences {
     return new Walk(longest, i);
   }
 
+  /**
+   * {@return whether a code point is a joiner, modifier, selector, flag letter or tag that
+   * occurs inside sequences} These are the {@code Emoji_Component} ranges plus U+FE0E, without
+   * the keycap bases.
+   *
+   * @param codePoint The code point to test.
+   */
   private boolean isStructuralComponent(int codePoint) {
     if (KEYCAP_BASES.contains(codePoint)) {
       return false;
@@ -193,17 +256,23 @@ final class UnicodeEmojiSequences {
       int[] range = componentRanges[middle];
       if (codePoint < range[0]) {
         high = middle - 1;
-      }
-      else if (codePoint > range[1]) {
+      } else if (codePoint > range[1]) {
         low = middle + 1;
-      }
-      else {
+      } else {
         return true;
       }
     }
     return false;
   }
 
+  /**
+   * Loads the bundled data resource.
+   *
+   * @return The matcher.
+   * @throws IllegalStateException Thrown if the bundled data resource is missing.
+   * @throws UncheckedIOException Thrown if the bundled data resource cannot be read.
+   * @throws IllegalArgumentException Thrown if the bundled data is malformed.
+   */
   private static UnicodeEmojiSequences load() {
     try (InputStream in = UnicodeEmojiSequences.class.getResourceAsStream(RESOURCE)) {
       if (in == null) {
@@ -265,6 +334,13 @@ final class UnicodeEmojiSequences {
     return new UnicodeEmojiSequences(root, ranges.toArray(int[][]::new));
   }
 
+  /**
+   * Adds one sequence to the trie.
+   *
+   * @param root The root of the trie. Must not be {@code null}.
+   * @param sequence The hex code points of the sequence, separated by single spaces.
+   * @throws IllegalArgumentException Thrown if a code point is malformed.
+   */
   private static void addSequence(Node root, String sequence) {
     Node node = root;
     int tokenStart = 0;
@@ -278,12 +354,27 @@ final class UnicodeEmojiSequences {
     node.terminal = true;
   }
 
+  /**
+   * What {@link #candidateAt(CharSequence, int)} found at a position.
+   *
+   * @param end The index after the candidate.
+   * @param valid {@code true} if the candidate consists of complete sequences only and is to be
+   *     replaced; {@code false} if it holds a stray component or an incomplete sequence and is
+   *     to be kept as it is.
+   */
   record Candidate(int end, boolean valid) {
   }
 
+  /**
+   * The result of one trie walk.
+   *
+   * @param matchEnd The index after the longest complete sequence, or {@code -1} if none.
+   * @param prefixEnd The index after the longest prefix of any sequence.
+   */
   private record Walk(int matchEnd, int prefixEnd) {
   }
 
+  /** A trie node: the code points that may follow, and whether a sequence ends here. */
   private static final class Node {
     private final Map<Integer, Node> children = new HashMap<>();
     private boolean terminal;

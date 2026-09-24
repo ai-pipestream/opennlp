@@ -19,9 +19,18 @@ package opennlp.tools.util.normalizer;
 import opennlp.tools.util.CompatibilityMode;
 
 /**
- * Replaces complete, fully-qualified Unicode Emoji 17.0 sequences with whitespace.
- * Adjacent sequences form one run and become one space. Text-presentation characters and
- * structurally connected malformed emoji candidates are preserved.
+ * A {@link CharSequenceNormalizer} implementation that replaces each run of complete emoji with
+ * one space.
+ *
+ * <p>An emoji is a fully-qualified sequence of Unicode Emoji 17.0 in the sense of
+ * <a href="https://www.unicode.org/reports/tr51/">UTS #51</a>: a single emoji, an emoji with
+ * U+FE0F, a flag, a keycap, a skin tone modifier sequence, a ZWJ sequence or a tag sequence, as
+ * listed in {@code emoji-test.txt}. Adjacent emoji form one run and become one space; one
+ * redundant U+FE0F right after an emoji is removed with it. Everything else is kept: a symbol
+ * with text presentation such as U+2764 without U+FE0F, letters and ideographs from other planes,
+ * private use characters, unpaired surrogates, and an emoji with a stray joiner, modifier,
+ * selector, flag letter or tag next to it, which is kept as a whole instead of leaving a
+ * fragment behind.</p>
  *
  * <p>Since 3.0.0 only complete emoji sequences are removed. Under
  * {@link CompatibilityMode#LEGACY} the earlier output is produced for language detector models
@@ -58,7 +67,8 @@ public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
   }
 
   /** {@inheritDoc} */
-  @Override public CharSequence normalize(CharSequence text) {
+  @Override
+  public CharSequence normalize(CharSequence text) {
     if (text == null) {
       throw new IllegalArgumentException("The text must not be null.");
     }
@@ -77,8 +87,7 @@ public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
         normalized.append(text, copiedThrough, i).append(' ');
         i = candidate.end();
         copiedThrough = i;
-      }
-      else {
+      } else {
         i = candidate == null ? i + Character.charCount(Character.codePointAt(text, i))
             : candidate.end();
       }
@@ -148,6 +157,7 @@ public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
         || (codePoint >= LEGACY_RANGE_FIRST && codePoint <= LEGACY_RANGE_LAST);
   }
 
+  /** {@return the shared instance, so deserialization keeps the singleton} */
   private Object readResolve() {
     return INSTANCE;
   }
