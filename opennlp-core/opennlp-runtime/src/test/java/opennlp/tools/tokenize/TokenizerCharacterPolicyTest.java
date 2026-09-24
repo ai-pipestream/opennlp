@@ -98,8 +98,9 @@ public class TokenizerCharacterPolicyTest {
       "a7b\u03018, true",
       "'', false",
       "\u0301, false",
-      "7\u0301, false",
-      "a7\u0301, false",
+      "7\u0301, true",
+      "a7\u0301, true",
+      "7\u0301\u0301b, true",
       "a-b, false"})
   void testGrammarAcrossCategoryTransitions(String input, boolean expected) {
     assertEquals(expected, GRAMMAR.test(input), input);
@@ -112,7 +113,8 @@ public class TokenizerCharacterPolicyTest {
         CodePointSet.of(MUSICAL_MARK));
 
     assertTrue(policy.test(codePoints(DESERET_LETTER, MUSICAL_MARK, MATHEMATICAL_DIGIT)));
-    assertFalse(policy.test(codePoints(MATHEMATICAL_DIGIT, MUSICAL_MARK)));
+    assertTrue(policy.test(codePoints(MATHEMATICAL_DIGIT, MUSICAL_MARK)));
+    assertFalse(policy.test(codePoints(MUSICAL_MARK, MATHEMATICAL_DIGIT)));
   }
 
   @ParameterizedTest
