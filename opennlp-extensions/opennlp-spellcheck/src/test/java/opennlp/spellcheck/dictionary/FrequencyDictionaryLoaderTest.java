@@ -162,6 +162,9 @@ public class FrequencyDictionaryLoaderTest {
         Arguments.of("the\u00A0100", "expected 'word<sep>count'"),
         Arguments.of("the\t-5", "count must not be negative"),
         Arguments.of("the\t5\u00A0", "count is not an integer"),
+        // control characters next to the count are not separators and not digits
+        Arguments.of("the\t5\u0001", "count is not an integer"),
+        Arguments.of("the\t\u00015", "count is not an integer"),
         Arguments.of("the\t5.0", "count is not an integer"),
         Arguments.of("the\t1e3", "count is not an integer"),
         Arguments.of("the\t99999999999999999999", "count is not an integer"),
