@@ -38,6 +38,8 @@ final class UnicodeEmojiSequences {
   /** Prefix of a record holding one {@code Emoji_Component} code point range. */
   private static final String COMPONENT_RECORD = "C;";
 
+  private static final char COMMENT = '#';
+
   private static final int VARIATION_SELECTOR_TEXT = 0xFE0E;
 
   /** The bases of the keycap sequences: {@code #}, {@code *} and the ASCII digits. */
@@ -192,18 +194,40 @@ final class UnicodeEmojiSequences {
    */
   static UnicodeEmojiSequences parse(InputStream in) throws IOException {
     Node root = new Node();
+    int sequences = 0;
     List<int[]> ranges = new ArrayList<>();
     try (BufferedReader reader = new BufferedReader(
         new InputStreamReader(in, StandardCharsets.US_ASCII))) {
       String line;
+      int lineNumber = 0;
       while ((line = reader.readLine()) != null) {
-        if (line.startsWith(SEQUENCE_RECORD)) {
-          addSequence(root, line.substring(SEQUENCE_RECORD.length()));
+        lineNumber++;
+        if (line.isBlank() || line.charAt(0) == COMMENT) {
+          continue;
         }
-        else if (line.startsWith(COMPONENT_RECORD)) {
-          ranges.add(HexCodePoints.parseRange(line.substring(COMPONENT_RECORD.length())));
+        try {
+          if (line.startsWith(SEQUENCE_RECORD)) {
+            addSequence(root, line.substring(SEQUENCE_RECORD.length()));
+            sequences++;
+          } else if (line.startsWith(COMPONENT_RECORD)) {
+            ranges.add(HexCodePoints.parseRange(line.substring(COMPONENT_RECORD.length())));
+          } else {
+            throw new IllegalArgumentException("neither a comment nor a record");
+          }
+        } catch (IllegalArgumentException e) {
+          // Fail loud naming the bad line, the same way the sibling loaders do.
+          throw new IllegalArgumentException("Malformed emoji sequence data in " + RESOURCE
+              + " at line " + lineNumber + ": " + line, e);
         }
       }
+    }
+    if (sequences == 0) {
+      throw new IllegalArgumentException("No " + SEQUENCE_RECORD + " sequence record in "
+          + RESOURCE);
+    }
+    if (ranges.isEmpty()) {
+      throw new IllegalArgumentException("No " + COMPONENT_RECORD + " component range record in "
+          + RESOURCE);
     }
     return new UnicodeEmojiSequences(root, ranges.toArray(int[][]::new));
   }
