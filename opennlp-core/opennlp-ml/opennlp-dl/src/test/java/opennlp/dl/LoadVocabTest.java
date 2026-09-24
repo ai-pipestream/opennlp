@@ -243,6 +243,81 @@ public class LoadVocabTest {
     assertTrue(e.getMessage().contains("model.vocab"), e.getMessage());
   }
 
+  static Stream<Arguments> addedTokens() {
+    final String model = "\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0, \"b\": 2}}";
+    return Stream.of(
+        // a token absent from model.vocab is added with its id, before or after the model
+        Arguments.of("{\"added_tokens\": [{\"id\": 5, \"content\": \"[NEW]\", \"special\": true}], "
+            + model + "}", Map.of("a", 0, "b", 2, "[NEW]", 5)),
+        Arguments.of("{" + model + ", \"added_tokens\": [{\"content\": \"c\", \"id\": 1}]}",
+            Map.of("a", 0, "b", 2, "c", 1)),
+        // a token listed with the id model.vocab gives it is an entry once
+        Arguments.of("{\"added_tokens\": [{\"id\": 0, \"content\": \"a\"}, {\"id\": 2, \"content\": \"b\"}],"
+            + model + "}", Map.of("a", 0, "b", 2)),
+        // the same added token twice with one id, and content with escapes
+        Arguments.of("{\"added_tokens\": [{\"id\": 3, \"content\": \"\\u0120x\"},"
+            + " {\"id\": 3, \"content\": \"\\u0120x\"}], " + model + "}",
+            Map.of("a", 0, "b", 2, "\u0120x", 3)),
+        // an empty list adds nothing
+        Arguments.of("{\"added_tokens\": [], " + model + "}", Map.of("a", 0, "b", 2)),
+        // a later added_tokens list replaces an earlier one, as a later member does
+        Arguments.of("{\"added_tokens\": [{\"id\": 9, \"content\": \"x\"}], " + model
+            + ", \"added_tokens\": [{\"id\": 8, \"content\": \"y\"}]}", Map.of("a", 0, "b", 2, "y", 8)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("addedTokens")
+  void testLoadJsonVocabAddsTheAddedTokensAbsentFromTheModelVocab(String json,
+      Map<String, Integer> expected) {
+    assertEquals(expected, AbstractDL.loadJsonVocab(json));
+  }
+
+  @Test
+  void testLoadJsonVocabRejectsAnAddedTokenWhoseIdDiffersFromTheModelVocab() {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab("{\"added_tokens\": [{\"id\": 7, \"content\": \"b\"}],"
+            + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0, \"b\": 2}}}"));
+    assertTrue(e.getMessage().contains("\"b\""), e.getMessage());
+    assertTrue(e.getMessage().contains("7"), e.getMessage());
+    assertTrue(e.getMessage().contains("2"), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      // the id is that of a token of model.vocab
+      "{\"added_tokens\": [{\"id\": 2, \"content\": \"[NEW]\"}],"
+          + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0, \"b\": 2}}}",
+      // the id is that of an earlier added token
+      "{\"added_tokens\": [{\"id\": 5, \"content\": \"[NEW]\"}, {\"id\": 5, \"content\": \"b\"}],"
+          + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}}"})
+  void testLoadJsonVocabRejectsAnAddedTokenWhoseIdAnotherTokenHas(String json) {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("\"[NEW]\""), e.getMessage());
+    assertTrue(e.getMessage().contains("\"b\""), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      // not a list
+      "{\"added_tokens\": null, MODEL}", "{\"added_tokens\": {\"id\": 1, \"content\": \"c\"}, MODEL}",
+      // an entry that is not an object
+      "{\"added_tokens\": [\"c\"], MODEL}", "{\"added_tokens\": [[1, \"c\"]], MODEL}",
+      // id or content missing or of another type
+      "{\"added_tokens\": [{\"content\": \"c\"}], MODEL}", "{\"added_tokens\": [{\"id\": 1}], MODEL}",
+      "{\"added_tokens\": [{\"id\": \"1\", \"content\": \"c\"}], MODEL}",
+      "{\"added_tokens\": [{\"id\": -1, \"content\": \"c\"}], MODEL}",
+      "{\"added_tokens\": [{\"id\": 1.0, \"content\": \"c\"}], MODEL}",
+      "{\"added_tokens\": [{\"id\": 1, \"content\": null}], MODEL}",
+      "{\"added_tokens\": [{\"id\": 1, \"content\": [\"c\"]}], MODEL}"})
+  void testLoadJsonVocabRejectsMalformedAddedTokens(String template) {
+    final String json = template.replace("MODEL",
+        "\"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}");
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains("added_tokens"), e.getMessage());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"BPE", "Unigram", "WordLevel", "wordpiece", ""})
   void testLoadJsonVocabRejectsOtherModelTypes(String type) {
