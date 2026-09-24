@@ -213,9 +213,22 @@ public class LoadVocabTest {
   @ValueSource(strings = {
       // an int-valued top-level member makes the top-level object the vocabulary
       "{\"a\": 1, \"model\": {\"vocab\": {\"b\": 2}}}",
-      // model or vocab missing, or not an object
-      "{\"model\": {\"type\": \"WordPiece\"}}", "{\"model\": \"x\"}",
-      "{\"model\": {\"vocab\": [\"a\"]}}", "{\"vocab\": {\"a\": 1}}",
+      // model missing or not an object
+      "{\"model\": \"x\"}", "{\"vocab\": {\"a\": 1}}",
+      // a config.json or a tokenizer_config.json handed over in place of the vocabulary
+      "{\"architectures\": [\"BertModel\"], \"hidden_size\": 768}",
+      "{\"do_lower_case\": true, \"tokenizer_class\": \"BertTokenizer\"}"})
+  void testLoadJsonVocabRejectsOtherLayoutsNamingBothAcceptedOnes(String json) {
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> AbstractDL.loadJsonVocab(json));
+    assertTrue(e.getMessage().contains(
+        "as in vocab.json, or a tokenizer.json of a WordPiece model"), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      // model.vocab missing or not an object
+      "{\"model\": {\"type\": \"WordPiece\"}}", "{\"model\": {\"vocab\": [\"a\"]}}",
       // the same strict rules apply inside model.vocab
       "{\"model\": {\"vocab\": {\"a\": \"1\"}}}", "{\"model\": {\"vocab\": {\"a\": -1}}}",
       "{\"model\": {\"vocab\": {\"a\": 1,}}}"})
