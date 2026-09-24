@@ -17,9 +17,13 @@
 package opennlp.tools.tokenize;
 
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.normalizer.CodePointSet;
@@ -36,6 +40,14 @@ public class TokenizerCharacterPolicyTest {
   private static final int DESERET_LETTER = 0x10400;
   private static final int MUSICAL_MARK = 0x1D165;
   private static final int MATHEMATICAL_DIGIT = 0x1D7D8;
+  private static final int ACUTE_ACCENT = 0x0301;
+
+  private static final CodePointSet A = CodePointSet.of('a');
+  private static final CodePointSet SEVEN = CodePointSet.of('7');
+  private static final CodePointSet EMPTY = CodePointSet.of();
+
+  private static final TokenizerCharacterPolicy GRAMMAR = TokenizerCharacterPolicy.of(
+      CodePointSet.of('a', 'b'), CodePointSet.of('7', '8'), CodePointSet.of(ACUTE_ACCENT));
 
   @Test
   void testPolicyIsACharSequencePredicate() {
@@ -52,16 +64,16 @@ public class TokenizerCharacterPolicyTest {
     for (int cp = 0; cp < 128; cp++) {
       boolean letter = cp >= 'A' && cp <= 'Z' || cp >= 'a' && cp <= 'z';
       boolean digit = cp >= '0' && cp <= '9';
-      assertEquals(letter, policy.getLetters().contains(cp), "letter U+" + cp);
-      assertEquals(digit, policy.getDigits().contains(cp), "digit U+" + cp);
+      assertEquals(letter, policy.getLetters().contains(cp), String.format("letter U+%04X", cp));
+      assertEquals(digit, policy.getDigits().contains(cp), String.format("digit U+%04X", cp));
     }
   }
 
   @Test
-  void testExplicitSetsAreExposedForPersistence() {
+  void testGettersReturnSuppliedSets() {
     CodePointSet letters = CodePointSet.of('a', DESERET_LETTER);
     CodePointSet digits = CodePointSet.of('7', MATHEMATICAL_DIGIT);
-    CodePointSet marks = CodePointSet.of(0x0301, MUSICAL_MARK);
+    CodePointSet marks = CodePointSet.of(ACUTE_ACCENT, MUSICAL_MARK);
 
     TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.of(letters, digits, marks);
 
@@ -72,28 +84,25 @@ public class TokenizerCharacterPolicyTest {
 
   @Test
   void testLetterOnlyAndDigitOnlyPoliciesAreValid() {
-    CodePointSet empty = CodePointSet.of();
-
-    assertTrue(TokenizerCharacterPolicy.of(CodePointSet.of('a'), empty, empty).test("aaa"));
-    assertTrue(TokenizerCharacterPolicy.of(empty, CodePointSet.of('7'), empty).test("777"));
+    assertTrue(TokenizerCharacterPolicy.of(A, EMPTY, EMPTY).test("aaa"));
+    assertTrue(TokenizerCharacterPolicy.of(EMPTY, SEVEN, EMPTY).test("777"));
   }
 
-  @Test
-  void testGrammarAcrossCategoryTransitions() {
-    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.of(
-        CodePointSet.of('a', 'b'), CodePointSet.of('7', '8'), CodePointSet.of(0x0301));
-
-    assertTrue(policy.test("a"));
-    assertTrue(policy.test("7"));
-    assertTrue(policy.test("a\u0301\u0301"));
-    assertTrue(policy.test("a\u03017"));
-    assertTrue(policy.test("7a\u0301"));
-    assertTrue(policy.test("a7b\u03018"));
-    assertFalse(policy.test(""));
-    assertFalse(policy.test("\u0301"));
-    assertFalse(policy.test("7\u0301"));
-    assertFalse(policy.test("a7\u0301"));
-    assertFalse(policy.test("a-b"));
+  @ParameterizedTest
+  @CsvSource({
+      "a, true",
+      "7, true",
+      "a\u0301\u0301, true",
+      "a\u03017, true",
+      "7a\u0301, true",
+      "a7b\u03018, true",
+      "'', false",
+      "\u0301, false",
+      "7\u0301, false",
+      "a7\u0301, false",
+      "a-b, false"})
+  void testGrammarAcrossCategoryTransitions(String input, boolean expected) {
+    assertEquals(expected, GRAMMAR.test(input), input);
   }
 
   @Test
@@ -129,71 +138,65 @@ public class TokenizerCharacterPolicyTest {
     assertFalse(TokenizerCharacterPolicy.ascii().test(input));
   }
 
-  @Test
-  void testFactoryRejectsNullSets() {
-    CodePointSet a = CodePointSet.of('a');
-    CodePointSet empty = CodePointSet.of();
+  static Stream<Arguments> nullSets() {
+    return Stream.of(
+        Arguments.of(null, EMPTY, EMPTY),
+        Arguments.of(A, null, EMPTY),
+        Arguments.of(A, EMPTY, null));
+  }
 
+  @ParameterizedTest
+  @MethodSource("nullSets")
+  void testFactoryRejectsNullSets(CodePointSet letters, CodePointSet digits, CodePointSet marks) {
     assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(null, empty, empty));
-    assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(a, null, empty));
-    assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(a, empty, null));
+        () -> TokenizerCharacterPolicy.of(letters, digits, marks));
   }
 
   @Test
   void testFactoryRequiresABaseCharacter() {
     assertThrows(IllegalArgumentException.class,
         () -> TokenizerCharacterPolicy.of(
-            CodePointSet.of(), CodePointSet.of(), CodePointSet.of(0x0301)));
+            EMPTY, EMPTY, CodePointSet.of(ACUTE_ACCENT)));
   }
 
-  @Test
-  void testFactoryRejectsOverlappingCategories() {
-    CodePointSet a = CodePointSet.of('a');
-    CodePointSet seven = CodePointSet.of('7');
-    CodePointSet empty = CodePointSet.of();
+  static Stream<Arguments> overlappingSets() {
+    return Stream.of(
+        Arguments.of(A, A, EMPTY),
+        Arguments.of(A, SEVEN, A),
+        Arguments.of(A, SEVEN, SEVEN));
+  }
 
+  @ParameterizedTest
+  @MethodSource("overlappingSets")
+  void testFactoryRejectsOverlappingCategories(
+      CodePointSet letters, CodePointSet digits, CodePointSet marks) {
     assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(a, a, empty));
-    assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(a, seven, a));
-    assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(a, seven, seven));
+        () -> TokenizerCharacterPolicy.of(letters, digits, marks));
   }
 
   @Test
   void testFactoryRejectsSurrogatesInEveryCategory() {
-    CodePointSet a = CodePointSet.of('a');
-    CodePointSet seven = CodePointSet.of('7');
-    CodePointSet empty = CodePointSet.of();
-
     for (int surrogate = Character.MIN_SURROGATE;
          surrogate <= Character.MAX_SURROGATE; surrogate++) {
       int cp = surrogate;
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(CodePointSet.of(cp), seven, empty));
+          () -> TokenizerCharacterPolicy.of(CodePointSet.of(cp), SEVEN, EMPTY));
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(a, CodePointSet.of(cp), empty));
+          () -> TokenizerCharacterPolicy.of(A, CodePointSet.of(cp), EMPTY));
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(a, seven, CodePointSet.of(cp)));
+          () -> TokenizerCharacterPolicy.of(A, SEVEN, CodePointSet.of(cp)));
     }
   }
 
   @Test
   void testFactoryRejectsEveryUnicodeWhitespaceInEveryCategory() {
-    CodePointSet a = CodePointSet.of('a');
-    CodePointSet seven = CodePointSet.of('7');
-    CodePointSet empty = CodePointSet.of();
-
     for (int whitespace : UnicodeWhitespace.codePoints()) {
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(CodePointSet.of(whitespace), seven, empty));
+          () -> TokenizerCharacterPolicy.of(CodePointSet.of(whitespace), SEVEN, EMPTY));
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(a, CodePointSet.of(whitespace), empty));
+          () -> TokenizerCharacterPolicy.of(A, CodePointSet.of(whitespace), EMPTY));
       assertThrows(IllegalArgumentException.class,
-          () -> TokenizerCharacterPolicy.of(a, seven, CodePointSet.of(whitespace)));
+          () -> TokenizerCharacterPolicy.of(A, SEVEN, CodePointSet.of(whitespace)));
     }
   }
 
