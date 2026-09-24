@@ -28,6 +28,7 @@ public class SimpleEventStreamBuilder {
   private static final char VALUE_SEPARATOR = ';';
   private static final String FORMAT_ERROR = "format error of the event \"%s\"";
   private static final String NOT_NAME_VALUE = FORMAT_ERROR + ". \"%s\" is not name;value";
+  private static final String NOT_A_NUMBER = FORMAT_ERROR + ". \"%s\" is not a number";
 
   private final List<Event> eventList = new ArrayList<>();
   private int pos = 0;
@@ -48,8 +49,7 @@ public class SimpleEventStreamBuilder {
    * @throws IllegalArgumentException Thrown if {@code event} is {@code null}, if the outcome or
    *         the contexts are missing, if the first context has a value and another one is not
    *         written as {@code name;value} with both parts present and no further {@code ;}, or
-   *         if a value is negative.
-   * @throws NumberFormatException Thrown if a value is not a number.
+   *         if a value is not a number or is negative.
    */
   public SimpleEventStreamBuilder add(String event) {
     if (event == null) {
@@ -76,7 +76,12 @@ public class SimpleEventStreamBuilder {
           throw new IllegalArgumentException(String.format(NOT_NAME_VALUE, event, pair));
         }
         context[i] = pair.substring(0, separator);
-        values[i] = Float.parseFloat(pair.substring(separator + 1));
+        String value = pair.substring(separator + 1);
+        try {
+          values[i] = Float.parseFloat(value);
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException(String.format(NOT_A_NUMBER, event, value), e);
+        }
         if (values[i] < 0) {
           throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + pair);
         }
