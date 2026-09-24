@@ -16,6 +16,8 @@
  */
 package opennlp.tools.tokenize;
 
+import java.util.function.Predicate;
+
 import opennlp.tools.util.normalizer.CodePointSet;
 import opennlp.tools.util.normalizer.UnicodeWhitespace;
 
@@ -30,7 +32,7 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
  * its text. It does not configure {@link TokenizerME} or tokenizer training. Applications
  * can retain the category sets to reconstruct the same policy.</p>
  */
-public final class TokenizerCharacterPolicy {
+public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
 
   private static final TokenizerCharacterPolicy ASCII = new TokenizerCharacterPolicy(
       CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
@@ -80,12 +82,14 @@ public final class TokenizerCharacterPolicy {
   }
 
   /**
-   * Tests whether the entire input matches this policy.
+   * {@inheritDoc}
    *
-   * @param input The characters to test.
-   * @return {@code true} if the input is a non-empty token accepted by this policy.
+   * <p>Returns {@code true} if the entire input is a non-empty token accepted by this policy.
+   * Malformed UTF-16 input (an unpaired or reversed surrogate) returns {@code false}.</p>
+   *
    * @throws IllegalArgumentException Thrown if {@code input} is {@code null}.
    */
+  @Override
   public boolean test(CharSequence input) {
     if (input == null) {
       throw new IllegalArgumentException("input must not be null");
