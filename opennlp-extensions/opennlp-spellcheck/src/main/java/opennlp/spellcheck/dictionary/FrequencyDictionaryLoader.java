@@ -247,14 +247,14 @@ public final class FrequencyDictionaryLoader {
   }
 
   /**
-   * Tests whether a line holds no entry: it is empty, consists of Unicode whitespace only as
-   * {@link StringUtil#isUnicodeBlank(CharSequence)} defines it, or starts with {@code #}.
+   * Tests whether a line holds no entry: it is empty, consists of whitespace only as
+   * {@link String#isBlank()} defines it, or starts with {@code #}.
    *
    * @param line The line without its byte-order mark. Must not be {@code null}.
    * @return {@code true} if the line is to be skipped.
    */
   private boolean isSkippable(String line) {
-    if (StringUtil.isUnicodeBlank(line)) {
+    if (line.isBlank()) {
       return true;
     }
     return line.charAt(0) == COMMENT_MARKER;

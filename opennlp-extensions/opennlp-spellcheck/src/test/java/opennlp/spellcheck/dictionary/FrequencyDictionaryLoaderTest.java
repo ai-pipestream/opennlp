@@ -126,10 +126,9 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   @ParameterizedTest
-  // tabs and spaces, no-break spaces, a figure space, a narrow no-break space, an ideographic
-  // space, a next line character, and a line separator all have the White_Space property
-  @ValueSource(strings = {"\t\t", " \t \t ", "\u00A0", "\u00A0\u00A0", " \u00A0\t", "\u2007",
-      "\u202F", "\u3000", "\u0085", "\u2028"})
+  // tabs and spaces, a vertical tab and a form feed, an ideographic space, and a line
+  // separator are whitespace to String.isBlank(); a no-break space is not
+  @ValueSource(strings = {"\t\t", " \t \t ", "\u000B\f", "\u3000", "\u2028"})
   void testLineOfWhitespaceOnlyIsSkipped(String blank) throws IOException {
     final String text = "the\t100\n" + blank + "\nworld 5\n";
     final Map<String, Long> into = new LinkedHashMap<>();
