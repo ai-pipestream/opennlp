@@ -37,7 +37,7 @@ mkdir -p target/unicode-emoji-generator
 javac -d target/unicode-emoji-generator dev/UnicodeEmojiSequenceGenerator.java
 java -cp target/unicode-emoji-generator UnicodeEmojiSequenceGenerator \
   /path/to/emoji-test.txt /path/to/emoji-data.txt \
-  opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt
+  opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/EmojiSequences.txt
 ```
 
 The generated inventory and its sources are covered by Unicode License V3, reproduced in the

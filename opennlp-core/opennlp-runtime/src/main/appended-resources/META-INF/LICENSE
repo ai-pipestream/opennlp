@@ -1,6 +1,6 @@
 
 The generated Unicode Emoji 18.0 inventory in
-opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt
+opennlp/tools/util/normalizer/EmojiSequences.txt
 is derived from Unicode emoji-test.txt and emoji-data.txt.
 The following license applies to this data:
 

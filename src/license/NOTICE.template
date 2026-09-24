@@ -117,7 +117,7 @@ by Unicode, Inc. (https://www.unicode.org/Public/).
     filtered subset; the upstream file additionally carries the Emoji,
     Emoji_Presentation, Emoji_Modifier, Emoji_Modifier_Base, and
     Emoji_Component properties, which are not retained.
-  * opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt
+  * opennlp-core/opennlp-runtime/src/main/resources/opennlp/tools/util/normalizer/EmojiSequences.txt
     is a generated inventory of fully-qualified emoji sequences from
     emoji-test.txt and Emoji_Component ranges from emoji-data.txt, both
     Unicode Emoji version 18.0.

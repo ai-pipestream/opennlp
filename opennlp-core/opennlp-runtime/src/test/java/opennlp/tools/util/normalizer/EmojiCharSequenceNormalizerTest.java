@@ -172,7 +172,7 @@ public class EmojiCharSequenceNormalizerTest {
   void normalizeRemovesEveryFullyQualifiedSequenceInBundledInventory() throws Exception {
     int count = 0;
     InputStream input = getClass().getResourceAsStream(
-        "/opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt");
+        "/opennlp/tools/util/normalizer/EmojiSequences.txt");
     Assertions.assertNotNull(input);
     try (BufferedReader reader = new BufferedReader(
         new InputStreamReader(input, StandardCharsets.US_ASCII))) {

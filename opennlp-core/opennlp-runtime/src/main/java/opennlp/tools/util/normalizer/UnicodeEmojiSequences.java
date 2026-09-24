@@ -29,7 +29,7 @@ import java.util.Map;
 /** Exact Unicode 18 fully-qualified emoji sequence matcher. */
 final class UnicodeEmojiSequences {
   private static final String RESOURCE =
-      "/opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt";
+      "/opennlp/tools/util/normalizer/EmojiSequences.txt";
   private static final UnicodeEmojiSequences INSTANCE = load();
 
   private final Node root;

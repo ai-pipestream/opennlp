@@ -1,5 +1,5 @@
 This product bundles a generated Unicode Emoji 18.0 inventory in
-opennlp/tools/util/normalizer/emoji/EmojiSequences-18.0.txt.
+opennlp/tools/util/normalizer/EmojiSequences.txt.
 It contains fully-qualified sequences from emoji-test.txt and
 Emoji_Component ranges from emoji-data.txt, published by Unicode, Inc.:
 https://www.unicode.org/Public/18.0.0/emoji/emoji-test.txt
