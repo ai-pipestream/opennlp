@@ -136,7 +136,7 @@ public final class FrequencyDictionaryLoader {
   long parseUnigrams(InputStreamFactory factory, Map<String, Long> into) throws IOException {
     Objects.requireNonNull(into, "into must not be null");
     return readUnigrams(factory,
-        (word, count) -> into.merge(word, count, FrequencyDictionaryLoader::saturatedAdd));
+        (word, count) -> into.merge(word, count, this::saturatedAdd));
   }
 
   /**
@@ -152,8 +152,7 @@ public final class FrequencyDictionaryLoader {
   long parseBigrams(InputStreamFactory factory, Map<String, Long> into) throws IOException {
     Objects.requireNonNull(into, "into must not be null");
     return readBigrams(factory,
-        (w1, w2, count) -> into.merge(w1 + " " + w2, count,
-            FrequencyDictionaryLoader::saturatedAdd));
+        (w1, w2, count) -> into.merge(w1 + " " + w2, count, this::saturatedAdd));
   }
 
   private long readUnigrams(InputStreamFactory factory, UnigramSink sink) throws IOException {
@@ -239,7 +238,13 @@ public final class FrequencyDictionaryLoader {
     return c == COLUMN_TAB || c == COLUMN_SPACE;
   }
 
-  private static String stripBom(String line) {
+  /**
+   * Removes the byte-order mark that leads {@code line}, if there is one.
+   *
+   * @param line The line as read. Must not be {@code null}.
+   * @return The line without a leading byte-order mark.
+   */
+  private String stripBom(String line) {
     if (!line.isEmpty() && line.charAt(0) == BOM) {
       return line.substring(1);
     }
@@ -271,7 +276,7 @@ public final class FrequencyDictionaryLoader {
    * @throws MalformedDictionaryLineException Thrown if the column is not ASCII digits only, is a
    *         negative number, or does not fit in a {@code long}.
    */
-  private static long parseCount(String raw, long lineNo, String line) throws IOException {
+  private long parseCount(String raw, long lineNo, String line) throws IOException {
     if (raw.charAt(0) == MINUS_SIGN && isAsciiDigits(raw, 1)) {
       throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
     }
@@ -293,11 +298,18 @@ public final class FrequencyDictionaryLoader {
    * @param from The offset the digits start at, between {@code 0} and {@code text.length()}.
    * @return {@code true} if the rest of {@code text} is one or more ASCII digits.
    */
-  private static boolean isAsciiDigits(String text, int from) {
+  private boolean isAsciiDigits(String text, int from) {
     return from < text.length() && StringUtil.endOfAsciiDigits(text, from) == text.length();
   }
 
-  private static long saturatedAdd(long a, long b) {
+  /**
+   * Adds two counts and returns {@link Long#MAX_VALUE} instead of overflowing.
+   *
+   * @param a The first count.
+   * @param b The second count.
+   * @return The sum, or {@link Long#MAX_VALUE} if the sum does not fit in a {@code long}.
+   */
+  private long saturatedAdd(long a, long b) {
     final long sum = a + b;
     if (((a ^ sum) & (b ^ sum)) < 0) {
       return Long.MAX_VALUE;
