@@ -40,6 +40,7 @@ import opennlp.tools.tokenize.WordpieceEncoder;
 import opennlp.tools.tokenize.WordpieceTokenizer;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.Span;
+import opennlp.tools.util.StringUtil;
 import opennlp.tools.util.normalizer.AlignedText;
 import opennlp.tools.util.normalizer.Alignment;
 import opennlp.tools.util.normalizer.CharClass;
@@ -52,8 +53,6 @@ public abstract class AbstractDL implements AutoCloseable {
   public static final String INPUT_IDS = "input_ids";
   public static final String ATTENTION_MASK = "attention_mask";
   public static final String TOKEN_TYPE_IDS = "token_type_ids";
-
-  private static final String BYTE_ORDER_MARK = "\uFEFF";
 
   protected final OrtEnvironment env;
   protected final OrtSession session;
@@ -193,7 +192,7 @@ public abstract class AbstractDL implements AutoCloseable {
       final File vocabFile) throws IOException {
 
     final String read = Files.readString(Path.of(vocabFile.getPath()), StandardCharsets.UTF_8);
-    final String content = read.startsWith(BYTE_ORDER_MARK) ? read.substring(1) : read;
+    final String content = StringUtil.stripByteOrderMark(read);
     final String trimmed = content.trim();
 
     // Detect JSON format by leading brace
