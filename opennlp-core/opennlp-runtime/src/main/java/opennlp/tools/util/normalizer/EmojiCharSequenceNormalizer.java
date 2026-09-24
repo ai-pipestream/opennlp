@@ -17,7 +17,7 @@
 package opennlp.tools.util.normalizer;
 
 /**
- * Replaces complete, fully-qualified Unicode Emoji 18.0 sequences with whitespace.
+ * Replaces complete, fully-qualified Unicode Emoji 17.0 sequences with whitespace.
  * Adjacent sequences form one run and become one space. Text-presentation characters and
  * structurally connected malformed emoji candidates are preserved.
  *

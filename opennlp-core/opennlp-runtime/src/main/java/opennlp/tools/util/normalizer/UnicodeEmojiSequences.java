@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Exact Unicode 18 fully-qualified emoji sequence matcher. */
+/** Exact Unicode Emoji 17.0 fully-qualified emoji sequence matcher. */
 final class UnicodeEmojiSequences {
   private static final String RESOURCE =
       "/opennlp/tools/util/normalizer/EmojiSequences.txt";

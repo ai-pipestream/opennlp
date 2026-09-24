@@ -48,7 +48,7 @@ under the License.
 					<tbody>
 						<row>
 							<entry>EmojiCharSequenceNormalizer</entry>
-							<entry>Replaces each adjacent run of fully-qualified Unicode Emoji 18.0
+							<entry>Replaces each adjacent run of fully-qualified Unicode Emoji 17.0
 								sequences with one space. This includes default-presentation emoji, explicit
 								BMP emoji presentations, valid flags, keycaps, modifiers, tag sequences,
 								and ZWJ sequences. For example, <code>go&#x1F600;&#x2764;&#xFE0F;now</code>

@@ -60,27 +60,8 @@ public class EmojiCharSequenceNormalizerTest {
 
   @ParameterizedTest(name = "{1}")
   @MethodSource("emojiSequences")
-  void normalizeRemovesCompleteUnicode18Emoji(String emoji, String description) {
+  void normalizeRemovesCompleteEmoji(String emoji, String description) {
     Assertions.assertEquals("a b", NORMALIZER.normalize("a" + emoji + "b"));
-  }
-
-  @ParameterizedTest
-  @ValueSource(ints = {0x1FAEB, 0x1FAF9, 0x1FAFA, 0x1FACC, 0x1FADD,
-      0x1F6D9, 0x1FA8B, 0x1FA8C, 0x1FA8D})
-  void normalizeRemovesUnicode18Additions(int codePoint) {
-    Assertions.assertEquals("a b", NORMALIZER.normalize("a" + cp(codePoint) + "b"));
-  }
-
-  @ParameterizedTest
-  @ValueSource(ints = {0x1FAF9, 0x1FAFA})
-  void normalizeRemovesUnicode18ThumbModifiersWithoutAcceptingDuplicateModifiers(int thumb) {
-    for (int modifier = 0x1F3FB; modifier <= 0x1F3FF; modifier++) {
-      String sequence = cp(thumb, modifier);
-      Assertions.assertEquals("a b", NORMALIZER.normalize("a" + sequence + "b"),
-          "modifier U+" + Integer.toHexString(modifier));
-      String malformed = "a" + sequence + cp(modifier) + "b";
-      Assertions.assertEquals(malformed, NORMALIZER.normalize(malformed));
-    }
   }
 
   /**
@@ -213,7 +194,7 @@ public class EmojiCharSequenceNormalizerTest {
         count++;
       }
     }
-    Assertions.assertEquals(3963, count);
+    Assertions.assertEquals(3944, count);
   }
 
   @Test
