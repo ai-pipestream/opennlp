@@ -183,12 +183,11 @@ public class LeipzigLanguageSampleStream implements ObjectStream<LanguageSample>
   }
 
   /**
-   * Tests whether a file name starts with a language code, that is {@value #LANG_CODE_LENGTH}
-   * ASCII lower case letters, {@code a} to {@code z}.
+   * Tests whether the first {@value #LANG_CODE_LENGTH} characters of a file name are ASCII
+   * lower case letters, {@code a} to {@code z}, as the language code of a Leipzig file is.
    *
    * @param fileName The file name. Must not be {@code null}.
-   * @return {@code true} if the first {@value #LANG_CODE_LENGTH} characters are ASCII lower
-   *     case letters.
+   * @return {@code true} if the file name starts with a language code.
    */
   private boolean hasLanguageCodePrefix(String fileName) {
     if (fileName.length() < LANG_CODE_LENGTH) {
