@@ -63,7 +63,7 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
   /**
    * @param jarModelPrefix The leafnames of the jars that should be canned (e.g. "opennlp.jar").
    *                       May contain a wildcard glob ("opennlp-*.jar"). It must not be {@code null}.
-   * @throws IllegalArgumentException If {@code jarModelPrefix} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code jarModelPrefix} is {@code null}.
    */
   public AbstractClassPathModelFinder(String jarModelPrefix) {
     if (jarModelPrefix == null) {
@@ -145,14 +145,14 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
    * Tests whether the decoded file part of {@code url} matches {@code wildcard} from start
    * to end, where {@code *} stands for any run of characters, {@code ?} for exactly one
    * Unicode code point, and every other character for itself. URI percent escapes are
-   * decoded once; literal plus signs remain plus signs.
+   * decoded once; literal plus signs remain plus signs. A {@code url} that is not a valid
+   * URI, such as one with an unescaped space, is matched on {@link URL#getFile()} as is.
    *
    * @param url The {@link URL} whose decoded file part is tested.
    *            Must not be {@code null}.
    * @param wildcard The wildcard expression. Must not be {@code null}.
    * @return {@code true} if the file part matches, {@code false} otherwise.
-   * @throws IllegalArgumentException If {@code url} or {@code wildcard} is {@code null},
-   *                                  or {@code url} is not a valid URI.
+   * @throws IllegalArgumentException Thrown if {@code url} or {@code wildcard} is {@code null}.
    */
   protected boolean matchesWildcard(URL url, String wildcard) {
     if (url == null) {
@@ -161,14 +161,15 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
     if (wildcard == null) {
       throw new IllegalArgumentException(WILDCARD_MUST_NOT_BE_NULL);
     }
+    String filePart;
     try {
       final URI uri = url.toURI();
-      final String filePart = uri.isOpaque() ? uri.getSchemeSpecificPart()
+      filePart = uri.isOpaque() ? uri.getSchemeSpecificPart()
           : uri.getPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getQuery());
-      return WildcardMatcher.matches(wildcard, filePart);
     } catch (URISyntaxException e) {
-      throw new IllegalArgumentException("url must be a valid URI", e);
+      filePart = url.getFile();
     }
+    return WildcardMatcher.matches(wildcard, filePart);
   }
 
   /**

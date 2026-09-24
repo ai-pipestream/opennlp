@@ -42,7 +42,7 @@ final class WildcardMatcher {
    * @param input The text to test. Must not be {@code null}.
    * @return {@code true} if {@code input} matches {@code wildcard} from start to end,
    *     {@code false} otherwise.
-   * @throws IllegalArgumentException If {@code wildcard} or {@code input} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code wildcard} or {@code input} is {@code null}.
    */
   static boolean matches(String wildcard, String input) {
     if (wildcard == null) {

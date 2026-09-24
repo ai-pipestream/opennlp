@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLConnection;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -31,6 +32,8 @@ import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -98,7 +101,30 @@ class ModelFinderPathTest {
     assertReadable(models.iterator().next(), entry, properties);
   }
 
+  /**
+   * Checks that a class loader URL with an unescaped space, which is not a valid URI, does not
+   * stop the scan.
+   */
+  @Test
+  void testUnescapedClassLoaderUrlDoesNotFail() throws Exception {
+    final Path jar = createJar("model space.jar", "nested/en.bin", "nested/model.properties");
+    final URL unescaped = UnescapedUrls.of(jar.toAbsolutePath().toString());
+    final Thread thread = Thread.currentThread();
+    final ClassLoader original = thread.getContextClassLoader();
+    try (URLClassLoader loader = new URLClassLoader(new URL[] {unescaped}, original)) {
+      thread.setContextClassLoader(loader);
+      Assertions.assertDoesNotThrow(
+          () -> new SimpleClassPathModelFinder("model space.jar").findModels(false));
+    } finally {
+      thread.setContextClassLoader(original);
+    }
+  }
+
   private Path createJar(String name, String entry, String properties) throws IOException {
+    // file names outside the platform charset, e.g. under a POSIX locale, cannot be created
+    Assumptions.assumeTrue(
+        Charset.forName(System.getProperty("sun.jnu.encoding", "UTF-8")).newEncoder().canEncode(name),
+        "the platform file name charset cannot encode " + name);
     final Path jar = directory.resolve(name);
     try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
       out.putNextEntry(new JarEntry(entry));

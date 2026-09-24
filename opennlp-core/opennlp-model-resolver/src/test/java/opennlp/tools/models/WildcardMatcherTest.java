@@ -114,9 +114,9 @@ public class WildcardMatcherTest {
 
   @ParameterizedTest
   @MethodSource("accepted")
-  void testMatchesAccepts(String glob, String input) {
-    Assertions.assertTrue(WildcardMatcher.matches(glob, input),
-        "glob '" + glob + "' should accept '" + input + "'");
+  void testMatchesAccepts(String wildcard, String input) {
+    Assertions.assertTrue(WildcardMatcher.matches(wildcard, input),
+        "wildcard '" + wildcard + "' should accept '" + input + "'");
   }
 
   private static Stream<Arguments> rejected() {
@@ -177,12 +177,12 @@ public class WildcardMatcherTest {
 
   @ParameterizedTest
   @MethodSource("rejected")
-  void testMatchesRejects(String glob, String input) {
-    Assertions.assertFalse(WildcardMatcher.matches(glob, input),
-        "glob '" + glob + "' should reject '" + input + "'");
+  void testMatchesRejects(String wildcard, String input) {
+    Assertions.assertFalse(WildcardMatcher.matches(wildcard, input),
+        "wildcard '" + wildcard + "' should reject '" + input + "'");
   }
 
-  private static Stream<Arguments> literalGlobs() {
+  private static Stream<Arguments> acceptRejectPairs() {
     return Stream.of(
         Arguments.of("*.bin", "en-pos.bin", "en-posxbin"),
         Arguments.of("*.bin", ".bin", "en-pos.bin.bak"),
@@ -212,10 +212,10 @@ public class WildcardMatcherTest {
 
   /** Checks literal characters and both wildcards against explicit accept/reject examples. */
   @ParameterizedTest
-  @MethodSource("literalGlobs")
-  void testLiteralGlobSemantics(String glob, String accepted, String rejected) {
-    Assertions.assertTrue(WildcardMatcher.matches(glob, accepted));
-    Assertions.assertFalse(WildcardMatcher.matches(glob, rejected));
+  @MethodSource("acceptRejectPairs")
+  void testAcceptRejectPairs(String wildcard, String accepted, String rejected) {
+    Assertions.assertTrue(WildcardMatcher.matches(wildcard, accepted));
+    Assertions.assertFalse(WildcardMatcher.matches(wildcard, rejected));
   }
 
   private static Stream<Arguments> nullInputs() {
@@ -226,12 +226,12 @@ public class WildcardMatcherTest {
   }
 
   /**
-   * Checks that null glob or input fails fast instead of matching.
+   * Checks that a null wildcard or input fails fast instead of matching.
    */
   @ParameterizedTest
   @MethodSource("nullInputs")
-  void testMatchesRejectsNull(String glob, String input) {
-    Assertions.assertThrows(IllegalArgumentException.class, () -> WildcardMatcher.matches(glob, input));
+  void testMatchesRejectsNull(String wildcard, String input) {
+    Assertions.assertThrows(IllegalArgumentException.class, () -> WildcardMatcher.matches(wildcard, input));
   }
 
   /**
