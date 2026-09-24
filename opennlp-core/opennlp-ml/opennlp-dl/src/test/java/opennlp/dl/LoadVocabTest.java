@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -34,8 +35,10 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.tokenize.SubwordPiece;
 import opennlp.tools.util.InvalidFormatException;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -120,6 +123,96 @@ public class LoadVocabTest {
     assertEquals(2, vocab.get("form\ffeed"));
   }
 
+
+  @Test
+  void testLoadTokenizerJsonVocabFile() throws IOException {
+    final File file = getResource("tokenizer.json");
+
+    final Map<String, Integer> vocab = AbstractDL.loadVocabFile(file);
+
+    // the 24 entries of model.vocab, and the added token opennlp that model.vocab lacks
+    assertEquals(25, vocab.size());
+    assertEquals(0, vocab.get("[PAD]"));
+    assertEquals(1, vocab.get("[UNK]"));
+    assertEquals(2, vocab.get("[CLS]"));
+    assertEquals(3, vocab.get("[SEP]"));
+    assertEquals(6, vocab.get("hello"));
+    assertEquals(9, vocab.get("##ing"));
+    assertEquals(23, vocab.get("##c"));
+    assertEquals(24, vocab.get("opennlp"));
+    assertEquals(Boolean.TRUE, AbstractDL.readVocabFile(file).lowercase());
+  }
+
+  /**
+   * Sentences and the pieces and ids the fixture gives them, computed by hand from
+   * {@code tokenizer.json}: the text is lower cased and stripped of accents as the normalizer
+   * says, split at whitespace and punctuation, and each word is segmented into the longest
+   * pieces of the vocabulary, all but the first carrying the {@code ##} prefix; a word that
+   * cannot be segmented is {@code [UNK]}, and {@code [CLS]} and {@code [SEP]} frame the text.
+   */
+  static Stream<Arguments> tokenizerJsonEncodings() {
+    return Stream.of(
+        Arguments.of("Hello world!",
+            List.of("[CLS]", "hello", "world", "!", "[SEP]"),
+            new long[] {2, 6, 7, 19, 3}),
+        // un ##play ##able; the added token opennlp is longer than the piece open
+        Arguments.of("The unplayable OpenNLP plays, played.",
+            List.of("[CLS]", "the", "un", "##play", "##able", "opennlp", "play", "##s", ",",
+                "play", "##ed", ".", "[SEP]"),
+            new long[] {2, 5, 12, 13, 14, 24, 8, 10, 18, 8, 11, 17, 3}),
+        // c is only a continuation piece, so cab cannot start
+        Arguments.of("abc cab",
+            List.of("[CLS]", "a", "##b", "##c", "[UNK]", "[SEP]"),
+            new long[] {2, 20, 22, 23, 1, 3}),
+        // lowercase: true strips accents as well
+        Arguments.of("H\u00e9llo W\u00f6rld!",
+            List.of("[CLS]", "hello", "world", "!", "[SEP]"),
+            new long[] {2, 6, 7, 19, 3}),
+        Arguments.of("",
+            List.of("[CLS]", "[SEP]"),
+            new long[] {2, 3}));
+  }
+
+  @ParameterizedTest
+  @MethodSource("tokenizerJsonEncodings")
+  void testTokenizerJsonVocabularyEncodesAsComputedByHand(String text, List<String> pieces,
+      long[] ids) throws IOException {
+    final Map<String, Integer> vocab = AbstractDL.loadVocabFile(getResource("tokenizer.json"));
+    final List<SubwordPiece> encoded = AbstractDL.createWordpieceEncoder(vocab, true).encode(text);
+
+    assertEquals(pieces, encoded.stream().map(SubwordPiece::piece).toList());
+    assertArrayEquals(ids, encoded.stream().mapToLong(SubwordPiece::id).toArray());
+  }
+
+  static Stream<Arguments> unsupportedTokenizerFiles() {
+    return Stream.of(
+        Arguments.of("tokenizer-unigram.json", UNIGRAM_TOKENIZER_JSON, "\"Unigram\""),
+        Arguments.of("tokenizer-bpe.json", "{\"model\": {\"type\": \"BPE\", \"vocab\": {\"a\": 0},"
+            + " \"merges\": []}}", "\"BPE\""),
+        Arguments.of("tokenizer-prefix.json", "{\"model\": {\"type\": \"WordPiece\","
+            + " \"continuing_subword_prefix\": \"@@\", \"vocab\": {\"a\": 0}}}", "continuing_subword_prefix"),
+        Arguments.of("tokenizer-conflict.json", "{\"added_tokens\": [{\"id\": 1, \"content\": \"a\"}],"
+            + " \"model\": {\"type\": \"WordPiece\", \"vocab\": {\"a\": 0}}}", "added token \"a\""));
+  }
+
+  @ParameterizedTest
+  @MethodSource("unsupportedTokenizerFiles")
+  void testUnsupportedTokenizerJsonFileIsRejectedNamingTheFile(String name, String json,
+      String reason) throws IOException {
+    final File tempFile = vocabFile(name, json);
+
+    final InvalidFormatException e = assertThrows(InvalidFormatException.class,
+        () -> AbstractDL.loadVocabFile(tempFile));
+    assertTrue(e.getMessage().contains(tempFile.getName()), e.getMessage());
+    assertTrue(e.getMessage().contains(reason), e.getMessage());
+  }
+
+  @Test
+  void testTokenizerJsonFileWithAByteOrderMarkIsReadAsJson() throws IOException {
+    final File tempFile = vocabFile("tokenizer-bom.json", "\uFEFF" + TOKENIZER_JSON);
+
+    assertEquals(TOKENIZER_VOCAB, AbstractDL.loadVocabFile(tempFile));
+  }
 
   @Test
   void testJsonAndPlainTextVocabProduceSameResult() throws IOException {
