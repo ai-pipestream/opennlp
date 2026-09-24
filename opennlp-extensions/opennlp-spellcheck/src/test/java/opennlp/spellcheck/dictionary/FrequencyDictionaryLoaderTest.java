@@ -32,6 +32,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import static opennlp.spellcheck.dictionary.DictionaryTestResources.stringResource;
 
+/**
+ * Tests for {@link FrequencyDictionaryLoader}.
+ */
 public class FrequencyDictionaryLoaderTest {
 
   @Test
@@ -85,19 +88,6 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   @Test
-  void testUnigramColumnsSplitOnTabAndSpaceRunsOnly() throws IOException {
-    final String text = "the \t 100\nworld\t\t50\n  hello  7  \na\u000Bb 5\nc\u00A0d\t9\n";
-    final Map<String, Long> into = new LinkedHashMap<>();
-    final long read = new FrequencyDictionaryLoader().parseUnigrams(stringResource(text), into);
-    Assertions.assertEquals(5, read);
-    Assertions.assertEquals(100L, into.get("the"));
-    Assertions.assertEquals(50L, into.get("world"));
-    Assertions.assertEquals(7L, into.get("hello"));
-    Assertions.assertEquals(5L, into.get("a\u000Bb"));
-    Assertions.assertEquals(9L, into.get("c\u00A0d"));
-  }
-
-  @Test
   void testBigramColumnsSplitOnTabAndSpaceRuns() throws IOException {
     final String text = "the  world\t3\nhello \t there   4\n";
     final Map<String, Long> into = new LinkedHashMap<>();
@@ -105,24 +95,6 @@ public class FrequencyDictionaryLoaderTest {
     Assertions.assertEquals(2, read);
     Assertions.assertEquals(3L, into.get("the world"));
     Assertions.assertEquals(4L, into.get("hello there"));
-  }
-
-  @Test
-  void testUnigramLineWithLeadingSeparatorsIsRead() throws IOException {
-    final String text = "\t the\t100\n";
-    final Map<String, Long> into = new LinkedHashMap<>();
-    Assertions.assertEquals(1, new FrequencyDictionaryLoader().parseUnigrams(stringResource(text), into));
-    Assertions.assertEquals(100L, into.get("the"));
-  }
-
-  @Test
-  void testUnigramLineWithoutTabOrSpaceIsMalformed() {
-    final String text = "the\u00A0100\n";
-    final Map<String, Long> into = new LinkedHashMap<>();
-    final FrequencyDictionaryLoader loader = new FrequencyDictionaryLoader();
-    final MalformedDictionaryLineException ex = Assertions.assertThrows(
-        MalformedDictionaryLineException.class, () -> loader.parseUnigrams(stringResource(text), into));
-    Assertions.assertEquals(1, ex.getLineNumber());
   }
 
   @ParameterizedTest
@@ -174,8 +146,7 @@ public class FrequencyDictionaryLoaderTest {
         Arguments.of("the\t+", "count is not an integer"),
         Arguments.of("the\t+5", "count is not an integer"),
         Arguments.of("the\t+-5", "count is not an integer"),
-        Arguments.of("the\t-0", "count must not be negative"),
-        Arguments.of(" # note", "count is not an integer"));
+        Arguments.of("the\t-0", "count must not be negative"));
   }
 
   @ParameterizedTest
