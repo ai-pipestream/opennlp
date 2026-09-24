@@ -157,8 +157,8 @@ public class EmojiCharSequenceNormalizerTest {
             cp(0x1F600) + "\u200D" + cp(0x1F600) + " "),
         Arguments.of(cp(0x1F600, 0x1F600) + "\u200D" + cp(0x1F600, 0x1F600),
             " " + cp(0x1F600) + "\u200D" + cp(0x1F600) + " "),
-        Arguments.of(cp(0x1F600, 0x1F600, 0x1F3FD, 0x1F600),
-            " " + cp(0x1F600, 0x1F3FD) + " "));
+        Arguments.of(cp(0x1F600, 0x1F600, 0x1F3FD, 0x1F600, 0x1F600),
+            " " + cp(0x1F600, 0x1F3FD, 0x1F600) + " "));
   }
 
   @ParameterizedTest

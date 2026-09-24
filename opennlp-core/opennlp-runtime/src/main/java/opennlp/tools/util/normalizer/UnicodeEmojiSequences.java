@@ -97,18 +97,34 @@ final class UnicodeEmojiSequences {
         return null;
       }
     }
+    // The start of the most recent complete sequence of the run, and whether the item before
+    // the current position is a stray component. A component connects only to the complete
+    // sequence right before it and to the one right after it.
+    int lastSequenceStart = start;
+    boolean afterComponent = !valid;
     int position = end;
     while (position < text.length()) {
       int next = match(text, position);
       if (next >= 0) {
+        if (!valid && !afterComponent) {
+          break;
+        }
+        lastSequenceStart = position;
         position = next;
+        afterComponent = false;
         continue;
       }
       int codePoint = Character.codePointAt(text, position);
       if (!isStructuralComponent(codePoint)) {
         break;
       }
+      if (valid && lastSequenceStart > start) {
+        // Only the last complete sequence is connected to the stray component: the run ends
+        // before it, and the next call at that sequence yields the malformed candidate.
+        return new Candidate(lastSequenceStart, true);
+      }
       valid = false;
+      afterComponent = true;
       position += Character.charCount(codePoint);
     }
     return new Candidate(position, valid);
