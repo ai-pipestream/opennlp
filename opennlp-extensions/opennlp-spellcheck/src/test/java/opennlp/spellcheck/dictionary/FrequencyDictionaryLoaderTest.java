@@ -17,7 +17,9 @@
 
 package opennlp.spellcheck.dictionary;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -30,12 +32,22 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import static opennlp.spellcheck.dictionary.DictionaryTestResources.stringResource;
+import opennlp.tools.util.InputStreamFactory;
 
 /**
  * Tests for {@link FrequencyDictionaryLoader}.
  */
 public class FrequencyDictionaryLoaderTest {
+
+  /**
+   * Wraps {@code text}, encoded as UTF-8, as a factory the loader reads from.
+   *
+   * @param text The dictionary text.
+   * @return A factory that opens a fresh stream over the text on every call.
+   */
+  private static InputStreamFactory stringResource(String text) {
+    return () -> new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+  }
 
   @Test
   void testLoaderSkipsBlankAndCommentLines() throws IOException {
