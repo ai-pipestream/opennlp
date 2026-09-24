@@ -271,10 +271,9 @@ public final class FrequencyDictionaryLoader {
    *         negative, or does not fit in a {@code long}.
    */
   private static long parseCount(String raw, long lineNo, String line) throws IOException {
-    final String trimmed = raw.trim();
     final long count;
     try {
-      count = Long.parseLong(trimmed);
+      count = Long.parseLong(raw);
     } catch (NumberFormatException e) {
       throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
     }
