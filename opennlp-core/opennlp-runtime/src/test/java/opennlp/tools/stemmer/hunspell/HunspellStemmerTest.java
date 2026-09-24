@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -1940,4 +1941,22 @@ public class HunspellStemmerTest {
     Assertions.assertEquals(List.of("undog"), markedPrefix.stemAll("undog"));
   }
 
+  /**
+   * Verifies that a long word under a compound-declaring dictionary is answered
+   * promptly. The word-pair check inserts a space at every position of each text a
+   * compound level splits, so without a bound on the spaced forms a dictionary can
+   * read, the work grows with the cube of the word length.
+   *
+   * @param words The word list, with and without an entry containing a space.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"1\nlo/CA\n", "2\nlo/CA\nlo la/A\n"})
+  void testLongWordWithCompoundsIsBounded(String words) {
+    final String word = "lo".repeat(10_000) + "q";
+    final List<CharSequence> stems = Assertions.assertTimeoutPreemptively(
+        Duration.ofSeconds(10), () -> new HunspellStemmer(load(
+            "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nSFX A Y 1\nSFX A 0 s .\n", words))
+            .stemAll(word));
+    Assertions.assertEquals(List.of(word), stems);
+  }
 }

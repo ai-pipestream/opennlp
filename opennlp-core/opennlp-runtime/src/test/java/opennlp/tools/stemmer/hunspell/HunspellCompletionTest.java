@@ -123,6 +123,8 @@ class HunspellCompletionTest {
             "1\ncard/A\n", "cards", List.of("card"), true),
         new Example("compound-word-with-space", COMPOUND,
             "3\nriver/C\nboat/C\nriver boat\n", "riverboat", List.of("riverboat"), false),
+        new Example("compound-affixed-word-with-space", COMPOUND + "SFX A Y 1\nSFX A 0 s .\n",
+            "3\nriver/C\nboat/CA\nriver boat/A\n", "riverboats", List.of("riverboats"), false),
         new Example("compound-affixed-duplicate", COMPOUND + "CHECKCOMPOUNDDUP\n"
             + "COMPOUNDPERMITFLAG P\nSFX A Y 1\nSFX A 0 s/P .\n",
             "1\nriver/CA\n", "riversriver", List.of("riversriver"), false),

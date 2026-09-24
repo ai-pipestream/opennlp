@@ -121,7 +121,7 @@ class HunspellDictionaryLoadTest {
       "TRY abc", "REP 1\nREP ph f", "MAP 1\nMAP aá", "PHONE 1\nPHONE ph f",
       "NOSUGGEST N", "MAXCPDSUGS 0", "MAXNGRAMSUGS 0", "MAXDIFF 5",
       "ONLYMAXDIFF", "NOSPLITSUGS", "SUGSWITHDOTS", "WARN W",
-      "SUBSTANDARD S", "WORDCHARS -"
+      "SUBSTANDARD S", "WORDCHARS -", "NONGRAMSUGGEST N", "CHECKNUM"
   })
   void testSettingsOutsideStemmingDoNotPreventStrictLoading(String setting)
       throws IOException {
@@ -329,6 +329,42 @@ class HunspellDictionaryLoadTest {
     final HunspellDictionary dictionary = HunspellDictionary.load(
         stream("\uFEFF" + RULES), stream(WORDS));
     Assertions.assertEquals("dog", new HunspellStemmer(dictionary).stem("dogs").toString());
+  }
+
+  /**
+   * Reads the flag declaration on the first line after a UTF-8 byte-order mark, so
+   * the declared flag mode, not the raw-byte default, applies to the rules.
+   *
+   * @param affix The affix content following the byte-order mark.
+   * @param words The word list.
+   * @throws IOException If loading fails.
+   */
+  @ParameterizedTest
+  @MethodSource("flagDeclarationsAfterByteOrderMark")
+  void testByteOrderMarkDoesNotHideFlagDeclaration(byte[] affix, byte[] words)
+      throws IOException {
+    final byte[] marked = new byte[affix.length + 3];
+    marked[0] = (byte) 0xef;
+    marked[1] = (byte) 0xbb;
+    marked[2] = (byte) 0xbf;
+    System.arraycopy(affix, 0, marked, 3, affix.length);
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        new ByteArrayInputStream(marked), new ByteArrayInputStream(words));
+    Assertions.assertEquals("card", new HunspellStemmer(dictionary).stem("cards").toString());
+  }
+
+  /** {@return affix content with a flag declaration or a raw byte flag on the first line} */
+  private static Stream<Arguments> flagDeclarationsAfterByteOrderMark() {
+    return Stream.of(
+        Arguments.of("FLAG UTF-8\nSFX \u00e4 Y 1\nSFX \u00e4 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/\u00e4\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of("FLAG long\nSFX Qz Y 1\nSFX Qz 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/Qz\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of("FLAG num\nSFX 312 Y 1\nSFX 312 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/312\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of(new byte[] {'S', 'F', 'X', ' ', (byte) 0xe4, ' ', 'Y', ' ', '1', '\n',
+            'S', 'F', 'X', ' ', (byte) 0xe4, ' ', '0', ' ', 's', ' ', '.', '\n'},
+            new byte[] {'1', '\n', 'c', 'a', 'r', 'd', '/', (byte) 0xe4, '\n'}));
   }
 
   /**
