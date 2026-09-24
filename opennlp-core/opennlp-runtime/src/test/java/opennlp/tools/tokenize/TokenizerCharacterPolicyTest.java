@@ -69,6 +69,22 @@ public class TokenizerCharacterPolicyTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"\u00E9", "e\u0301", "\uD801\uDC00"})
+  void testAsciiPresetRejectsNonAsciiInput(String input) {
+    assertFalse(TokenizerCharacterPolicy.ascii().test(input));
+  }
+
+  @Test
+  void testManualExampleAcceptsDecomposedCafe() {
+    TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.of(
+        CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
+        CodePointSet.ofRange('0', '9'),
+        CodePointSet.of(0x0300, ACUTE_ACCENT));
+
+    assertTrue(policy.test("Cafe\u0301"));
+  }
+
   @Test
   void testGettersReturnSuppliedSets() {
     CodePointSet letters = CodePointSet.of('a', DESERET_LETTER);
@@ -101,6 +117,7 @@ public class TokenizerCharacterPolicyTest {
       "7\u0301, true",
       "a7\u0301, true",
       "7\u0301\u0301b, true",
+      "a\u0301-, false",
       "a-b, false"})
   void testGrammarAcrossCategoryTransitions(String input, boolean expected) {
     assertEquals(expected, GRAMMAR.test(input), input);
@@ -118,7 +135,8 @@ public class TokenizerCharacterPolicyTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"\uD800", "\uDC00", "a\uD800", "\uDC00a", "\uDC00\uD800"})
+  @ValueSource(strings = {"\uD800", "\uDC00", "a\uD800", "\uDC00a", "\uDC00\uD800", "\uD800\uD800",
+      "a\uD800b"})
   void testRejectsUnpairedOrReversedSurrogates(String input) {
     assertFalse(TokenizerCharacterPolicy.ascii().test(input));
   }
