@@ -143,14 +143,17 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
     return marks;
   }
 
-  /** Validates scalar values against the fixed Unicode whitespace definition. */
+  /** Throws if {@code set} contains a surrogate code point or {@link UnicodeWhitespace} member. */
   private static void validateSet(String name, CodePointSet set) {
-    for (int codePoint : set.toArray()) {
-      if (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE) {
+    for (int codePoint = Character.MIN_SURROGATE; codePoint <= Character.MAX_SURROGATE;
+         codePoint++) {
+      if (set.contains(codePoint)) {
         throw new IllegalArgumentException(name + " contains the surrogate code point "
             + String.format(CODE_POINT_FORMAT, codePoint));
       }
-      if (UnicodeWhitespace.isWhitespace(codePoint)) {
+    }
+    for (int codePoint : UnicodeWhitespace.codePoints()) {
+      if (set.contains(codePoint)) {
         throw new IllegalArgumentException(name + " contains the whitespace code point "
             + String.format(CODE_POINT_FORMAT, codePoint));
       }
