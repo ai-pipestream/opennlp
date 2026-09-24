@@ -164,11 +164,22 @@ public class SimpleEventStreamBuilderTest {
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
   }
 
+  private static Stream<Arguments> valuesThatAreNotNumbers() {
+    return Stream.of(
+        Arguments.of("other/w=he;abc", "abc"),
+        Arguments.of("other/w=he;1,5", "1,5"),
+        Arguments.of("other/w=he;0.5 n=x;-", "-"),
+        Arguments.of("other/w=he;0x1", "0x1"));
+  }
+
   @ParameterizedTest
-  @ValueSource(strings = {"other/w=he;abc", "other/w=he;1,5", "other/w=he;0.5 n=x;-", "other/w=he;0x1"})
-  void testAddRejectsAValueThatIsNotANumber(String event) {
-    Assertions.assertThrows(NumberFormatException.class,
+  @MethodSource("valuesThatAreNotNumbers")
+  void testAddRejectsAValueThatIsNotANumber(String event, String value) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
         () -> new SimpleEventStreamBuilder().add(event));
+    Assertions.assertEquals("format error of the event \"" + event + "\". \"" + value + "\" is not a number",
+        e.getMessage());
+    Assertions.assertInstanceOf(NumberFormatException.class, e.getCause());
   }
 
   @ParameterizedTest
