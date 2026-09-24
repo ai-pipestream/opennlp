@@ -209,7 +209,7 @@ double[] tokenProbs = tokenizer.getTokenProbabilities();]]>
 		<para>
 			<code>TokenizerCharacterPolicy</code> tests token eligibility from caller-supplied
 			<code>CodePointSet</code> values for letters, digits, and marks. A mark may follow a
-			letter or another mark, but cannot start a token or follow a digit. The policy does
+			letter, a digit, or another mark, but cannot start a token. The policy does
 			not infer Unicode character categories, so callers choose the exact script and model
 			coverage they intend to persist. The predicate checks a complete candidate without
 			finding token boundaries or changing its text.

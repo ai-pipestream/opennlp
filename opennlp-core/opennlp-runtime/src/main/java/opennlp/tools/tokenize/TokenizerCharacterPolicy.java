@@ -24,9 +24,11 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
 /**
  * An immutable policy for testing token eligibility against explicit character sets.
  *
- * <p>A token consists of one or more letter or digit bases. A letter may be followed by zero or
- * more marks. A mark cannot start a token or follow a digit. The supplied sets express a caller's
- * tokenization policy; this class does not infer Unicode character categories.</p>
+ * <p>A token consists of one or more letters or digits. Each letter or digit may be followed by
+ * zero or more marks, as in Unicode word boundary rule WB4 of
+ * <a href="https://www.unicode.org/reports/tr29/#WB4">UAX #29</a>. A mark cannot start a token.
+ * The supplied sets express a caller's tokenization policy; this class does not infer Unicode
+ * character categories.</p>
  *
  * <p>This predicate tests a complete candidate without finding token boundaries or changing
  * its text. It does not configure {@link TokenizerME} or tokenizer training. Applications
@@ -53,7 +55,7 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
    *
    * @param letters Code points treated as letters.
    * @param digits Code points treated as digits.
-   * @param marks Code points permitted after a letter or another mark.
+   * @param marks Code points permitted after a letter, a digit, or another mark.
    * @return The immutable policy.
    * @throws IllegalArgumentException Thrown if a set is {@code null}, the base sets are both
    *     empty, a code point occurs in more than one set, or a set contains whitespace or a
@@ -98,29 +100,26 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
       return false;
     }
 
-    boolean markAllowed = false;
     for (int offset = 0; offset < input.length();) {
-      char first = input.charAt(offset);
+      final boolean first = offset == 0;
+      char unit = input.charAt(offset);
       final int codePoint;
-      if (first >= Character.MIN_HIGH_SURROGATE && first <= Character.MAX_HIGH_SURROGATE) {
+      if (unit >= Character.MIN_HIGH_SURROGATE && unit <= Character.MAX_HIGH_SURROGATE) {
         if (offset + 1 >= input.length() || input.charAt(offset + 1) < Character.MIN_LOW_SURROGATE
             || input.charAt(offset + 1) > Character.MAX_LOW_SURROGATE) {
           return false;
         }
-        codePoint = Character.toCodePoint(first, input.charAt(offset + 1));
+        codePoint = Character.toCodePoint(unit, input.charAt(offset + 1));
         offset += 2;
-      } else if (first >= Character.MIN_LOW_SURROGATE && first <= Character.MAX_LOW_SURROGATE) {
+      } else if (unit >= Character.MIN_LOW_SURROGATE && unit <= Character.MAX_LOW_SURROGATE) {
         return false;
       } else {
-        codePoint = first;
+        codePoint = unit;
         offset++;
       }
 
-      if (letters.contains(codePoint)) {
-        markAllowed = true;
-      } else if (digits.contains(codePoint)) {
-        markAllowed = false;
-      } else if (!markAllowed || !marks.contains(codePoint)) {
+      if (!letters.contains(codePoint) && !digits.contains(codePoint)
+          && (first || !marks.contains(codePoint))) {
         return false;
       }
     }
