@@ -54,8 +54,7 @@ final class MascIdentifiers {
    */
   static int parseId(String id, String prefix) {
     if (id == null || !id.startsWith(prefix)) {
-      throw new IllegalArgumentException(
-          "MASC identifier must be " + prefix + " followed by digits: " + id);
+      throw invalidId(id, prefix, null);
     }
     try {
       return parseAsciiInt(id, prefix.length());
@@ -63,9 +62,21 @@ final class MascIdentifiers {
       // reached only when the digits overflow an int
       throw new IllegalArgumentException("MASC identifier number does not fit an int: " + id, e);
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(
-          "MASC identifier must be " + prefix + " followed by digits: " + id, e);
+      throw invalidId(id, prefix, e);
     }
+  }
+
+  /**
+   * Describes an identifier that is not {@code prefix} followed by ASCII digits.
+   *
+   * @param id The rejected identifier.
+   * @param prefix The expected prefix.
+   * @param cause The underlying error, or {@code null}.
+   * @return The exception to throw.
+   */
+  private static IllegalArgumentException invalidId(String id, String prefix, Throwable cause) {
+    return new IllegalArgumentException(
+        "MASC identifier must be " + prefix + " followed by digits: " + id, cause);
   }
 
   /**
