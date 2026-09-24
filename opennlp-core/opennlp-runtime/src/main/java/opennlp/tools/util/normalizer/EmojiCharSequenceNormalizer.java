@@ -30,10 +30,7 @@ import opennlp.tools.util.CompatibilityMode;
  * and halfwidth forms, variation selectors), supplementary characters up to U+10FC00 whether
  * they are emoji or not, and unpaired surrogates from U+D83C on becomes one space, while emoji
  * in the Basic Multilingual Plane such as U+231A are kept.</p>
- *
- * @deprecated Use {@link EmojiToEmoticonCharSequenceNormalizer} to retain emoji as text signal.
  */
-@Deprecated(since = "3.0.0", forRemoval = true)
 public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
 
   private static final long serialVersionUID = 4553401197981667914L;
@@ -55,6 +52,7 @@ public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
 
   private static final EmojiCharSequenceNormalizer INSTANCE = new EmojiCharSequenceNormalizer();
 
+  /** {@return the shared, stateless instance} */
   public static EmojiCharSequenceNormalizer getInstance() {
     return INSTANCE;
   }
