@@ -27,6 +27,7 @@ public class SimpleEventStreamBuilder {
   private static final char OUTCOME_SEPARATOR = '/';
   private static final char VALUE_SEPARATOR = ';';
   private static final String FORMAT_ERROR = "format error of the event \"%s\"";
+  private static final String NOT_NAME_VALUE = FORMAT_ERROR + ". \"%s\" is not name;value";
 
   private final List<Event> eventList = new ArrayList<>();
   private int pos = 0;
@@ -72,13 +73,12 @@ public class SimpleEventStreamBuilder {
         int separator = pair.indexOf(VALUE_SEPARATOR);
         if (separator < 1 || separator == pair.length() - 1
             || pair.indexOf(VALUE_SEPARATOR, separator + 1) >= 0) {
-          throw new IllegalArgumentException(String.format(FORMAT_ERROR + ". \"%s\" is not name;value",
-              event, pair));
+          throw new IllegalArgumentException(String.format(NOT_NAME_VALUE, event, pair));
         }
         context[i] = pair.substring(0, separator);
         values[i] = Float.parseFloat(pair.substring(separator + 1));
         if (values[i] < 0) {
-          throw new IllegalArgumentException("Negative values are not allowed: " + pair);
+          throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + pair);
         }
       }
       eventList.add(new Event(outcome, context, values));

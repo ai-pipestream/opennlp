@@ -19,8 +19,17 @@ package opennlp.tools.ml.model;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Field delimiters for the textual event formats, shared with {@link FileEventStream}. */
+/** Field delimiters and messages shared by the textual event formats. */
 final class EventFields {
+
+  /** Message prefix for a negative context value; the offending context follows. */
+  static final String NEGATIVE_VALUE = "Negative values are not allowed: ";
+
+  private static final char SPACE = ' ';
+  private static final char TAB = '\t';
+  private static final char CARRIAGE_RETURN = '\r';
+  private static final char LINE_FEED = '\n';
+  private static final char FORM_FEED = '\f';
 
   private EventFields() {
   }
@@ -49,12 +58,12 @@ final class EventFields {
   }
 
   /**
-   * Tests the fixed delimiter set used by {@link FileEventStream}.
+   * Tests the delimiter set of the textual event formats.
    *
    * @param c The character to test.
    * @return Whether the character separates event fields.
    */
   private static boolean isSeparator(char c) {
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+    return c == SPACE || c == TAB || c == CARRIAGE_RETURN || c == LINE_FEED || c == FORM_FEED;
   }
 }

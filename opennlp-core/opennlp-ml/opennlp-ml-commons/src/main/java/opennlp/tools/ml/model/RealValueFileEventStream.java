@@ -113,7 +113,7 @@ public class RealValueFileEventStream extends FileEventStream {
         }
         if (gotReal) {
           if (values[ci] < 0) {
-            throw new RuntimeException("Negative values are not allowed: " + contexts[ci]);
+            throw new RuntimeException(EventFields.NEGATIVE_VALUE + contexts[ci]);
           }
           contexts[ci] = contexts[ci].substring(0, ei);
           hasRealValue = true;
