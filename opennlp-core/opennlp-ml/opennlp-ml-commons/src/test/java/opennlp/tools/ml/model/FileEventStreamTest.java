@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import opennlp.tools.ml.AbstractEventStreamTest;
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
 
 public class FileEventStreamTest extends AbstractEventStreamTest {
@@ -57,6 +58,15 @@ public class FileEventStreamTest extends AbstractEventStreamTest {
     }
   }
   
+  @Test
+  void testReadRejectsBlankLine() throws IOException {
+    try (ObjectStream<Event> eventStream = createEventStream("other wc=ic\n \t \nother wc=lc\n")) {
+      Assertions.assertEquals("other", eventStream.read().getOutcome());
+      InvalidFormatException e = Assertions.assertThrows(InvalidFormatException.class, eventStream::read);
+      Assertions.assertEquals("An event line must start with an outcome: \" \t \"", e.getMessage());
+    }
+  }
+
   @Test
   void testReset() throws IOException {
     try (FileEventStream feStream = createEventStream(EVENTS_PLAIN)) {
