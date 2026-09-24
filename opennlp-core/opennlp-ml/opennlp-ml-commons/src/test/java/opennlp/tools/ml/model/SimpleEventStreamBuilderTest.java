@@ -24,10 +24,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.FieldSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import opennlp.tools.tokenize.WhitespaceTokenizer;
+import opennlp.tools.ml.AbstractEventStreamTest;
 import opennlp.tools.util.ObjectStream;
 
 public class SimpleEventStreamBuilderTest {
@@ -75,34 +76,19 @@ public class SimpleEventStreamBuilderTest {
         Arguments.of("other/w=he\u0085n1w=belongs", new String[] {"w=he\u0085n1w=belongs"}),
         Arguments.of("other/w=he\u2028n1w=belongs", new String[] {"w=he\u2028n1w=belongs"}),
         Arguments.of("other/w=he\u3000n1w=belongs", new String[] {"w=he\u3000n1w=belongs"}),
-        // file separator and zero width space are not whitespace, they stay inside a context
+        // file separator and zero width space are not event delimiters either
         Arguments.of("other/w=he\u001Cn1w=belongs", new String[] {"w=he\u001Cn1w=belongs"}),
         Arguments.of("other/w=he\u200Bn1w=belongs", new String[] {"w=he\u200Bn1w=belongs"}),
         // a supplementary character is one character of a context
         Arguments.of("other/w=\uD83D\uDE00 n1w=x", new String[] {"w=\uD83D\uDE00", "n1w=x"}));
   }
 
-  /**
-   * The contexts use fixed event delimiters, independent of the whitespace mode.
-   */
   @ParameterizedTest
   @MethodSource("contextSeparators")
   void testContextsUseEventDelimiters(String event, String[] contexts)
       throws IOException {
     try (ObjectStream<Event> events = new SimpleEventStreamBuilder().add(event).build()) {
       Assertions.assertArrayEquals(contexts, events.read().getContext());
-    }
-  }
-
-  @Test
-  void testAddDoesNotDependOnTheSharedWhitespaceTokenizer() throws IOException {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(true);
-    try (ObjectStream<Event> events = new SimpleEventStreamBuilder()
-        .add("other/w=he\nn1w=belongs\r\nn2w=to").build()) {
-      Assertions.assertArrayEquals(
-          new String[] {"w=he", "n1w=belongs", "n2w=to"}, events.read().getContext());
-    } finally {
-      WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
     }
   }
 
@@ -215,9 +201,9 @@ public class SimpleEventStreamBuilderTest {
     Assertions.assertTrue(e.getMessage().startsWith("format error of the event"), e.getMessage());
   }
 
+  /** See {@link AbstractEventStreamTest#NON_DELIMITER_CHARS}. */
   @ParameterizedTest
-  @ValueSource(strings = {"\u00A0", "\u0085", "\u2028", "\u2029", "\u3000", "\u2007",
-      "\u202F", "\u200B", "\u000B", "\u001C", "\uD83D\uDE00", "e\u0301"})
+  @FieldSource("opennlp.tools.ml.AbstractEventStreamTest#NON_DELIMITER_CHARS")
   void testValuedFeaturesPreserveUnicode(String text) throws IOException {
     String feature = "word=New" + text + "York";
     try (ObjectStream<Event> events = new SimpleEventStreamBuilder()
