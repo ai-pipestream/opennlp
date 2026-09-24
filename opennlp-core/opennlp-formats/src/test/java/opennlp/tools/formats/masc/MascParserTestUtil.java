@@ -20,6 +20,7 @@ package opennlp.tools.formats.masc;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 import org.xml.sax.helpers.DefaultHandler;
 
@@ -45,6 +46,16 @@ final class MascParserTestUtil {
     XmlUtil.createSaxParser().parse(
         new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), handler);
     return handler;
+  }
+
+  /**
+   * Lists XML whitespace as it can separate two items of an attribute value: written
+   * literally, repeated, or supplied through character references.
+   *
+   * @return The separators, each to be placed between two items.
+   */
+  static Stream<String> xmlWhitespaceSeparators() {
+    return Stream.of(" ", "   ", "\t", "\n", "\r\n", "&#9;", "&#10;", "&#13;", " &#10; ");
   }
 
   /**
