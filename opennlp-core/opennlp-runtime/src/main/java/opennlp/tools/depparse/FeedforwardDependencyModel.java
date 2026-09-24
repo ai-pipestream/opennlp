@@ -159,7 +159,7 @@ public class FeedforwardDependencyModel {
    *         {@link #transitions()}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code features} is {@code null}, does not
    *         have the required length, or contains an invalid embedding index.
-   * @throws IllegalStateException If the model produces a non-finite transition score.
+   * @throws IllegalStateException Thrown if the model produces a non-finite transition score.
    */
   double[] score(int[] features) {
     if (features == null) {

@@ -63,6 +63,9 @@ public class DependencyParserEvaluatorTool extends AbstractEvaluatorTool<Depende
       evaluator.evaluate(samples);
       logger.info("Tokens: {}; UAS: {}; LAS: {}", evaluator.getWordCount(),
           evaluator.getUas(), evaluator.getLas());
+      logger.info("Tokens excluding punctuation: {}; UAS: {}; LAS: {}",
+          evaluator.getWordCountExcludingPunctuation(),
+          evaluator.getUasExcludingPunctuation(), evaluator.getLasExcludingPunctuation());
     } catch (IOException e) {
       throw new TerminateToolException(-1, "Error reading dependency evaluation data", e);
     }

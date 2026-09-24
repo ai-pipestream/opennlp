@@ -107,7 +107,7 @@ public class ArcStandardOracleTest {
 
   /**
    * Enumerates every head assignment and checks each valid tree against the
-   * arc-crossing definition of projectivity.
+   * contiguous-subtree definition of projectivity.
    *
    * @param heads The head assignment under construction; positions before {@code index}
    *              are fixed.
@@ -143,25 +143,49 @@ public class ArcStandardOracleTest {
   }
 
   /**
-   * Decides projectivity by the arc-crossing definition.
+   * Decides projectivity by an independent definition: every token's subtree covers a
+   * contiguous span of the sentence. This agrees with the arc-crossing test that
+   * {@link ArcStandardOracle#isProjective} implements because the artificial root sits
+   * to the left of the sentence.
    *
    * @param graph The graph to inspect.
-   * @return {@code true} if no pair of arcs crosses in token order.
+   * @return {@code true} if every subtree is a contiguous span.
    */
   private static boolean isProjective(DependencyGraph graph) {
-    for (int first = 0; first < graph.size(); first++) {
-      final int firstLow = Math.min(first, graph.headOf(first));
-      final int firstHigh = Math.max(first, graph.headOf(first));
-      for (int second = first + 1; second < graph.size(); second++) {
-        final int secondLow = Math.min(second, graph.headOf(second));
-        final int secondHigh = Math.max(second, graph.headOf(second));
-        if (firstLow < secondLow && secondLow < firstHigh && firstHigh < secondHigh
-            || secondLow < firstLow && firstLow < secondHigh && secondHigh < firstHigh) {
-          return false;
+    for (int token = 0; token < graph.size(); token++) {
+      int first = token;
+      int last = token;
+      int covered = 0;
+      for (int other = 0; other < graph.size(); other++) {
+        if (dominates(graph, token, other)) {
+          first = Math.min(first, other);
+          last = Math.max(last, other);
+          covered++;
         }
+      }
+      if (last - first + 1 != covered) {
+        return false;
       }
     }
     return true;
+  }
+
+  /**
+   * Tests whether a token is another token or one of its ancestors.
+   *
+   * @param graph The graph to inspect.
+   * @param ancestor The candidate ancestor.
+   * @param token The token whose head chain is followed.
+   * @return {@code true} if {@code ancestor} is on the head chain from {@code token}.
+   */
+  private static boolean dominates(DependencyGraph graph, int ancestor, int token) {
+    for (int current = token; current != DependencyArc.ROOT_HEAD;
+        current = graph.headOf(current)) {
+      if (current == ancestor) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Test

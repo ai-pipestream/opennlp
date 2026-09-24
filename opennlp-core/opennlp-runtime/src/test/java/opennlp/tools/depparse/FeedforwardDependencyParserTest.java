@@ -36,6 +36,12 @@ import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.StringUtil;
 
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TOKENS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TOKENS;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
 import static opennlp.tools.depparse.DependencyTestSamples.sample;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -123,10 +129,7 @@ public class FeedforwardDependencyParserTest {
   /** Checks that the greedy parser reproduces a training sentence. */
   @Test
   void testMemorizesTrainingSentences() {
-    final DependencyGraph parsed = parser.parse(new String[] {"the", "dog", "barks"},
-        new String[] {"DT", "NN", "VBZ"});
-    assertEquals(DependencyGraph.of(new int[] {1, 2, -1},
-        new String[] {"det", "nsubj", "root"}), parsed);
+    assertEquals(THE_DOG_BARKS_GRAPH, parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
   }
 
   /** Checks UAS and LAS of 1.0 on the training corpus. */
@@ -170,10 +173,7 @@ public class FeedforwardDependencyParserTest {
   @Test
   void testBeamedParserReproducesTrainingSentences() {
     final FeedforwardDependencyParser beamed = new FeedforwardDependencyParser(model, 4);
-    assertEquals(DependencyGraph.of(new int[] {1, 2, -1},
-            new String[] {"det", "nsubj", "root"}),
-        beamed.parse(new String[] {"the", "dog", "barks"},
-            new String[] {"DT", "NN", "VBZ"}));
+    assertEquals(THE_DOG_BARKS_GRAPH, beamed.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
   }
 
   /** Checks that beam search is deterministic and single-rooted on unseen words. */
@@ -225,8 +225,8 @@ public class FeedforwardDependencyParserTest {
     final FeedforwardDependencyTrainer.Settings settings = settings(60, 0.05);
     final FeedforwardDependencyModel local = FeedforwardDependencyTrainer.train(
         ObjectStreamUtils.createObjectStream(corpus()), settings);
-    final String[] tokens = {"the", "dog", "barks"};
-    final String[] tags = {"DT", "NN", "VBZ"};
+    final String[] tokens = THE_DOG_BARKS_TOKENS;
+    final String[] tags = THE_DOG_BARKS_TAGS;
     final int[] features = local.featureIds(
         FeedforwardContext.extract(new ArcStandardState(tokens.length), tokens, tags));
     final double[] before = local.score(features);
@@ -331,8 +331,8 @@ public class FeedforwardDependencyParserTest {
   @Test
   void testScoringCacheMatchesTheDirectPath() {
     final FeedforwardDependencyModel uncached = model.copy();
-    final String[] tokens = {"the", "dog", "barks"};
-    final String[] tags = {"DT", "NN", "VBZ"};
+    final String[] tokens = THE_DOG_BARKS_TOKENS;
+    final String[] tags = THE_DOG_BARKS_TAGS;
     final int[] features = model.featureIds(
         FeedforwardContext.extract(new ArcStandardState(tokens.length), tokens, tags));
 
@@ -386,9 +386,8 @@ public class FeedforwardDependencyParserTest {
     final FeedforwardDependencyModel reloaded =
         FeedforwardDependencyModel.load(new ByteArrayInputStream(out.toByteArray()));
     final DependencyGraph parsed = new FeedforwardDependencyParser(reloaded)
-        .parse(new String[] {"she", "eats", "fish"}, new String[] {"PRP", "VBZ", "NN"});
-    assertEquals(DependencyGraph.of(new int[] {1, -1, 1},
-        new String[] {"nsubj", "root", "obj"}), parsed);
+        .parse(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS);
+    assertEquals(SHE_EATS_FISH_GRAPH, parsed);
   }
 
   /** Checks that arbitrary bytes are rejected with an IOException. */

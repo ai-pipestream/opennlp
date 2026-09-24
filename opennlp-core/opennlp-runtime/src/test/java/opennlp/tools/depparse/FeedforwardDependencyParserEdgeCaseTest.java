@@ -35,6 +35,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import opennlp.tools.util.ObjectStreamUtils;
 
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TOKENS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TOKENS;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
 import static opennlp.tools.depparse.DependencyTestSamples.sample;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -45,9 +51,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 public class FeedforwardDependencyParserEdgeCaseTest {
 
-  /** The language code of the test corpus. */
-  private static final String LANGUAGE = "eng";
-
   /** The random seed making the feedforward training runs reproducible. */
   private static final long SEED = 17L;
 
@@ -57,34 +60,14 @@ public class FeedforwardDependencyParserEdgeCaseTest {
   private static final FeedforwardDependencyTrainer.Settings SINGLE_EPOCH_SETTINGS =
       new FeedforwardDependencyTrainer.Settings(8, 8, 1, 32, 0.05, 0.0, 0.0, 1, SEED);
 
-  /** The tokens of the first corpus sentence. */
-  private static final String[] THE_DOG_BARKS_TOKENS = {"the", "dog", "barks"};
-
-  /** The tags of the first corpus sentence. */
-  private static final String[] THE_DOG_BARKS_TAGS = {"DT", "NN", "VBZ"};
-
-  /** The gold graph of the first corpus sentence. */
-  private static final DependencyGraph THE_DOG_BARKS_GRAPH =
-      DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
-
-  /** The tokens of the third corpus sentence. */
-  private static final String[] SHE_EATS_FISH_TOKENS = {"she", "eats", "fish"};
-
-  /** The tags of the third corpus sentence. */
-  private static final String[] SHE_EATS_FISH_TAGS = {"PRP", "VBZ", "NN"};
-
-  /** The gold graph of the third corpus sentence. */
-  private static final DependencyGraph SHE_EATS_FISH_GRAPH =
-      DependencyGraph.of(new int[] {1, -1, 1}, new String[] {"nsubj", "root", "obj"});
-
   /** The number of threads parsing concurrently in the sharing test. */
   private static final int THREADS = 8;
 
   /** The number of parses each thread performs in the sharing test. */
   private static final int ITERATIONS_PER_THREAD = 50;
 
-  private static FeedforwardDependencyModel feedforwardModel;
-  private static FeedforwardDependencyParser feedforwardParser;
+  private static FeedforwardDependencyModel model;
+  private static FeedforwardDependencyParser parser;
 
   /**
    * Builds a four-token sample whose gold arcs (2,0) and (3,1) cross, so the tree is
@@ -104,26 +87,26 @@ public class FeedforwardDependencyParserEdgeCaseTest {
    * @throws IOException Thrown if reading the in-memory samples fails.
    */
   @BeforeAll
-  static void trainParsers() throws IOException {
+  static void trainParser() throws IOException {
     final FeedforwardDependencyTrainer.Settings settings =
         new FeedforwardDependencyTrainer.Settings(16, 32, 60, 32, 0.05, 0.0, 0.0, 1, SEED);
-    feedforwardModel = FeedforwardDependencyTrainer.train(
+    model = FeedforwardDependencyTrainer.train(
         ObjectStreamUtils.createObjectStream(corpus()), settings);
-    feedforwardParser = new FeedforwardDependencyParser(feedforwardModel);
+    parser = new FeedforwardDependencyParser(model);
   }
 
   @Test
   void testEmptySentenceIsRejected() {
     assertThrows(IllegalArgumentException.class,
-        () -> feedforwardParser.parse(new String[0], new String[0]));
+        () -> parser.parse(new String[0], new String[0]));
   }
 
   @Test
   void testNullTokenOrTagIsRejected() {
     assertThrows(IllegalArgumentException.class,
-        () -> feedforwardParser.parse(new String[] {null}, new String[] {"NN"}));
+        () -> parser.parse(new String[] {null}, new String[] {"NN"}));
     assertThrows(IllegalArgumentException.class,
-        () -> feedforwardParser.parse(new String[] {"word"}, new String[] {null}));
+        () -> parser.parse(new String[] {"word"}, new String[] {null}));
   }
 
   @Test
@@ -131,7 +114,7 @@ public class FeedforwardDependencyParserEdgeCaseTest {
     // A single token permits only the derivation shift then right-arc, so the head is
     // forced to the artificial root and the model only chooses the relation label.
     final DependencyGraph feedforwardParse =
-        feedforwardParser.parse(new String[] {"Run"}, new String[] {"VB"});
+        parser.parse(new String[] {"Run"}, new String[] {"VB"});
     assertEquals(DependencyGraph.of(new int[] {-1}, new String[] {"root"}),
         feedforwardParse);
   }
@@ -164,7 +147,7 @@ public class FeedforwardDependencyParserEdgeCaseTest {
     final FeedforwardDependencyTrainer.Settings settings =
         new FeedforwardDependencyTrainer.Settings(16, 32, 1, 32, 0.01, 0.0, 0.0, 1, SEED);
     final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-        () -> FeedforwardDependencyTrainer.refine(feedforwardModel,
+        () -> FeedforwardDependencyTrainer.refine(model,
             ObjectStreamUtils.createObjectStream(List.of(nonProjectiveSample())),
             settings, 2));
     assertEquals("no trainable samples for refinement", e.getMessage());
@@ -175,12 +158,12 @@ public class FeedforwardDependencyParserEdgeCaseTest {
       throws IOException {
     final Path file = dir.resolve("depparse-ff.bin");
     try (OutputStream out = Files.newOutputStream(file)) {
-      feedforwardModel.serialize(out);
+      model.serialize(out);
     }
     final FeedforwardDependencyParser reloaded =
         new FeedforwardDependencyParser(FeedforwardDependencyModel.load(file));
     for (final DependencySample sample : corpus()) {
-      assertEquals(feedforwardParser.parse(sample.getTokens(), sample.getTags()),
+      assertEquals(parser.parse(sample.getTokens(), sample.getTags()),
           reloaded.parse(sample.getTokens(), sample.getTags()),
           Arrays.toString(sample.getTokens()));
     }
@@ -194,7 +177,7 @@ public class FeedforwardDependencyParserEdgeCaseTest {
       tasks.add(() -> {
         for (int iteration = 0; iteration < ITERATIONS_PER_THREAD; iteration++) {
           assertEquals(THE_DOG_BARKS_GRAPH,
-              feedforwardParser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
+              parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
         }
         return null;
       });

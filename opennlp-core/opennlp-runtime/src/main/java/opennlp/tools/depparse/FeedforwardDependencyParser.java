@@ -94,12 +94,12 @@ public class FeedforwardDependencyParser implements DependencyParser {
   /**
    * {@inheritDoc}
    *
-   * @throws IllegalStateException If no model outcome is applicable in a configuration
+   * @throws IllegalStateException Thrown if no model outcome is applicable in a configuration
    *         or the model produces a non-finite transition score.
    */
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    DependencySample.checkTokensAndTags(tokens, tags);
+    DependencyValidation.checkTokensAndTags(tokens, tags);
     if (beamSize == GREEDY_BEAM_SIZE) {
       return greedyParse(tokens, tags);
     }
@@ -112,7 +112,7 @@ public class FeedforwardDependencyParser implements DependencyParser {
    * @param tokens The sentence tokens.
    * @param tags The POS tags, aligned with {@code tokens}.
    * @return The parse. Never {@code null}.
-   * @throws IllegalStateException If no model outcome is applicable in a configuration
+   * @throws IllegalStateException Thrown if no model outcome is applicable in a configuration
    *         or the model produces a non-finite transition score.
    */
   private DependencyGraph greedyParse(String[] tokens, String[] tags) {
@@ -154,7 +154,7 @@ public class FeedforwardDependencyParser implements DependencyParser {
    * @param tokens The sentence tokens.
    * @param tags The POS tags, aligned with {@code tokens}.
    * @return The parse. Never {@code null}.
-   * @throws IllegalStateException If no beam alternative can be advanced by a model
+   * @throws IllegalStateException Thrown if no beam alternative can be advanced by a model
    *         outcome or the model produces a non-finite transition score.
    */
   private DependencyGraph beamParse(String[] tokens, String[] tags) {
