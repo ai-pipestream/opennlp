@@ -42,7 +42,7 @@ import opennlp.tools.util.CompatibilityMode;
  */
 public class EmojiCharSequenceNormalizer implements CharSequenceNormalizer {
 
-  private static final long serialVersionUID = 4553401197981667914L;
+  private static final long serialVersionUID = -723015318244958736L;
 
   /**
    * The first code point of the legacy range: the high surrogate U+D83C, which the former
