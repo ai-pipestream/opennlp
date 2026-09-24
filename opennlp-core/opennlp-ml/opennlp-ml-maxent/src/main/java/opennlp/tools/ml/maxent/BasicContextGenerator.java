@@ -27,11 +27,7 @@ import java.util.List;
  * <p>
  * {@code cp_1 cp_2 ... cp_n}
  * </p>
- * A different separator can be given, which is taken as written. A predicate is not empty:
- * a leading, repeated, or trailing separator does not produce one.
- * <p>
- * Since 3.0.0 the separator is taken as written, not as a regular expression (OPENNLP-1929).
- * </p>
+ * A separator given to the constructor is literal text; empty predicates are not returned.
  */
 public class BasicContextGenerator implements ContextGenerator<String> {
 
@@ -118,8 +114,6 @@ public class BasicContextGenerator implements ContextGenerator<String> {
   /**
    * {@inheritDoc}
    * Splits {@code o} at each occurrence of the separator and leaves out empty parts.
-   *
-   * @throws IllegalArgumentException If {@code o} is {@code null}.
    */
   @Override
   public String[] getContext(String o) {
