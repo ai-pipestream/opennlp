@@ -70,12 +70,25 @@ public final class FrequencyDictionaryLoader {
   /** The first character of a comment line. */
   private static final char COMMENT_MARKER = '#';
 
+  /** A TAB, one of the two column separators. */
   private static final char COLUMN_TAB = '\t';
+
+  /** A space, one of the two column separators. */
   private static final char COLUMN_SPACE = ' ';
 
+  /** The sign that leads a negative count. */
   private static final char MINUS_SIGN = '-';
 
+  /** The reason reported for a unigram line with fewer than two columns. */
+  private static final String UNIGRAM_COLUMNS_MISSING = "expected 'word<sep>count'";
+
+  /** The reason reported for a bigram line with fewer than three columns. */
+  private static final String BIGRAM_COLUMNS_MISSING = "expected 'w1<sep>w2<sep>count'";
+
+  /** The reason reported for a count with a minus sign. */
   private static final String COUNT_NEGATIVE = "count must not be negative";
+
+  /** The reason reported for a count that is not ASCII digits or does not fit in a long. */
   private static final String COUNT_NOT_INTEGER = "count is not an integer";
 
   private final Charset charset;
@@ -169,7 +182,7 @@ public final class FrequencyDictionaryLoader {
         }
         final String[] columns = splitColumns(content.strip());
         if (columns.length < 2) {
-          throw new MalformedDictionaryLineException(lineNo, line, "expected 'word<sep>count'");
+          throw new MalformedDictionaryLineException(lineNo, line, UNIGRAM_COLUMNS_MISSING);
         }
         final long count = parseCount(columns[1], lineNo, line);
         sink.accept(columns[0], count);
@@ -193,7 +206,7 @@ public final class FrequencyDictionaryLoader {
         }
         final String[] columns = splitColumns(content.strip());
         if (columns.length < 3) {
-          throw new MalformedDictionaryLineException(lineNo, line, "expected 'w1<sep>w2<sep>count'");
+          throw new MalformedDictionaryLineException(lineNo, line, BIGRAM_COLUMNS_MISSING);
         }
         final long count = parseCount(columns[2], lineNo, line);
         sink.accept(columns[0], columns[1], count);
