@@ -41,6 +41,7 @@ final class UnicodeEmojiSequences {
   private static final char COMMENT = '#';
 
   private static final int VARIATION_SELECTOR_TEXT = 0xFE0E;
+  private static final int VARIATION_SELECTOR_EMOJI = 0xFE0F;
 
   /** The bases of the keycap sequences: {@code #}, {@code *} and the ASCII digits. */
   private static final CodePointSet KEYCAP_BASES =
@@ -143,6 +144,11 @@ final class UnicodeEmojiSequences {
       if (node.terminal) {
         longest = i;
       }
+    }
+    if (longest >= 0 && longest < text.length()
+        && Character.codePointAt(text, longest) == VARIATION_SELECTOR_EMOJI) {
+      // One redundant emoji presentation selector after a complete sequence belongs to it.
+      longest++;
     }
     return longest;
   }
