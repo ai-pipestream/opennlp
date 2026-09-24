@@ -167,11 +167,11 @@ entries and dictionary `ph:` replacements. Compound boundaries and minimum
 lengths use Unicode code points. `BREAK` splits recognized parts recursively;
 the default separators are `-`, `^-`, and `-$`, and `BREAK 0` disables them.
 
-The compound restrictions follow the reference implementation in detail. `CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair checks apply to the complete input and to every remainder a further level splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt from the other patterns. A listed spelling whose first homonym carries `COMPOUNDFORBIDFLAG` is barred from every position but the last, including its affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
+The compound restrictions follow Hunspell in detail. `CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair checks apply to the complete input and to every remainder a further level splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt from the other patterns. A listed spelling whose first homonym carries `COMPOUNDFORBIDFLAG` is barred from every position but the last, including its affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
 
 `NEEDAFFIX` (also named `PSEUDOROOT`), `ONLYINCOMPOUND`, `FORBIDDENWORD`,
-`CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted. As in the
-reference implementation, the first listed homonym decides whether a spelling is
+`CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted. As in
+Hunspell, the first listed homonym decides whether a spelling is
 forbidden, and a forbidden direct or affixed reading also blocks the compound and
 `BREAK` readings of that input. Morphology
 aliases use `AM`; `st:` supplies an explicit stem, `sp:` prepends surface

@@ -264,7 +264,7 @@ class HunspellCompatibilityTest {
         new Example("trailing-period-not-added", PLURAL, "2\ntext/A\netc.\n", "etc", List.of("etc")),
         new Example("numeric-flag-maximum", "FLAG num\nSFX 65535 Y 1\nSFX 65535 0 s .\n",
             "1\ndog/65535\n", "dogs", List.of("dog")),
-        // the manual's example of part stems here against the concatenated native stem
+        // the manual's example of part stems here against the concatenated Hunspell stem
         new Example("compound-part-stems", COMPOUND + PLURAL, "2\nriver/C\nboat/CA\n",
             "riverboats", List.of("river", "boat")));
   }
@@ -301,7 +301,7 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * The stems the reference implementation returned for a fixture when the fixtures were
+   * The stems Hunspell returned for a fixture when the fixtures were
    * recorded, as described in {@code dev/README-hunspell-dictionaries.md}. An empty
    * reference result is recorded as the input itself.
    *
@@ -341,7 +341,7 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * Whether the reference spell checker accepted a fixture input when the fixtures
+   * Whether the Hunspell spell checker accepted a fixture input when the fixtures
    * were recorded.
    *
    * @param example The fixture.
@@ -381,18 +381,18 @@ class HunspellCompatibilityTest {
    * checker rejects while its analyzer still stems them, are covered structurally.
    */
   private static final Map<String, String> STEM_DEVIATIONS = Map.ofEntries(
-      Map.entry("complex-prefixes", "the reference analyzer reverses field text under COMPLEXPREFIXES"),
-      Map.entry("sharp-s-uppercase", "the reference analyzer does not expand SS to a sharp s"),
-      Map.entry("sharp-s-keepcase", "the reference analyzer does not expand SS to a sharp s"),
-      Map.entry("compound-pattern-replacement", "the reference analyzer does not restore replaced junctions"),
-      Map.entry("compound-simplified-triple", "the reference analyzer does not restore simplified triples"),
-      Map.entry("mixed-case-initial-capital", "the reference analyzer keeps the initial capital"),
-      Map.entry("mixed-case-initial-capital-entry", "the reference analyzer keeps the initial capital"),
-      Map.entry("apostrophe-all-caps", "the reference analyzer does not undo an elided-article prefix"),
-      Map.entry("apostrophe-capitalized", "the reference analyzer does not undo an elided-article prefix"),
-      Map.entry("hidden-capital-initial-capital", "the reference analyzer ignores the capitalized input"),
-      Map.entry("break-start", "the reference analyzer does not split at BREAK separators"),
-      Map.entry("break-end", "the reference analyzer does not split at BREAK separators"));
+      Map.entry("complex-prefixes", "Hunspell's analyzer reverses field text under COMPLEXPREFIXES"),
+      Map.entry("sharp-s-uppercase", "Hunspell's analyzer does not expand SS to a sharp s"),
+      Map.entry("sharp-s-keepcase", "Hunspell's analyzer does not expand SS to a sharp s"),
+      Map.entry("compound-pattern-replacement", "Hunspell's analyzer does not restore replaced junctions"),
+      Map.entry("compound-simplified-triple", "Hunspell's analyzer does not restore simplified triples"),
+      Map.entry("mixed-case-initial-capital", "Hunspell's analyzer keeps the initial capital"),
+      Map.entry("mixed-case-initial-capital-entry", "Hunspell's analyzer keeps the initial capital"),
+      Map.entry("apostrophe-all-caps", "Hunspell's analyzer does not undo an elided-article prefix"),
+      Map.entry("apostrophe-capitalized", "Hunspell's analyzer does not undo an elided-article prefix"),
+      Map.entry("hidden-capital-initial-capital", "Hunspell's analyzer ignores the capitalized input"),
+      Map.entry("break-start", "Hunspell's analyzer does not split at BREAK separators"),
+      Map.entry("break-end", "Hunspell's analyzer does not split at BREAK separators"));
 
   /**
    * Tests recognition against the recorded reference outcome. A fixture listed in
