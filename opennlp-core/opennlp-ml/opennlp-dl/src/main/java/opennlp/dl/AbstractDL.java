@@ -61,6 +61,8 @@ public abstract class AbstractDL implements AutoCloseable {
   private static final String TOKENIZER_ADDED_TOKENS_KEY = "added_tokens";
   private static final String TOKENIZER_ID_KEY = "id";
   private static final String TOKENIZER_CONTENT_KEY = "content";
+  private static final String TOKENIZER_NORMALIZER_KEY = "normalizer";
+  private static final String TOKENIZER_LOWERCASE_KEY = "lowercase";
   /** The only {@code model.type} of a {@code tokenizer.json} the WordPiece encoder can use. */
   private static final String WORDPIECE_MODEL_TYPE = "WordPiece";
   /** The continuing subword prefix the WordPiece encoder assumes. */
@@ -208,6 +210,30 @@ public abstract class AbstractDL implements AutoCloseable {
   static Map<String, Integer> loadVocabFile(
       final File vocabFile) throws IOException {
 
+    return readVocabFile(vocabFile).ids();
+  }
+
+  /**
+   * A vocabulary read from a file or JSON text.
+   *
+   * @param ids The map of tokens to IDs.
+   * @param lowercase The {@code normalizer.lowercase} setting of a {@code tokenizer.json}, or
+   *     {@code null} if the vocabulary does not carry that setting.
+   */
+  record Vocabulary(Map<String, Integer> ids, Boolean lowercase) {
+  }
+
+  /**
+   * Reads a vocabulary file as {@link #loadVocab(File)} does, keeping the settings of a
+   * {@code tokenizer.json} that a component must agree with.
+   *
+   * @param vocabFile The vocabulary file.
+   * @return The vocabulary.
+   * @throws IOException Thrown if the vocabulary file cannot be opened or read.
+   * @throws InvalidFormatException Thrown if a JSON vocabulary is malformed, has a layout that
+   *     is not supported, or contains a value that is not a non-negative integer.
+   */
+  static Vocabulary readVocabFile(final File vocabFile) throws IOException {
     final String read = Files.readString(Path.of(vocabFile.getPath()), StandardCharsets.UTF_8);
     final String content = StringUtil.stripByteOrderMark(read);
     final String trimmed = content.trim();
@@ -215,7 +241,7 @@ public abstract class AbstractDL implements AutoCloseable {
     // Detect JSON format by leading brace
     if (trimmed.startsWith("{")) {
       try {
-        return loadJsonVocab(trimmed);
+        return readJsonVocab(trimmed);
       } catch (IllegalArgumentException e) {
         throw new InvalidFormatException(
             "Vocabulary file " + vocabFile.getName() + ": " + e.getMessage(), e);
@@ -231,7 +257,28 @@ public abstract class AbstractDL implements AutoCloseable {
         vocab.put(line, counter.getAndIncrement())
     );
 
-    return vocab;
+    return new Vocabulary(vocab, null);
+  }
+
+  /**
+   * Checks that the lower casing a component is configured with agrees with the
+   * {@code normalizer.lowercase} setting of its vocabulary file, so that the component encodes
+   * text as the model's own tokenizer does.
+   *
+   * @param vocabFile The vocabulary file, named in the message.
+   * @param vocabulary The vocabulary read from it.
+   * @param lowerCase {@code true} if the component lower cases text, {@code false} otherwise.
+   * @throws InvalidFormatException Thrown if the file sets {@code normalizer.lowercase} to the
+   *     other value.
+   */
+  static void requireLowerCase(final File vocabFile, final Vocabulary vocabulary,
+      final boolean lowerCase) throws InvalidFormatException {
+    final Boolean lowercase = vocabulary.lowercase();
+    if (lowercase != null && lowercase != lowerCase) {
+      throw new InvalidFormatException("Vocabulary file " + vocabFile.getName() + " sets "
+          + TOKENIZER_NORMALIZER_KEY + "." + TOKENIZER_LOWERCASE_KEY + " to " + lowercase
+          + ", but the component is configured with lowerCase " + lowerCase);
+    }
   }
 
   /**
@@ -565,6 +612,18 @@ public abstract class AbstractDL implements AutoCloseable {
    *     the token, or the unsupported member.
    */
   static Map<String, Integer> loadJsonVocab(final String json) {
+    return readJsonVocab(json).ids();
+  }
+
+  /**
+   * Reads a JSON vocabulary as {@link #loadJsonVocab(String)} does, keeping the
+   * {@code normalizer.lowercase} setting of a {@code tokenizer.json}.
+   *
+   * @param json The JSON text of the vocabulary.
+   * @return The vocabulary.
+   * @throws IllegalArgumentException Thrown as by {@link #loadJsonVocab(String)}.
+   */
+  static Vocabulary readJsonVocab(final String json) {
     final List<JsonScan.Member> document = JsonScan.document(json);
     final JsonScan.Member model = JsonScan.member(document, TOKENIZER_MODEL_KEY);
     if (model != null && JsonScan.isObject(json, model)) {
@@ -574,7 +633,7 @@ public abstract class AbstractDL implements AutoCloseable {
         final Map<String, Integer> vocab =
             tokenizerVocab(json, modelMembers, JsonScan.stringValue(json, type));
         addTokens(json, document, vocab);
-        return vocab;
+        return new Vocabulary(vocab, null);
       }
     }
     final Map<String, Integer> vocab = new HashMap<>();
@@ -585,7 +644,7 @@ public abstract class AbstractDL implements AutoCloseable {
         throw new IllegalArgumentException(EXPECTED_LAYOUTS + e.getMessage(), e);
       }
     }
-    return vocab;
+    return new Vocabulary(vocab, null);
   }
 
   /**
