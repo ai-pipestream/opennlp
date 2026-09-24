@@ -36,6 +36,8 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
  */
 public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
 
+  private static final String CODE_POINT_FORMAT = "U+%04X";
+
   private static final TokenizerCharacterPolicy ASCII = new TokenizerCharacterPolicy(
       CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
       CodePointSet.ofRange('0', '9'), CodePointSet.of());
@@ -64,7 +66,7 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
   public static TokenizerCharacterPolicy of(
       CodePointSet letters, CodePointSet digits, CodePointSet marks) {
     if (letters == null || digits == null || marks == null) {
-      throw new IllegalArgumentException("Character sets must not be null");
+      throw new IllegalArgumentException("letters, digits and marks must not be null");
     }
     if (letters.isEmpty() && digits.isEmpty()) {
       throw new IllegalArgumentException("At least one letter or digit is required");
@@ -145,10 +147,12 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
   private static void validateSet(String name, CodePointSet set) {
     for (int codePoint : set.toArray()) {
       if (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE) {
-        throw new IllegalArgumentException(name + " contains a surrogate code point");
+        throw new IllegalArgumentException(name + " contains the surrogate code point "
+            + String.format(CODE_POINT_FORMAT, codePoint));
       }
       if (UnicodeWhitespace.isWhitespace(codePoint)) {
-        throw new IllegalArgumentException(name + " contains Unicode whitespace");
+        throw new IllegalArgumentException(name + " contains the whitespace code point "
+            + String.format(CODE_POINT_FORMAT, codePoint));
       }
     }
   }
@@ -161,7 +165,8 @@ public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
     for (int codePoint : smaller.toArray()) {
       if (larger.contains(codePoint)) {
         throw new IllegalArgumentException(
-            firstName + " and " + secondName + " overlap at U+" + Integer.toHexString(codePoint));
+            firstName + " and " + secondName + " overlap at "
+                + String.format(CODE_POINT_FORMAT, codePoint));
       }
     }
   }
