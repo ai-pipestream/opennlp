@@ -16,21 +16,26 @@
  */
 package opennlp.tools.tokenize;
 
+import java.util.function.Predicate;
+
 import opennlp.tools.util.normalizer.CodePointSet;
 import opennlp.tools.util.normalizer.UnicodeWhitespace;
 
 /**
  * An immutable policy for testing token eligibility against explicit character sets.
  *
- * <p>A token consists of one or more letter or digit bases. A letter may be followed by zero or
- * more marks. A mark cannot start a token or follow a digit. The supplied sets express a caller's
- * tokenization policy; this class does not infer Unicode character categories.</p>
+ * <p>A token consists of one or more letters or digits. Each letter or digit may be followed by
+ * zero or more marks, as in Unicode word boundary rule WB4 of
+ * <a href="https://www.unicode.org/reports/tr29/#WB4">UAX #29</a>. A mark cannot start a token.
+ * The supplied sets express a caller's tokenization policy; this class does not infer Unicode
+ * character categories.</p>
  *
  * <p>This predicate tests a complete candidate without finding token boundaries or changing
- * its text. It does not configure {@link TokenizerME} or tokenizer training. Applications
- * can retain the category sets to reconstruct the same policy.</p>
+ * its text.</p>
  */
-public final class TokenizerCharacterPolicy {
+public final class TokenizerCharacterPolicy implements Predicate<CharSequence> {
+
+  private static final String CODE_POINT_FORMAT = "U+%04X";
 
   private static final TokenizerCharacterPolicy ASCII = new TokenizerCharacterPolicy(
       CodePointSet.ofRange('A', 'Z').union(CodePointSet.ofRange('a', 'z')),
@@ -47,20 +52,22 @@ public final class TokenizerCharacterPolicy {
   }
 
   /**
-   * Creates a policy from explicit, pairwise-disjoint Unicode scalar-value sets.
+   * Creates a policy from explicit, pairwise-disjoint code point sets. Whitespace separates
+   * tokens and so cannot be part of one; every other non-surrogate code point is left to the
+   * caller.
    *
    * @param letters Code points treated as letters.
    * @param digits Code points treated as digits.
-   * @param marks Code points permitted after a letter or another mark.
+   * @param marks Code points permitted after a letter, a digit, or another mark.
    * @return The immutable policy.
-   * @throws IllegalArgumentException Thrown if a set is {@code null}, the base sets are both
-   *     empty, a code point occurs in more than one set, or a set contains whitespace or a
-   *     surrogate code point.
+   * @throws IllegalArgumentException Thrown if a set is {@code null}, {@code letters} and
+   *     {@code digits} are both empty, a code point occurs in more than one set, or a set
+   *     contains a surrogate code point or {@link UnicodeWhitespace} member.
    */
   public static TokenizerCharacterPolicy of(
       CodePointSet letters, CodePointSet digits, CodePointSet marks) {
     if (letters == null || digits == null || marks == null) {
-      throw new IllegalArgumentException("Character sets must not be null");
+      throw new IllegalArgumentException("letters, digits and marks must not be null");
     }
     if (letters.isEmpty() && digits.isEmpty()) {
       throw new IllegalArgumentException("At least one letter or digit is required");
@@ -80,12 +87,14 @@ public final class TokenizerCharacterPolicy {
   }
 
   /**
-   * Tests whether the entire input matches this policy.
+   * {@inheritDoc}
    *
-   * @param input The characters to test.
-   * @return {@code true} if the input is a non-empty token accepted by this policy.
+   * <p>Returns {@code true} if the entire input is a non-empty token accepted by this policy.
+   * Malformed UTF-16 input (an unpaired or reversed surrogate) returns {@code false}.</p>
+   *
    * @throws IllegalArgumentException Thrown if {@code input} is {@code null}.
    */
+  @Override
   public boolean test(CharSequence input) {
     if (input == null) {
       throw new IllegalArgumentException("input must not be null");
@@ -94,29 +103,25 @@ public final class TokenizerCharacterPolicy {
       return false;
     }
 
-    boolean markAllowed = false;
     for (int offset = 0; offset < input.length();) {
-      char first = input.charAt(offset);
+      final boolean first = offset == 0;
+      char unit = input.charAt(offset);
       final int codePoint;
-      if (first >= Character.MIN_HIGH_SURROGATE && first <= Character.MAX_HIGH_SURROGATE) {
-        if (offset + 1 >= input.length() || input.charAt(offset + 1) < Character.MIN_LOW_SURROGATE
-            || input.charAt(offset + 1) > Character.MAX_LOW_SURROGATE) {
+      if (Character.isHighSurrogate(unit)) {
+        if (offset + 1 >= input.length() || !Character.isLowSurrogate(input.charAt(offset + 1))) {
           return false;
         }
-        codePoint = Character.toCodePoint(first, input.charAt(offset + 1));
+        codePoint = Character.toCodePoint(unit, input.charAt(offset + 1));
         offset += 2;
-      } else if (first >= Character.MIN_LOW_SURROGATE && first <= Character.MAX_LOW_SURROGATE) {
+      } else if (Character.isLowSurrogate(unit)) {
         return false;
       } else {
-        codePoint = first;
+        codePoint = unit;
         offset++;
       }
 
-      if (letters.contains(codePoint)) {
-        markAllowed = true;
-      } else if (digits.contains(codePoint)) {
-        markAllowed = false;
-      } else if (!markAllowed || !marks.contains(codePoint)) {
+      if (!letters.contains(codePoint) && !digits.contains(codePoint)
+          && (first || !marks.contains(codePoint))) {
         return false;
       }
     }
@@ -138,19 +143,24 @@ public final class TokenizerCharacterPolicy {
     return marks;
   }
 
-  /** Validates scalar values against the fixed Unicode whitespace definition. */
+  /** Throws if {@code set} contains a surrogate code point or {@link UnicodeWhitespace} member. */
   private static void validateSet(String name, CodePointSet set) {
-    for (int codePoint : set.toArray()) {
-      if (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE) {
-        throw new IllegalArgumentException(name + " contains a surrogate code point");
+    for (int codePoint = Character.MIN_SURROGATE; codePoint <= Character.MAX_SURROGATE;
+         codePoint++) {
+      if (set.contains(codePoint)) {
+        throw new IllegalArgumentException(name + " contains the surrogate code point "
+            + String.format(CODE_POINT_FORMAT, codePoint));
       }
-      if (UnicodeWhitespace.isWhitespace(codePoint)) {
-        throw new IllegalArgumentException(name + " contains Unicode whitespace");
+    }
+    for (int codePoint : UnicodeWhitespace.codePoints()) {
+      if (set.contains(codePoint)) {
+        throw new IllegalArgumentException(name + " contains the whitespace code point "
+            + String.format(CODE_POINT_FORMAT, codePoint));
       }
     }
   }
 
-  /** Checks category overlap by visiting only the smaller set. */
+  /** Throws if {@code first} and {@code second} share a code point. */
   private static void requireDisjoint(
       String firstName, CodePointSet first, String secondName, CodePointSet second) {
     CodePointSet smaller = first.size() <= second.size() ? first : second;
@@ -158,7 +168,8 @@ public final class TokenizerCharacterPolicy {
     for (int codePoint : smaller.toArray()) {
       if (larger.contains(codePoint)) {
         throw new IllegalArgumentException(
-            firstName + " and " + secondName + " overlap at U+" + Integer.toHexString(codePoint));
+            firstName + " and " + secondName + " overlap at "
+                + String.format(CODE_POINT_FORMAT, codePoint));
       }
     }
   }
