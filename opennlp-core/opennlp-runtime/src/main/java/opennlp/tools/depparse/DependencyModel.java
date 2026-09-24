@@ -26,7 +26,6 @@ import java.util.Map;
 
 import opennlp.tools.ml.model.AbstractModel;
 import opennlp.tools.ml.model.MaxentModel;
-import opennlp.tools.util.BaseToolFactory;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.model.BaseModel;
 
@@ -61,22 +60,7 @@ public class DependencyModel extends BaseModel {
    */
   public DependencyModel(String languageCode, MaxentModel parserModel,
       Map<String, String> manifestInfoEntries) {
-    this(languageCode, parserModel, manifestInfoEntries, new DependencyParserFactory());
-  }
-
-  /**
-   * Initializes a model with the artifacts and serializers supplied by a factory.
-   *
-   * @param languageCode The ISO language code. Must not be {@code null}.
-   * @param parserModel The transition model. Must not be {@code null}.
-   * @param manifestInfoEntries Additional manifest entries, or {@code null}.
-   * @param factory The artifact factory. Must not be {@code null}.
-   * @throws IllegalArgumentException If a required argument is {@code null}.
-   */
-  public DependencyModel(String languageCode, MaxentModel parserModel,
-      Map<String, String> manifestInfoEntries, DependencyParserFactory factory) {
-    super(COMPONENT_NAME, notNull(languageCode, "languageCode"), manifestInfoEntries,
-        notNull(factory, "factory"));
+    super(COMPONENT_NAME, notNull(languageCode, "languageCode"), manifestInfoEntries);
     if (parserModel == null) {
       throw new IllegalArgumentException("parserModel must not be null");
     }
@@ -146,17 +130,6 @@ public class DependencyModel extends BaseModel {
       throw new InvalidFormatException("The " + PARSER_MODEL_ENTRY_NAME
           + " artifact is missing or not a supported transition model.");
     }
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  protected Class<? extends BaseToolFactory> getDefaultFactory() {
-    return DependencyParserFactory.class;
-  }
-
-  /** @return The factory supplying this model's artifacts and serializers. */
-  public DependencyParserFactory getFactory() {
-    return (DependencyParserFactory) toolFactory;
   }
 
   /**

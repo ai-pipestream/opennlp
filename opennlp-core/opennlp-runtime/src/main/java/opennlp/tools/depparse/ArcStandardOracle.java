@@ -20,7 +20,6 @@ package opennlp.tools.depparse;
 import java.util.ArrayList;
 import java.util.List;
 
-
 /**
  * The static oracle for the arc-standard system: derives the transition sequence that
  * reproduces a gold {@link DependencyGraph}.
@@ -106,6 +105,7 @@ final class ArcStandardOracle {
     }
     return null;
   }
+
   /**
    * Tests whether a gold graph is projective: no pair of arcs crosses when the arcs are
    * placed above the token sequence. The projective graphs are the ones with an

@@ -31,9 +31,16 @@ import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.postag.POSSample;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.PlainTextByLineStream;
+import opennlp.tools.util.StringUtil;
 
 /** Parses POS-tagged sentences from standard input and prints basic CoNLL-U trees. */
 public class DependencyParserMETool extends BasicCmdLineTool {
+
+  /** Separates the fields of a CoNLL-U token row. */
+  private static final String FIELD_SEPARATOR = "\t";
+
+  /** Fills a CoNLL-U field that the parser does not predict. */
+  private static final String EMPTY_FIELD = "_";
 
   /** {@inheritDoc} */
   @Override
@@ -59,7 +66,7 @@ public class DependencyParserMETool extends BasicCmdLineTool {
         new SystemInputStreamFactory(), SystemInputStreamFactory.encoding())) {
       String line;
       while ((line = lines.read()) != null) {
-        if (line.isBlank()) {
+        if (StringUtil.isBlank(line)) {
           continue;
         }
         POSSample sample = POSSample.parse(line);
@@ -68,8 +75,10 @@ public class DependencyParserMETool extends BasicCmdLineTool {
         DependencyGraph graph = parser.parse(tokens, tags);
         for (int i = 0; i < tokens.length; i++) {
           // Input tags may be UPOS or XPOS; retain them in XPOS without guessing a mapping.
-          out.println((i + 1) + "\t" + tokens[i] + "\t_\t_\t" + tags[i]
-              + "\t_\t" + (graph.headOf(i) + 1) + "\t" + graph.relationOf(i) + "\t_\t_");
+          out.println(String.join(FIELD_SEPARATOR, Integer.toString(i + 1), tokens[i],
+              EMPTY_FIELD, EMPTY_FIELD, tags[i], EMPTY_FIELD,
+              Integer.toString(graph.headOf(i) + 1), graph.relationOf(i),
+              EMPTY_FIELD, EMPTY_FIELD));
         }
         out.println();
       }
