@@ -23,6 +23,7 @@ import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,9 +56,24 @@ final class UnicodeEmojiSequences {
   private final Node root;
   private final int[][] componentRanges;
 
+  /**
+   * Every code point a candidate can start with: the first code point of a sequence or a
+   * structural component. One bit test rejects nearly every position of ordinary text before
+   * the trie is touched.
+   */
+  private final BitSet candidateStarts;
+
   private UnicodeEmojiSequences(Node root, int[][] componentRanges) {
     this.root = root;
     this.componentRanges = componentRanges;
+    this.candidateStarts = new BitSet();
+    for (int codePoint : root.children.keySet()) {
+      candidateStarts.set(codePoint);
+    }
+    for (int[] range : componentRanges) {
+      candidateStarts.set(range[0], range[1] + 1);
+    }
+    candidateStarts.set(VARIATION_SELECTOR_TEXT);
   }
 
   /**
@@ -82,11 +98,15 @@ final class UnicodeEmojiSequences {
   }
 
   Candidate candidateAt(CharSequence text, int start) {
-    int end = match(text, start);
+    int first = Character.codePointAt(text, start);
+    if (!candidateStarts.get(first)) {
+      return null;
+    }
+    Walk walk = walk(text, start);
+    int end = walk.matchEnd();
     boolean valid = end >= 0;
     if (!valid) {
-      int first = Character.codePointAt(text, start);
-      int prefixEnd = prefixEnd(text, start);
+      int prefixEnd = walk.prefixEnd();
       if (!KEYCAP_BASES.contains(first) && prefixEnd > start && prefixEnd < text.length()
           && isStructuralComponent(Character.codePointAt(text, prefixEnd))) {
         end = prefixEnd;
@@ -132,14 +152,20 @@ final class UnicodeEmojiSequences {
   }
 
   private int match(CharSequence text, int start) {
+    return walk(text, start).matchEnd();
+  }
+
+  private Walk walk(CharSequence text, int start) {
     Node node = root;
     int longest = -1;
-    for (int i = start; i < text.length();) {
+    int i = start;
+    while (i < text.length()) {
       int codePoint = Character.codePointAt(text, i);
-      node = node.children.get(codePoint);
-      if (node == null) {
+      Node child = node.children.get(codePoint);
+      if (child == null) {
         break;
       }
+      node = child;
       i += Character.charCount(codePoint);
       if (node.terminal) {
         longest = i;
@@ -150,22 +176,7 @@ final class UnicodeEmojiSequences {
       // One redundant emoji presentation selector after a complete sequence belongs to it.
       longest++;
     }
-    return longest;
-  }
-
-  private int prefixEnd(CharSequence text, int start) {
-    Node node = root;
-    int end = start;
-    for (int i = start; i < text.length();) {
-      int codePoint = Character.codePointAt(text, i);
-      node = node.children.get(codePoint);
-      if (node == null) {
-        break;
-      }
-      i += Character.charCount(codePoint);
-      end = i;
-    }
-    return end;
+    return new Walk(longest, i);
   }
 
   private boolean isStructuralComponent(int codePoint) {
@@ -268,6 +279,9 @@ final class UnicodeEmojiSequences {
   }
 
   record Candidate(int end, boolean valid) {
+  }
+
+  private record Walk(int matchEnd, int prefixEnd) {
   }
 
   private static final class Node {
