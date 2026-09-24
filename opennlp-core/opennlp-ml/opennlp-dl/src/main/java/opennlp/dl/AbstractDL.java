@@ -56,6 +56,9 @@ public abstract class AbstractDL implements AutoCloseable {
 
   private static final String TOKENIZER_MODEL_KEY = "model";
   private static final String TOKENIZER_VOCAB_KEY = "vocab";
+  /** The start of the message for a JSON vocabulary that has neither accepted layout. */
+  private static final String EXPECTED_LAYOUTS = "Expected one object mapping tokens to integer"
+      + " ids, as in vocab.json, or a tokenizer.json of a WordPiece model: ";
 
   protected final OrtEnvironment env;
   protected final OrtSession session;
@@ -555,7 +558,14 @@ public abstract class AbstractDL implements AutoCloseable {
     final List<JsonScan.Member> tokenizerVocab = tokenizerVocab(json, document);
     final Map<String, Integer> vocab = new HashMap<>();
     for (JsonScan.Member member : tokenizerVocab != null ? tokenizerVocab : document) {
-      vocab.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
+      try {
+        vocab.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
+      } catch (IllegalArgumentException e) {
+        if (tokenizerVocab != null) {
+          throw e;
+        }
+        throw new IllegalArgumentException(EXPECTED_LAYOUTS + e.getMessage(), e);
+      }
     }
     return vocab;
   }
