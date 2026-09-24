@@ -80,6 +80,7 @@ final class UnicodeEmojiSequences {
 
   private final Node root;
   private final int[][] componentRanges;
+  private final int sequenceCount;
 
   /**
    * Every code point a candidate can start with: the first code point of a sequence or a
@@ -88,9 +89,10 @@ final class UnicodeEmojiSequences {
    */
   private final BitSet candidateStarts;
 
-  private UnicodeEmojiSequences(Node root, int[][] componentRanges) {
+  private UnicodeEmojiSequences(Node root, int[][] componentRanges, int sequenceCount) {
     this.root = root;
     this.componentRanges = componentRanges;
+    this.sequenceCount = sequenceCount;
     this.candidateStarts = new BitSet();
     for (int codePoint : root.children.keySet()) {
       candidateStarts.set(codePoint);
@@ -120,6 +122,11 @@ final class UnicodeEmojiSequences {
       }
     }
     return sequences;
+  }
+
+  /** {@return the number of sequence records that were loaded} */
+  int sequenceCount() {
+    return sequenceCount;
   }
 
   /**
@@ -331,7 +338,7 @@ final class UnicodeEmojiSequences {
       throw new IllegalArgumentException("No " + COMPONENT_RECORD + " component range record in "
           + RESOURCE);
     }
-    return new UnicodeEmojiSequences(root, ranges.toArray(int[][]::new));
+    return new UnicodeEmojiSequences(root, ranges.toArray(int[][]::new), sequences);
   }
 
   /**
