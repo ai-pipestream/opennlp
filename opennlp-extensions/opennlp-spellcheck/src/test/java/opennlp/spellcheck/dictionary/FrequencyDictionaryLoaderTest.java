@@ -148,7 +148,7 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"+5, 5", "007, 7", "0, 0", "9223372036854775807, 9223372036854775807"})
+  @CsvSource({"007, 7", "0, 0", "9223372036854775807, 9223372036854775807"})
   void testUnigramCountAccepts(String count, long expected) throws IOException {
     final Map<String, Long> into = new LinkedHashMap<>();
     Assertions.assertEquals(1,
@@ -170,7 +170,9 @@ public class FrequencyDictionaryLoaderTest {
         Arguments.of("the\t99999999999999999999", "count is not an integer"),
         Arguments.of("the\t-", "count is not an integer"),
         Arguments.of("the\t+", "count is not an integer"),
+        Arguments.of("the\t+5", "count is not an integer"),
         Arguments.of("the\t+-5", "count is not an integer"),
+        Arguments.of("the\t-0", "count must not be negative"),
         Arguments.of(" # note", "count is not an integer"));
   }
 
@@ -186,28 +188,21 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"\u0665, 5", "\uFF15, 5", "5\u0665, 55", "\u0661\u0662\u0663, 123",
-      "+\uFF15, 5", "-\u0660, 0"})
-  void testCountsPreserveSupportedDecimalDigits(String count, long expected) throws IOException {
+  // an Arabic-Indic digit, a fullwidth digit, mixed digits, a signed fullwidth digit, a signed
+  // Arabic-Indic zero, and a mathematical digit: Long.parseLong takes some of them, the loader none
+  @ValueSource(strings = {"\u0665", "\uFF15", "5\u0665", "\u0661\u0662\u0663", "+\uFF15",
+      "-\u0660", "-\u0665", "\uFF19\uFF12\uFF12\uFF13", "\uD835\uDFCE"})
+  void testCountsMustBeAsciiDigits(String count) {
     final FrequencyDictionaryLoader loader = new FrequencyDictionaryLoader();
-    final Map<String, Long> unigrams = new LinkedHashMap<>();
-    final Map<String, Long> bigrams = new LinkedHashMap<>();
-    Assertions.assertEquals(1,
-        loader.parseUnigrams(stringResource("café\t" + count + "\n"), unigrams));
-    Assertions.assertEquals(1,
-        loader.parseBigrams(stringResource("中文 café\t" + count + "\n"), bigrams));
-    Assertions.assertEquals(Map.of("café", expected), unigrams);
-    Assertions.assertEquals(Map.of("中文 café", expected), bigrams);
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"-\u0665", "９２２３３７２０３６８５４７７５８０８", "\uD835\uDFCE"})
-  void testInvalidCountsAreRejectedInBothFormats(String count) {
-    final FrequencyDictionaryLoader loader = new FrequencyDictionaryLoader();
-    Assertions.assertThrows(MalformedDictionaryLineException.class,
-        () -> loader.parseUnigrams(stringResource("café\t" + count + "\n"), new LinkedHashMap<>()));
-    Assertions.assertThrows(MalformedDictionaryLineException.class,
-        () -> loader.parseBigrams(stringResource("中文 café\t" + count + "\n"), new LinkedHashMap<>()));
+    final MalformedDictionaryLineException unigram = Assertions.assertThrows(
+        MalformedDictionaryLineException.class,
+        () -> loader.parseUnigrams(stringResource("caf\u00E9\t" + count + "\n"), new LinkedHashMap<>()));
+    final MalformedDictionaryLineException bigram = Assertions.assertThrows(
+        MalformedDictionaryLineException.class,
+        () -> loader.parseBigrams(stringResource("\u4E2D\u6587 caf\u00E9\t" + count + "\n"),
+            new LinkedHashMap<>()));
+    Assertions.assertTrue(unigram.getMessage().contains("(count is not an integer)"), unigram.getMessage());
+    Assertions.assertTrue(bigram.getMessage().contains("(count is not an integer)"), bigram.getMessage());
   }
 
   @Test
