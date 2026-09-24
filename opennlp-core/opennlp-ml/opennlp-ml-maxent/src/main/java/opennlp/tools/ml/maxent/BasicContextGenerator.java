@@ -20,8 +20,6 @@ package opennlp.tools.ml.maxent;
 import java.util.ArrayList;
 import java.util.List;
 
-import opennlp.tools.util.StringUtil;
-
 /**
  * A {@link ContextGenerator} implementation for maxent decisions, assuming that the input
  * given to the {@link #getContext(String)} method is a String containing contextual
@@ -39,16 +37,23 @@ public class BasicContextGenerator implements ContextGenerator<String> {
 
   private static final String[] NO_PREDICATES = new String[0];
 
+  private static final char SPACE = ' ';
+  private static final char TAB = '\t';
+  private static final char CARRIAGE_RETURN = '\r';
+  private static final char LINE_FEED = '\n';
+  private static final char FORM_FEED = '\f';
+
   /**
    * The separator, or {@code null} to split on whitespace.
    */
   private final String separator;
 
   /**
-   * Initializes a {@link BasicContextGenerator} that splits on runs of whitespace under the
-   * Unicode {@code White_Space} property, see {@link StringUtil#isUnicodeWhitespace(int)}.
-   * That definition is fixed and does not depend on the {@code opennlp.whitespace.mode}
-   * system property, see {@link opennlp.tools.util.WhitespaceMode}.
+   * Initializes a {@link BasicContextGenerator} that splits on runs of space, tab, carriage
+   * return, line feed and form feed, the characters that separate the fields of an event
+   * file, see {@link opennlp.tools.ml.model.FileEventStream}. Other characters, including
+   * no-break spaces, are part of the predicates. The set does not depend on the
+   * {@code opennlp.whitespace.mode} system property, see {@link opennlp.tools.util.WhitespaceMode}.
    */
   public BasicContextGenerator() {
     separator = null;
@@ -103,7 +108,7 @@ public class BasicContextGenerator implements ContextGenerator<String> {
       throw new IllegalArgumentException("o must not be null");
     }
     if (separator == null) {
-      return StringUtil.splitOnUnicodeWhitespace(o);
+      return splitOnWhitespace(o);
     }
     int next = o.indexOf(separator);
     if (next == -1) {
@@ -122,6 +127,41 @@ public class BasicContextGenerator implements ContextGenerator<String> {
       contexts.add(o.substring(start));
     }
     return contexts.toArray(NO_PREDICATES);
+  }
+
+  /**
+   * Splits {@code o} at each run of whitespace, see {@link #isWhitespace(char)}.
+   *
+   * @param o The input, not {@code null}.
+   * @return The non-empty parts of {@code o}, in order.
+   */
+  private String[] splitOnWhitespace(String o) {
+    final List<String> contexts = new ArrayList<>();
+    int start = -1;
+    for (int i = 0; i < o.length(); i++) {
+      if (isWhitespace(o.charAt(i))) {
+        if (start >= 0) {
+          contexts.add(o.substring(start, i));
+          start = -1;
+        }
+      } else if (start < 0) {
+        start = i;
+      }
+    }
+    if (start >= 0) {
+      contexts.add(o.substring(start));
+    }
+    return contexts.toArray(NO_PREDICATES);
+  }
+
+  /**
+   * Tests whether a character separates predicates in the default configuration.
+   *
+   * @param c The character to test.
+   * @return {@code true} if {@code c} is a space, tab, carriage return, line feed or form feed.
+   */
+  private boolean isWhitespace(char c) {
+    return c == SPACE || c == TAB || c == CARRIAGE_RETURN || c == LINE_FEED || c == FORM_FEED;
   }
 
 }
