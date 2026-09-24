@@ -223,6 +223,20 @@ public final class JsonScan {
   }
 
   /**
+   * Tests whether the value of a member is a string.
+   *
+   * @param text The JSON text. Must not be {@code null}.
+   * @param member The member, inside the text. Must not be {@code null}.
+   * @return {@code true} if the value starts with a quote.
+   * @throws IllegalArgumentException Thrown if an argument is {@code null} or the member lies
+   *     outside the text.
+   */
+  static boolean isString(String text, Member member) {
+    requireMember(text, member);
+    return text.charAt(member.valueStart()) == QUOTE;
+  }
+
+  /**
    * Reads the value of a member as a string.
    *
    * @param text The JSON text. Must not be {@code null}.
