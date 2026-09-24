@@ -58,6 +58,9 @@ public abstract class AbstractDL implements AutoCloseable {
   private static final String TOKENIZER_TYPE_KEY = "type";
   private static final String TOKENIZER_VOCAB_KEY = "vocab";
   private static final String TOKENIZER_SUBWORD_PREFIX_KEY = "continuing_subword_prefix";
+  private static final String TOKENIZER_ADDED_TOKENS_KEY = "added_tokens";
+  private static final String TOKENIZER_ID_KEY = "id";
+  private static final String TOKENIZER_CONTENT_KEY = "content";
   /** The only {@code model.type} of a {@code tokenizer.json} the WordPiece encoder can use. */
   private static final String WORDPIECE_MODEL_TYPE = "WordPiece";
   /** The continuing subword prefix the WordPiece encoder assumes. */
@@ -548,16 +551,18 @@ public abstract class AbstractDL implements AutoCloseable {
    * Reads a JSON vocabulary in one of two layouts: a {@code vocab.json} object that maps each
    * token to its ID, or a {@code tokenizer.json} of a WordPiece model, recognized by a
    * {@code model} object with a string {@code type}, whose {@code model.vocab} object supplies
-   * the tokens. Keys are decoded from their escapes, and a later entry for the same token
+   * the tokens and whose {@code added_tokens} entries absent from {@code model.vocab} are added
+   * with their ids. Keys are decoded from their escapes, and a later entry for the same token
    * overwrites an earlier one.
    *
    * @param json The JSON text of the vocabulary.
    * @return A map of vocabulary tokens to IDs.
    * @throws IllegalArgumentException Thrown if the text is not a single well-formed JSON object,
    *     if a value of the vocabulary object is not a non-negative integer that fits into an
-   *     {@code int}, or if a {@code tokenizer.json} is not that of a WordPiece model with the
-   *     {@code ##} continuing subword prefix and a {@code model.vocab} object. The message names
-   *     the offset, the token, or the unsupported member.
+   *     {@code int}, if a {@code tokenizer.json} is not that of a WordPiece model with the
+   *     {@code ##} continuing subword prefix and a {@code model.vocab} object, or if an added
+   *     token is malformed or conflicts with another token or id. The message names the offset,
+   *     the token, or the unsupported member.
    */
   static Map<String, Integer> loadJsonVocab(final String json) {
     final List<JsonScan.Member> document = JsonScan.document(json);
@@ -566,7 +571,10 @@ public abstract class AbstractDL implements AutoCloseable {
       final List<JsonScan.Member> modelMembers = JsonScan.members(json, model.valueStart());
       final JsonScan.Member type = JsonScan.member(modelMembers, TOKENIZER_TYPE_KEY);
       if (type != null && JsonScan.isString(json, type)) {
-        return tokenizerVocab(json, modelMembers, JsonScan.stringValue(json, type));
+        final Map<String, Integer> vocab =
+            tokenizerVocab(json, modelMembers, JsonScan.stringValue(json, type));
+        addTokens(json, document, vocab);
+        return vocab;
       }
     }
     final Map<String, Integer> vocab = new HashMap<>();
@@ -628,6 +636,73 @@ public abstract class AbstractDL implements AutoCloseable {
       }
     }
     return ids;
+  }
+
+  /**
+   * Adds the entries of the {@code added_tokens} list of a {@code tokenizer.json} to a
+   * vocabulary. An entry whose token the vocabulary already maps to the same id is left as it
+   * is.
+   *
+   * @param json The JSON text.
+   * @param document The members of the top-level object.
+   * @param vocab The vocabulary read from {@code model.vocab}, extended in place.
+   * @throws IllegalArgumentException Thrown if {@code added_tokens} is present and not a list,
+   *     if an entry is not an object with a string {@code content} and a non-negative integer
+   *     {@code id}, or if an entry conflicts with the vocabulary: its token has another id
+   *     there, or its id belongs to another token.
+   */
+  private static void addTokens(final String json, final List<JsonScan.Member> document,
+      final Map<String, Integer> vocab) {
+    final JsonScan.Member addedTokens = JsonScan.member(document, TOKENIZER_ADDED_TOKENS_KEY);
+    if (addedTokens == null) {
+      return;
+    }
+    if (!JsonScan.isArray(json, addedTokens)) {
+      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_ADDED_TOKENS_KEY
+          + " must be a list");
+    }
+    Map<Integer, String> tokensById = null;
+    for (JsonScan.Member entry : JsonScan.elements(json, addedTokens.valueStart())) {
+      final String where = TOKENIZER_ADDED_TOKENS_KEY + "[" + entry.key() + "]";
+      if (!JsonScan.isObject(json, entry)) {
+        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + " must be an object");
+      }
+      final List<JsonScan.Member> fields = JsonScan.members(json, entry.valueStart());
+      final JsonScan.Member content = JsonScan.member(fields, TOKENIZER_CONTENT_KEY);
+      final JsonScan.Member id = JsonScan.member(fields, TOKENIZER_ID_KEY);
+      if (content == null || id == null) {
+        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + " must have \""
+            + TOKENIZER_CONTENT_KEY + "\" and \"" + TOKENIZER_ID_KEY + "\"");
+      }
+      final String token;
+      final int tokenId;
+      try {
+        token = JsonScan.stringValue(json, content);
+        tokenId = JsonScan.nonNegativeIntValue(json, id);
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + ": " + e.getMessage(), e);
+      }
+      final Integer known = vocab.get(token);
+      if (known != null) {
+        if (known != tokenId) {
+          throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + "added token \"" + token
+              + "\" has id " + tokenId + " but the vocabulary maps it to " + known);
+        }
+        continue;
+      }
+      if (tokensById == null) {
+        tokensById = new HashMap<>();
+        for (Map.Entry<String, Integer> e : vocab.entrySet()) {
+          tokensById.put(e.getValue(), e.getKey());
+        }
+      }
+      final String holder = tokensById.putIfAbsent(tokenId, token);
+      if (holder != null) {
+        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + "added token \"" + token
+            + "\" has id " + tokenId + " but the vocabulary maps \"" + holder + "\" to it");
+      }
+      vocab.put(token, tokenId);
+    }
   }
 
   /**
