@@ -95,7 +95,7 @@ public class RealValueFileEventStream extends FileEventStream {
    * @param contexts The contexts with real values specified.
    * @return The value for each context or {@code null} if all values are unspecified.
    *
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IllegalArgumentException Thrown if a value is negative.
    */
   public static float[] parseContexts(String[] contexts) {
     boolean hasRealValue = false;
@@ -113,7 +113,7 @@ public class RealValueFileEventStream extends FileEventStream {
         }
         if (gotReal) {
           if (values[ci] < 0) {
-            throw new RuntimeException(EventFields.NEGATIVE_VALUE + contexts[ci]);
+            throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + contexts[ci]);
           }
           contexts[ci] = contexts[ci].substring(0, ei);
           hasRealValue = true;
@@ -139,9 +139,8 @@ public class RealValueFileEventStream extends FileEventStream {
    *
    * @param line The event line. Must not be {@code null}.
    * @return The event; a line with only an outcome gives an event without contexts.
-   * @throws IllegalArgumentException Thrown if {@code line} is {@code null}.
-   * @throws InvalidFormatException Thrown if {@code line} has no field.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IllegalArgumentException Thrown if {@code line} is {@code null} or a value is negative.
+   * @throws InvalidFormatException Thrown if {@code line} is blank.
    */
   public static Event parseEvent(String line) throws InvalidFormatException {
     if (line == null) {
@@ -158,8 +157,9 @@ public class RealValueFileEventStream extends FileEventStream {
   /**
    * {@inheritDoc}
    *
-   * @throws IOException Thrown if there is an error during reading, or if a line has no outcome.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IOException Thrown if there is an error during reading.
+   * @throws InvalidFormatException Thrown if a line is blank.
+   * @throws IllegalArgumentException Thrown if a value is negative.
    */
   @Override
   public Event read() throws IOException {

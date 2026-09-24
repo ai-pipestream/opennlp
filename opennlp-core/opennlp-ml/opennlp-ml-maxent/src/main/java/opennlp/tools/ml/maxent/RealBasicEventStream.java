@@ -21,6 +21,7 @@ import java.io.IOException;
 
 import opennlp.tools.ml.model.Event;
 import opennlp.tools.ml.model.RealValueFileEventStream;
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
 
 /**
@@ -44,8 +45,8 @@ public class RealBasicEventStream implements ObjectStream<Event> {
    * Each line is parsed by {@link RealValueFileEventStream#parseEvent(String)}.
    *
    * @throws IOException Thrown if there is an error during reading.
-   * @throws opennlp.tools.util.InvalidFormatException Thrown if a line has no outcome.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws InvalidFormatException Thrown if a line is blank.
+   * @throws IllegalArgumentException Thrown if a value is negative.
    */
   @Override
   public Event read() throws IOException {
