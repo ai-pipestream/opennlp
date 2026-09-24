@@ -16,6 +16,8 @@
  */
 package opennlp.tools.tokenize;
 
+import java.util.function.Predicate;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -25,6 +27,7 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,6 +36,11 @@ public class TokenizerCharacterPolicyTest {
   private static final int DESERET_LETTER = 0x10400;
   private static final int MUSICAL_MARK = 0x1D165;
   private static final int MATHEMATICAL_DIGIT = 0x1D7D8;
+
+  @Test
+  void testPolicyIsACharSequencePredicate() {
+    assertInstanceOf(Predicate.class, TokenizerCharacterPolicy.ascii());
+  }
 
   @Test
   void testAsciiPresetHasExactSets() {
