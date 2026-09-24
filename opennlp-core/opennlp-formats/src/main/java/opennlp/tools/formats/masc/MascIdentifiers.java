@@ -58,15 +58,17 @@ final class MascIdentifiers {
    *         an {@code int}.
    */
   static int parseId(String id, String prefix) {
-    if (id == null || !id.startsWith(prefix) || id.length() == prefix.length()
-        || StringUtil.endOfAsciiDigits(id, prefix.length()) != id.length()) {
+    if (id == null || !id.startsWith(prefix)) {
       throw new IllegalArgumentException(
           "MASC identifier must be " + prefix + " followed by digits: " + id);
     }
     try {
-      return Integer.parseInt(id, prefix.length(), id.length(), 10);
+      return parseAsciiInt(id, prefix.length());
     } catch (NumberFormatException e) {
       throw new IllegalArgumentException("MASC identifier number does not fit an int: " + id, e);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          "MASC identifier must be " + prefix + " followed by digits: " + id, e);
     }
   }
 
@@ -139,10 +141,29 @@ final class MascIdentifiers {
       throw new IllegalArgumentException("MASC region anchors must contain exactly two offsets: " + anchors);
     }
     try {
-      return new Span(Integer.parseInt(items[0]), Integer.parseInt(items[1]));
+      return new Span(parseAsciiInt(items[0], 0), parseAsciiInt(items[1], 0));
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("Invalid MASC region anchors: " + anchors, e);
     }
+  }
+
+  /**
+   * Parses the ASCII digits from {@code from} to the end of {@code text} as a nonnegative
+   * {@code int}. A sign and digits of other scripts are not accepted.
+   *
+   * @param text The text holding the digits.
+   * @param from The index of the first digit.
+   * @return The number.
+   * @throws IllegalArgumentException Thrown if there is no digit at {@code from} or the digits
+   *         do not reach the end of {@code text}.
+   * @throws NumberFormatException Thrown if the number does not fit an {@code int}.
+   */
+  private static int parseAsciiInt(String text, int from) {
+    int end = StringUtil.endOfAsciiDigits(text, from);
+    if (end == from || end != text.length()) {
+      throw new IllegalArgumentException("Expected ASCII digits only: " + text.substring(from));
+    }
+    return Integer.parseInt(text, from, end, 10);
   }
 
   /** Returns whether a character belongs to the XML whitespace production S. */
