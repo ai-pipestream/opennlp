@@ -88,7 +88,12 @@ accordingly; no conversion is required.
 
 ## Testing against real dictionaries
 
-The runtime tests use project-authored fixtures. `HunspellCompatibilityEval` in `opennlp-eval-tests` extends `AbstractEvalTest` and loads the LibreOffice `en_US`, `de_DE_frami`, and `hu_HU` dictionaries from the `hunspell/` directory of `OPENNLP_DATA_DIR`, the shared `opennlp-data.zip` archive every evaluation uses. It checks strict loading, expected inflections, compounds, concurrent stemming, and the stems and recognition recorded from Hunspell as described below.
+The runtime tests use project-authored fixtures. `HunspellCompatibilityEval` in
+`opennlp-eval-tests` extends `AbstractEvalTest` and loads the LibreOffice
+`en_US`, `de_DE_frami`, and `hu_HU` dictionaries from the `hunspell/` directory
+of `OPENNLP_DATA_DIR`, the shared `opennlp-data.zip` archive every evaluation
+uses. It checks strict loading, concurrent stemming, and the stems and
+recognition recorded from Hunspell as described below.
 
 The dictionary revision is
 [`32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4`](https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4).
@@ -117,28 +122,75 @@ from Hunspell. Morphological analyses are compared on the fixtures in
 `HunspellCompletionTest` only. It reports exact result-set matches,
 expected differences, unknown-input identity fallbacks, and unexpected results
 separately, and fails on an unexpected result. Expected differences specify the
-complete OpenNLP output for inputs whose recorded reference output differs, so a
+complete OpenNLP output for inputs whose recorded Hunspell output differs, so a
 change on either side fails. Concurrency checks compare repeated results with a
-single-threaded reference. They do not measure throughput, and compatibility
+single-threaded run. They do not measure throughput, and compatibility
 counts are not accuracy scores.
 
-### How the reference results were recorded
+### How the Hunspell results were recorded
 
-The reference outcomes recorded in `HunspellCompatibilityTest`, `HunspellCompletionTest`, and `HunspellCompatibilityEval` come from Hunspell revision [`e184e22c51fe213f4490e9b36998f0ad3e5e606b`](https://github.com/hunspell/hunspell/commit/e184e22c51fe213f4490e9b36998f0ad3e5e606b), built from source and driven through its C API. The project contains no native source, and no test forks a native process; the fixtures and the recorded outputs are what is committed.
+The acceptance, stems, and analyses recorded in `HunspellCompatibilityTest`,
+`HunspellCompletionTest`, and `HunspellCompatibilityEval` come from Hunspell
+revision
+[`e184e22c51fe213f4490e9b36998f0ad3e5e606b`](https://github.com/hunspell/hunspell/commit/e184e22c51fe213f4490e9b36998f0ad3e5e606b),
+built from source with the recording driver `dev/hunspell-record.cxx`. No test
+runs native code; the fixtures and the recorded values are committed.
 
-The driver used for recording is about thirty lines of C++ against `hunspell.h`: it calls `Hunspell_create(affixPath, dictionaryPath)`, reads one input per line from standard input in the encoding the affix file declares with `SET`, and for each line calls `Hunspell_spell`, `Hunspell_stem`, or `Hunspell_analyze` as selected by a command-line argument, printing one output line per input with multiple stems or analyses joined by a tab, then releases each result list with `Hunspell_free_list` and the handle with `Hunspell_destroy`. It builds with:
+The driver loads an affix file and a word list, reads one input per line from
+standard input in the encoding the affix file declares with `SET`, and prints one
+tab-separated line per input: the input, `accepted` or `rejected` as returned by
+`Hunspell::spell()`, and the results of `Hunspell::stem()`, or of
+`Hunspell::analyze()` with `--analyze`. Build it outside the OpenNLP checkout,
+compiling the Hunspell library sources directly:
 
 ```sh
-g++ -std=c++17 -O2 -DHUNSPELL_STATIC \
-    -I/path/to/hunspell/src/hunspell \
-    /path/to/hunspell/src/hunspell/*.cxx driver.cc -o hunspell-reference
+git clone https://github.com/hunspell/hunspell.git
+git -C hunspell checkout e184e22c51fe213f4490e9b36998f0ad3e5e606b
+g++ -std=c++17 -O2 -DHUNSPELL_STATIC -Ihunspell/src/hunspell \
+    hunspell/src/hunspell/*.cxx /path/to/opennlp/dev/hunspell-record.cxx \
+    -o hunspell-record
 ```
 
-Whitespace inside recorded analyses is normalized to single spaces. The fixture tests assert the OpenNLP results and, where recognition deliberately deviates from the recorded reference outcome, name the deviation from the manual; a fixture whose deviation disappears fails, so the recorded outcomes stay honest. To re-record after a reference upgrade, rebuild the driver from the new revision, run the fixtures and the evaluation inputs through it, and update the recorded values.
+`HunspellCompatibilityTest` and `HunspellCompletionTest` load each fixture with
+`SET UTF-8` before its affix content, so write the fixture files the same way:
+
+```sh
+printf 'SET UTF-8\nSFX A Y 1\nSFX A 0 s .\n' > plural.aff
+printf '1\ncard/A\n' > plural.dic
+echo cards | ./hunspell-record plural.aff plural.dic
+echo cards | ./hunspell-record --analyze plural.aff plural.dic
+```
+
+The first command prints `cards`, `accepted`, and `card`, separated by tabs; the
+second prints the analysis `st:card fl:A`, with a leading space, in place of the
+stem. The German
+dictionary declares `SET ISO8859-1`, so convert its inputs and results:
+
+```sh
+iconv -f UTF-8 -t ISO-8859-1 inputs.txt \
+    | ./hunspell-record de_DE_frami.aff de_DE_frami.dic \
+    | iconv -f ISO-8859-1 -t UTF-8
+```
+
+Whitespace inside recorded analyses is normalized to single spaces, and analyses
+that Hunspell returns in a different order are compared as sets. The fixture
+tests assert the OpenNLP results and compare them with the recorded values; a
+fixture whose result deliberately differs names the reason, and a listed
+difference that disappears fails. To re-record after a Hunspell upgrade, rebuild
+the driver from the new revision, run the fixtures and the evaluation inputs
+through it, and update the recorded values.
 
 ## What the engine supports
 
-The engine applies `PFX` and `SFX` rules with strip strings and character-class conditions. It supports a prefix and suffix cross-product, a double suffix sequence connected by continuation classes, rules that add and strip no material both on their own and in continuation paths, file-wide `FLAG` modes, file-wide `AF` aliases, and the `SET` encoding declaration. Numeric flags range from 1 through 65535, the full range the reference accepts. A number sign starts a comment at the beginning of a line or after the fields a directive consumes; elsewhere it is an ordinary value, so `BREAK #`, `NEEDAFFIX #`, and affix material consisting of `#` load as written.
+The engine applies `PFX` and `SFX` rules with strip strings and character-class
+conditions. It supports a prefix and suffix cross-product, a double suffix
+sequence connected by continuation classes, rules that add and strip no material
+both on their own and in continuation paths, file-wide `FLAG` modes, file-wide
+`AF` aliases, and the `SET` encoding declaration. Numeric flags range from 1
+through 65535, the full range Hunspell accepts. A number sign starts a comment
+at the beginning of a line or after the fields a directive consumes; elsewhere
+it is an ordinary value, so `BREAK #`, `NEEDAFFIX #`, and affix material
+consisting of `#` load as written.
 
 `COMPLEXPREFIXES` selects 2 prefix levels and 1 suffix level instead of 1
 prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions;
@@ -147,16 +199,17 @@ prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions;
 and warning-marked entries. A capitalized word with a further inner capital is also
 tried with a lowercase initial, and the Turkic `LANG` values map the dotted and
 dotless `i` in both case directions. All-uppercase input also matches mixed-case
-entries and flagged all-uppercase entries in their capitalized form, as the
-reference does through hidden capitalized homonyms, so `IPODS` stems to `Ipod`
-while `Ipods` stays unrecognized; these forms take no part in compounds. An
-all-uppercase word with an apostrophe is also tried with the part after the
-apostrophe capitalized, so `L'AFRIQUE` finds an elided article rule. Trailing
-periods are removed before lookup, and one period is restored when only an entry
-listed with it matches, so `texts.` stems to `text` and `etc.` stays `etc.`.
-Under `LANG hu`, the part of a word before a hyphen follows the reference's
-moving rule: it may be a compound whose opening entry carries one of the
-hardwired flags `F`, `G`, or `H`, ignoring compound-forbid and size limits.
+entries and flagged all-uppercase entries in their capitalized form, as Hunspell
+does through hidden capitalized homonyms, so with `eBook` listed, `EBOOKS` stems
+to `Ebook` while `Ebooks` stays unrecognized; these forms take no part in
+compounds. An all-uppercase word with an apostrophe is also tried with the part
+after the apostrophe capitalized, so `D'ORIENT` finds an elided article rule.
+Trailing periods are removed before lookup, and one period is restored when only
+an entry listed with it matches, so `texts.` stems to `text` and `etc.` stays
+`etc.`. Under `LANG hu`, the part of a word before a hyphen may be a compound
+whose opening entry carries one of the flags `F`, `G`, or `H`, which Hunspell
+hard-wires for Hungarian dictionaries; compound-forbid and size limits do not
+apply to it.
 
 Compound decomposition supports positional flags and independent `COMPOUNDRULE`
 patterns, including optional and repeated flags. It applies compound permit and
@@ -167,7 +220,13 @@ entries and dictionary `ph:` replacements. Compound boundaries and minimum
 lengths use Unicode code points. `BREAK` splits recognized parts recursively;
 the default separators are `-`, `^-`, and `-$`, and `BREAK 0` disables them.
 
-The compound restrictions follow Hunspell in detail. `CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair checks apply to the complete input and to every remainder a further level splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt from the other patterns. A listed spelling whose first homonym carries `COMPOUNDFORBIDFLAG` is barred from every position but the last, including its affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
+`CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a
+repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair
+checks apply to the complete input and to every remainder a further level
+splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt
+from the other patterns. A listed spelling whose first homonym carries
+`COMPOUNDFORBIDFLAG` is barred from every position but the last, including its
+affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
 
 `NEEDAFFIX` (also named `PSEUDOROOT`), `ONLYINCOMPOUND`, `FORBIDDENWORD`,
 `CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted. As in
@@ -180,22 +239,15 @@ material, and `ds:` makes the form derived by the entry's suffixes the stem.
 `SYLLABLENUM` supports Hungarian compound syllable adjustments. The deprecated
 `LEMMA_PRESENT` directive is validated but has no effect. Obsolete
 `COMPOUNDFIRST`, `COMPOUNDLAST`, `ONLYROOT`, `HU_KOTOHANGZO`, and `GENERATE`
-metadata have no effect on stemming or analysis in the pinned reference and
-are ignored. The active compound and affix directives remain applicable.
+metadata have no effect on stemming or analysis in the pinned Hunspell revision
+and are ignored. The active compound and affix directives remain applicable.
 
-`HunspellStemmer.analyze(text)` returns an immutable list of distinct analyses
-as space-separated Hunspell fields in the reference field order. Entries without
-`st:` use the entry text. A suffix without morphological fields contributes `fl:`
-and its flag after the entry fields. A prefix without morphological fields
-contributes its affix text before the stem when no suffix follows and `fl:` with
-its flag otherwise; an entry without fields then contributes the prefix's `fl:`
-field after the stem. Compound components begin with `pa:`, and a closing
-component without affixes or entry fields carries no `st:` field. Unknown input
-returns an empty list.
-Analysis preserves field text without `OCONV`. The shared `Stemmer` interface
-is unchanged. The manual contains an executable example.
-
-Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading in both modes. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
+Comments and unused metadata may contain legacy-encoded bytes even when the file
+uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and
+`long` flag modes preserve raw one-byte flag values used by published UTF-8
+dictionaries. Invalid rule counts, aliases, flags, and compound limits fail
+during loading in both modes. Each affix or dictionary stream is rejected when it
+exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
 
 ## Loading policy
 
@@ -204,10 +256,10 @@ directives cause an `IOException` identifying the directive and source line.
 Path-based loading includes the affix path. Valid Hunspell dictionaries using
 unsupported features require an explicit choice to load partially.
 
-Unknown directive names cause rejection. Recognized metadata and settings outside stemming,
-such as `NAME`, `TRY`, and `WORDCHARS`, are ignored. `REP` is parsed when
-`CHECKCOMPOUNDREP` makes replacements affect compound recognition; otherwise it
-is unused suggestion data.
+Unknown directive names cause rejection. Recognized metadata and settings
+outside stemming, such as `NAME`, `TRY`, and `WORDCHARS`, are ignored. `REP` is
+parsed when `CHECKCOMPOUNDREP` makes replacements affect compound recognition;
+otherwise it is unused suggestion data.
 
 Use `ALLOW_PARTIAL` to skip unsupported directives and inspect the diagnostics:
 
