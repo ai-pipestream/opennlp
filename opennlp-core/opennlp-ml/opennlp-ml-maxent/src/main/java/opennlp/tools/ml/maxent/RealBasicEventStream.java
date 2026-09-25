@@ -21,12 +21,13 @@ import java.io.IOException;
 
 import opennlp.tools.ml.model.Event;
 import opennlp.tools.ml.model.RealValueFileEventStream;
+import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
 
 /**
  * Class for real-valued {@link Event events} as an
  * {@link ObjectStream event stream}.
- * .
+ *
  * @see Event
  * @see ObjectStream
  */
@@ -34,6 +35,11 @@ public class RealBasicEventStream implements ObjectStream<Event> {
 
   private final ObjectStream<String> ds;
 
+  /**
+   * Instantiates a {@link RealBasicEventStream} over a stream of event lines.
+   *
+   * @param ds The {@link ObjectStream} of lines, one event per line.
+   */
   public RealBasicEventStream(ObjectStream<String> ds) {
     this.ds = ds;
   }
@@ -41,11 +47,13 @@ public class RealBasicEventStream implements ObjectStream<Event> {
   /**
    * {@inheritDoc}
    * <p>
-   * Each line is parsed by {@link RealValueFileEventStream#parseEvent(String)}.
+   * Each line is parsed by {@link RealValueFileEventStream#parseEvent(String)}. Since 3.0, a line
+   * with only an outcome is an event without contexts; earlier versions ended the stream at
+   * such a line.
    *
    * @throws IOException Thrown if there is an error during reading.
-   * @throws opennlp.tools.util.InvalidFormatException Thrown if a line has no outcome.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws InvalidFormatException Thrown if a line is blank.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   @Override
   public Event read() throws IOException {

@@ -22,20 +22,25 @@ import java.util.List;
 
 import opennlp.tools.util.ObjectStream;
 
+/**
+ * Builds an in-memory {@link ObjectStream} of {@link Event events} from text lines,
+ * mainly for tests. See {@link #add(String)} for the format.
+ */
 public class SimpleEventStreamBuilder {
 
   private static final char OUTCOME_SEPARATOR = '/';
   private static final char VALUE_SEPARATOR = ';';
   private static final String FORMAT_ERROR = "format error of the event \"%s\"";
+  private static final String NOT_NAME_VALUE = FORMAT_ERROR + ". \"%s\" is not name;value";
+  private static final String NOT_A_NUMBER = FORMAT_ERROR + ". \"%s\" is not a number";
 
   private final List<Event> eventList = new ArrayList<>();
   private int pos = 0;
 
   /**
    * Adds one event. The outcome runs up to the first {@code /}; the contexts follow it, separated
-   * by runs of space, tab, carriage return, line feed, and form feed, as in
-   * {@link FileEventStream}. Other characters remain in the context names. Delimiters are
-   * independent of tokenizer configuration and {@code opennlp.whitespace.mode}.
+   * by runs of space, tab, carriage return, line feed and form feed, as in
+   * {@link FileEventStream}. Other characters remain in the context names.
    * Each context can have a value after a {@code ;}:
    * <pre>
    * other/w=he n1w=belongs n2w=to po=other pow=other,He powf=other,ic
@@ -47,8 +52,7 @@ public class SimpleEventStreamBuilder {
    * @throws IllegalArgumentException Thrown if {@code event} is {@code null}, if the outcome or
    *         the contexts are missing, if the first context has a value and another one is not
    *         written as {@code name;value} with both parts present and no further {@code ;}, or
-   *         if a value is negative.
-   * @throws NumberFormatException Thrown if a value is not a number.
+   *         if a value is not a number, is negative, NaN or infinite.
    */
   public SimpleEventStreamBuilder add(String event) {
     if (event == null) {
@@ -72,13 +76,20 @@ public class SimpleEventStreamBuilder {
         int separator = pair.indexOf(VALUE_SEPARATOR);
         if (separator < 1 || separator == pair.length() - 1
             || pair.indexOf(VALUE_SEPARATOR, separator + 1) >= 0) {
-          throw new IllegalArgumentException(String.format(FORMAT_ERROR + ". \"%s\" is not name;value",
-              event, pair));
+          throw new IllegalArgumentException(String.format(NOT_NAME_VALUE, event, pair));
         }
         context[i] = pair.substring(0, separator);
-        values[i] = Float.parseFloat(pair.substring(separator + 1));
+        String value = pair.substring(separator + 1);
+        try {
+          values[i] = Float.parseFloat(value);
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException(String.format(NOT_A_NUMBER, event, value), e);
+        }
+        if (!Float.isFinite(values[i])) {
+          throw new IllegalArgumentException(EventFields.NON_FINITE_VALUE + pair);
+        }
         if (values[i] < 0) {
-          throw new IllegalArgumentException("Negative values are not allowed: " + pair);
+          throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + pair);
         }
       }
       eventList.add(new Event(outcome, context, values));
@@ -89,6 +100,10 @@ public class SimpleEventStreamBuilder {
     return this;
   }
 
+  /**
+   * @return An {@link ObjectStream} over the added events, in insertion order. The stream
+   *         does not support {@link ObjectStream#reset()}.
+   */
   public ObjectStream<Event> build() {
     return () -> {
       if (eventList.size() <= pos) {

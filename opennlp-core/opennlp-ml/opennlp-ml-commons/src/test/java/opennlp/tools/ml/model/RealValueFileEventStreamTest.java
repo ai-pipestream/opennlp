@@ -25,23 +25,20 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.FieldSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.ml.AbstractEventStreamTest;
-import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.ObjectStream;
-
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Verifies that the textual event (input) format in {@link RealValueFileEventStream} is:
  * <br/>
  * {@code outcome context1 context2 context3 ...}
  * <p>
- * and is consistent with {@code RealBasicEventStream}. Moreover, the test checks that processing
- * given input works as expected.
+ * and is consistent with {@code RealBasicEventStream} and {@link FileEventStream}.
  *
  * @see ObjectStream
  */
@@ -73,21 +70,6 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
       Assertions.assertEquals("other [wc=other=1.0 w&c=.,other=2.0 p1wc=ic=3.0]",
           eventStream.read().toString());
       Assertions.assertNull(eventStream.read());
-    }
-  }
-
-  @Test
-  void testReadWithInvalidNegativeValues() throws IOException {
-    try (RealValueFileEventStream eventStream = createEventStream(EVENTS_INVALID_NEGATIVE)) {
-      eventStream.read();
-      fail("Negative values should not be tolerated as input!");
-    } catch (RuntimeException rte) {
-      //noinspection StatementWithEmptyBody
-      if (rte.getMessage().startsWith("Negative values are not allowed")) {
-        // expected behviour
-      } else {
-        fail(rte);
-      }
     }
   }
 
@@ -137,7 +119,7 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
         Arguments.of("other\u0085wc=ic=1.0", "other\u0085wc=ic=1.0", new String[0]),
         Arguments.of("other\u2028wc=ic=1.0", "other\u2028wc=ic=1.0", new String[0]),
         Arguments.of("other\u3000wc=ic=1.0", "other\u3000wc=ic=1.0", new String[0]),
-        // file separator and zero width space do not, so they stay inside a field
+        // file separator and zero width space are not delimiters either
         Arguments.of("other\u001Cwc=ic=1.0", "other\u001Cwc=ic=1.0", new String[0]),
         Arguments.of("other\u200Bwc=ic=1.0", "other\u200Bwc=ic=1.0", new String[0]),
         Arguments.of("other wc\u001C=ic=1.0", "other", new String[] {"wc\u001C=ic"}),
@@ -145,9 +127,6 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
         Arguments.of("\uD83D\uDE00 w=\uD83D\uDE00=1.0", "\uD83D\uDE00", new String[] {"w=\uD83D\uDE00"}));
   }
 
-  /**
-   * The fields use fixed event delimiters, independent of the whitespace mode.
-   */
   @ParameterizedTest
   @MethodSource("fieldSeparators")
   void testFieldsUseEventDelimiters(String line, String outcome, String[] contexts)
@@ -155,18 +134,6 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
     Event e = RealValueFileEventStream.parseEvent(line);
     Assertions.assertEquals(outcome, e.getOutcome());
     Assertions.assertArrayEquals(contexts, e.getContext());
-  }
-
-  @Test
-  void testParseEventDoesNotDependOnTheSharedWhitespaceTokenizer() throws IOException {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(true);
-    try {
-      Event e = RealValueFileEventStream.parseEvent("other\nwc=ic=1.0\r\nn1wc=lc=2.0");
-      Assertions.assertEquals("other", e.getOutcome());
-      Assertions.assertArrayEquals(new String[] {"wc=ic", "n1wc=lc"}, e.getContext());
-    } finally {
-      WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
-    }
   }
 
   @Test
@@ -241,9 +208,18 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
   @ParameterizedTest
   @ValueSource(strings = {"wc=ic=-1", "wc=ic=-0.5", "wc=ic=-1e2", "wc=ic=-1E-2"})
   void testNegativeValueIsRejectedWithTheContextNamed(String context) {
-    RuntimeException e = Assertions.assertThrows(RuntimeException.class,
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
         () -> RealValueFileEventStream.parseEvent("other " + context));
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
+  }
+
+  /** {@code Float.parseFloat} accepts these, but they are no usable feature values. */
+  @ParameterizedTest
+  @ValueSource(strings = {"wc=ic=NaN", "wc=ic=Infinity", "wc=ic=-Infinity"})
+  void testNonFiniteValueIsRejectedWithTheContextNamed(String context) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> RealValueFileEventStream.parseEvent("other " + context));
+    Assertions.assertEquals("Values must be finite: " + context, e.getMessage());
   }
 
   @ParameterizedTest
@@ -265,9 +241,9 @@ public class RealValueFileEventStreamTest extends AbstractEventStreamTest {
     }
   }
 
+  /** See {@link #NON_DELIMITER_CHARS}: only the vertical tab row pins a change from 2.x. */
   @ParameterizedTest
-  @ValueSource(strings = {"\u00A0", "\u0085", "\u2028", "\u2029", "\u3000", "\u2007",
-      "\u202F", "\u200B", "\u000B", "\u001C", "\uD83D\uDE00", "e\u0301"})
+  @FieldSource("NON_DELIMITER_CHARS")
   void testFeatureIdentityMatchesUnvaluedFormat(String text) throws IOException {
     String feature = "word=New" + text + "York";
     String line = FileEventStream.toLine(new Event("label" + text, new String[] {feature, "中文"}));

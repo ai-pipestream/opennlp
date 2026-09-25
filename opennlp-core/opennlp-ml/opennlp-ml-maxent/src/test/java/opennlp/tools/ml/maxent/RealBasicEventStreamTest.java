@@ -84,15 +84,9 @@ public class RealBasicEventStreamTest extends AbstractEventStreamTest {
   @Test
   void testReadWithInvalidNegativeValues() throws IOException {
     try (RealBasicEventStream eventStream = createEventStream(EVENTS_INVALID_NEGATIVE)) {
-      eventStream.read();
-      fail("Negative values should not be tolerated as input!");
-    } catch (RuntimeException rte) {
-      //noinspection StatementWithEmptyBody
-      if (rte.getMessage().startsWith("Negative values are not allowed")) {
-        // expected behviour
-      } else {
-        fail(rte);
-      }
+      IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+          eventStream::read);
+      Assertions.assertEquals("Negative values are not allowed: wc=ic=-1.0", e.getMessage());
     }
   }
 
@@ -106,12 +100,11 @@ public class RealBasicEventStreamTest extends AbstractEventStreamTest {
   }
 
   /**
-   * Every line goes through {@link RealValueFileEventStream#parseEvent(String)}: an outcome-only
-   * line is an event without contexts and does not end the stream, fields are separated by
-   * tabs, Unicode feature characters are preserved, and a blank line is reported.
+   * An outcome-only line is an event without contexts and does not end the stream, a tab
+   * separates fields, a no-break space does not, and a blank line is reported.
    */
   @Test
-  void testReadParsesEveryLineWithParseEvent() throws IOException {
+  void testOutcomeOnlyLineDoesNotEndTheStream() throws IOException {
     String input = "other\r\nsecond\tword=New\u00A0York=2.0\t中文=3.0\n \nother wc=x=1.0\n";
     try (ObjectStream<Event> eventStream = createEventStream(input)) {
       Event e = eventStream.read();

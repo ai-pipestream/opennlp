@@ -32,8 +32,8 @@ import opennlp.tools.util.ObjectStream;
  * Class for using a file of real-valued {@link Event events} as an
  * {@link ObjectStream event stream}.
  * The format of the file is one event per line with
- * each line consisting of outcome followed by contexts, separated by fixed event delimiters,
- * see {@link #parseEvent(String)}.
+ * each line consisting of outcome followed by contexts, separated by
+ * space, tab, carriage return, line feed or form feed, see {@link #parseEvent(String)}.
  *
  * @see Event
  * @see FileEventStream
@@ -95,7 +95,7 @@ public class RealValueFileEventStream extends FileEventStream {
    * @param contexts The contexts with real values specified.
    * @return The value for each context or {@code null} if all values are unspecified.
    *
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   public static float[] parseContexts(String[] contexts) {
     boolean hasRealValue = false;
@@ -112,8 +112,11 @@ public class RealValueFileEventStream extends FileEventStream {
           values[ci] = 1;
         }
         if (gotReal) {
+          if (!Float.isFinite(values[ci])) {
+            throw new IllegalArgumentException(EventFields.NON_FINITE_VALUE + contexts[ci]);
+          }
           if (values[ci] < 0) {
-            throw new RuntimeException("Negative values are not allowed: " + contexts[ci]);
+            throw new IllegalArgumentException(EventFields.NEGATIVE_VALUE + contexts[ci]);
           }
           contexts[ci] = contexts[ci].substring(0, ei);
           hasRealValue = true;
@@ -130,18 +133,14 @@ public class RealValueFileEventStream extends FileEventStream {
 
   /**
    * Parses one event line. Fields are separated by runs of space, tab, carriage return,
-   * line feed, and form feed, as in {@link FileEventStream}. Other characters, including
-   * non-ASCII whitespace, remain in the fields. The delimiters do not depend on
-   * {@code opennlp.whitespace.mode} or tokenizer configuration.
-   * Leading, trailing, and repeated delimiters are ignored; the first field is the outcome and
-   * each further field is a context with an optional real value, see
-   * {@link #parseContexts(String[])}.
+   * line feed and form feed, as in {@link FileEventStream}; the first field is the outcome,
+   * the rest are contexts parsed by {@link #parseContexts(String[])}.
    *
    * @param line The event line. Must not be {@code null}.
    * @return The event; a line with only an outcome gives an event without contexts.
-   * @throws IllegalArgumentException Thrown if {@code line} is {@code null}.
-   * @throws InvalidFormatException Thrown if {@code line} has no field.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IllegalArgumentException Thrown if {@code line} is {@code null} or a value is negative,
+   *         NaN or infinite.
+   * @throws InvalidFormatException Thrown if {@code line} is blank.
    */
   public static Event parseEvent(String line) throws InvalidFormatException {
     if (line == null) {
@@ -149,7 +148,7 @@ public class RealValueFileEventStream extends FileEventStream {
     }
     String[] fields = EventFields.split(line);
     if (fields.length == 0) {
-      throw new InvalidFormatException("An event line must start with an outcome: \"" + line + "\"");
+      throw new InvalidFormatException(EventFields.MISSING_OUTCOME + line + "\"");
     }
     String[] contexts = Arrays.copyOfRange(fields, 1, fields.length);
     return new Event(fields[0], contexts, parseContexts(contexts));
@@ -158,8 +157,9 @@ public class RealValueFileEventStream extends FileEventStream {
   /**
    * {@inheritDoc}
    *
-   * @throws IOException Thrown if there is an error during reading, or if a line has no outcome.
-   * @throws RuntimeException Thrown if negative real values are detected in the input data.
+   * @throws IOException Thrown if there is an error during reading.
+   * @throws InvalidFormatException Thrown if a line is blank.
+   * @throws IllegalArgumentException Thrown if a value is negative, NaN or infinite.
    */
   @Override
   public Event read() throws IOException {
