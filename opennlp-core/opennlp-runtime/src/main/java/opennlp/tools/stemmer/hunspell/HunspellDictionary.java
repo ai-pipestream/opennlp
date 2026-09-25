@@ -215,6 +215,15 @@ public final class HunspellDictionary {
   /** The directive that selects the file-wide flag representation. */
   private static final String FLAG_TAG = "FLAG";
 
+  /** The {@code FLAG} value that selects character pairs as flags. */
+  private static final String LONG_FLAG_MODE = "long";
+
+  /** The {@code FLAG} value that selects comma-separated decimal numbers as flags. */
+  private static final String NUMERIC_FLAG_MODE = "num";
+
+  /** The {@code FLAG} value that selects single Unicode characters as flags. */
+  private static final String UTF8_FLAG_MODE = "UTF-8";
+
   /** The directive that defines the file-wide flag alias table. */
   private static final String ALIAS_TAG = "AF";
 
@@ -238,6 +247,24 @@ public final class HunspellDictionary {
   private static final String SYLLABLE_NUMBER_TAG = "SYLLABLENUM";
   private static final String LEMMA_PRESENT_TAG = "LEMMA_PRESENT";
   private static final String COMPOUND_SYLLABLE_TAG = "COMPOUNDSYLLABLE";
+  private static final String COMPOUND_FLAG_TAG = "COMPOUNDFLAG";
+  private static final String COMPOUND_BEGIN_TAG = "COMPOUNDBEGIN";
+  private static final String COMPOUND_MIDDLE_TAG = "COMPOUNDMIDDLE";
+  private static final String COMPOUND_END_TAG = "COMPOUNDEND";
+  private static final String COMPOUND_PERMIT_TAG = "COMPOUNDPERMITFLAG";
+  private static final String COMPOUND_FORBID_TAG = "COMPOUNDFORBIDFLAG";
+  private static final String NEED_AFFIX_TAG = "NEEDAFFIX";
+  private static final String PSEUDO_ROOT_TAG = "PSEUDOROOT";
+  private static final String ONLY_IN_COMPOUND_TAG = "ONLYINCOMPOUND";
+  private static final String FORBIDDEN_WORD_TAG = "FORBIDDENWORD";
+  private static final String CIRCUMFIX_TAG = "CIRCUMFIX";
+  private static final String COMPOUND_MIN_TAG = "COMPOUNDMIN";
+  private static final String COMPOUND_WORD_MAX_TAG = "COMPOUNDWORDMAX";
+  private static final String CHECK_COMPOUND_DUP_TAG = "CHECKCOMPOUNDDUP";
+  private static final String CHECK_COMPOUND_CASE_TAG = "CHECKCOMPOUNDCASE";
+  private static final String CHECK_COMPOUND_TRIPLE_TAG = "CHECKCOMPOUNDTRIPLE";
+  private static final String CHECK_COMPOUND_REP_TAG = "CHECKCOMPOUNDREP";
+  private static final String FULL_STRIP_TAG = "FULLSTRIP";
   /** The suggestion table whose replacements {@code CHECKCOMPOUNDREP} applies to compounds. */
   static final String REPLACEMENT_TAG = "REP";
 
@@ -686,7 +713,7 @@ public final class HunspellDictionary {
   private static List<UnsupportedDirective> maskIgnoredAffixLines(byte[] bytes,
       LoadMode mode, String source) throws IOException {
     final Map<String, UnsupportedDirective> unsupported = new LinkedHashMap<>();
-    final boolean useReplacements = hasAffixDirective(bytes, "CHECKCOMPOUNDREP");
+    final boolean useReplacements = hasAffixDirective(bytes, CHECK_COMPOUND_REP_TAG);
     int lineStart = 0;
     int lineNumber = 1;
     for (int i = 0; i <= bytes.length; i++) {
@@ -877,15 +904,15 @@ public final class HunspellDictionary {
   private static boolean isParsedAffixDirective(String directive) {
     return switch (directive) {
       case SET_TAG, FLAG_TAG, ALIAS_TAG, PREFIX_TAG, SUFFIX_TAG,
-          "COMPOUNDFLAG", "COMPOUNDBEGIN", "COMPOUNDMIDDLE", "COMPOUNDEND",
-          "COMPOUNDPERMITFLAG", "COMPOUNDFORBIDFLAG", "NEEDAFFIX", "PSEUDOROOT",
-          "ONLYINCOMPOUND", "FORBIDDENWORD", "CIRCUMFIX", "COMPOUNDMIN",
-          "COMPOUNDWORDMAX", "CHECKCOMPOUNDDUP", "CHECKCOMPOUNDCASE",
-          "CHECKCOMPOUNDTRIPLE", "FULLSTRIP", INPUT_CONVERSION_TAG, OUTPUT_CONVERSION_TAG,
+          COMPOUND_FLAG_TAG, COMPOUND_BEGIN_TAG, COMPOUND_MIDDLE_TAG, COMPOUND_END_TAG,
+          COMPOUND_PERMIT_TAG, COMPOUND_FORBID_TAG, NEED_AFFIX_TAG, PSEUDO_ROOT_TAG,
+          ONLY_IN_COMPOUND_TAG, FORBIDDEN_WORD_TAG, CIRCUMFIX_TAG, COMPOUND_MIN_TAG,
+          COMPOUND_WORD_MAX_TAG, CHECK_COMPOUND_DUP_TAG, CHECK_COMPOUND_CASE_TAG,
+          CHECK_COMPOUND_TRIPLE_TAG, FULL_STRIP_TAG, INPUT_CONVERSION_TAG, OUTPUT_CONVERSION_TAG,
           IGNORE_TAG, MORPHOLOGY_ALIAS_TAG, COMPLEX_PREFIXES_TAG, KEEP_CASE_TAG, WARNING_TAG,
           FORBID_WARNING_TAG, LANGUAGE_TAG, CHECK_SHARPS_TAG,
           COMPOUND_RULE_TAG, COMPOUND_ROOT_TAG, FORCE_UPPER_CASE_TAG, COMPOUND_MORE_SUFFIXES_TAG,
-          SIMPLIFIED_TRIPLE_TAG, "CHECKCOMPOUNDREP", COMPOUND_PATTERN_TAG,
+          SIMPLIFIED_TRIPLE_TAG, CHECK_COMPOUND_REP_TAG, COMPOUND_PATTERN_TAG,
           COMPOUND_SYLLABLE_TAG, SYLLABLE_NUMBER_TAG, LEMMA_PRESENT_TAG, REPLACEMENT_TAG, BREAK_TAG -> true;
       default -> false;
     };
@@ -938,7 +965,7 @@ public final class HunspellDictionary {
         if (count >= 2 && FLAG_TAG.equals(
             asciiField(bytes, starts[0], fieldEnds[0]))) {
           final String mode = asciiField(bytes, starts[1], fieldEnds[1]);
-          return "UTF-8".equals(mode) || "num".equals(mode);
+          return UTF8_FLAG_MODE.equals(mode) || NUMERIC_FLAG_MODE.equals(mode);
         }
         lineStart = i + 1;
       }
@@ -1067,9 +1094,9 @@ public final class HunspellDictionary {
    */
   private static boolean isSingleFlagDirective(String directive) {
     return switch (directive) {
-      case "COMPOUNDFLAG", "COMPOUNDBEGIN", "COMPOUNDMIDDLE", "COMPOUNDEND",
-          "COMPOUNDPERMITFLAG", "COMPOUNDFORBIDFLAG", "NEEDAFFIX", "PSEUDOROOT",
-          "ONLYINCOMPOUND", "FORBIDDENWORD", "CIRCUMFIX", KEEP_CASE_TAG, WARNING_TAG,
+      case COMPOUND_FLAG_TAG, COMPOUND_BEGIN_TAG, COMPOUND_MIDDLE_TAG, COMPOUND_END_TAG,
+          COMPOUND_PERMIT_TAG, COMPOUND_FORBID_TAG, NEED_AFFIX_TAG, PSEUDO_ROOT_TAG,
+          ONLY_IN_COMPOUND_TAG, FORBIDDEN_WORD_TAG, CIRCUMFIX_TAG, KEEP_CASE_TAG, WARNING_TAG,
           COMPOUND_ROOT_TAG, FORCE_UPPER_CASE_TAG, LEMMA_PRESENT_TAG -> true;
       default -> false;
     };
@@ -2470,17 +2497,17 @@ public final class HunspellDictionary {
     }
     final int declared = parseFlag(fields[1], result.flagMode, line);
     switch (fields[0]) {
-      case "COMPOUNDFLAG" -> result.compoundFlag = declared;
-      case "COMPOUNDBEGIN" -> result.compoundBegin = declared;
-      case "COMPOUNDMIDDLE" -> result.compoundMiddle = declared;
-      case "COMPOUNDEND" -> result.compoundEnd = declared;
-      case "COMPOUNDPERMITFLAG" -> result.compoundPermit = declared;
-      case "COMPOUNDFORBIDFLAG" -> result.compoundForbid = declared;
+      case COMPOUND_FLAG_TAG -> result.compoundFlag = declared;
+      case COMPOUND_BEGIN_TAG -> result.compoundBegin = declared;
+      case COMPOUND_MIDDLE_TAG -> result.compoundMiddle = declared;
+      case COMPOUND_END_TAG -> result.compoundEnd = declared;
+      case COMPOUND_PERMIT_TAG -> result.compoundPermit = declared;
+      case COMPOUND_FORBID_TAG -> result.compoundForbid = declared;
       // PSEUDOROOT is the directive's name before hunspell renamed it
-      case "NEEDAFFIX", "PSEUDOROOT" -> result.needAffix = declared;
-      case "ONLYINCOMPOUND" -> result.onlyInCompound = declared;
-      case "CIRCUMFIX" -> result.circumfix = declared;
-      case "FORBIDDENWORD" -> result.forbiddenWord = declared;
+      case NEED_AFFIX_TAG, PSEUDO_ROOT_TAG -> result.needAffix = declared;
+      case ONLY_IN_COMPOUND_TAG -> result.onlyInCompound = declared;
+      case CIRCUMFIX_TAG -> result.circumfix = declared;
+      case FORBIDDEN_WORD_TAG -> result.forbiddenWord = declared;
       case KEEP_CASE_TAG -> result.keepCase = declared;
       case WARNING_TAG -> result.warningFlag = declared;
       case COMPOUND_ROOT_TAG -> result.compoundRoot = declared;
@@ -2505,20 +2532,21 @@ public final class HunspellDictionary {
   private static boolean readCompoundSetting(String[] fields, int line, AffixFile result)
       throws IOException {
     switch (fields[0]) {
-      case "COMPOUNDMIN" -> {
+      case COMPOUND_MIN_TAG -> {
         final int compoundMin = parseValue(fields, line);
         if (compoundMin < 0) {
-          throw new IOException("negative COMPOUNDMIN at line " + line);
+          throw new IOException("negative " + COMPOUND_MIN_TAG + " at line " + line);
         }
         if (compoundMin > MAX_COMPOUND_MIN) {
-          throw new IOException("COMPOUNDMIN exceeds " + MAX_COMPOUND_MIN + " at line " + line);
+          throw new IOException(COMPOUND_MIN_TAG + " exceeds " + MAX_COMPOUND_MIN + " at line "
+              + line);
         }
         result.compoundMin = Math.max(1, compoundMin);
       }
-      case "COMPOUNDWORDMAX" -> {
+      case COMPOUND_WORD_MAX_TAG -> {
         final int compoundWordMax = parseValue(fields, line);
         if (compoundWordMax < 0) {
-          throw new IOException("negative COMPOUNDWORDMAX at line " + line);
+          throw new IOException("negative " + COMPOUND_WORD_MAX_TAG + " at line " + line);
         }
         result.compoundWordMax = compoundWordMax;
       }
@@ -2535,10 +2563,10 @@ public final class HunspellDictionary {
         }
         result.syllableNumber = true;
       }
-      case "CHECKCOMPOUNDDUP" -> result.checkCompoundDup = true;
-      case "CHECKCOMPOUNDCASE" -> result.checkCompoundCase = true;
-      case "CHECKCOMPOUNDTRIPLE" -> result.checkCompoundTriple = true;
-      case "CHECKCOMPOUNDREP" -> result.checkCompoundRep = true;
+      case CHECK_COMPOUND_DUP_TAG -> result.checkCompoundDup = true;
+      case CHECK_COMPOUND_CASE_TAG -> result.checkCompoundCase = true;
+      case CHECK_COMPOUND_TRIPLE_TAG -> result.checkCompoundTriple = true;
+      case CHECK_COMPOUND_REP_TAG -> result.checkCompoundRep = true;
       case COMPOUND_MORE_SUFFIXES_TAG -> result.compoundMoreSuffixes = true;
       case SIMPLIFIED_TRIPLE_TAG -> result.simplifiedTriple = true;
       default -> {
@@ -2561,7 +2589,7 @@ public final class HunspellDictionary {
   private static void readGeneralSetting(String[] fields, int line, AffixFile result)
       throws IOException {
     switch (fields[0]) {
-      case "FULLSTRIP" -> result.fullStrip = true;
+      case FULL_STRIP_TAG -> result.fullStrip = true;
       case COMPLEX_PREFIXES_TAG -> result.complexPrefixes = true;
       case FORBID_WARNING_TAG -> result.forbidWarn = true;
       case CHECK_SHARPS_TAG -> result.checkSharps = true;
@@ -2599,9 +2627,9 @@ public final class HunspellDictionary {
         throw new IOException("FLAG line without a mode at line " + (i + 1));
       }
       mode = switch (fields[1]) {
-        case "long" -> FlagMode.LONG;
-        case "num" -> FlagMode.NUM;
-        case "UTF-8" -> FlagMode.CHAR;
+        case LONG_FLAG_MODE -> FlagMode.LONG;
+        case NUMERIC_FLAG_MODE -> FlagMode.NUM;
+        case UTF8_FLAG_MODE -> FlagMode.CHAR;
         default -> throw new IOException(
             "unsupported FLAG mode '" + fields[1] + "' at line " + (i + 1));
       };
