@@ -30,20 +30,18 @@ import opennlp.tools.commons.Internal;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Reads the JSON files of the deep-learning components, vocabularies and model configurations,
- * in one pass over the text. Structure, whitespace, numbers, and string escapes follow
- * <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a>, with three additions: a byte
- * order mark as the first character is skipped, as
- * <a href="https://www.rfc-editor.org/rfc/rfc8259#section-8.1">section 8.1</a> allows; the
- * control characters {@code U+0000} to {@code U+001F} are accepted as content inside a string,
- * in keys as well as in values; and the values {@code NaN}, {@code Infinity}, and
- * {@code -Infinity}, which Python's {@code json} module writes by default, are accepted where a
- * value is skipped, never where one is read. Nesting is bounded by memory, not by the call
- * stack. Malformed text is reported as an {@link IllegalArgumentException} whose message names
- * the offset at which reading stopped.
- *
- * <p>{@link #stringObject(String, String)} is the only API of this class; its other members
- * serve the classes of this package.
+ * Reads the JSON files of the deep-learning components, vocabularies and model configurations.
+ * Structure, whitespace, numbers, and string escapes follow
+ * <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a>, with three additions:
+ * <ul>
+ *   <li>a byte order mark as the first character is skipped, as
+ *   <a href="https://www.rfc-editor.org/rfc/rfc8259#section-8.1">section 8.1</a> allows;</li>
+ *   <li>the control characters {@code U+0000} to {@code U+001F} are accepted inside a string;</li>
+ *   <li>the values {@code NaN}, {@code Infinity}, and {@code -Infinity} are accepted where a
+ *   value is skipped, never where one is read.</li>
+ * </ul>
+ * Malformed text is reported as an {@link IllegalArgumentException} whose message names the
+ * offset at which reading stopped.
  */
 @Internal(since = "3.0.0")
 public final class JsonScan {

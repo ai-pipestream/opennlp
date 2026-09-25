@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
  */
 public class StringUtilByteOrderMarkTest {
 
-  private static final String BOM = "﻿";
+  private static final String BOM = "\uFEFF";
 
   @Test
   void testStripsOneLeadingMark() {
@@ -49,7 +49,7 @@ public class StringUtilByteOrderMarkTest {
     Assertions.assertFalse(StringUtil.startsWithByteOrderMark(""));
     Assertions.assertFalse(StringUtil.startsWithByteOrderMark("{}" + BOM));
     // U+FFFE is the byte-swapped mark, not a mark itself
-    Assertions.assertFalse(StringUtil.startsWithByteOrderMark("￾{}"));
+    Assertions.assertFalse(StringUtil.startsWithByteOrderMark("\uFFFE{}"));
   }
 
   @Test
