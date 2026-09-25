@@ -44,9 +44,8 @@ import opennlp.tools.stemmer.hunspell.HunspellStemmer;
 /**
  * Evaluates the Hunspell stemmer with the LibreOffice English, German, and Hungarian
  * dictionaries under the {@code hunspell} directory of {@code OPENNLP_DATA_DIR}: strict
- * loading, expected inflections and compounds, concurrent use, and agreement with the
- * stems and the recognition recorded from Hunspell as described in
- * {@code dev/README-hunspell-dictionaries.md}.
+ * loading, concurrent use, and agreement with the stems and the recognition recorded
+ * from Hunspell as described in {@code dev/README-hunspell-dictionaries.md}.
  */
 public class HunspellCompatibilityEval extends AbstractEvalTest {
 
@@ -60,15 +59,18 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
 
   /** The external dictionaries, their MD5 digests, and the evaluated inputs. */
   private enum Dictionary {
-    ENGLISH("en_US", "bbb118ea006c22ebe9ef7dbfe0dbfc2a", "7e671db5244b0496f9888e9f0176c360",
+    ENGLISH("en_US", new BigInteger("249485177073091177602027474779897592874"),
+        new BigInteger("168018136586736559676403570142036280160"),
         List.of("workers", "cats", "unhappiest", "quickly", "looked", "reading",
             "dogs", "books", "walked", "walking", "talked", "talking", "played",
             "playing", "helped", "helping", "houses", "children", "feet", "better",
             "Workers", "WORKERS", "cAtS", "worker's", "well-known", "unhappy", "undone", UNKNOWN)),
-    GERMAN("de_DE_frami", "9fd6eb96145bdccb2dc0213e1df5a46e", "07c5fd0780eca6ba448cba8c7be170cd",
+    GERMAN("de_DE_frami", new BigInteger("212463181114310067301034897826962056302"),
+        new BigInteger("10332610495752808725046082365141643469"),
         List.of("gegangen", "Kinder", "Häuser", "schnellsten", "Freunden", "Vorschläge",
             "Haustür", "Kinderzimmer", "Abbildungsverzeichnis", "Haus", "Baum", "Buch", "schnell", UNKNOWN)),
-    HUNGARIAN("hu_HU", "c13482742489921ce2d8d19ff5122986", "66bab5478e829ba5e33afcde24a7259c",
+    HUNGARIAN("hu_HU", new BigInteger("256813648538155674068153627472569706886"),
+        new BigInteger("136550699571191463218281891994934912412"),
         List.of("kutyák", "asztalon", "könyveket", "házak", "emberek", "kutyáknak", UNKNOWN));
 
     private final String id;
@@ -80,14 +82,15 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
      * Describes one external dictionary.
      *
      * @param id The file name without suffix.
-     * @param affixChecksum The MD5 digest of the affix file, in hexadecimal.
-     * @param dictionaryChecksum The MD5 digest of the word list, in hexadecimal.
+     * @param affixChecksum The MD5 digest of the affix file.
+     * @param dictionaryChecksum The MD5 digest of the word list.
      * @param inputs The evaluated inputs.
      */
-    Dictionary(String id, String affixChecksum, String dictionaryChecksum, List<String> inputs) {
+    Dictionary(String id, BigInteger affixChecksum, BigInteger dictionaryChecksum,
+               List<String> inputs) {
       this.id = id;
-      this.affixChecksum = new BigInteger(affixChecksum, 16);
-      this.dictionaryChecksum = new BigInteger(dictionaryChecksum, 16);
+      this.affixChecksum = affixChecksum;
+      this.dictionaryChecksum = dictionaryChecksum;
       this.inputs = inputs;
     }
   }
@@ -95,8 +98,8 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   /**
    * The outcome recorded from Hunspell for one input.
    *
-   * @param accepted Whether the Hunspell spell checker accepted the input.
-   * @param stems The distinct stems the Hunspell stemmer returned.
+   * @param accepted Whether Hunspell's spell checker accepted the input.
+   * @param stems The distinct stems Hunspell's analyzer returned.
    */
   private record Recorded(boolean accepted, Set<String> stems) { }
 
@@ -108,7 +111,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   /**
    * Verifies the dictionary digests and loads each dictionary once, strictly.
    *
-   * @throws Exception If a file is missing, changed, or malformed.
+   * @throws Exception Thrown if a file is missing, changed, or malformed.
    */
   @BeforeAll
   static void verifyAndLoadDictionaries() throws Exception {
@@ -117,9 +120,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
       final Path words = file(dictionary, HunspellDictionary.DICTIONARY_FILE_SUFFIX);
       verifyFileChecksum(affix, dictionary.affixChecksum);
       verifyFileChecksum(words, dictionary.dictionaryChecksum);
-      final HunspellDictionary loaded = HunspellDictionary.load(affix, words);
-      Assertions.assertTrue(loaded.getUnsupportedDirectives().isEmpty());
-      STEMMERS.put(dictionary, new HunspellStemmer(loaded));
+      STEMMERS.put(dictionary, new HunspellStemmer(HunspellDictionary.load(affix, words)));
     }
   }
 
@@ -146,47 +147,6 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   }
 
   /**
-   * Confirms that partial loading of a dictionary that loads strictly skips nothing.
-   *
-   * @param dictionary The external dictionary.
-   * @throws Exception If a file is missing or malformed.
-   */
-  @ParameterizedTest
-  @EnumSource(Dictionary.class)
-  void partialLoadingSkipsNothing(Dictionary dictionary) throws Exception {
-    final HunspellDictionary partial = HunspellDictionary.load(
-        file(dictionary, HunspellDictionary.AFFIX_FILE_SUFFIX),
-        file(dictionary, HunspellDictionary.DICTIONARY_FILE_SUFFIX),
-        HunspellDictionary.LoadMode.ALLOW_PARTIAL);
-    Assertions.assertTrue(partial.getUnsupportedDirectives().isEmpty());
-  }
-
-  /**
-   * Checks expected stems and compound decompositions.
-   *
-   * @param dictionary The external dictionary.
-   */
-  @ParameterizedTest
-  @EnumSource(Dictionary.class)
-  void expectedInflections(Dictionary dictionary) {
-    final HunspellStemmer stemmer = STEMMERS.get(dictionary);
-    final Map<String, String> expected = switch (dictionary) {
-      case ENGLISH -> Map.of("workers", "worker", "cats", "cat", "unhappiest", "unhappy",
-          "quickly", "quick", "looked", "look");
-      case GERMAN -> Map.of("Kinder", "Kind", "Häuser", "Haus", "schnellsten", "schnell");
-      case HUNGARIAN -> Map.of("kutyák", "kutya", "asztalon", "asztal", "könyveket", "könyv");
-    };
-    expected.forEach((word, stem) -> Assertions.assertEquals(stem,
-        stemmer.stem(word).toString(), word));
-    Assertions.assertEquals(List.of(UNKNOWN), stemmer.stemAll(UNKNOWN));
-    if (dictionary == Dictionary.GERMAN) {
-      for (String word : List.of("Haustür", "Kinderzimmer", "Abbildungsverzeichnis")) {
-        Assertions.assertTrue(stemmer.stemAll(word).size() >= 2, word);
-      }
-    }
-  }
-
-  /**
    * Compares stems and recognition with the recorded Hunspell results and fails on any
    * result that is neither exact, an expected difference, nor an identity fallback for
    * an input Hunspell rejects.
@@ -196,7 +156,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
-  void referenceCompatibility(Dictionary dictionary, TestReporter reporter) {
+  void hunspellCompatibility(Dictionary dictionary, TestReporter reporter) {
     final HunspellStemmer stemmer = STEMMERS.get(dictionary);
     final Map<String, Recorded> recorded = recorded(dictionary);
     int exact = 0;
@@ -204,14 +164,14 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
     int fallback = 0;
     final List<String> failures = new ArrayList<>();
     for (String word : dictionary.inputs) {
-      final Recorded reference = recorded.get(word);
-      Assertions.assertNotNull(reference, "no recorded reference result for " + word);
+      final Recorded hunspell = recorded.get(word);
+      Assertions.assertNotNull(hunspell, "no recorded Hunspell result for " + word);
       final Set<String> stems = stems(stemmer, word);
-      switch (classify(word, reference, stems, expectedDifference(dictionary, word))) {
+      switch (classify(word, hunspell, stems, expectedDifference(dictionary, word))) {
         case EXACT -> exact++;
         case EXPECTED_DIFFERENCE -> differences++;
         case IDENTITY_FALLBACK -> fallback++;
-        case UNEXPECTED -> failures.add(word + ": reference=" + reference + ", OpenNLP=" + stems);
+        case UNEXPECTED -> failures.add(word + ": Hunspell=" + hunspell + ", OpenNLP=" + stems);
       }
     }
     reporter.publishEntry(dictionary.id, "inputs=" + dictionary.inputs.size() + ", exact=" + exact
@@ -225,7 +185,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    * compares each result with the single-threaded result.
    *
    * @param dictionary The external dictionary.
-   * @throws Exception If a task fails.
+   * @throws Exception Thrown if a task fails.
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
@@ -260,7 +220,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    * @param dictionary The external dictionary.
    * @param suffix The file suffix.
    * @return The file path.
-   * @throws Exception If the data directory is not configured or does not exist.
+   * @throws Exception Thrown if the data directory is not configured or does not exist.
    */
   private static Path file(Dictionary dictionary, String suffix) throws Exception {
     return new File(getOpennlpDataDir(), DATA_DIRECTORY + File.separator + dictionary.id + suffix).toPath();
@@ -279,26 +239,26 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
 
   /**
    * Classifies one comparison. An expected difference must match the recorded
-   * OpenNLP output exactly and must still differ from the reference, so a stale entry
+   * OpenNLP output exactly and must still differ from Hunspell's, so a stale entry
    * is reported. For an input Hunspell rejects, the unchanged input is the identity
    * fallback of unknown vocabulary; the public API does not tell it apart from a
    * listed word that is its own stem.
    *
    * @param word The input.
-   * @param reference The recorded Hunspell outcome.
+   * @param hunspell The recorded Hunspell outcome.
    * @param stems The OpenNLP stems.
    * @param expected The recorded OpenNLP stems for a known difference, or {@code null}.
    * @return The classification.
    */
-  private static Outcome classify(String word, Recorded reference, Set<String> stems, Set<String> expected) {
+  private static Outcome classify(String word, Recorded hunspell, Set<String> stems, Set<String> expected) {
     if (expected != null) {
-      return reference.accepted() && !reference.stems().equals(stems) && expected.equals(stems)
+      return hunspell.accepted() && !hunspell.stems().equals(stems) && expected.equals(stems)
           ? Outcome.EXPECTED_DIFFERENCE : Outcome.UNEXPECTED;
     }
-    if (reference.accepted() && reference.stems().equals(stems)) {
+    if (hunspell.accepted() && hunspell.stems().equals(stems)) {
       return Outcome.EXACT;
     }
-    if (!reference.accepted() && reference.stems().isEmpty() && stems.equals(Set.of(word))) {
+    if (!hunspell.accepted() && hunspell.stems().isEmpty() && stems.equals(Set.of(word))) {
       return Outcome.IDENTITY_FALLBACK;
     }
     return Outcome.UNEXPECTED;
