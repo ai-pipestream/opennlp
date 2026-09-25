@@ -62,8 +62,7 @@ import opennlp.tools.util.StringUtil;
  * directives and reports them through {@link #getUnsupportedDirectives()}.
  * Morphological stems use {@code st:}, {@code sp:}, and {@code ds:} fields.
  * {@code SYLLABLENUM} supports Hungarian compound syllable adjustments.
- * {@code LEMMA_PRESENT} is accepted and has no effect. Strict loading validates
- * declarations; it does not establish that every result matches Hunspell.</p>
+ * {@code LEMMA_PRESENT} is accepted and has no effect.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -283,8 +282,10 @@ public final class HunspellDictionary {
 
   /**
    * Largest flag value permitted by {@code FLAG num}: the full unsigned 16-bit range.
-   * The format manual names 65000, but published dictionaries use values above it and
-   * Hunspell loads them.
+   * The
+   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/man/hunspell.5#L133-L139">
+   * Hunspell format manual</a> names 65000, but published dictionaries use values above
+   * it and Hunspell loads them.
    */
   private static final int MAX_NUMERIC_FLAG = 65_535;
 
@@ -1376,7 +1377,8 @@ public final class HunspellDictionary {
    *
    * @param flags The selected entry flags.
    * @param affixes The applied rules.
-   * @return One unit, or an additional unit for COMPOUNDROOT.
+   * @return One unit, one more for COMPOUNDROOT, and for a Hungarian dictionary one more
+   *     for each applied prefix of more than one syllable.
    */
   int compoundUnits(int[] flags, List<Affix> affixes) {
     int units = contains(flags, compoundRoot) ? 2 : 1;
@@ -1470,17 +1472,19 @@ public final class HunspellDictionary {
   }
 
   /**
-   * {@return whether the Hungarian moving rule applies} The part of a Hungarian word
-   * before a hyphen is checked as a compound with relaxed rules: the opening part may
-   * qualify through the reserved flags {@code F}, {@code G}, and {@code H}, a
-   * compound-forbidden opening entry is allowed, and the size limits do not apply.
+   * {@return whether the part of a word before a hyphen is also checked as a compound
+   * with relaxed rules} Hunspell does this for Hungarian dictionaries only, and its
+   * source calls it the moving rule. The compound may open with an entry that carries
+   * one of the reserved flags {@code F}, {@code G}, and {@code H} or
+   * {@code COMPOUNDFORBIDFLAG}, and the compound size limits do not apply.
    */
   boolean hyphenMovingRule() {
     return hungarian;
   }
 
   /**
-   * Checks whether an entry may open a compound under the Hungarian moving rule.
+   * Checks whether an entry may open the compound before a hyphen in a Hungarian word,
+   * as described at {@link #hyphenMovingRule()}.
    *
    * @param flags One entry's flag set.
    * @return {@code true} if the entry carries one of the hardwired opening flags and is
@@ -2002,7 +2006,12 @@ public final class HunspellDictionary {
 
   /**
    * Checks whether an entry marked with {@code COMPOUNDFORBIDFLAG} is barred from
-   * this compound position. Such an entry may stand only as the last part.
+   * this compound position. Hunspell permits such an entry only as the last part, as
+   * specified by the
+   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/man/hunspell.5#L502-L506">
+   * format manual</a> and the
+   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/tests/compoundforbid.aff">
+   * regression fixture</a>.
    *
    * @param flags One entry's flag set.
    * @param position The part's place in the compound.
@@ -2384,10 +2393,12 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Parses the affix file: the {@code FLAG} declaration, the {@code AF} flag alias
-   * table, the compound and blocking flag declarations, and the {@code PFX} and
-   * {@code SFX} blocks. Other directives are skipped because this class implements
-   * affix stemming, not the complete Hunspell spell-checking engine.
+   * Parses the affix file after the lines of ignored directives have been blanked. The
+   * {@code FLAG} mode, the {@code AF}, {@code ICONV}, {@code OCONV}, {@code AM},
+   * {@code COMPOUNDRULE}, {@code CHECKCOMPOUNDPATTERN}, {@code REP}, and {@code BREAK}
+   * tables, and {@code IGNORE} are read first, because other lines depend on them. A
+   * second pass reads the {@code PFX} and {@code SFX} blocks, the flag declarations, the
+   * compound settings, and the general settings.
    *
    * @param content The decoded affix file content.
    * @return The parsed rules and flag mode. Never {@code null}.
@@ -2742,8 +2753,8 @@ public final class HunspellDictionary {
    * @param content The decoded word-list content.
    * @param affix The affix settings and destination for entry morphology.
    * @return The words mapped to the flag sets of their entries. Never {@code null}.
-   * @throws IOException Thrown if a flag run is malformed or an alias reference is
-   *         out of range.
+   * @throws IOException Thrown if a flag run is malformed, or a flag or morphology
+   *         alias reference is malformed or out of range.
    */
   private static Map<String, List<int[]>> parseWordList(String content,
       AffixFile affix) throws IOException {
