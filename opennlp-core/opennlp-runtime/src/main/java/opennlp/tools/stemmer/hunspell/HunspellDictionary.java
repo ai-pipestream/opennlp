@@ -184,8 +184,9 @@ public final class HunspellDictionary {
     static WordBreak parse(String declaration, int line) throws IOException {
       final boolean atStart = declaration.startsWith(BREAK_START_ANCHOR);
       final boolean atEnd = declaration.endsWith(BREAK_END_ANCHOR);
-      final String separator = declaration.substring(atStart ? 1 : 0,
-          declaration.length() - (atEnd ? 1 : 0));
+      final String separator = declaration.substring(
+          atStart ? BREAK_START_ANCHOR.length() : 0,
+          declaration.length() - (atEnd ? BREAK_END_ANCHOR.length() : 0));
       if (separator.isEmpty()) {
         throw new IOException("invalid BREAK at line " + line);
       }
@@ -268,14 +269,11 @@ public final class HunspellDictionary {
   /** The suggestion table whose replacements {@code CHECKCOMPOUNDREP} applies to compounds. */
   static final String REPLACEMENT_TAG = "REP";
 
-  /** The word-list field that lists a misspelling of its entry. */
-  static final String PHONETIC_FIELD = "ph:";
-
   /** The {@code BREAK} anchor that binds a separator to the start of the word. */
-  static final String BREAK_START_ANCHOR = "^";
+  private static final String BREAK_START_ANCHOR = "^";
 
   /** The {@code BREAK} anchor that binds a separator to the end of the word. */
-  static final String BREAK_END_ANCHOR = "$";
+  private static final String BREAK_END_ANCHOR = "$";
 
   /** The dotted capital I, the uppercase of {@code i} in the Turkic languages. */
   static final String DOTTED_CAPITAL_I = "İ";
