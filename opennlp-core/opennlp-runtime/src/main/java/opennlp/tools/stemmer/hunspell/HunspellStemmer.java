@@ -80,6 +80,9 @@ public final class HunspellStemmer implements Stemmer {
   /** The sharp s that {@code CHECKSHARPS} restores in all-uppercase input. */
   private static final String SHARP_S = "ß";
 
+  /** The message for a {@code null} input word. */
+  private static final String NULL_WORD = "word must not be null";
+
   private final HunspellDictionary dictionary;
 
   /**
@@ -102,8 +105,12 @@ public final class HunspellStemmer implements Stemmer {
    */
   @Override
   public CharSequence stem(CharSequence word) {
-    final List<CharSequence> analyses = stemAll(word);
-    return analyses.get(0);
+    if (word == null) {
+      throw new IllegalArgumentException(NULL_WORD);
+    }
+    final String surface = word.toString();
+    final List<String> analyses = findWord(dictionary.inputForm(surface), false);
+    return analyses.isEmpty() ? surface : dictionary.outputForm(analyses.get(0));
   }
 
   /**
@@ -115,7 +122,7 @@ public final class HunspellStemmer implements Stemmer {
   @Override
   public List<CharSequence> stemAll(CharSequence word) {
     if (word == null) {
-      throw new IllegalArgumentException("word must not be null");
+      throw new IllegalArgumentException(NULL_WORD);
     }
     final String surface = word.toString();
     final List<String> analyses = findWord(dictionary.inputForm(surface), false);
@@ -144,7 +151,7 @@ public final class HunspellStemmer implements Stemmer {
    */
   List<String> analyze(CharSequence word) {
     if (word == null) {
-      throw new IllegalArgumentException("word must not be null");
+      throw new IllegalArgumentException(NULL_WORD);
     }
     return findWord(dictionary.inputForm(word.toString()), true);
   }
@@ -184,7 +191,8 @@ public final class HunspellStemmer implements Stemmer {
    */
   private final class Request implements Predicate<String> {
     private final boolean morphological;
-    private final Map<String, List<String>> cache = new HashMap<>();
+    /** The readings of break-separated pieces, created with the first piece. */
+    private Map<String, List<String>> cache;
     private int budget = PART_CHECK_BUDGET;
 
     /**
@@ -194,6 +202,29 @@ public final class HunspellStemmer implements Stemmer {
      */
     private Request(boolean morphological) {
       this.morphological = morphological;
+    }
+
+    /**
+     * Looks up the readings of a piece searched before.
+     *
+     * @param piece The break-separated piece.
+     * @return The readings, or {@code null} if the piece was not searched.
+     */
+    private List<String> cached(String piece) {
+      return cache == null ? null : cache.get(piece);
+    }
+
+    /**
+     * Stores the readings of a searched piece.
+     *
+     * @param piece The break-separated piece.
+     * @param readings The piece's readings.
+     */
+    private void remember(String piece, List<String> readings) {
+      if (cache == null) {
+        cache = new HashMap<>();
+      }
+      cache.put(piece, readings);
     }
 
     /** {@return whether every check of the budget is spent} */
@@ -341,7 +372,7 @@ public final class HunspellStemmer implements Stemmer {
     if (input.isEmpty() || depth >= MAX_COMPOUND_PARTS || request.exhausted()) {
       return List.of();
     }
-    final List<String> cached = request.cache.get(input);
+    final List<String> cached = request.cached(input);
     if (cached != null) {
       return cached;
     }
@@ -400,7 +431,10 @@ public final class HunspellStemmer implements Stemmer {
       }
     }
     final List<String> result = List.copyOf(analyses.values);
-    request.cache.put(input, result);
+    // only a piece below the complete input can be reached again
+    if (depth > 0) {
+      request.remember(input, result);
+    }
     return result;
   }
 
@@ -441,8 +475,6 @@ public final class HunspellStemmer implements Stemmer {
    * @return The variants in analysis order. Never {@code null} or empty.
    */
   private List<String> variants(String surface) {
-    final Set<String> variants = new LinkedHashSet<>();
-    variants.add(surface);
     boolean upper = false;
     boolean lowerAfterFirst = true;
     boolean allUpper = true;
@@ -465,7 +497,14 @@ public final class HunspellStemmer implements Stemmer {
       }
       i += Character.charCount(point);
     }
-    if (upper && (allUpper || lowerAfterFirst)) {
+    final boolean lowerCased = upper && (allUpper || lowerAfterFirst);
+    final boolean innerCapital = firstUpper && uppers > 1 && !allUpper;
+    if (!lowerCased && !innerCapital) {
+      return List.of(surface);
+    }
+    final Set<String> variants = new LinkedHashSet<>();
+    variants.add(surface);
+    if (lowerCased) {
       final String lowered = dictionary.lowerCase(surface);
       final int apostrophe = lowered.indexOf('\'');
       if (allUpper && apostrophe > 0 && apostrophe < lowered.length() - 1) {
@@ -487,7 +526,7 @@ public final class HunspellStemmer implements Stemmer {
           addSharpVariants(lowered, 0, variants);
         }
       }
-    } else if (firstUpper && uppers > 1 && !allUpper) {
+    } else {
       variants.add(dictionary.lowerCaseInitial(surface));
     }
     return List.copyOf(variants);
