@@ -80,6 +80,12 @@ public final class HunspellStemmer implements Stemmer {
   /** The sharp s that {@code CHECKSHARPS} restores in all-uppercase input. */
   private static final String SHARP_S = "ß";
 
+  /** The morphological field that opens the reading of each compound component. */
+  private static final String PART_FIELD = "pa:";
+
+  /** The hyphen, the break separator the Hungarian first-part rule applies to. */
+  private static final String HYPHEN = "-";
+
   /** The message for a {@code null} input word. */
   private static final String NULL_WORD = "word must not be null";
 
@@ -322,7 +328,7 @@ public final class HunspellStemmer implements Stemmer {
               break;
             }
             next.add(new StringBuilder(prior).append(prior.isEmpty() ? "" : " ")
-                .append("pa:").append(part.surface())
+                .append(PART_FIELD).append(part.surface())
                 .append(fields.isEmpty() ? "" : " ").append(fields).toString());
           }
         }
@@ -350,10 +356,15 @@ public final class HunspellStemmer implements Stemmer {
           if (values.size() >= MAX_ANALYSES) {
             return;
           }
-          values.add(new StringBuilder()
-              .append(first.startsWith("pa:") ? "" : "pa:" + leftText + " ").append(first)
-              .append(' ').append(last.startsWith("pa:") ? "" : "pa:" + rightText + " ")
-              .append(last).toString());
+          final StringBuilder reading = new StringBuilder();
+          if (!first.startsWith(PART_FIELD)) {
+            reading.append(PART_FIELD).append(leftText).append(' ');
+          }
+          reading.append(first).append(' ');
+          if (!last.startsWith(PART_FIELD)) {
+            reading.append(PART_FIELD).append(rightText).append(' ');
+          }
+          values.add(reading.append(last).toString());
         }
       }
     }
@@ -416,7 +427,7 @@ public final class HunspellStemmer implements Stemmer {
             analyses.addAll(findStems(input.substring(0, at), depth + 1, request));
           } else if (!start) {
             List<String> left = findStems(input.substring(0, at), depth + 1, request);
-            if (left.isEmpty() && "-".equals(separator) && dictionary.hyphenMovingRule()) {
+            if (left.isEmpty() && HYPHEN.equals(separator) && dictionary.hyphenMovingRule()) {
               left = hyphenatedFirstPart(input.substring(0, at), request);
             }
             if (!left.isEmpty()) {
@@ -448,7 +459,7 @@ public final class HunspellStemmer implements Stemmer {
    */
   private List<String> hyphenatedFirstPart(String text, Request request) {
     final Results analyses = new Results(request.morphological);
-    final String hyphenated = text + "-";
+    final String hyphenated = text + HYPHEN;
     final boolean allCaps = HunspellDictionary.caseType(text) == HunspellDictionary.CaseType.ALLCAP;
     for (final String variant : variants(hyphenated)) {
       analyze(variant, new Analysis(hyphenated, variant, analyses, allCaps));
@@ -707,20 +718,21 @@ public final class HunspellStemmer implements Stemmer {
     if (dictionary.positionalCompoundsDeclared()) {
       searchSpelling(word, caseSource, analyses, request, List.of());
       for (CompoundPattern pattern : dictionary.compoundPatterns()) {
-        if (pattern.replacement() == null || pattern.replacement().isEmpty()) {
+        final String replacement = pattern.replacement();
+        if (replacement == null || replacement.isEmpty()) {
           continue;
         }
-        for (int at = word.indexOf(pattern.replacement()); at >= 0 && !request.exhausted();
-            at = word.indexOf(pattern.replacement(), at + 1)) {
-          final int end = at + pattern.replacement().length();
-          final String inserted = pattern.end() + pattern.begin();
+        final String inserted = pattern.end() + pattern.begin();
+        for (int at = word.indexOf(replacement); at >= 0 && !request.exhausted();
+            at = word.indexOf(replacement, at + 1)) {
+          final int end = at + replacement.length();
           searchSpelling(word.substring(0, at) + inserted + word.substring(end),
               caseSource.substring(0, at) + inserted + caseSource.substring(end),
               analyses, request, List.of(new Junction(at + pattern.end().length(), pattern)));
         }
       }
       if (dictionary.simplifiedTriple()) {
-        searchTriples(word, caseSource, 0, List.of(), analyses, request);
+        searchTriples(word, caseSource, 0, new ArrayList<>(), analyses, request);
       }
     }
     for (HunspellCompoundRule rule : dictionary.compoundRules()) {
@@ -772,7 +784,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param word The current text.
    * @param surface The aligned case source.
    * @param from The next position eligible for restoration.
-   * @param junctions The required boundaries accumulated so far.
+   * @param junctions The required boundaries accumulated so far, restored on return.
    * @param analyses The destination for stems.
    * @param request The state of the input word's search.
    */
@@ -788,21 +800,35 @@ public final class HunspellStemmer implements Stemmer {
       if (next < word.length() && word.codePointAt(next) == point
           && (at == 0 || word.codePointBefore(at) != point)
           && (next + width == word.length() || word.codePointAt(next + width) != point)) {
-        final String inserted = new String(Character.toChars(point));
-        final String expanded = new StringBuilder(word).insert(next, inserted).toString();
-        final String expandedCase = new StringBuilder(surface).insert(next, inserted).toString();
-        for (int boundary : new int[] {next, next + width}) {
+        final String expanded = insertCodePoint(word, next, point);
+        final String expandedCase = insertCodePoint(surface, next, point);
+        // the restored letter joins either the left part or the right part
+        for (int boundary = next; boundary <= next + width; boundary += width) {
           if (!request.charge()) {
             return;
           }
-          final List<Junction> required = new ArrayList<>(junctions);
-          required.add(new Junction(boundary, null));
-          searchSpelling(expanded, expandedCase, analyses, request, required);
-          searchTriples(expanded, expandedCase, next + 2 * width, required, analyses, request);
+          junctions.add(new Junction(boundary, null));
+          searchSpelling(expanded, expandedCase, analyses, request, junctions);
+          searchTriples(expanded, expandedCase, next + 2 * width, junctions, analyses, request);
+          junctions.remove(junctions.size() - 1);
         }
       }
       at = next;
     }
+  }
+
+  /**
+   * Inserts one code point into a text.
+   *
+   * @param text The text to extend.
+   * @param at The UTF-16 offset to insert at.
+   * @param point The code point to insert.
+   * @return The extended text.
+   */
+  private static String insertCodePoint(String text, int at, int point) {
+    return new StringBuilder(text.length() + Character.charCount(point))
+        .append(text, 0, at).appendCodePoint(point).append(text, at, text.length())
+        .toString();
   }
 
   /**
