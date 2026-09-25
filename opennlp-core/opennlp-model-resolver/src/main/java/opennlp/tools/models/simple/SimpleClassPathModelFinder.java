@@ -173,7 +173,7 @@ public class SimpleClassPathModelFinder extends AbstractClassPathModelFinder imp
    * @param classPath The class path value to split. Must not be {@code null}.
    * @param isWindows {@code true} to split on {@code ;}, {@code false} to split on {@code :}.
    * @return The non-empty class path entries in order.
-   * @throws IllegalArgumentException If {@code classPath} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code classPath} is {@code null}.
    */
   static String[] splitClassPath(String classPath, boolean isWindows) {
     if (classPath == null) {
@@ -182,7 +182,6 @@ public class SimpleClassPathModelFinder extends AbstractClassPathModelFinder imp
     return StringUtil.splitNonEmpty(classPath,
         isWindows ? CLASSPATH_SEPARATOR_WINDOWS : CLASSPATH_SEPARATOR_UNIX);
   }
-
 
   /*
    * Java 9+ Bridge to obtain URLs from classpath.

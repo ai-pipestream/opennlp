@@ -16,8 +16,11 @@
  */
 package opennlp.tools.models;
 
+import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -130,12 +133,12 @@ public class AbstractClassPathModelFinderTest {
 
     @Override
     protected List<URI> getMatchingURIs(String wildcardPattern, Object context) {
-      final List<URI> matches = new java.util.ArrayList<>();
+      final List<URI> matches = new ArrayList<>();
       for (URL candidate : candidates) {
         if (matchesWildcard(candidate, "*" + wildcardPattern)) {
           try {
             matches.add(candidate.toURI());
-          } catch (java.net.URISyntaxException e) {
+          } catch (URISyntaxException e) {
             throw new IllegalStateException(e);
           }
         }
@@ -172,6 +175,27 @@ public class AbstractClassPathModelFinderTest {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> finder.matchesWildcard(null, "*.bin"));
     Assertions.assertThrows(IllegalArgumentException.class, () -> finder.matchesWildcard(url, null));
+  }
+
+  private static Stream<Arguments> unescapedUrls() {
+    return Stream.of(
+        Arguments.of("/C:/my models/opennlp-models-pos-en-1.2.0.jar", "*opennlp-models-*", true),
+        Arguments.of("/C:/my models/opennlp-models-pos-en-1.2.0.jar", "*/my models/*.jar", true),
+        Arguments.of("/C:/my models/opennlp-models-pos-en-1.2.0.jar", "*.bin", false),
+        Arguments.of("/models/a b%20c.jar", "*a b%20c.jar", true),
+        Arguments.of("/models/a b%20c.jar", "*a b c.jar", false));
+  }
+
+  /**
+   * Checks that a URL that is not a valid URI is matched on its raw file part instead of failing.
+   */
+  @ParameterizedTest
+  @MethodSource("unescapedUrls")
+  void testMatchesWildcardOnUrlThatIsNotAUri(String path, String wildcard, boolean expected)
+      throws MalformedURLException {
+    final URL parsed = UnescapedUrls.of(path);
+    Assertions.assertThrows(URISyntaxException.class, parsed::toURI);
+    Assertions.assertEquals(expected, newProbeFinder().matchesWildcard(parsed, wildcard));
   }
 
   @Test

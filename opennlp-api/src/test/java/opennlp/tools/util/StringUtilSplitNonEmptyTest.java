@@ -84,6 +84,15 @@ public class StringUtilSplitNonEmptyTest {
   void testMatchesRegexSplitWithoutEmptyFields() {
     final String[] pieces = {":", ";", " ", "\t", ".", "|", "a", "b", "xy", SMILEY, "0"};
     final char[][] separatorSets = {{':'}, {';'}, {' ', '\t'}, {'.', '|'}, {':', ';', ' '}};
+    final Pattern[] patterns = new Pattern[separatorSets.length];
+    for (int s = 0; s < separatorSets.length; s++) {
+      final StringBuilder charClass = new StringBuilder("[");
+      for (char separator : separatorSets[s]) {
+        // a backslash before a non-letter makes it a literal inside the class
+        charClass.append('\\').append(separator);
+      }
+      patterns[s] = Pattern.compile(charClass.append("]+").toString());
+    }
     final Random random = new Random(1932);
     for (int n = 0; n < 5_000; n++) {
       final StringBuilder input = new StringBuilder();
@@ -91,14 +100,9 @@ public class StringUtilSplitNonEmptyTest {
       for (int p = 0; p < parts; p++) {
         input.append(pieces[random.nextInt(pieces.length)]);
       }
-      final char[] separators = separatorSets[random.nextInt(separatorSets.length)];
-      final StringBuilder charClass = new StringBuilder("[");
-      for (char separator : separators) {
-        // a backslash before a non-letter makes it a literal inside the class
-        charClass.append('\\').append(separator);
-      }
-      final Pattern pattern = Pattern.compile(charClass.append("]+").toString());
-      final String[] expected = Arrays.stream(pattern.split(input))
+      final int set = random.nextInt(separatorSets.length);
+      final char[] separators = separatorSets[set];
+      final String[] expected = Arrays.stream(patterns[set].split(input))
           .filter(field -> !field.isEmpty()).toArray(String[]::new);
       Assertions.assertArrayEquals(expected, StringUtil.splitNonEmpty(input, separators),
           () -> "input '" + input + "' separators " + Arrays.toString(separators));
