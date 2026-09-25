@@ -167,38 +167,34 @@ public class BasicContextGeneratorTest {
     return Stream.of(
         Arguments.of("cp_1 cp_2 cp_3", new String[] {"cp_1", "cp_2", "cp_3"}),
         Arguments.of("single", new String[] {"single"}),
-        // space, tab, carriage return, line feed and form feed separate, also in runs;
-        // no empty predicate is produced
+        // runs, tabs, and Unicode whitespace all separate; no empty predicate is produced
         Arguments.of("a  b", new String[] {"a", "b"}),
         Arguments.of("a\tb", new String[] {"a", "b"}),
         Arguments.of("a\nb", new String[] {"a", "b"}),
-        Arguments.of("a\rb", new String[] {"a", "b"}),
-        Arguments.of("a\fb", new String[] {"a", "b"}),
+        Arguments.of("a" + NO_BREAK_SPACE + "b", new String[] {"a", "b"}),
+        Arguments.of("a" + EM_SPACE + "b", new String[] {"a", "b"}),
+        Arguments.of("a" + IDEOGRAPHIC_SPACE + "b", new String[] {"a", "b"}),
+        Arguments.of("a \t" + NO_BREAK_SPACE + " b", new String[] {"a", "b"}),
+        Arguments.of("a" + NO_BREAK_SPACE + "b" + EM_SPACE + "c" + IDEOGRAPHIC_SPACE + "d",
+            new String[] {"a", "b", "c", "d"}),
         Arguments.of("a\r\nb\fc", new String[] {"a", "b", "c"}),
-        Arguments.of("a \t b", new String[] {"a", "b"}),
         Arguments.of(" a b ", new String[] {"a", "b"}),
-        Arguments.of("\t\na\f\r", new String[] {"a"}),
+        Arguments.of(NO_BREAK_SPACE + "a" + IDEOGRAPHIC_SPACE, new String[] {"a"}),
         Arguments.of("", NONE),
         Arguments.of(" ", NONE),
-        Arguments.of(" \t\r\n\f", NONE),
-        // other whitespace stays inside a predicate, the same as in an event file
-        Arguments.of("a" + NO_BREAK_SPACE + "b", new String[] {"a" + NO_BREAK_SPACE + "b"}),
-        Arguments.of("a" + EM_SPACE + "b", new String[] {"a" + EM_SPACE + "b"}),
-        Arguments.of("a" + IDEOGRAPHIC_SPACE + "b", new String[] {"a" + IDEOGRAPHIC_SPACE + "b"}),
-        Arguments.of("a" + NEXT_LINE + "b", new String[] {"a" + NEXT_LINE + "b"}),
-        Arguments.of("a" + LINE_SEPARATOR + "b", new String[] {"a" + LINE_SEPARATOR + "b"}),
-        Arguments.of("a" + PARAGRAPH_SEPARATOR + "b", new String[] {"a" + PARAGRAPH_SEPARATOR + "b"}),
+        Arguments.of(" \t" + NO_BREAK_SPACE + IDEOGRAPHIC_SPACE, NONE),
+        Arguments.of(NO_BREAK_SPACE + EM_SPACE + IDEOGRAPHIC_SPACE, NONE),
+        // the next line, line separator, and paragraph separator characters have the
+        // White_Space property; the ASCII information separators and format characters do not
+        Arguments.of("a" + NEXT_LINE + "b", new String[] {"a", "b"}),
+        Arguments.of("a" + LINE_SEPARATOR + "b", new String[] {"a", "b"}),
+        Arguments.of("a" + PARAGRAPH_SEPARATOR + "b", new String[] {"a", "b"}),
         Arguments.of("a" + FILE_SEPARATOR + "b", new String[] {"a" + FILE_SEPARATOR + "b"}),
         Arguments.of("a" + ZERO_WIDTH_SPACE + "b", new String[] {"a" + ZERO_WIDTH_SPACE + "b"}),
         Arguments.of(BYTE_ORDER_MARK + "a b", new String[] {BYTE_ORDER_MARK + "a", "b"}),
-        Arguments.of("a \t" + NO_BREAK_SPACE + " b", new String[] {"a", NO_BREAK_SPACE, "b"}),
-        Arguments.of(NO_BREAK_SPACE + "a" + IDEOGRAPHIC_SPACE,
-            new String[] {NO_BREAK_SPACE + "a" + IDEOGRAPHIC_SPACE}),
-        Arguments.of(NO_BREAK_SPACE + EM_SPACE + IDEOGRAPHIC_SPACE,
-            new String[] {NO_BREAK_SPACE + EM_SPACE + IDEOGRAPHIC_SPACE}),
-        // name=value predicates are kept whole, a separating character in a value separates
+        // name=value predicates are kept whole, whitespace in a value separates
         Arguments.of("w=a b x=c", new String[] {"w=a", "b", "x=c"}),
-        Arguments.of("w=New" + NO_BREAK_SPACE + "York", new String[] {"w=New" + NO_BREAK_SPACE + "York"}),
+        Arguments.of("w=a" + NO_BREAK_SPACE + "b", new String[] {"w=a", "b"}),
         Arguments.of("w= x", new String[] {"w=", "x"}),
         // supplementary-plane content is not whitespace
         Arguments.of(GRINNING_FACE + " " + DESERET_BEE, new String[] {GRINNING_FACE, DESERET_BEE}),
@@ -212,8 +208,8 @@ public class BasicContextGeneratorTest {
   }
 
   /**
-   * The default split does not follow the whitespace mode: the next line character and
-   * the file separator stay inside a predicate in both modes.
+   * The default split does not follow the whitespace mode: the next line character
+   * separates and the file separator does not, in both modes.
    */
   @ParameterizedTest
   @MethodSource("whitespaceContexts")
