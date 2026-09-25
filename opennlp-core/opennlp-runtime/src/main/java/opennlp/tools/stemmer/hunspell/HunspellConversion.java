@@ -162,8 +162,8 @@ final class HunspellConversion {
     if (rules.isEmpty() || input.isEmpty()) {
       return input;
     }
-    final StringBuilder output = new StringBuilder(input.length());
-    boolean changed = false;
+    StringBuilder output = null;
+    int copied = 0;
     for (int offset = 0; offset < input.length();) {
       Rule selected = null;
       for (Rule rule : rules) {
@@ -175,16 +175,17 @@ final class HunspellConversion {
         }
       }
       if (selected != null) {
-        output.append(selected.to());
+        if (output == null) {
+          output = new StringBuilder(input.length());
+        }
+        output.append(input, copied, offset).append(selected.to());
         offset += selected.from().length();
-        changed = true;
+        copied = offset;
       } else {
-        final int point = input.codePointAt(offset);
-        output.appendCodePoint(point);
-        offset += Character.charCount(point);
+        offset += Character.charCount(input.codePointAt(offset));
       }
     }
-    return changed ? output.toString() : input;
+    return output == null ? input : output.append(input, copied, input.length()).toString();
   }
 
   /**
