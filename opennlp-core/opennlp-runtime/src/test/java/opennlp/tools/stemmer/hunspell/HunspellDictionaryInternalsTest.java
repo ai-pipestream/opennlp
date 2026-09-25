@@ -149,6 +149,21 @@ class HunspellDictionaryInternalsTest {
   }
 
   /**
+   * Makes the form derived by a {@code ds:} suffix the stem, with the suffix's strip
+   * material removed and a further suffix left off.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testDerivationalSuffixFormsTheStem() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        stream("SFX A Y 1\nSFX A y iness/B y ds:noun\nSFX B Y 1\nSFX B 0 es .\n"),
+        stream("1\nhappy/A\n"));
+    Assertions.assertEquals(List.of("happiness"),
+        new HunspellStemmer(dictionary).stemAll("happinesses"));
+  }
+
+  /**
    * Adds the {@code ph:} fields of the word list to the replacement table.
    *
    * @throws IOException Thrown if loading fails.
