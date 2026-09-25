@@ -108,8 +108,39 @@ public class HunspellStemmerTest {
    */
   private static HunspellDictionary load(String affix, String words, Charset charset)
       throws IOException {
+    return load(affix, words, charset, HunspellDictionary.LoadMode.STRICT);
+  }
+
+  /**
+   * Loads a dictionary from in-memory affix and word-list content, both encoded as
+   * UTF-8, in the given load mode.
+   *
+   * @param affix The {@code .aff} content.
+   * @param words The {@code .dic} content.
+   * @param mode How unsupported directives are handled.
+   * @return The loaded dictionary. Never {@code null}.
+   * @throws IOException Thrown if the content is malformed.
+   */
+  private static HunspellDictionary load(String affix, String words,
+      HunspellDictionary.LoadMode mode) throws IOException {
+    return load(affix, words, StandardCharsets.UTF_8, mode);
+  }
+
+  /**
+   * Loads a dictionary from in-memory affix and word-list content encoded in the given
+   * charset, in the given load mode, through the stream-based entry point.
+   *
+   * @param affix The {@code .aff} content.
+   * @param words The {@code .dic} content.
+   * @param charset The charset both contents are encoded with.
+   * @param mode How unsupported directives are handled.
+   * @return The loaded dictionary. Never {@code null}.
+   * @throws IOException Thrown if the content is malformed.
+   */
+  private static HunspellDictionary load(String affix, String words, Charset charset,
+      HunspellDictionary.LoadMode mode) throws IOException {
     return HunspellDictionary.load(new ByteArrayInputStream(affix.getBytes(charset)),
-        new ByteArrayInputStream(words.getBytes(charset)));
+        new ByteArrayInputStream(words.getBytes(charset)), mode);
   }
 
   /**
@@ -1253,27 +1284,22 @@ public class HunspellStemmerTest {
   }
 
   /**
-   * Checks supported rules when partial loading skips unsupported directives.
+   * Verifies that {@link HunspellDictionary.LoadMode#ALLOW_PARTIAL} records an unknown
+   * directive and still applies the supported rules that follow it.
    *
-   * @param line The affix file line.
+   * @param line The unknown directive line.
+   * @throws IOException Thrown if the fixture fails to load.
    */
   @ParameterizedTest
-  @ValueSource(strings = {
-      "UNSUPPORTED_SYLLABLES ABC",
-      "UNSUPPORTED_LEMMA L",
-      "UNSUPPORTED value"
-  })
-  void testUnsupportedDirectiveDoesNotBlockSupportedRules(String line)
-      throws IOException {
-    final HunspellDictionary dictionary = HunspellDictionary.load(
-        new ByteArrayInputStream((line + "\nSFX A Y 1\nSFX A 0 s .\n")
-            .getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("1\ndog/A\n".getBytes(StandardCharsets.UTF_8)),
-        HunspellDictionary.LoadMode.ALLOW_PARTIAL);
-    final HunspellStemmer stemmer = new HunspellStemmer(dictionary);
+  @ValueSource(strings = {"UNRECOGNIZED value", "SYLLABLEFIELD ABC"})
+  void testAllowPartialSkipsUnknownDirective(String line) throws IOException {
+    final HunspellDictionary dictionary = load(line + "\nSFX A Y 1\nSFX A 0 s .\n",
+        "1\ndog/A\n", HunspellDictionary.LoadMode.ALLOW_PARTIAL);
 
-    Assertions.assertEquals("dog", stemmer.stem("dogs").toString());
+    Assertions.assertEquals("dog", new HunspellStemmer(dictionary).stem("dogs").toString());
     Assertions.assertEquals(1, dictionary.getUnsupportedDirectives().size());
+    Assertions.assertEquals(line.substring(0, line.indexOf(' ')),
+        dictionary.getUnsupportedDirectives().get(0).directive());
   }
 
   /**
@@ -1484,21 +1510,6 @@ public class HunspellStemmerTest {
         "1\nfoo/AU\n"));
 
     Assertions.assertEquals("foo", stemmer.stem("unfoosbar").toString());
-  }
-
-  /** Checks supported rules when partial loading skips an unknown directive. */
-  @Test
-  void testUnknownAffixDirectiveIsSkipped() throws IOException {
-    final HunspellDictionary dictionary = HunspellDictionary.load(
-        new ByteArrayInputStream("UNRECOGNIZED value\nSFX A Y 1\nSFX A 0 s .\n"
-            .getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("1\ndog/A\n".getBytes(StandardCharsets.UTF_8)),
-        HunspellDictionary.LoadMode.ALLOW_PARTIAL);
-    final HunspellStemmer stemmer = new HunspellStemmer(dictionary);
-
-    Assertions.assertEquals("dog", stemmer.stem("dogs").toString());
-    Assertions.assertEquals("UNRECOGNIZED",
-        dictionary.getUnsupportedDirectives().get(0).directive());
   }
 
   /** Verifies validation of the {@code AF} count line. */
