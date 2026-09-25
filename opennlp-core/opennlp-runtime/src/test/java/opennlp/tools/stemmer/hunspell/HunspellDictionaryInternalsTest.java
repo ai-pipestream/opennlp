@@ -178,6 +178,21 @@ class HunspellDictionaryInternalsTest {
   }
 
   /**
+   * Accepts a compound rule of 4096 elements and rejects one of 4097.
+   *
+   * @throws IOException Thrown if loading the accepted rule fails.
+   */
+  @Test
+  void testCompoundRuleElementLimit() throws IOException {
+    final String longest = "R?".repeat(4095) + "S";
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        stream("COMPOUNDRULE 1\nCOMPOUNDRULE " + longest + "\n"), stream(WORDS));
+    Assertions.assertEquals(1, dictionary.compoundRules().size());
+    Assertions.assertThrows(IOException.class, () -> HunspellDictionary.load(
+        stream("COMPOUNDRULE 1\nCOMPOUNDRULE R" + longest + "\n"), stream(WORDS)));
+  }
+
+  /**
    * Joins UTF-8 text and raw bytes.
    *
    * @param text The leading text.
