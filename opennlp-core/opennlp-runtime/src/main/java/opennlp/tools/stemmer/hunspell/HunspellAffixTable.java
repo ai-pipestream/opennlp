@@ -43,7 +43,7 @@ final class HunspellAffixTable {
    * @param minimumFields The minimum fields in an entry, including the directive.
    * @param maximumFields The maximum fields in an entry, including the directive.
    * @return The entries, or null if the file has no declaration for this table.
-   * @throws IOException If the header, entries, or count is invalid.
+   * @throws IOException Thrown if the header, entries, or count is invalid.
    */
   static List<Entry> read(String[][] lines, String tag, int minimumFields, int maximumFields)
       throws IOException {
@@ -55,16 +55,9 @@ final class HunspellAffixTable {
         continue;
       }
       if (count < 0) {
-        try {
-          if (fields.length != 2) {
-            throw new NumberFormatException();
-          }
-          count = Integer.parseInt(fields[1]);
-          if (count < 0) {
-            throw new NumberFormatException();
-          }
-        } catch (NumberFormatException e) {
-          throw new IOException("invalid " + tag + " count at line " + (i + 1), e);
+        count = fields.length == 2 ? HunspellDictionary.parseCount(fields[1]) : -1;
+        if (count < 0) {
+          throw new IOException("invalid " + tag + " count at line " + (i + 1));
         }
       } else {
         if (fields.length < minimumFields || fields.length > maximumFields || entries.size() == count) {

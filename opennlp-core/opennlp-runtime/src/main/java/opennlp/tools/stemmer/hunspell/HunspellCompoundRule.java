@@ -18,7 +18,7 @@
 package opennlp.tools.stemmer.hunspell;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** A compound flag sequence with optional and repeated elements. */
@@ -33,7 +33,7 @@ final class HunspellCompoundRule {
      * @param text The encoded flag.
      * @param line The source line.
      * @return The flag value.
-     * @throws IOException If the flag is malformed.
+     * @throws IOException Thrown if the flag is malformed.
      */
     int read(String text, int line) throws IOException;
   }
@@ -42,6 +42,21 @@ final class HunspellCompoundRule {
   private static final int MAX_ELEMENTS = 4096;
 
   private static final String INVALID_PATTERN = "invalid COMPOUNDRULE at line ";
+
+  /** Opens a flag written with more than one character. */
+  private static final char GROUP_START = '(';
+
+  /** Closes a flag written with more than one character. */
+  private static final char GROUP_END = ')';
+
+  /** Lets the preceding flag occur any number of times, including none. */
+  private static final char ANY_NUMBER = '*';
+
+  /** Lets the preceding flag occur once or not at all. */
+  private static final char OPTIONAL = '?';
+
+  /** Marks a flag that occurs exactly once. */
+  private static final char ONCE = ' ';
 
   private final int[] flags;
   private final char[] repetition;
@@ -64,15 +79,18 @@ final class HunspellCompoundRule {
    * @param line The source line.
    * @param reader The flag decoder.
    * @return The parsed rule.
-   * @throws IOException If the pattern or a flag is malformed.
+   * @throws IOException Thrown if the pattern or a flag is malformed.
    */
   static HunspellCompoundRule parse(String pattern, int line, FlagReader reader) throws IOException {
-    final List<Integer> flags = new ArrayList<>();
-    final StringBuilder repetitions = new StringBuilder();
+    // every element takes at least one character, so the pattern length bounds the count
+    final int capacity = Math.min(pattern.length(), MAX_ELEMENTS);
+    final int[] flags = new int[capacity];
+    final char[] repetition = new char[capacity];
+    int count = 0;
     for (int at = 0; at < pattern.length();) {
       final String flag;
-      if (pattern.charAt(at) == '(') {
-        final int end = pattern.indexOf(')', at + 1);
+      if (pattern.charAt(at) == GROUP_START) {
+        final int end = pattern.indexOf(GROUP_END, at + 1);
         if (end <= at + 1) {
           throw new IOException(INVALID_PATTERN + line);
         }
@@ -80,33 +98,28 @@ final class HunspellCompoundRule {
         at = end + 1;
       } else {
         final int point = pattern.codePointAt(at);
-        if (point == '*' || point == '?' || point == ')') {
+        if (point == ANY_NUMBER || point == OPTIONAL || point == GROUP_END) {
           throw new IOException(INVALID_PATTERN + line);
         }
         final int end = at + Character.charCount(point);
         flag = pattern.substring(at, end);
         at = end;
       }
-      flags.add(reader.read(flag, line));
-      if (flags.size() > MAX_ELEMENTS) {
+      if (count == MAX_ELEMENTS) {
         throw new IOException("COMPOUNDRULE exceeds " + MAX_ELEMENTS + " elements at line " + line);
       }
-      if (at < pattern.length() && (pattern.charAt(at) == '*' || pattern.charAt(at) == '?')) {
-        repetitions.append(pattern.charAt(at++));
+      flags[count] = reader.read(flag, line);
+      if (at < pattern.length()
+          && (pattern.charAt(at) == ANY_NUMBER || pattern.charAt(at) == OPTIONAL)) {
+        repetition[count++] = pattern.charAt(at++);
       } else {
-        repetitions.append(' ');
+        repetition[count++] = ONCE;
       }
     }
-    if (flags.isEmpty()) {
+    if (count == 0) {
       throw new IOException("empty COMPOUNDRULE at line " + line);
     }
-    final int[] values = new int[flags.size()];
-    final char[] repetition = new char[flags.size()];
-    for (int i = 0; i < values.length; i++) {
-      values[i] = flags.get(i);
-      repetition[i] = repetitions.charAt(i);
-    }
-    return new HunspellCompoundRule(values, repetition);
+    return new HunspellCompoundRule(Arrays.copyOf(flags, count), Arrays.copyOf(repetition, count));
   }
 
   /**
@@ -118,17 +131,20 @@ final class HunspellCompoundRule {
    */
   boolean matches(List<int[]> parts, boolean complete) {
     boolean[] states = new boolean[flags.length + 1];
+    boolean[] next = new boolean[states.length];
     states[0] = true;
     skipOptional(states);
     for (int[] part : parts) {
-      final boolean[] next = new boolean[states.length];
+      Arrays.fill(next, false);
       for (int i = 0; i < flags.length; i++) {
         if (states[i] && HunspellDictionary.contains(part, flags[i])) {
-          next[repetition[i] == '*' ? i : i + 1] = true;
+          next[repetition[i] == ANY_NUMBER ? i : i + 1] = true;
         }
       }
       skipOptional(next);
+      final boolean[] previous = states;
       states = next;
+      next = previous;
     }
     if (complete) {
       return states[flags.length];
@@ -148,7 +164,7 @@ final class HunspellCompoundRule {
    */
   private void skipOptional(boolean[] states) {
     for (int i = 0; i < flags.length; i++) {
-      if (states[i] && repetition[i] != ' ') {
+      if (states[i] && repetition[i] != ONCE) {
         states[i + 1] = true;
       }
     }
