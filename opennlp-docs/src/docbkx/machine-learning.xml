@@ -80,9 +80,9 @@ under the License.
 		</para>
 		<para>
 		<code>BasicContextGenerator</code> turns one string of contextual predicates into the
-		predicate array. Without arguments, space, tab, carriage return, line feed and form feed
-		separate predicates; other characters, including no-break spaces, stay inside feature
-		names, matching <code>FileEventStream</code>. A separator given to the constructor is
+		predicate array. Without arguments, runs of Unicode whitespace (the White_Space property,
+		which includes no-break and ideographic spaces) separate predicates, independent of the
+		<code>opennlp.whitespace.mode</code> setting. A separator given to the constructor is
 		literal text. It must not contain a backslash or one of the characters
 		<code>[ ] ( ) { } | * + ? ^ $ .</code>; such a separator is rejected with an
 		<code>IllegalArgumentException</code>. Empty predicates are not returned.
