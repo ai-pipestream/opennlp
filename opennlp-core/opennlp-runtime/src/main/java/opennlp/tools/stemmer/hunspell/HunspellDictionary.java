@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import opennlp.tools.commons.ThreadSafe;
@@ -347,6 +348,7 @@ public final class HunspellDictionary {
   private final String compoundVowels;
   private final List<WordBreak> wordBreaks;
   private final List<UnsupportedDirective> unsupportedDirectives;
+  private final int longestSpacedForm;
 
   /**
    * Initializes the dictionary from the two parsed files.
@@ -402,6 +404,8 @@ public final class HunspellDictionary {
     this.entries = immutableFlagSets(entries);
     this.hiddenEntries = immutableFlagSets(hiddenCapitalizedEntries(entries));
     this.unsupportedDirectives = List.copyOf(unsupportedDirectives);
+    this.longestSpacedForm = longestSpacedForm(this.entries.keySet(), affix.prefixes,
+        affix.suffixes);
     // A material-bearing rule can only be undone from a word whose boundary
     // character matches its affix material, so bucketing by that character
     // narrows each scan to one bucket plus the strip-only rules.
@@ -411,6 +415,54 @@ public final class HunspellDictionary {
     final List<Affix> prefixesWithout = new ArrayList<>();
     this.prefixesByFirst = bucketByBoundary(affix.prefixes, false, prefixesWithout);
     this.prefixesWithoutMaterial = List.copyOf(prefixesWithout);
+  }
+
+  /**
+   * Bounds the length of a word containing a space that can have a reading. Such a
+   * reading needs an entry or affix material with a space, and it is found by undoing
+   * at most two prefixes and two suffixes, each adding at most the longest affix
+   * material; a case variant is at least half as long as its surface form, because
+   * the sharp s variant replaces two letters with one.
+   *
+   * @param words The listed spellings.
+   * @param prefixes The prefix rules.
+   * @param suffixes The suffix rules.
+   * @return The longest possible UTF-16 length, or -1 when no spaced form has a reading.
+   */
+  private static int longestSpacedForm(Set<String> words, List<Affix> prefixes,
+      List<Affix> suffixes) {
+    boolean spacedAffix = false;
+    int prefixMaterial = 0;
+    for (Affix prefix : prefixes) {
+      prefixMaterial = Math.max(prefixMaterial, prefix.affix().length());
+      spacedAffix |= prefix.affix().indexOf(' ') >= 0;
+    }
+    int suffixMaterial = 0;
+    for (Affix suffix : suffixes) {
+      suffixMaterial = Math.max(suffixMaterial, suffix.affix().length());
+      spacedAffix |= suffix.affix().indexOf(' ') >= 0;
+    }
+    int longestWord = -1;
+    for (String word : words) {
+      if (spacedAffix || word.indexOf(' ') >= 0) {
+        longestWord = Math.max(longestWord, word.length());
+      }
+    }
+    if (longestWord < 0) {
+      return -1;
+    }
+    return 2 * (longestWord + 2 * prefixMaterial + 2 * suffixMaterial);
+  }
+
+  /**
+   * Tests whether a word containing a space can have a reading, so that the compound
+   * word-pair check can skip texts no reading can match.
+   *
+   * @param length The UTF-16 length of the spaced word.
+   * @return {@code false} if no word of this length containing a space has a reading.
+   */
+  boolean mayReadSpacedForm(int length) {
+    return length <= longestSpacedForm;
   }
 
   /**
@@ -638,11 +690,7 @@ public final class HunspellDictionary {
     int lineNumber = 1;
     for (int i = 0; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
-        int fieldStart = lineStart;
-        if (lineStart == 0 && i >= 3 && bytes[0] == (byte) 0xef
-            && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf) {
-          fieldStart = 3;
-        }
+        int fieldStart = lineStart == 0 ? Math.min(byteOrderMarkLength(bytes), i) : lineStart;
         while (fieldStart < i && isAsciiFieldSpace(bytes[fieldStart])) {
           fieldStart++;
         }
@@ -684,6 +732,18 @@ public final class HunspellDictionary {
   }
 
   /**
+   * Measures a leading UTF-8 byte order mark, which the byte-level scans skip so that
+   * the first line's directive is read without it.
+   *
+   * @param bytes The affix content.
+   * @return 3 when the content starts with a UTF-8 byte order mark, otherwise 0.
+   */
+  private static int byteOrderMarkLength(byte[] bytes) {
+    return bytes.length >= 3 && bytes[0] == (byte) 0xef
+        && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
+  }
+
+  /**
    * Finds a directive before metadata is removed or decoded.
    *
    * @param bytes The affix content.
@@ -693,8 +753,7 @@ public final class HunspellDictionary {
   private static boolean hasAffixDirective(byte[] bytes, String directive) {
     final int[] starts = new int[1];
     final int[] ends = new int[1];
-    int from = bytes.length >= 3 && bytes[0] == (byte) 0xef
-        && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
+    int from = byteOrderMarkLength(bytes);
     for (int to = from; to <= bytes.length; to++) {
       if (to == bytes.length || bytes[to] == '\r' || bytes[to] == '\n') {
         if (findAsciiFields(bytes, from, to, starts, ends) > 0
@@ -718,7 +777,8 @@ public final class HunspellDictionary {
     return switch (directive) {
       case "NAME", "HOME", "VERSION", "KEY", "TRY", REPLACEMENT_TAG, "MAP", "PHONE",
           "NOSUGGEST", "MAXCPDSUGS", "MAXNGRAMSUGS", "MAXDIFF", "ONLYMAXDIFF",
-          "NOSPLITSUGS", "SUGSWITHDOTS", "SUBSTANDARD", "WORDCHARS",
+          "NOSPLITSUGS", "SUGSWITHDOTS", "SUBSTANDARD", "WORDCHARS", "NONGRAMSUGGEST",
+          "CHECKNUM",
           "COMPOUNDFIRST", "COMPOUNDLAST", "ONLYROOT", "HU_KOTOHANGZO", "GENERATE" -> true;
       default -> false;
     };
@@ -846,8 +906,10 @@ public final class HunspellDictionary {
       return bytes;
     }
     final ByteArrayOutputStream normalized = new ByteArrayOutputStream(bytes.length);
-    int lineStart = 0;
-    for (int i = 0; i <= bytes.length; i++) {
+    // the byte order mark is copied as it is, so the first line's fields start after it
+    int lineStart = byteOrderMarkLength(bytes);
+    normalized.write(bytes, 0, lineStart);
+    for (int i = lineStart; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
         writeNormalizedFlagLine(normalized, bytes, lineStart, i);
         if (i < bytes.length) {
@@ -868,8 +930,8 @@ public final class HunspellDictionary {
   private static boolean usesUnicodeOrNumericFlags(byte[] bytes) {
     final int[] starts = new int[5];
     final int[] fieldEnds = new int[5];
-    int lineStart = 0;
-    for (int i = 0; i <= bytes.length; i++) {
+    int lineStart = byteOrderMarkLength(bytes);
+    for (int i = lineStart; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
         final int count = findAsciiFields(bytes, lineStart, i, starts, fieldEnds);
         if (count >= 2 && FLAG_TAG.equals(
@@ -2242,7 +2304,9 @@ public final class HunspellDictionary {
    * @throws IOException Thrown if the declared encoding name is not supported.
    */
   private static Charset declaredCharset(byte[] affixBytes) throws IOException {
-    final String ascii = new String(affixBytes, StandardCharsets.US_ASCII);
+    final int start = byteOrderMarkLength(affixBytes);
+    final String ascii = new String(affixBytes, start, affixBytes.length - start,
+        StandardCharsets.US_ASCII);
     for (final String line : splitLines(ascii)) {
       final String trimmed = trim(line);
       if (trimmed.startsWith(SET_PREFIX) || trimmed.startsWith(SET_TAB_PREFIX)) {
@@ -3079,7 +3143,9 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Splits text into lines with a single character scan, tolerating CRLF endings.
+   * Splits text into lines with a single character scan. A line ends at a line feed, a
+   * carriage return, or a carriage return followed by a line feed, as in the directive
+   * masking, so line numbers agree.
    *
    * @param content The text to split.
    * @return The lines without their terminators. Never {@code null}.
@@ -3088,12 +3154,12 @@ public final class HunspellDictionary {
     final List<String> lines = new ArrayList<>();
     int start = 0;
     for (int i = 0; i <= content.length(); i++) {
-      if (i == content.length() || content.charAt(i) == '\n') {
-        int end = i;
-        if (end > start && content.charAt(end - 1) == '\r') {
-          end--;
+      if (i == content.length() || content.charAt(i) == '\n' || content.charAt(i) == '\r') {
+        lines.add(content.substring(start, i));
+        if (i + 1 < content.length() && content.charAt(i) == '\r'
+            && content.charAt(i + 1) == '\n') {
+          i++;
         }
-        lines.add(content.substring(start, end));
         start = i + 1;
       }
     }

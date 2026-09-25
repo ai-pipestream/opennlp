@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -1183,7 +1184,7 @@ public class HunspellStemmerTest {
 
   /**
    * Verifies CHECKCOMPOUNDDUP: the closing part must not repeat the part before it,
-   * while an earlier repetition passes, as in the reference implementation, and the
+   * while an earlier repetition passes, as in Hunspell, and the
    * same dictionary without the declaration accepts both.
    *
    * @throws IOException Thrown if a fixture fails to load.
@@ -1687,15 +1688,15 @@ public class HunspellStemmerTest {
   @Test
   void testForbiddenSurfaceOverridesAffixAnalysis() throws IOException {
     final HunspellStemmer stemmer = new HunspellStemmer(load(
-        "FORBIDDENWORD X\nSFX A Y 1\nSFX A 0 s .\n",
-        "2\nfoo/A\nfoos/X\n"));
+        "FORBIDDENWORD F\nSFX A Y 1\nSFX A 0 s .\n",
+        "2\nreed/A\nreeds/F\n"));
 
-    Assertions.assertEquals(List.of("foos"), stemmer.stemAll("foos"));
+    Assertions.assertEquals(List.of("reeds"), stemmer.stemAll("reeds"));
   }
 
   /**
    * Verifies that the first listed homonym decides whether a surface form is
-   * forbidden, as in the reference implementation: a forbidden first homonym blocks the
+   * forbidden, as in Hunspell: a forbidden first homonym blocks the
    * standalone and affix analyses, while a valid first homonym keeps both.
    *
    * @throws IOException Thrown if the fixture fails to load.
@@ -1703,14 +1704,14 @@ public class HunspellStemmerTest {
   @Test
   void testForbiddenFirstHomonymOverridesStandaloneEntry() throws IOException {
     final HunspellStemmer forbiddenFirst = new HunspellStemmer(load(
-        "FORBIDDENWORD X\nSFX A Y 1\nSFX A 0 s .\n",
-        "3\nfoo/A\nfoos/X\nfoos\n"));
-    Assertions.assertEquals(List.of("foos"), forbiddenFirst.stemAll("foos"));
-    Assertions.assertEquals(List.of(), forbiddenFirst.analyze("foos"));
+        "FORBIDDENWORD F\nSFX A Y 1\nSFX A 0 s .\n",
+        "3\nreed/A\nreeds/F\nreeds\n"));
+    Assertions.assertEquals(List.of("reeds"), forbiddenFirst.stemAll("reeds"));
+    Assertions.assertEquals(List.of(), forbiddenFirst.analyze("reeds"));
     final HunspellStemmer validFirst = new HunspellStemmer(load(
-        "FORBIDDENWORD X\nSFX A Y 1\nSFX A 0 s .\n",
-        "3\nfoo/A\nfoos\nfoos/X\n"));
-    Assertions.assertEquals(List.of("foos", "foo"), validFirst.stemAll("foos"));
+        "FORBIDDENWORD F\nSFX A Y 1\nSFX A 0 s .\n",
+        "3\nreed/A\nreeds\nreeds/F\n"));
+    Assertions.assertEquals(List.of("reeds", "reed"), validFirst.stemAll("reeds"));
   }
 
   /**
@@ -1792,16 +1793,16 @@ public class HunspellStemmerTest {
     final HunspellStemmer stemmer = new HunspellStemmer(load(
         String.join("\n",
             "AF 2",
-            "AF AB",
-            "AF A",
-            "SFX A Y 1",
-            "SFX A 0 x .",
-            "SFX B Y 1",
-            "SFX B 0 y/2 .",
+            "AF PQ",
+            "AF P",
+            "SFX P Y 1",
+            "SFX P 0 s .",
+            "SFX Q Y 1",
+            "SFX Q 0 en/2 .",
             ""),
-        "1\nfoo/1\n"));
+        "1\nquick/1\n"));
 
-    Assertions.assertEquals(List.of("foo"), stemmer.stemAll("fooyx"));
+    Assertions.assertEquals(List.of("quick"), stemmer.stemAll("quickens"));
   }
 
   /**
@@ -1917,7 +1918,7 @@ public class HunspellStemmerTest {
 
   /**
    * Verifies that a FORBIDDENWORD flag among an affix rule's continuation classes
-   * marks the generated form as forbidden, as in the reference implementation: the
+   * marks the generated form as forbidden, as in Hunspell: the
    * derived surface has no analysis even without a listed forbidden entry, in suffix
    * position, in prefix position, and through a cross product involving the marked
    * rule. A derivation over rules without the flag still reaches the listed stem.
@@ -1938,5 +1939,24 @@ public class HunspellStemmerTest {
         "FORBIDDENWORD F\nPFX P Y 1\nPFX P 0 un/F .\n",
         "1\ndog/P\n"));
     Assertions.assertEquals(List.of("undog"), markedPrefix.stemAll("undog"));
+  }
+
+  /**
+   * Verifies that a long word under a compound-declaring dictionary is answered
+   * promptly. The word-pair check inserts a space at every position of each text a
+   * compound level splits, so without a bound on the spaced forms a dictionary can
+   * read, the work grows with the cube of the word length.
+   *
+   * @param words The word list, with and without an entry containing a space.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"1\nlo/CA\n", "2\nlo/CA\nlo la/A\n"})
+  void testLongWordWithCompoundsIsBounded(String words) {
+    final String word = "lo".repeat(10_000) + "q";
+    final List<CharSequence> stems = Assertions.assertTimeoutPreemptively(
+        Duration.ofSeconds(10), () -> new HunspellStemmer(load(
+            "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nSFX A Y 1\nSFX A 0 s .\n", words))
+            .stemAll(word));
+    Assertions.assertEquals(List.of(word), stems);
   }
 }

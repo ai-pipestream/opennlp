@@ -650,6 +650,11 @@ public final class HunspellStemmer implements Stemmer {
     if (dictionary.rejectsCompoundReplacement(text, this::isNoncompoundForm)) {
       return true;
     }
+    // without this bound every split position of a long word would be analyzed again
+    // at every compound level
+    if (!dictionary.mayReadSpacedForm(text.length() + 1)) {
+      return false;
+    }
     for (int at = Character.charCount(text.codePointAt(0)); at < text.length();
         at += Character.charCount(text.codePointAt(at))) {
       if (isNoncompoundForm(text.substring(0, at) + " " + text.substring(at))) {

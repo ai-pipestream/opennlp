@@ -45,6 +45,9 @@ class HunspellCompletionTest {
   private static final String COMPOUND = "COMPOUNDFLAG C\nCOMPOUNDMIN 1\n";
   private static final String HUNGARIAN = COMPOUND + "LANG hu\nCOMPOUNDWORDMAX 2\n";
   private static final String THREE_WORDS = "3\nray/C\nme/C\nfa/C";
+  private static final String NEEDS_AFFIX_ZERO_RULES = "NEEDAFFIX N\n"
+      + "SFX P Y 1\nSFX P 0 0 . is:bare\nSFX Q Y 1\nSFX Q 0 0 . is:plain\n"
+      + "SFX R Y 2\nSFX R 0 0/NPQ . dp:none\nSFX R 0 ix/NPQ . dp:ix\n";
 
   /**
    * An original dictionary with expected recognition and stems.
@@ -54,7 +57,7 @@ class HunspellCompletionTest {
    * @param words The dictionary entries.
    * @param input The text to analyze.
    * @param stems The expected stems.
-   * @param accepted The native recognition expectation.
+   * @param accepted Whether Hunspell recognized the input.
    */
   private record Example(String name, String affix, String words, String input,
                          List<String> stems, boolean accepted) {
@@ -120,10 +123,12 @@ class HunspellCompletionTest {
             "1\ncard/A\n", "cards", List.of("card"), true),
         new Example("compound-word-with-space", COMPOUND,
             "3\nriver/C\nboat/C\nriver boat\n", "riverboat", List.of("riverboat"), false),
+        new Example("compound-affixed-word-with-space", COMPOUND + "SFX A Y 1\nSFX A 0 s .\n",
+            "3\nriver/C\nboat/CA\nriver boat/A\n", "riverboats", List.of("riverboats"), false),
         new Example("compound-affixed-duplicate", COMPOUND + "CHECKCOMPOUNDDUP\n"
             + "COMPOUNDPERMITFLAG P\nSFX A Y 1\nSFX A 0 s/P .\n",
             "1\nriver/CA\n", "riversriver", List.of("riversriver"), false),
-        // the reference spell checker rejects these forms while its analyzer stems them
+        // the Hunspell spell checker rejects these forms while its analyzer stems them
         new Example("turkish-capitalized-name", "LANG tr_TR\n", "1\nİpek\n",
             "İPEK", List.of("İpek"), false),
         new Example("azerbaijani-capitalized-name", "LANG az_AZ\n", "1\nİpek\n",
@@ -197,7 +202,7 @@ class HunspellCompletionTest {
       "numeric-token", "numbers are accepted natively before any lookup");
 
   /**
-   * Tests recognition against the outcome recorded from the reference spell checker.
+   * Tests recognition against the outcome recorded from the Hunspell spell checker.
    * A fixture listed in {@link #RECOGNITION_DEVIATIONS} must differ, so a stale entry
    * fails too.
    *
@@ -291,7 +296,7 @@ class HunspellCompletionTest {
   }
 
   /**
-   * Supplies morphology expected from the native reference.
+   * Supplies morphology recorded from Hunspell.
    *
    * @return Affix content, dictionary content, input, and expected analysis.
    */
@@ -327,15 +332,6 @@ class HunspellCompletionTest {
   }
 
   /**
-   * Compares morphological fields with native output on original fixtures.
-   *
-   * @param affix The affix content.
-   * @param words The entry content.
-   * @param input The input word.
-   * @param expected The expected analysis.
-   * @throws Exception If parsing or reference execution fails.
-   */
-  /**
    * Analyses that include a rule adding and removing no material, in reference order.
    *
    * @return Affix content, word list, input, and every expected analysis.
@@ -346,11 +342,11 @@ class HunspellCompletionTest {
             List.of("st:bar", "st:bar is:zero")),
         Arguments.of("PFX A Y 1\nPFX A 0 0 . dp:zero\n", "1\nbar/A\n", "bar",
             List.of("st:bar", "dp:zero st:bar fl:A")),
-        Arguments.of("NEEDAFFIX X\nSFX A Y 1\nSFX A 0 0 . >\nSFX B Y 1\nSFX B 0 0 . <ZERO>>\n"
-            + "SFX C Y 2\nSFX C 0 0/XAB . <ZERODERIV>\nSFX C 0 baz/XAB . <DERIV>\n",
-            "1\nbar/XABC\t<BAR\n", "bar",
-            List.of("st:bar <BAR >", "st:bar <BAR <ZERO>>", "st:bar <BAR <ZERODERIV> >",
-                "st:bar <BAR <ZERODERIV> <ZERO>>")));
+        Arguments.of(NEEDS_AFFIX_ZERO_RULES, "1\nlumen/NPQR po:noun\n", "lumen",
+            List.of("st:lumen po:noun is:bare", "st:lumen po:noun is:plain",
+                "st:lumen po:noun dp:none is:bare", "st:lumen po:noun dp:none is:plain")),
+        Arguments.of(NEEDS_AFFIX_ZERO_RULES, "1\nlumen/NPQR po:noun\n", "lumenix",
+            List.of("st:lumen po:noun dp:ix is:bare", "st:lumen po:noun dp:ix is:plain")));
   }
 
   /**
@@ -359,7 +355,7 @@ class HunspellCompletionTest {
    * @param affix The affix content.
    * @param words The word list.
    * @param input The analyzed word.
-   * @param expected The distinct analyses, as recorded from the reference analyzer.
+   * @param expected The distinct analyses, as recorded from Hunspell's analyzer.
    * @throws IOException If loading fails.
    */
   @ParameterizedTest
@@ -374,27 +370,27 @@ class HunspellCompletionTest {
 
   /**
    * Tests that only the first listed homonym decides whether a spelling is forbidden.
-   * The reference spell checker accepts {@code foo} with the valid homonym listed first
+   * The Hunspell spell checker accepts {@code reed} with the valid homonym listed first
    * and rejects it with the forbidden homonym listed first.
    *
    * @throws IOException If loading fails.
    */
   @Test
   void testForbiddenFirstHomonym() throws IOException {
-    final String affix = "FORBIDDENWORD X\nCOMPOUNDFLAG Y\nCOMPOUNDMIN 1\n";
+    final String affix = "FORBIDDENWORD F\nCOMPOUNDFLAG K\nCOMPOUNDMIN 1\n";
     final HunspellStemmer allowed = new HunspellStemmer(HunspellDictionary.load(
         new ByteArrayInputStream(affix.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("2\nfoo/S\nfoo/YX\n".getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertEquals(List.of("st:foo"), allowed.analyze("foo"));
-    Assertions.assertEquals(List.of(), allowed.analyze("foofoo"));
+        new ByteArrayInputStream("2\nreed/T\nreed/KF\n".getBytes(StandardCharsets.UTF_8))));
+    Assertions.assertEquals(List.of("st:reed"), allowed.analyze("reed"));
+    Assertions.assertEquals(List.of(), allowed.analyze("reedreed"));
     final HunspellStemmer forbidden = new HunspellStemmer(HunspellDictionary.load(
         new ByteArrayInputStream(affix.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("2\nfoo/YX\nfoo/S\n".getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertEquals(List.of(), forbidden.analyze("foo"));
+        new ByteArrayInputStream("2\nreed/KF\nreed/T\n".getBytes(StandardCharsets.UTF_8))));
+    Assertions.assertEquals(List.of(), forbidden.analyze("reed"));
   }
 
   /**
-   * Tests analyses against the field text recorded from the reference analyzer, with
+   * Tests analyses against the field text recorded from Hunspell's analyzer, with
    * separator whitespace normalized to single spaces.
    *
    * @param affix The affix content.
