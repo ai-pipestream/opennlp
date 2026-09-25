@@ -20,6 +20,7 @@ package opennlp.tools.stemmer.hunspell;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.LoadMode;
 class HunspellDictionaryInternalsTest {
 
   private static final String WORDS = "1\ndog/A\n";
+  private static final String RULES = "SFX A Y 1\nSFX A 0 s .\n";
   private static final String MORPHOLOGY_ALIASES = "AM 1\nAM po:noun\n";
   private static final String REPLACEMENTS = "REP 1\nREP coat boat\n";
   private static final String CHECK_REPLACEMENTS = "CHECKCOMPOUNDREP\n";
@@ -103,6 +105,61 @@ class HunspellDictionaryInternalsTest {
     final byte[] checked = concat(CHECK_REPLACEMENTS, affix);
     Assertions.assertThrows(IOException.class, () -> HunspellDictionary.load(
         new ByteArrayInputStream(checked), stream(WORDS)));
+  }
+
+  /**
+   * Keeps each entry's morphological fields when entries share a flag alias.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testSharedFlagAliasKeepsEntryMorphology() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        stream("AF 1\nAF A\nSFX A Y 1\nSFX A 0 s .\n"),
+        stream("2\ndog/1 st:hound\ncat/1 st:feline\n"));
+    final HunspellStemmer stemmer = new HunspellStemmer(dictionary);
+    Assertions.assertEquals(List.of("hound"), stemmer.stemAll("dogs"));
+    Assertions.assertEquals(List.of("feline"), stemmer.stemAll("cats"));
+  }
+
+  /**
+   * Keeps the morphological fields of homonyms whose flags are equal.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testHomonymsWithEqualFlagsKeepTheirMorphology() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(stream(RULES),
+        stream("3\nbank/A st:shore\nbank/A st:money\nbank/A\n"));
+    Assertions.assertEquals(List.of("shore", "money", "bank"),
+        new HunspellStemmer(dictionary).stemAll("banks"));
+  }
+
+  /**
+   * Gives the capitalized form of a mixed-case entry, which all-uppercase input matches,
+   * the entry's morphological fields.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testCapitalizedFormKeepsEntryMorphology() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(stream(RULES),
+        stream("1\neBook/A st:ebook\n"));
+    Assertions.assertEquals(List.of("ebook"), new HunspellStemmer(dictionary).stemAll("EBOOKS"));
+  }
+
+  /**
+   * Adds the {@code ph:} fields of the word list to the replacement table.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testPhoneticFieldsExtendReplacements() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(stream(CHECK_REPLACEMENTS),
+        stream("2\nboat ph:coat\nsail/A ph:seil\n"));
+    Assertions.assertTrue(dictionary.rejectsCompoundReplacement("raincoat", "rainboat"::equals));
+    Assertions.assertTrue(dictionary.rejectsCompoundReplacement("Seilor", "sailor"::equals));
+    Assertions.assertFalse(dictionary.rejectsCompoundReplacement("raincoat", "raincoat"::equals));
   }
 
   /**
