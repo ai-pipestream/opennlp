@@ -178,6 +178,20 @@ class HunspellDictionaryInternalsTest {
   }
 
   /**
+   * Applies input conversions at several positions, keeping the text between them and
+   * honoring the end anchor.
+   *
+   * @throws IOException Thrown if loading fails.
+   */
+  @Test
+  void testInputConversionKeepsTextBetweenMatches() throws IOException {
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        stream("ICONV 2\nICONV ab X\nICONV c_ Z\n"), stream(WORDS));
+    Assertions.assertEquals("zXqXcXZ", dictionary.inputForm("zabqabcabc"));
+    Assertions.assertEquals("dog", dictionary.inputForm("dog"));
+  }
+
+  /**
    * Accepts a compound rule of 4096 elements and rejects one of 4097.
    *
    * @throws IOException Thrown if loading the accepted rule fails.
