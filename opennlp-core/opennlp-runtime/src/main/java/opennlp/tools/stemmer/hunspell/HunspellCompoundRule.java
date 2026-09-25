@@ -33,7 +33,7 @@ final class HunspellCompoundRule {
      * @param text The encoded flag.
      * @param line The source line.
      * @return The flag value.
-     * @throws IOException If the flag is malformed.
+     * @throws IOException Thrown if the flag is malformed.
      */
     int read(String text, int line) throws IOException;
   }
@@ -64,7 +64,7 @@ final class HunspellCompoundRule {
    * @param line The source line.
    * @param reader The flag decoder.
    * @return The parsed rule.
-   * @throws IOException If the pattern or a flag is malformed.
+   * @throws IOException Thrown if the pattern or a flag is malformed.
    */
   static HunspellCompoundRule parse(String pattern, int line, FlagReader reader) throws IOException {
     final List<Integer> flags = new ArrayList<>();

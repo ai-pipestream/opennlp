@@ -58,7 +58,7 @@ final class HunspellConversion {
    * @param lines The affix fields indexed by source line.
    * @param directive The table name.
    * @return The conversion table.
-   * @throws IOException If the table is malformed.
+   * @throws IOException Thrown if the table is malformed.
    */
   static HunspellConversion parse(String[][] lines, String directive) throws IOException {
     final List<Rule> rules = new ArrayList<>();

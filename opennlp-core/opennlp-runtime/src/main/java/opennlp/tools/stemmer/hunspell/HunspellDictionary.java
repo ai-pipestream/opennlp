@@ -110,7 +110,7 @@ public final class HunspellDictionary {
      * @param directive The nonblank directive name.
      * @param source The nonblank source description.
      * @param lineNumber The positive source line number.
-     * @throws IllegalArgumentException If a name is null or blank, or the line
+     * @throws IllegalArgumentException Thrown if a name is null or blank, or the line
      *     number is not positive.
      */
     public UnsupportedDirective {
@@ -180,7 +180,7 @@ public final class HunspellDictionary {
      * @param declaration The declared separator with optional anchors.
      * @param line The one-based source line, for diagnostics.
      * @return The parsed declaration.
-     * @throws IOException If the declaration consists of anchors only.
+     * @throws IOException Thrown if the declaration consists of anchors only.
      */
     static WordBreak parse(String declaration, int line) throws IOException {
       final boolean atStart = declaration.startsWith(BREAK_START_ANCHOR);
@@ -647,7 +647,7 @@ public final class HunspellDictionary {
    * @param mode The directive policy.
    * @param source The affix source used in unsupported-directive diagnostics.
    * @return The parsed dictionary.
-   * @throws IOException If reading, validation, or parsing fails.
+   * @throws IOException Thrown if reading, validation, or parsing fails.
    */
   private static HunspellDictionary loadStreams(InputStream affixStream,
       InputStream dictionaryStream, LoadMode mode, String source) throws IOException {
@@ -680,7 +680,7 @@ public final class HunspellDictionary {
    * @param mode The directive policy applied before masking.
    * @param source The affix source description.
    * @return Unsupported directives skipped in partial mode, in encounter order.
-   * @throws IOException If strict loading encounters an unsupported directive.
+   * @throws IOException Thrown if strict loading encounters an unsupported directive.
    */
   private static List<UnsupportedDirective> maskIgnoredAffixLines(byte[] bytes,
       LoadMode mode, String source) throws IOException {
@@ -2799,7 +2799,7 @@ public final class HunspellDictionary {
    *
    * @param lines The affix fields indexed by source line.
    * @return The aliases in reference order.
-   * @throws IOException If a count or table entry is malformed.
+   * @throws IOException Thrown if a count or table entry is malformed.
    */
   private static List<List<String>> readMorphologyAliases(String[][] lines) throws IOException {
     final List<List<String>> aliases = new ArrayList<>();
@@ -2820,7 +2820,7 @@ public final class HunspellDictionary {
    * @param lines The affix fields indexed by line.
    * @param mode The flag encoding.
    * @return The parsed patterns.
-   * @throws IOException If a count, pattern, or flag is malformed.
+   * @throws IOException Thrown if a count, pattern, or flag is malformed.
    */
   private static List<HunspellCompoundRule> readCompoundRules(String[][] lines, FlagMode mode)
       throws IOException {
@@ -2841,7 +2841,7 @@ public final class HunspellDictionary {
    * @param lines The affix fields.
    * @param mode The flag encoding.
    * @return The boundary patterns.
-   * @throws IOException If a declaration is malformed.
+   * @throws IOException Thrown if a declaration is malformed.
    */
   private static List<CompoundPattern> readCompoundPatterns(String[][] lines, FlagMode mode)
       throws IOException {
@@ -2870,7 +2870,7 @@ public final class HunspellDictionary {
    *
    * @param lines The affix fields.
    * @return The separators and anchors.
-   * @throws IOException If the table or a separator is malformed.
+   * @throws IOException Thrown if the table or a separator is malformed.
    */
   private static List<WordBreak> readWordBreaks(String[][] lines) throws IOException {
     final List<HunspellAffixTable.Entry> entries = HunspellAffixTable.read(lines, BREAK_TAG, 2, 2);
@@ -2891,7 +2891,7 @@ public final class HunspellDictionary {
    * @param aliases The AM table.
    * @param line The source line.
    * @return The expanded immutable fields.
-   * @throws IOException If an alias reference is invalid.
+   * @throws IOException Thrown if an alias reference is invalid.
    */
   private static List<String> parseMorphology(String[] fields, List<List<String>> aliases,
       int line) throws IOException {

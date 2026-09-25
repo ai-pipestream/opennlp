@@ -43,7 +43,7 @@ final class HunspellAffixTable {
    * @param minimumFields The minimum fields in an entry, including the directive.
    * @param maximumFields The maximum fields in an entry, including the directive.
    * @return The entries, or null if the file has no declaration for this table.
-   * @throws IOException If the header, entries, or count is invalid.
+   * @throws IOException Thrown if the header, entries, or count is invalid.
    */
   static List<Entry> read(String[][] lines, String tag, int minimumFields, int maximumFields)
       throws IOException {
