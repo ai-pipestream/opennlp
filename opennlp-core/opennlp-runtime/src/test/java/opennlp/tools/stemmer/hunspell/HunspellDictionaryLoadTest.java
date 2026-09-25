@@ -83,6 +83,37 @@ class HunspellDictionaryLoadTest {
     Assertions.assertTrue(error.getMessage().contains("line 3"));
   }
 
+  /**
+   * Reads the affix file and the word list with each supported line separator, so a
+   * file with carriage return line endings loads like one with line feeds.
+   *
+   * @param separator A supported line separator.
+   * @throws IOException If loading fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"\n", "\r\n", "\r"})
+  void testLineSeparatorsInAffixAndWordList(String separator) throws IOException {
+    final String affix = String.join(separator, "SFX A Y 1", "SFX A 0 s .", "");
+    final String words = String.join(separator, "1", "dog/A", "");
+    final HunspellDictionary dictionary = HunspellDictionary.load(stream(affix), stream(words));
+    Assertions.assertEquals("dog", new HunspellStemmer(dictionary).stem("dogs").toString());
+  }
+
+  /**
+   * Reports the line of a malformed supported directive with each line separator.
+   *
+   * @param separator A supported line separator.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"\n", "\r\n", "\r"})
+  void testMalformedDirectiveLineNumber(String separator) {
+    final String affix = String.join(separator, "# comment", "", "IGNORE", "");
+    final IOException error = Assertions.assertThrows(IOException.class,
+        () -> HunspellDictionary.load(stream(affix), stream(WORDS)));
+    Assertions.assertTrue(error.getMessage().contains("IGNORE"), error.getMessage());
+    Assertions.assertTrue(error.getMessage().contains("line 3"), error.getMessage());
+  }
+
   /** Rejects an unsupported directive immediately after a UTF-8 byte-order mark. */
   @Test
   void testByteOrderMarkDoesNotHideUnsupportedDirective() {
