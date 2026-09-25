@@ -408,6 +408,14 @@ public final class HunspellDictionary {
    * {@link #entries}, sharing the entry flag arrays.
    */
   private final Map<String, List<int[]>> hiddenEntries;
+  /**
+   * The morphological fields of the listed entries, keyed like {@link #entries}. Each
+   * list is aligned with the word's flag sets; words without fields are absent, and a
+   * list ends after the last entry that has fields.
+   */
+  private final Map<String, List<List<String>>> morphology;
+  /** The morphological fields of the hidden capitalized forms, aligned like {@link #morphology}. */
+  private final Map<String, List<List<String>>> hiddenMorphology;
   private final BoundaryIndex suffixesByLast;
   private final List<Affix> suffixesWithoutMaterial;
   private final BoundaryIndex prefixesByFirst;
@@ -431,7 +439,6 @@ public final class HunspellDictionary {
   private final String ignoredCharacters;
   private final HunspellConversion inputConversion;
   private final HunspellConversion outputConversion;
-  private final Map<int[], List<String>> morphology;
   private final boolean complexPrefixes;
   private final int keepCase;
   private final int warningFlag;
@@ -482,12 +489,15 @@ public final class HunspellDictionary {
     this.ignoredCharacters = affix.ignoredCharacters;
     this.inputConversion = affix.inputConversion;
     this.outputConversion = affix.outputConversion;
-    this.morphology = Map.copyOf(affix.entryMorphology);
     this.complexPrefixes = affix.complexPrefixes;
     this.keepCase = affix.keepCase;
     this.warningFlag = affix.warningFlag;
     this.forbidWarn = affix.forbidWarn;
     this.checkSharps = affix.checkSharps;
+    this.turkicCase = TURKIC_LANGUAGES.stream()
+        .anyMatch(language -> isLanguage(affix.language, language));
+    this.hungarian = isLanguage(affix.language, HUNGARIAN_LANGUAGE);
+    this.syllableNumber = affix.syllableNumber;
     this.compoundRules = List.copyOf(affix.compoundRules);
     this.compoundPatterns = List.copyOf(affix.compoundPatterns);
     this.compoundRoot = affix.compoundRoot;
@@ -496,17 +506,18 @@ public final class HunspellDictionary {
     this.simplifiedTriple = affix.simplifiedTriple;
     this.checkCompoundRep = affix.checkCompoundRep;
     this.replacements = affix.checkCompoundRep
-        ? affix.replacements.withPhoneticFields(entries, affix.entryMorphology) : affix.replacements;
+        ? affix.replacements.withPhoneticFields(affix.entryMorphology) : affix.replacements;
     this.maxCompoundSyllables = affix.maxCompoundSyllables;
     this.compoundVowels = affix.compoundVowels;
     this.wordBreaks = List.copyOf(affix.wordBreaks);
-    this.turkicCase = TURKIC_LANGUAGES.stream()
-        .anyMatch(language -> isLanguage(affix.language, language));
-    this.hungarian = isLanguage(affix.language, HUNGARIAN_LANGUAGE);
-    this.syllableNumber = affix.syllableNumber;
-    this.entries = immutableFlagSets(entries);
-    this.hiddenEntries = immutableFlagSets(hiddenCapitalizedEntries(entries));
     this.unsupportedDirectives = List.copyOf(unsupportedDirectives);
+    // the word tables read the case mapping and the forbidden-word flag assigned above
+    final Map<String, List<List<String>>> hiddenFields = new HashMap<>();
+    this.entries = immutableLists(entries);
+    this.hiddenEntries = immutableLists(
+        hiddenCapitalizedEntries(entries, affix.entryMorphology, hiddenFields));
+    this.morphology = immutableLists(affix.entryMorphology);
+    this.hiddenMorphology = immutableLists(hiddenFields);
     this.longestSpacedForm = longestSpacedForm(this.entries.keySet(), affix.prefixes,
         affix.suffixes);
     // A material-bearing rule can only be undone from a word whose boundary
@@ -1334,18 +1345,40 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Replaces every flag-set list with an immutable copy so that lookups can return
-   * the stored lists directly.
+   * Replaces every list with an immutable copy so that lookups can return the stored
+   * lists directly.
    *
-   * @param flagSets The words mapped to mutable flag-set lists.
+   * @param <T> The list element type.
+   * @param byWord The words mapped to mutable lists.
    * @return The same words mapped to immutable lists.
    */
-  private static Map<String, List<int[]>> immutableFlagSets(Map<String, List<int[]>> flagSets) {
-    final Map<String, List<int[]>> frozen = new HashMap<>(flagSets.size() * 2);
-    for (final Map.Entry<String, List<int[]>> entry : flagSets.entrySet()) {
+  private static <T> Map<String, List<T>> immutableLists(Map<String, List<T>> byWord) {
+    final Map<String, List<T>> frozen = new HashMap<>(byWord.size() * 2);
+    for (final Map.Entry<String, List<T>> entry : byWord.entrySet()) {
       frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
     }
     return frozen;
+  }
+
+  /**
+   * Records the morphological fields of one homonym, adding empty field lists for the
+   * word's earlier homonyms that have none.
+   *
+   * @param byWord The fields by word, aligned with each word's flag sets.
+   * @param word The entry spelling.
+   * @param index The homonym's position among the word's flag sets.
+   * @param fields The homonym's fields.
+   */
+  private static void addMorphology(Map<String, List<List<String>>> byWord, String word,
+      int index, List<String> fields) {
+    if (fields.isEmpty()) {
+      return;
+    }
+    final List<List<String>> aligned = byWord.computeIfAbsent(word, key -> new ArrayList<>(1));
+    while (aligned.size() < index) {
+      aligned.add(List.of());
+    }
+    aligned.add(fields);
   }
 
   /**
@@ -1410,9 +1443,14 @@ public final class HunspellDictionary {
    * itself listed is not added, and forbidden entries contribute none.
    *
    * @param listed The words mapped to the flag sets of their entries.
+   * @param listedMorphology The morphological fields of the listed entries.
+   * @param hiddenMorphology Receives the fields of the capitalized forms, aligned with the
+   *                         returned flag sets.
    * @return The capitalized forms mapped to the flag sets they share with their entries.
    */
-  private Map<String, List<int[]>> hiddenCapitalizedEntries(Map<String, List<int[]>> listed) {
+  private Map<String, List<int[]>> hiddenCapitalizedEntries(Map<String, List<int[]>> listed,
+      Map<String, List<List<String>>> listedMorphology,
+      Map<String, List<List<String>>> hiddenMorphology) {
     final Map<String, List<int[]>> hidden = new HashMap<>();
     for (final Map.Entry<String, List<int[]>> entry : listed.entrySet()) {
       final CaseType type = caseType(entry.getKey());
@@ -1423,11 +1461,18 @@ public final class HunspellDictionary {
       if (listed.containsKey(capitalized)) {
         continue;
       }
-      for (final int[] flags : entry.getValue()) {
+      final List<int[]> homonyms = entry.getValue();
+      final List<List<String>> fields = listedMorphology.getOrDefault(entry.getKey(), List.of());
+      for (int h = 0; h < homonyms.size(); h++) {
+        final int[] flags = homonyms.get(h);
         if ((type == CaseType.ALLCAP && flags.length == 0) || contains(flags, forbiddenWord)) {
           continue;
         }
-        hidden.computeIfAbsent(capitalized, key -> new ArrayList<>(1)).add(flags);
+        final List<int[]> forms = hidden.computeIfAbsent(capitalized, key -> new ArrayList<>(1));
+        forms.add(flags);
+        if (h < fields.size()) {
+          addMorphology(hiddenMorphology, capitalized, forms.size() - 1, fields.get(h));
+        }
       }
     }
     return hidden;
@@ -1442,6 +1487,30 @@ public final class HunspellDictionary {
   private List<int[]> homonyms(String root) {
     final List<int[]> found = entries.get(root);
     return found != null ? found : hiddenEntries.getOrDefault(root, List.of());
+  }
+
+  /**
+   * The morphological fields of a root's entries, listed or hidden capitalized, aligned
+   * with {@link #homonyms(String)}. Listed and hidden spellings never coincide.
+   *
+   * @param root The entry spelling a reading selected.
+   * @return The fields by homonym position, possibly shorter than the homonyms. Never
+   *     {@code null}.
+   */
+  private List<List<String>> homonymMorphology(String root) {
+    final List<List<String>> found = morphology.get(root);
+    return found != null ? found : hiddenMorphology.getOrDefault(root, List.of());
+  }
+
+  /**
+   * The morphological fields of one homonym.
+   *
+   * @param fields The fields of a root's homonyms from {@link #homonymMorphology(String)}.
+   * @param index The homonym's position.
+   * @return The homonym's fields, empty when it has none.
+   */
+  private static List<String> fieldsAt(List<List<String>> fields, int index) {
+    return index < fields.size() ? fields.get(index) : List.of();
   }
 
   /**
@@ -1864,9 +1933,11 @@ public final class HunspellDictionary {
    */
   List<String> morphologicalStems(String root, int[] flags, Affix... affixes) {
     final List<String> stems = new ArrayList<>();
-    for (int[] entryFlags : homonyms(root)) {
-      if (Arrays.equals(entryFlags, flags)) {
-        stems.add(morphologicalStem(root, morphology.getOrDefault(entryFlags, List.of()), affixes));
+    final List<int[]> homonyms = homonyms(root);
+    final List<List<String>> fields = homonymMorphology(root);
+    for (int h = 0; h < homonyms.size(); h++) {
+      if (Arrays.equals(homonyms.get(h), flags)) {
+        stems.add(morphologicalStem(root, fieldsAt(fields, h), affixes));
       }
     }
     return stems;
@@ -1894,8 +1965,10 @@ public final class HunspellDictionary {
     for (Affix affix : affixes) {
       hasSuffix |= affix.suffix();
     }
-    for (int[] entryFlags : homonyms(root)) {
-      if (!Arrays.equals(entryFlags, flags)) {
+    final List<int[]> homonyms = homonyms(root);
+    final List<List<String>> homonymFields = homonymMorphology(root);
+    for (int h = 0; h < homonyms.size(); h++) {
+      if (!Arrays.equals(homonyms.get(h), flags)) {
         continue;
       }
       final List<String> fields = new ArrayList<>();
@@ -1913,7 +1986,7 @@ public final class HunspellDictionary {
           prefixOnly = prefix;
         }
       }
-      final List<String> entry = morphology.getOrDefault(entryFlags, List.of());
+      final List<String> entry = fieldsAt(homonymFields, h);
       if (compoundEnd && affixes.length == 0 && entry.isEmpty()) {
         result.add("");
         continue;
@@ -2509,7 +2582,7 @@ public final class HunspellDictionary {
     private HunspellConversion inputConversion = HunspellConversion.NONE;
     private HunspellConversion outputConversion = HunspellConversion.NONE;
     private final List<List<String>> morphologyAliases = new ArrayList<>();
-    private final Map<int[], List<String>> entryMorphology = new HashMap<>();
+    private final Map<String, List<List<String>>> entryMorphology = new HashMap<>();
     private boolean complexPrefixes;
     private int keepCase;
     private int warningFlag;
@@ -2933,15 +3006,15 @@ public final class HunspellDictionary {
             break;
           }
         }
-        flags = parseAliasedFlags(flagRun, affix.flagMode, affix.flagAliases, i + 1).clone();
+        flags = parseAliasedFlags(flagRun, affix.flagMode, affix.flagAliases, i + 1);
       }
+      final String key = removeIgnored(word.replace("\\/", "/"), affix.ignoredCharacters);
+      final List<int[]> homonyms = entries.computeIfAbsent(key, k -> new ArrayList<>(1));
+      homonyms.add(flags);
       if (morphology >= 0) {
-        affix.entryMorphology.put(flags, parseMorphology(split(line.substring(morphology)),
-            affix.morphologyAliases, i + 1));
+        addMorphology(affix.entryMorphology, key, homonyms.size() - 1,
+            parseMorphology(split(line.substring(morphology)), affix.morphologyAliases, i + 1));
       }
-      entries.computeIfAbsent(removeIgnored(word.replace("\\/", "/"), affix.ignoredCharacters),
-          key -> new ArrayList<>(1))
-          .add(flags);
     }
     return entries;
   }

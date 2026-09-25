@@ -113,16 +113,14 @@ final class HunspellConversion {
   /**
    * Adds dictionary transliterations to the replacement table.
    *
-   * @param entries The dictionary entries and their flags.
-   * @param morphology The fields of each selected entry.
+   * @param morphology The morphological fields of each word's entries.
    * @return A table containing REP and ph: replacements.
    */
-  HunspellConversion withPhoneticFields(Map<String, List<int[]>> entries,
-      Map<int[], List<String>> morphology) {
+  HunspellConversion withPhoneticFields(Map<String, List<List<String>>> morphology) {
     final List<Rule> extended = new ArrayList<>(rules);
-    for (Map.Entry<String, List<int[]>> word : entries.entrySet()) {
-      for (int[] flags : word.getValue()) {
-        for (String field : morphology.getOrDefault(flags, List.of())) {
+    for (Map.Entry<String, List<List<String>>> word : morphology.entrySet()) {
+      for (List<String> fields : word.getValue()) {
+        for (String field : fields) {
           if (!field.startsWith(PHONETIC_FIELD)) {
             continue;
           }
