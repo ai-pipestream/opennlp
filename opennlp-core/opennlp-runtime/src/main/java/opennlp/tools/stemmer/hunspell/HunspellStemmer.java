@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.stemmer.Stemmer;
@@ -46,8 +47,8 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.CompoundPosition;
  * parts ({@code ONLYINCOMPOUND}), or forbidden words ({@code FORBIDDENWORD}) do not
  * count as standalone analyses.</p>
  *
- * <p>Compound part search is capped at {@value #PART_CHECK_BUDGET} part-licensing
- * attempts per input word; beyond that budget further compound analyses are skipped.
+ * <p>Compound and word-break search is capped at {@value #PART_CHECK_BUDGET} checks
+ * per input word; once they are spent, further compound and break analyses are skipped.
  * The {@link Stemmer} interface leaves thread safety to the implementation. This
  * implementation reads only the immutable dictionary state, so a single instance is
  * safe to share between threads.</p>
@@ -58,7 +59,9 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.CompoundPosition;
 public final class HunspellStemmer implements Stemmer {
 
   /**
-   * Maximum candidate checks per compound search or recursive word-break search.
+   * Maximum checks one input word may spend on compound and word-break search. Each
+   * candidate compound part, each word-break split, and each form tested by the
+   * spaced-word and {@code CHECKCOMPOUNDREP} checks counts once.
    */
   private static final int PART_CHECK_BUDGET = 2048;
 
@@ -76,6 +79,15 @@ public final class HunspellStemmer implements Stemmer {
 
   /** The sharp s that {@code CHECKSHARPS} restores in all-uppercase input. */
   private static final String SHARP_S = "ß";
+
+  /** The morphological field that opens the reading of each compound component. */
+  private static final String PART_FIELD = "pa:";
+
+  /** The hyphen, the break separator the Hungarian first-part rule applies to. */
+  private static final String HYPHEN = "-";
+
+  /** The message for a {@code null} input word. */
+  private static final String NULL_WORD = "word must not be null";
 
   private final HunspellDictionary dictionary;
 
@@ -99,8 +111,12 @@ public final class HunspellStemmer implements Stemmer {
    */
   @Override
   public CharSequence stem(CharSequence word) {
-    final List<CharSequence> analyses = stemAll(word);
-    return analyses.get(0);
+    if (word == null) {
+      throw new IllegalArgumentException(NULL_WORD);
+    }
+    final String surface = word.toString();
+    final List<String> analyses = findWord(dictionary.inputForm(surface), false);
+    return analyses.isEmpty() ? surface : dictionary.outputForm(analyses.get(0));
   }
 
   /**
@@ -112,7 +128,7 @@ public final class HunspellStemmer implements Stemmer {
   @Override
   public List<CharSequence> stemAll(CharSequence word) {
     if (word == null) {
-      throw new IllegalArgumentException("word must not be null");
+      throw new IllegalArgumentException(NULL_WORD);
     }
     final String surface = word.toString();
     final List<String> analyses = findWord(dictionary.inputForm(surface), false);
@@ -127,21 +143,20 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Returns morphological analyses as space-separated Hunspell fields. The operation
-   * is package-private until a typed analysis result exists; the public API returns
-   * stems. Each result describes a complete accepted reading. Entries without an explicit
-   * {@code st:} field use the dictionary entry as their stem. Compound components
-   * begin with {@code pa:}; entry and affix fields follow in application order.
+   * Returns morphological analyses as space-separated Hunspell fields. Each result
+   * describes a complete accepted reading. Entries without an explicit {@code st:}
+   * field use the dictionary entry as their stem. Compound components begin with
+   * {@code pa:}; entry and affix fields follow in application order.
    * Results preserve dictionary field text without output conversion.
    *
    * @param word The input to analyze. Must not be {@code null}.
    * @return An immutable list of distinct analyses, or an empty list for unknown input.
    *     At most {@value #MAX_ANALYSES} analyses are returned.
-   * @throws IllegalArgumentException If {@code word} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code word} is {@code null}.
    */
   List<String> analyze(CharSequence word) {
     if (word == null) {
-      throw new IllegalArgumentException("word must not be null");
+      throw new IllegalArgumentException(NULL_WORD);
     }
     return findWord(dictionary.inputForm(word.toString()), true);
   }
@@ -165,13 +180,87 @@ public final class HunspellStemmer implements Stemmer {
       // could restore its strip string onto nothing and answer a non-empty stem
       return List.of();
     }
-    final List<String> analyses = findStems(input.substring(0, end), 0,
-        new int[] {PART_CHECK_BUDGET}, new HashMap<>(), morphological);
+    final Request request = new Request(morphological);
+    final List<String> analyses = findStems(input.substring(0, end), 0, request);
     if (analyses.isEmpty() && end < input.length()) {
-      return findStems(input.substring(0, end + 1), 0,
-          new int[] {PART_CHECK_BUDGET}, new HashMap<>(), morphological);
+      return findStems(input.substring(0, end + 1), 0, request);
     }
     return analyses;
+  }
+
+  /**
+   * The state shared by every search for one input word: the output representation,
+   * the remaining {@link #PART_CHECK_BUDGET} checks, and the readings of the pieces a
+   * word break separates. As a predicate it tests a replaced form for
+   * {@code CHECKCOMPOUNDREP}, charging one check.
+   */
+  private final class Request implements Predicate<String> {
+    private final boolean morphological;
+    /** The readings of break-separated pieces, created with the first piece. */
+    private Map<String, List<String>> cache;
+    private int budget = PART_CHECK_BUDGET;
+
+    /**
+     * Starts the search for one input word.
+     *
+     * @param morphological Whether results contain morphological fields.
+     */
+    private Request(boolean morphological) {
+      this.morphological = morphological;
+    }
+
+    /**
+     * Looks up the readings of a piece searched before.
+     *
+     * @param piece The break-separated piece.
+     * @return The readings, or {@code null} if the piece was not searched.
+     */
+    private List<String> cached(String piece) {
+      return cache == null ? null : cache.get(piece);
+    }
+
+    /**
+     * Stores the readings of a searched piece.
+     *
+     * @param piece The break-separated piece.
+     * @param readings The piece's readings.
+     */
+    private void remember(String piece, List<String> readings) {
+      if (cache == null) {
+        cache = new HashMap<>();
+      }
+      cache.put(piece, readings);
+    }
+
+    /** {@return whether every check of the budget is spent} */
+    private boolean exhausted() {
+      return budget <= 0;
+    }
+
+    /**
+     * Spends one check of the budget.
+     *
+     * @return {@code false} if the budget was already spent.
+     */
+    private boolean charge() {
+      if (budget <= 0) {
+        return false;
+      }
+      budget--;
+      return true;
+    }
+
+    /**
+     * Tests whether a form has a non-compound reading, charging one check.
+     *
+     * @param form The form to test.
+     * @return {@code true} if the form has a reading; {@code false} if it has none or
+     *     the budget is spent.
+     */
+    @Override
+    public boolean test(String form) {
+      return charge() && isNoncompoundForm(form);
+    }
   }
 
   /** Accumulates stems or complete morphology readings for one request. */
@@ -239,7 +328,7 @@ public final class HunspellStemmer implements Stemmer {
               break;
             }
             next.add(new StringBuilder(prior).append(prior.isEmpty() ? "" : " ")
-                .append("pa:").append(part.surface())
+                .append(PART_FIELD).append(part.surface())
                 .append(fields.isEmpty() ? "" : " ").append(fields).toString());
           }
         }
@@ -249,7 +338,7 @@ public final class HunspellStemmer implements Stemmer {
     }
 
     /**
-   * Combines accepted readings before and after a word break.
+     * Combines accepted readings before and after a word break.
      *
      * @param leftText The opening text.
      * @param left The opening readings.
@@ -267,10 +356,15 @@ public final class HunspellStemmer implements Stemmer {
           if (values.size() >= MAX_ANALYSES) {
             return;
           }
-          values.add(new StringBuilder()
-              .append(first.startsWith("pa:") ? "" : "pa:" + leftText + " ").append(first)
-              .append(' ').append(last.startsWith("pa:") ? "" : "pa:" + rightText + " ")
-              .append(last).toString());
+          final StringBuilder reading = new StringBuilder();
+          if (!first.startsWith(PART_FIELD)) {
+            reading.append(PART_FIELD).append(leftText).append(' ');
+          }
+          reading.append(first).append(' ');
+          if (!last.startsWith(PART_FIELD)) {
+            reading.append(PART_FIELD).append(rightText).append(' ');
+          }
+          values.add(reading.append(last).toString());
         }
       }
     }
@@ -281,17 +375,14 @@ public final class HunspellStemmer implements Stemmer {
    *
    * @param input The normalized input or a break-separated component.
    * @param depth The current break depth.
-   * @param budget The remaining break attempts.
-   * @param cache Results for completed pieces of this input.
-   * @param morphological Whether results contain morphological fields.
+   * @param request The state of the input word's search.
    * @return Recognized stems, or an empty list.
    */
-  private List<String> findStems(String input, int depth, int[] budget,
-      Map<String, List<String>> cache, boolean morphological) {
-    if (input.isEmpty() || depth >= MAX_COMPOUND_PARTS || budget[0] <= 0) {
+  private List<String> findStems(String input, int depth, Request request) {
+    if (input.isEmpty() || depth >= MAX_COMPOUND_PARTS || request.exhausted()) {
       return List.of();
     }
-    final List<String> cached = cache.get(input);
+    final List<String> cached = request.cached(input);
     if (cached != null) {
       return cached;
     }
@@ -299,7 +390,7 @@ public final class HunspellStemmer implements Stemmer {
     if (entries != null && dictionary.firstForbidden(entries)) {
       return List.of();
     }
-    final Results analyses = new Results(morphological);
+    final Results analyses = new Results(request.morphological);
     final boolean allCaps = HunspellDictionary.caseType(input) == HunspellDictionary.CaseType.ALLCAP;
     final List<String> variants = variants(input);
     for (final String variant : variants) {
@@ -309,38 +400,38 @@ public final class HunspellStemmer implements Stemmer {
     // compound or break reading is attempted
     if (analyses.isEmpty() && !analyses.forbidden && dictionary.compoundsDeclared()) {
       for (final String variant : variants) {
-        decompose(variant, input, analyses);
+        decompose(variant, input, analyses, request);
       }
     }
     if (analyses.isEmpty() && !analyses.forbidden) {
       for (final HunspellDictionary.WordBreak wordBreak : dictionary.wordBreaks()) {
-        if (budget[0] <= 0) {
+        if (request.exhausted()) {
           break;
         }
         final boolean start = wordBreak.atStart();
         final boolean end = wordBreak.atEnd();
         final String separator = wordBreak.separator();
-        for (int at = input.indexOf(separator); at >= 0 && budget[0] > 0;
+        for (int at = input.indexOf(separator); at >= 0;
             at = input.indexOf(separator, at + separator.length())) {
           final int after = at + separator.length();
           if ((start && at != 0) || (end && after != input.length())
               || (!start && at == 0) || (!end && after == input.length())) {
             continue;
           }
-          budget[0]--;
+          if (!request.charge()) {
+            break;
+          }
           if (start && !end) {
-            analyses.addAll(findStems(input.substring(after), depth + 1, budget, cache, morphological));
+            analyses.addAll(findStems(input.substring(after), depth + 1, request));
           } else if (end && !start) {
-            analyses.addAll(findStems(input.substring(0, at), depth + 1, budget, cache, morphological));
+            analyses.addAll(findStems(input.substring(0, at), depth + 1, request));
           } else if (!start) {
-            List<String> left = findStems(input.substring(0, at), depth + 1,
-                budget, cache, morphological);
-            if (left.isEmpty() && "-".equals(separator) && dictionary.hyphenMovingRule()) {
-              left = hyphenatedFirstPart(input.substring(0, at), morphological);
+            List<String> left = findStems(input.substring(0, at), depth + 1, request);
+            if (left.isEmpty() && HYPHEN.equals(separator) && dictionary.hyphenMovingRule()) {
+              left = hyphenatedFirstPart(input.substring(0, at), request);
             }
             if (!left.isEmpty()) {
-              final List<String> right = findStems(input.substring(after), depth + 1,
-                  budget, cache, morphological);
+              final List<String> right = findStems(input.substring(after), depth + 1, request);
               if (!right.isEmpty()) {
                 analyses.addBroken(input.substring(0, at), left, input.substring(after), right);
               }
@@ -350,7 +441,10 @@ public final class HunspellStemmer implements Stemmer {
       }
     }
     final List<String> result = List.copyOf(analyses.values);
-    cache.put(input, result);
+    // only a piece below the complete input can be reached again
+    if (depth > 0) {
+      request.remember(input, result);
+    }
     return result;
   }
 
@@ -360,12 +454,12 @@ public final class HunspellStemmer implements Stemmer {
    * rule.
    *
    * @param text The part before the hyphen.
-   * @param morphological Whether results contain morphological fields.
+   * @param request The state of the input word's search.
    * @return Recognized stems or analyses, or an empty list.
    */
-  private List<String> hyphenatedFirstPart(String text, boolean morphological) {
-    final Results analyses = new Results(morphological);
-    final String hyphenated = text + "-";
+  private List<String> hyphenatedFirstPart(String text, Request request) {
+    final Results analyses = new Results(request.morphological);
+    final String hyphenated = text + HYPHEN;
     final boolean allCaps = HunspellDictionary.caseType(text) == HunspellDictionary.CaseType.ALLCAP;
     for (final String variant : variants(hyphenated)) {
       analyze(variant, new Analysis(hyphenated, variant, analyses, allCaps));
@@ -373,7 +467,7 @@ public final class HunspellStemmer implements Stemmer {
     if (analyses.isEmpty() && !analyses.forbidden && dictionary.compoundsDeclared()) {
       analyses.hyphenatedFirstPart = true;
       for (final String variant : variants(text)) {
-        decompose(variant, text, analyses);
+        decompose(variant, text, analyses, request);
       }
     }
     return List.copyOf(analyses.values);
@@ -391,8 +485,6 @@ public final class HunspellStemmer implements Stemmer {
    * @return The variants in analysis order. Never {@code null} or empty.
    */
   private List<String> variants(String surface) {
-    final Set<String> variants = new LinkedHashSet<>();
-    variants.add(surface);
     boolean upper = false;
     boolean lowerAfterFirst = true;
     boolean allUpper = true;
@@ -415,7 +507,14 @@ public final class HunspellStemmer implements Stemmer {
       }
       i += Character.charCount(point);
     }
-    if (upper && (allUpper || lowerAfterFirst)) {
+    final boolean lowerCased = upper && (allUpper || lowerAfterFirst);
+    final boolean innerCapital = firstUpper && uppers > 1 && !allUpper;
+    if (!lowerCased && !innerCapital) {
+      return List.of(surface);
+    }
+    final Set<String> variants = new LinkedHashSet<>();
+    variants.add(surface);
+    if (lowerCased) {
       final String lowered = dictionary.lowerCase(surface);
       final int apostrophe = lowered.indexOf('\'');
       if (allUpper && apostrophe > 0 && apostrophe < lowered.length() - 1) {
@@ -437,7 +536,7 @@ public final class HunspellStemmer implements Stemmer {
           addSharpVariants(lowered, 0, variants);
         }
       }
-    } else if (firstUpper && uppers > 1 && !allUpper) {
+    } else {
       variants.add(dictionary.lowerCaseInitial(surface));
     }
     return List.copyOf(variants);
@@ -561,7 +660,7 @@ public final class HunspellStemmer implements Stemmer {
    * preference order reported by {@link #stemAll(CharSequence)}.
    *
    * @param word The case variant to analyze.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void analyze(String word, Analysis analyses) {
     final List<int[]> entries = analyses.lookup(word);
@@ -594,60 +693,66 @@ public final class HunspellStemmer implements Stemmer {
   /**
    * Searches compound components after standalone analysis fails. Entries and
    * affixes must permit the selected component positions and junctions. Recognized
-   * spaced forms prevent concatenation. The candidate budget applies to compound
-   * decomposition; output follows component order.
+   * spaced forms prevent concatenation. Every candidate part and every spaced or
+   * replaced form tested is charged to the input word's budget; output follows
+   * component order. A word the dictionary lists as forbidden never decomposes, which
+   * blocks one ill-formed compound while its parts stay productive.
    *
    * @param word The case variant to decompose.
    * @param surface The surface form the variant was derived from; character case at
    *                junctions is checked using this input for {@code CHECKCOMPOUNDCASE}.
-   * @param analyses The mutable, insertion-ordered set collecting the part stems.
+   * @param analyses The collector for the part stems.
+   * @param request The state of the input word's search.
    */
-  private void decompose(String word, String surface, Results analyses) {
+  private void decompose(String word, String surface, Results analyses, Request request) {
     final List<int[]> entries = dictionary.lookup(word);
     if (entries != null && dictionary.firstForbidden(entries)) {
       return;
     }
-    if (rejectsCompoundText(word)) {
+    if (rejectsCompoundText(word, request)) {
       return;
     }
     // lowercasing may change the length in exceptional mappings, in which case the
     // offsets no longer align and the variant itself is the only usable case source
     final String caseSource = surface.length() == word.length() ? surface : word;
-    final int[] budget = {PART_CHECK_BUDGET};
     if (dictionary.positionalCompoundsDeclared()) {
-      searchSpelling(word, caseSource, analyses, budget, List.of());
+      searchSpelling(word, caseSource, analyses, request, List.of());
       for (CompoundPattern pattern : dictionary.compoundPatterns()) {
-        if (pattern.replacement() == null || pattern.replacement().isEmpty()) {
+        final String replacement = pattern.replacement();
+        if (replacement == null || replacement.isEmpty()) {
           continue;
         }
-        for (int at = word.indexOf(pattern.replacement()); at >= 0 && budget[0] > 0;
-            at = word.indexOf(pattern.replacement(), at + 1)) {
-          final int end = at + pattern.replacement().length();
-          final String inserted = pattern.end() + pattern.begin();
+        final String inserted = pattern.end() + pattern.begin();
+        for (int at = word.indexOf(replacement); at >= 0 && !request.exhausted();
+            at = word.indexOf(replacement, at + 1)) {
+          final int end = at + replacement.length();
           searchSpelling(word.substring(0, at) + inserted + word.substring(end),
               caseSource.substring(0, at) + inserted + caseSource.substring(end),
-              analyses, budget, List.of(new Junction(at + pattern.end().length(), pattern)));
+              analyses, request, List.of(new Junction(at + pattern.end().length(), pattern)));
         }
       }
       if (dictionary.simplifiedTriple()) {
-        searchTriples(word, caseSource, 0, List.of(), analyses, budget);
+        searchTriples(word, caseSource, 0, new ArrayList<>(), analyses, request);
       }
     }
     for (HunspellCompoundRule rule : dictionary.compoundRules()) {
-      searchRule(word, caseSource, 0, rule, new ArrayList<>(), new ArrayList<>(), analyses, budget);
+      searchRule(word, caseSource, 0, rule, new ArrayList<>(), new ArrayList<>(), analyses,
+          request);
     }
   }
 
   /**
    * Applies the text-level compound checks to the text every compound level splits: a
    * {@code CHECKCOMPOUNDREP} replacement or a space inserted at any position must not
-   * produce a recognized non-compound form.
+   * produce a recognized non-compound form. Each form tested is charged to the input
+   * word's budget.
    *
    * @param text The complete input or the remainder a compound level splits.
-   * @return {@code true} if a check forbids splitting the text.
+   * @param request The state of the input word's search.
+   * @return {@code true} if a check forbids splitting the text or the budget is spent.
    */
-  private boolean rejectsCompoundText(String text) {
-    if (dictionary.rejectsCompoundReplacement(text, this::isNoncompoundForm)) {
+  private boolean rejectsCompoundText(String text, Request request) {
+    if (dictionary.rejectsCompoundReplacement(text, request) || request.exhausted()) {
       return true;
     }
     // without this bound every split position of a long word would be analyzed again
@@ -657,7 +762,8 @@ public final class HunspellStemmer implements Stemmer {
     }
     for (int at = Character.charCount(text.codePointAt(0)); at < text.length();
         at += Character.charCount(text.codePointAt(at))) {
-      if (isNoncompoundForm(text.substring(0, at) + " " + text.substring(at))) {
+      if (!request.charge()
+          || isNoncompoundForm(text.substring(0, at) + " " + text.substring(at))) {
         return true;
       }
     }
@@ -678,37 +784,51 @@ public final class HunspellStemmer implements Stemmer {
    * @param word The current text.
    * @param surface The aligned case source.
    * @param from The next position eligible for restoration.
-   * @param junctions The required boundaries accumulated so far.
+   * @param junctions The required boundaries accumulated so far, restored on return.
    * @param analyses The destination for stems.
-   * @param budget The remaining search attempts.
+   * @param request The state of the input word's search.
    */
   private void searchTriples(String word, String surface, int from, List<Junction> junctions,
-      Results analyses, int[] budget) {
+      Results analyses, Request request) {
     if (junctions.size() >= MAX_COMPOUND_PARTS - 1) {
       return;
     }
-    for (int at = from; at < word.length() && budget[0] > 0;) {
+    for (int at = from; at < word.length() && !request.exhausted();) {
       final int point = word.codePointAt(at);
       final int width = Character.charCount(point);
       final int next = at + width;
       if (next < word.length() && word.codePointAt(next) == point
           && (at == 0 || word.codePointBefore(at) != point)
           && (next + width == word.length() || word.codePointAt(next + width) != point)) {
-        final String inserted = new String(Character.toChars(point));
-        final String expanded = new StringBuilder(word).insert(next, inserted).toString();
-        final String expandedCase = new StringBuilder(surface).insert(next, inserted).toString();
-        for (int boundary : new int[] {next, next + width}) {
-          if (budget[0]-- <= 0) {
+        final String expanded = insertCodePoint(word, next, point);
+        final String expandedCase = insertCodePoint(surface, next, point);
+        // the restored letter joins either the left part or the right part
+        for (int boundary = next; boundary <= next + width; boundary += width) {
+          if (!request.charge()) {
             return;
           }
-          final List<Junction> required = new ArrayList<>(junctions);
-          required.add(new Junction(boundary, null));
-          searchSpelling(expanded, expandedCase, analyses, budget, required);
-          searchTriples(expanded, expandedCase, next + 2 * width, required, analyses, budget);
+          junctions.add(new Junction(boundary, null));
+          searchSpelling(expanded, expandedCase, analyses, request, junctions);
+          searchTriples(expanded, expandedCase, next + 2 * width, junctions, analyses, request);
+          junctions.remove(junctions.size() - 1);
         }
       }
       at = next;
     }
+  }
+
+  /**
+   * Inserts one code point into a text.
+   *
+   * @param text The text to extend.
+   * @param at The UTF-16 offset to insert at.
+   * @param point The code point to insert.
+   * @return The extended text.
+   */
+  private static String insertCodePoint(String text, int at, int point) {
+    return new StringBuilder(text.length() + Character.charCount(point))
+        .append(text, 0, at).appendCodePoint(point).append(text, at, text.length())
+        .toString();
   }
 
   /**
@@ -717,10 +837,10 @@ public final class HunspellStemmer implements Stemmer {
    * @param word The spelling with any compound substitution expanded.
    * @param surface The aligned case source.
    * @param analyses The destination for stems.
-   * @param budget The remaining candidate checks across forms.
+   * @param request The state of the input word's search.
    * @param junctions Required boundaries for spelling substitutions.
    */
-  private void searchSpelling(String word, String surface, Results analyses, int[] budget,
+  private void searchSpelling(String word, String surface, Results analyses, Request request,
       List<Junction> junctions) {
     final int count = word.codePointCount(0, word.length());
     if (count < 2 * dictionary.compoundMin()) {
@@ -738,7 +858,7 @@ public final class HunspellStemmer implements Stemmer {
       offset += Character.charCount(word.codePointAt(offset));
     }
     offsets[count] = word.length();
-    search(word, surface, offsets, 0, new ArrayList<>(), analyses, budget, junctions,
+    search(word, surface, offsets, 0, new ArrayList<>(), analyses, request, junctions,
         new byte[count + 1]);
   }
 
@@ -764,19 +884,21 @@ public final class HunspellStemmer implements Stemmer {
    * @param parts The selected readings.
    * @param flags The flags corresponding to the readings.
    * @param analyses The destination for stems.
-   * @param budget The remaining candidate checks.
+   * @param request The state of the input word's search.
    */
   private void searchRule(String word, String surface, int from, HunspellCompoundRule rule,
-      List<CompoundPart> parts, List<int[]> flags, Results analyses, int[] budget) {
+      List<CompoundPart> parts, List<int[]> flags, Results analyses, Request request) {
     if (parts.size() >= MAX_COMPOUND_PARTS
         || word.codePointCount(from, word.length()) < dictionary.compoundMin()) {
       return;
     }
     int end = word.offsetByCodePoints(from, dictionary.compoundMin());
-    while (end <= word.length() && budget[0] > 0) {
+    while (end <= word.length()) {
       final boolean last = end == word.length();
       if (!(from == 0 && last)) {
-        budget[0]--;
+        if (!request.charge()) {
+          return;
+        }
         final String part = word.substring(from, end);
         final String caseSource = surface.substring(from, end);
         for (CompoundPart candidate : ruleParts(part, caseSource, last)) {
@@ -790,7 +912,7 @@ public final class HunspellStemmer implements Stemmer {
             if (last) {
               analyses.addCompound(parts);
             } else {
-              searchRule(word, surface, end, rule, parts, flags, analyses, budget);
+              searchRule(word, surface, end, rule, parts, flags, analyses, request);
             }
           }
           parts.remove(parts.size() - 1);
@@ -873,15 +995,15 @@ public final class HunspellStemmer implements Stemmer {
    * @param codePointOffsets UTF-16 offsets for each code point boundary.
    * @param fromPoint The code point index where the next part starts.
    * @param parts The selected part readings.
-   * @param analyses The mutable, insertion-ordered set collecting the part stems.
-   * @param budget The remaining part-licensing attempts, counted down in place.
+   * @param analyses The collector for the part stems.
+   * @param request The state of the input word's search.
    * @param junctions The required boundaries for substitutions.
-   * @param remainderChecks The cached outcome of {@link #rejectsCompoundText(String)}
+   * @param remainderChecks The cached outcome of {@link #rejectsCompoundText(String, Request)}
    *                        per code point index: {@code 0} unknown, {@code 1} allowed,
    *                        {@code 2} rejected.
    */
   private void search(String word, String caseSource, int[] codePointOffsets,
-      int fromPoint, List<CompoundPart> parts, Results analyses, int[] budget,
+      int fromPoint, List<CompoundPart> parts, Results analyses, Request request,
       List<Junction> junctions, byte[] remainderChecks) {
     final int from = codePointOffsets[fromPoint];
     Junction current = null;
@@ -905,16 +1027,14 @@ public final class HunspellStemmer implements Stemmer {
     // same text checks as the complete input
     if (!first) {
       if (remainderChecks[fromPoint] == 0) {
-        remainderChecks[fromPoint] = (byte) (rejectsCompoundText(word.substring(from)) ? 2 : 1);
+        remainderChecks[fromPoint] =
+            (byte) (rejectsCompoundText(word.substring(from), request) ? 2 : 1);
       }
       if (remainderChecks[fromPoint] == 2) {
         return;
       }
     }
     for (int endPoint = fromPoint + min; endPoint < codePointOffsets.length; endPoint++) {
-      if (budget[0] <= 0) {
-        return;
-      }
       final int end = codePointOffsets[endPoint];
       final boolean last = end == word.length();
       boolean spansRequiredBoundary = false;
@@ -925,7 +1045,9 @@ public final class HunspellStemmer implements Stemmer {
           || (!last && codePointOffsets.length - 1 - endPoint < min)) {
         continue;
       }
-      budget[0]--;
+      if (!request.charge()) {
+        return;
+      }
       final String part = word.substring(from, end);
       final CompoundPosition position = first ? CompoundPosition.BEGIN
           : last ? CompoundPosition.END : CompoundPosition.MIDDLE;
@@ -950,7 +1072,7 @@ public final class HunspellStemmer implements Stemmer {
           }
         } else {
           search(word, caseSource, codePointOffsets, endPoint, parts, analyses,
-              budget, junctions, remainderChecks);
+              request, junctions, remainderChecks);
         }
         parts.remove(parts.size() - 1);
       }
@@ -1393,7 +1515,7 @@ public final class HunspellStemmer implements Stemmer {
    *
    * @param word The case variant under analysis.
    * @param suffix The suffix rule to undo.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoSuffix(String word, Affix suffix, Analysis analyses) {
     if (dictionary.compoundOnly(suffix) || dictionary.circumfixOnly(suffix)) {
@@ -1434,7 +1556,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param stem The intermediate stem after the outer removal.
    * @param outer The already-undone outer suffix rule.
    * @param inner The candidate inner suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoInnerSuffix(String stem, Affix outer, Affix inner,
       Analysis analyses) {
@@ -1466,7 +1588,7 @@ public final class HunspellStemmer implements Stemmer {
    *
    * @param word The case variant under analysis.
    * @param prefix The prefix rule to undo.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoPrefix(String word, Affix prefix, Analysis analyses) {
     if (dictionary.compoundOnly(prefix)) {
@@ -1516,7 +1638,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param stem The intermediate stem after the prefix removal.
    * @param prefix The already-undone prefix rule.
    * @param suffix The candidate suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoCrossProductSuffix(String stem, Affix prefix, Affix suffix,
       Analysis analyses) {
@@ -1563,7 +1685,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param prefix The already-undone prefix rule.
    * @param outer The already-undone outer suffix rule.
    * @param inner The candidate inner suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoCrossProductInnerSuffix(String stem, Affix prefix, Affix outer,
       Affix inner, Analysis analyses) {
