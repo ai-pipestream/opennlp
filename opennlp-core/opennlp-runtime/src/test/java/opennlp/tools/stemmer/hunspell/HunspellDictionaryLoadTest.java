@@ -163,6 +163,35 @@ class HunspellDictionaryLoadTest {
   }
 
   /**
+   * Accepts under strict loading every directive name Hunspell's affix and dictionary
+   * parsers read, as a stemming setting or as one the stemmer ignores. The value is a
+   * placeholder, so a directive may still fail on its value, but never as unsupported.
+   *
+   * @param directive A directive name Hunspell reads.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "AF", "AM", "BREAK", "CHECKCOMPOUNDCASE", "CHECKCOMPOUNDDUP", "CHECKCOMPOUNDPATTERN",
+      "CHECKCOMPOUNDREP", "CHECKCOMPOUNDTRIPLE", "CHECKNUM", "CHECKSHARPS", "CIRCUMFIX",
+      "COMPLEXPREFIXES", "COMPOUNDBEGIN", "COMPOUNDEND", "COMPOUNDFLAG", "COMPOUNDFORBIDFLAG",
+      "COMPOUNDMIDDLE", "COMPOUNDMIN", "COMPOUNDMORESUFFIXES", "COMPOUNDPERMITFLAG",
+      "COMPOUNDROOT", "COMPOUNDRULE", "COMPOUNDSYLLABLE", "COMPOUNDWORDMAX", "FLAG",
+      "FORBIDDENWORD", "FORBIDWARN", "FORCEUCASE", "FULLSTRIP", "ICONV", "IGNORE", "KEEPCASE",
+      "KEY", "LANG", "LEMMA_PRESENT", "MAP", "MAXCPDSUGS", "MAXDIFF", "MAXNGRAMSUGS",
+      "NEEDAFFIX", "NONGRAMSUGGEST", "NOSPLITSUGS", "NOSUGGEST", "OCONV", "ONLYINCOMPOUND",
+      "ONLYMAXDIFF", "PHONE", "PSEUDOROOT", "REP", "SET", "SIMPLIFIEDTRIPLE", "SUBSTANDARD",
+      "SUGSWITHDOTS", "SYLLABLENUM", "TRY", "VERSION", "WARN", "WORDCHARS"
+  })
+  void testHunspellDirectivesAreNotUnsupported(String directive) {
+    try {
+      HunspellDictionary.load(stream(directive + " X\n" + RULES), stream(WORDS));
+    } catch (IOException e) {
+      Assertions.assertFalse(e.getMessage().contains("unsupported affix directive"),
+          e.getMessage());
+    }
+  }
+
+  /**
    * Keeps a number sign that is a directive value, which the reference format allows
    * for flags, separators, and affix material.
    *
