@@ -279,6 +279,18 @@ public final class HunspellDictionary {
 
   /** The dotted capital I, the uppercase of {@code i} in the Turkic languages. */
   static final String DOTTED_CAPITAL_I = "İ";
+
+  /** The dotless small i, the lowercase of {@code I} in the Turkic languages. */
+  private static final char DOTLESS_SMALL_I = 'ı';
+
+  /** The language codes whose dictionaries map the letter i with Turkic case rules. */
+  private static final List<String> TURKIC_LANGUAGES = List.of("tr", "az", "crh");
+
+  /** The language code for which Hunspell applies its Hungarian compound rules. */
+  private static final String HUNGARIAN_LANGUAGE = "hu";
+
+  /** The separator between language and region in a {@code LANG} value such as {@code hu_HU}. */
+  private static final char REGION_SEPARATOR = '_';
   private static final String STEM_FIELD = "st:";
   private static final String SURFACE_PREFIX_FIELD = "sp:";
   private static final String DERIVATIONAL_SUFFIX_FIELD = "ds:";
@@ -321,6 +333,42 @@ public final class HunspellDictionary {
    * of them may open a compound written before a hyphen.
    */
   private static final int[] HUNGARIAN_HYPHEN_FLAGS = {'F', 'G', 'H'};
+
+  /**
+   * The flag {@code I}, which Hunspell reads with a fixed meaning in Hungarian
+   * dictionaries. A closing compound part without affixes that carries it, but not
+   * {@link #HUNGARIAN_FLAG_J}, counts one syllable less. Under {@code SYLLABLENUM}, a
+   * closing suffix with this flag counts one syllable more on an entry that carries
+   * {@link #HUNGARIAN_FLAG_J}.
+   */
+  private static final int HUNGARIAN_FLAG_I = 'I';
+
+  /**
+   * The flag {@code J}, which Hunspell reads with a fixed meaning in Hungarian
+   * dictionaries. Under {@code SYLLABLENUM}, a closing suffix with this flag counts one
+   * syllable more.
+   */
+  private static final int HUNGARIAN_FLAG_J = 'J';
+
+  /**
+   * The flag {@code c}, which Hunspell reads with a fixed meaning in Hungarian
+   * dictionaries. Under {@code SYLLABLENUM}, a closing suffix with this flag counts two
+   * syllables more.
+   */
+  private static final int HUNGARIAN_FLAG_C = 'c';
+
+  /**
+   * The ending of a Hungarian closing suffix that takes further affixes and counts one
+   * syllable less, unless the suffix ends in {@link #HUNGARIAN_YI_ENDING} or
+   * {@link #HUNGARIAN_TI_ENDING}.
+   */
+  private static final String HUNGARIAN_I_ENDING = "i";
+
+  /** A Hungarian suffix ending that keeps its syllable, see {@link #HUNGARIAN_I_ENDING}. */
+  private static final String HUNGARIAN_YI_ENDING = "yi";
+
+  /** A Hungarian suffix ending that keeps its syllable, see {@link #HUNGARIAN_I_ENDING}. */
+  private static final String HUNGARIAN_TI_ENDING = "ti";
 
   /** Largest {@code COMPOUNDMIN} value that can be doubled without overflow. */
   private static final int MAX_COMPOUND_MIN = Integer.MAX_VALUE / 2;
@@ -424,10 +472,9 @@ public final class HunspellDictionary {
     this.maxCompoundSyllables = affix.maxCompoundSyllables;
     this.compoundVowels = affix.compoundVowels;
     this.wordBreaks = List.copyOf(affix.wordBreaks);
-    this.turkicCase = affix.language.equals("tr") || affix.language.startsWith("tr_")
-        || affix.language.equals("az") || affix.language.startsWith("az_")
-        || affix.language.equals("crh") || affix.language.startsWith("crh_");
-    this.hungarian = affix.language.equals("hu") || affix.language.startsWith("hu_");
+    this.turkicCase = TURKIC_LANGUAGES.stream()
+        .anyMatch(language -> isLanguage(affix.language, language));
+    this.hungarian = isLanguage(affix.language, HUNGARIAN_LANGUAGE);
     this.syllableNumber = affix.syllableNumber;
     this.entries = immutableFlagSets(entries);
     this.hiddenEntries = immutableFlagSets(hiddenCapitalizedEntries(entries));
@@ -443,6 +490,18 @@ public final class HunspellDictionary {
     final List<Affix> prefixesWithout = new ArrayList<>();
     this.prefixesByFirst = bucketByBoundary(affix.prefixes, false, prefixesWithout);
     this.prefixesWithoutMaterial = List.copyOf(prefixesWithout);
+  }
+
+  /**
+   * Tests whether a {@code LANG} value names a language, alone or with a region.
+   *
+   * @param declared The declared {@code LANG} value.
+   * @param language The language code.
+   * @return {@code true} if the value is the code, or the code followed by a region.
+   */
+  private static boolean isLanguage(String declared, String language) {
+    return declared.startsWith(language) && (declared.length() == language.length()
+        || declared.charAt(language.length()) == REGION_SEPARATOR);
   }
 
   /**
@@ -1459,20 +1518,23 @@ public final class HunspellDictionary {
         suffix = affix;
       }
     }
-    if (affixes.isEmpty() && contains(flags, 'I') && !contains(flags, 'J')) {
+    if (affixes.isEmpty() && contains(flags, HUNGARIAN_FLAG_I)
+        && !contains(flags, HUNGARIAN_FLAG_J)) {
       return result - 1;
     }
     if (suffix != null) {
       if (suffix.continuation().length == 0) {
         result -= countSyllables(suffix.affix());
-      } else if (suffix.affix().endsWith("i") && !suffix.affix().endsWith("yi")
-          && !suffix.affix().endsWith("ti")) {
+      } else if (suffix.affix().endsWith(HUNGARIAN_I_ENDING)
+          && !suffix.affix().endsWith(HUNGARIAN_YI_ENDING)
+          && !suffix.affix().endsWith(HUNGARIAN_TI_ENDING)) {
         result--;
       }
       if (syllableNumber) {
-        if (suffix.flag() == 'c') {
+        if (suffix.flag() == HUNGARIAN_FLAG_C) {
           result += 2;
-        } else if (suffix.flag() == 'J' || (suffix.flag() == 'I' && contains(flags, 'J'))) {
+        } else if (suffix.flag() == HUNGARIAN_FLAG_J
+            || (suffix.flag() == HUNGARIAN_FLAG_I && contains(flags, HUNGARIAN_FLAG_J))) {
           result++;
         }
       }
@@ -1709,7 +1771,7 @@ public final class HunspellDictionary {
     if (!turkicCase) {
       return StringUtil.toLowerCase(text);
     }
-    return StringUtil.toLowerCase(text.replace('I', 'ı').replace('İ', 'i'));
+    return StringUtil.toLowerCase(text.replace('I', DOTLESS_SMALL_I).replace(DOTTED_CAPITAL_I, "i"));
   }
 
   /**
@@ -2110,7 +2172,7 @@ public final class HunspellDictionary {
     final int first = word.codePointAt(0);
     final String initial = word.substring(0, Character.charCount(first));
     final String upper = turkicCase && first == 'i' ? DOTTED_CAPITAL_I
-        : turkicCase && first == 'ı' ? "I" : StringUtil.toUpperCase(initial);
+        : turkicCase && first == DOTLESS_SMALL_I ? "I" : StringUtil.toUpperCase(initial);
     return upper + word.substring(initial.length());
   }
 
