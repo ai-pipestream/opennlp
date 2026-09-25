@@ -302,8 +302,38 @@ public final class HunspellDictionary {
       new WordBreak("-", false, false), new WordBreak("-", true, false),
       new WordBreak("-", false, true));
 
+  /** The character that starts a comment line or a trailing comment. */
+  private static final char COMMENT_MARK = '#';
+
   /** Prefix used by comment lines. */
-  private static final String COMMENT_PREFIX = "#";
+  private static final String COMMENT_PREFIX = String.valueOf(COMMENT_MARK);
+
+  /** The cross-product marker of an affix block header that allows combining affixes. */
+  private static final char CROSS_PRODUCT_MARK = 'Y';
+
+  /** The cross-product marker of an affix block header that forbids combining affixes. */
+  private static final char NO_CROSS_PRODUCT_MARK = 'N';
+
+  /** The fields of an affix block header: tag, flag, cross-product marker, and rule count. */
+  private static final int AFFIX_HEADER_FIELDS = 4;
+
+  /** The index of the cross-product marker in an affix block header. */
+  private static final int CROSS_PRODUCT_FIELD = 2;
+
+  /** The index of the rule count in an affix block header. */
+  private static final int RULE_COUNT_FIELD = 3;
+
+  /** The fields an affix rule reads before its morphology: tag, flag, strip, affix, condition. */
+  private static final int AFFIX_RULE_FIELDS = 5;
+
+  /** The fields a {@code COMPOUNDSYLLABLE} line reads: tag, syllable limit, and vowels. */
+  private static final int COMPOUND_SYLLABLE_FIELDS = 3;
+
+  /** The fields of the other parsed directives: tag and one value. */
+  private static final int DIRECTIVE_VALUE_FIELDS = 2;
+
+  /** The initial capacity for the start offsets of {@code REP} lines. */
+  private static final int REPLACEMENT_LINES_CAPACITY = 16;
 
   /** The affix-file directive that declares the character encoding. */
   private static final String SET_TAG = "SET";
@@ -759,7 +789,9 @@ public final class HunspellDictionary {
    * Replaces comments and unused directive lines with ASCII spaces before strict
    * decoding. Published dictionaries sometimes retain legacy-encoded metadata despite
    * a {@code SET UTF-8} declaration. Line endings and byte positions remain unchanged,
-   * while malformed bytes in parsed directives are still reported.
+   * while malformed bytes in parsed directives are still reported. {@code REP} lines
+   * are kept only when the file declares {@code CHECKCOMPOUNDREP}, which may follow
+   * them, so they are masked after the scan.
    *
    * @param bytes The buffered affix file, modified in place.
    * @param mode The directive policy applied before masking.
@@ -770,7 +802,11 @@ public final class HunspellDictionary {
   private static List<UnsupportedDirective> maskIgnoredAffixLines(byte[] bytes,
       LoadMode mode, String source) throws IOException {
     final Map<String, UnsupportedDirective> unsupported = new LinkedHashMap<>();
-    final boolean useReplacements = hasAffixDirective(bytes, CHECK_COMPOUND_REP_TAG);
+    final int[] starts = new int[AFFIX_HEADER_FIELDS];
+    final int[] ends = new int[AFFIX_HEADER_FIELDS];
+    int[] replacementLines = new int[REPLACEMENT_LINES_CAPACITY];
+    int replacementCount = 0;
+    boolean useReplacements = false;
     int lineStart = 0;
     int lineNumber = 1;
     for (int i = 0; i <= bytes.length; i++) {
@@ -784,11 +820,18 @@ public final class HunspellDictionary {
           fieldEnd++;
         }
         boolean parsed = false;
-        if (fieldStart < fieldEnd && bytes[fieldStart] != '#') {
+        if (fieldStart < fieldEnd && bytes[fieldStart] != COMMENT_MARK) {
           final String directive = new String(bytes, fieldStart,
               fieldEnd - fieldStart, StandardCharsets.US_ASCII);
-          if (isParsedAffixDirective(directive) && (!REPLACEMENT_TAG.equals(directive) || useReplacements)) {
-            maskInlineComment(bytes, fieldStart, i, directive);
+          if (REPLACEMENT_TAG.equals(directive)) {
+            if (replacementCount == replacementLines.length) {
+              replacementLines = Arrays.copyOf(replacementLines, 2 * replacementCount);
+            }
+            replacementLines[replacementCount++] = lineStart;
+            parsed = true;
+          } else if (isParsedAffixDirective(directive)) {
+            useReplacements |= CHECK_COMPOUND_REP_TAG.equals(directive);
+            maskInlineComment(bytes, fieldStart, i, directive, starts, ends);
             parsed = true;
           } else if (!isIgnoredAffixDirective(directive)) {
             if (mode == LoadMode.STRICT) {
@@ -796,10 +839,8 @@ public final class HunspellDictionary {
                   + " in " + source + " at line " + lineNumber
                   + "; use LoadMode.ALLOW_PARTIAL to load without this behavior");
             }
-            if (!unsupported.containsKey(directive)) {
-              unsupported.put(directive,
-                  new UnsupportedDirective(directive, source, lineNumber));
-            }
+            unsupported.putIfAbsent(directive,
+                new UnsupportedDirective(directive, source, lineNumber));
           }
         }
         if (!parsed) {
@@ -813,7 +854,24 @@ public final class HunspellDictionary {
         lineNumber++;
       }
     }
+    if (!useReplacements) {
+      for (int r = 0; r < replacementCount; r++) {
+        maskLine(bytes, replacementLines[r]);
+      }
+    }
     return List.copyOf(unsupported.values());
+  }
+
+  /**
+   * Replaces one line with ASCII spaces, keeping its line terminator.
+   *
+   * @param bytes The mutable file content.
+   * @param from The first byte of the line.
+   */
+  private static void maskLine(byte[] bytes, int from) {
+    for (int i = from; i < bytes.length && bytes[i] != '\n' && bytes[i] != '\r'; i++) {
+      bytes[i] = ' ';
+    }
   }
 
   /**
@@ -826,29 +884,6 @@ public final class HunspellDictionary {
   private static int byteOrderMarkLength(byte[] bytes) {
     return bytes.length >= 3 && bytes[0] == (byte) 0xef
         && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
-  }
-
-  /**
-   * Finds a directive before metadata is removed or decoded.
-   *
-   * @param bytes The affix content.
-   * @param directive The requested first field.
-   * @return Whether the directive occurs outside a comment.
-   */
-  private static boolean hasAffixDirective(byte[] bytes, String directive) {
-    final int[] starts = new int[1];
-    final int[] ends = new int[1];
-    int from = byteOrderMarkLength(bytes);
-    for (int to = from; to <= bytes.length; to++) {
-      if (to == bytes.length || bytes[to] == '\r' || bytes[to] == '\n') {
-        if (findAsciiFields(bytes, from, to, starts, ends) > 0
-            && directive.equals(asciiField(bytes, starts[0], ends[0]))) {
-          return true;
-        }
-        from = to + 1;
-      }
-    }
-    return false;
   }
 
   /**
@@ -889,9 +924,14 @@ public final class HunspellDictionary {
    * @param from The first byte of the directive.
    * @param to The exclusive end of the line.
    * @param directive The directive name.
+   * @param starts Reused storage for the start offsets of the leading fields.
+   * @param ends Reused storage for the end offsets of the leading fields.
    */
-  private static void maskInlineComment(byte[] bytes, int from, int to, String directive) {
-    final List<int[]> fields = new ArrayList<>();
+  private static void maskInlineComment(byte[] bytes, int from, int to, String directive,
+      int[] starts, int[] ends) {
+    final int count = findAsciiFields(bytes, from, to, starts, ends);
+    final int firstComment = firstCommentField(bytes, directive, count, starts, ends);
+    int index = 0;
     for (int i = from; i < to;) {
       while (i < to && isAsciiFieldSpace(bytes[i])) {
         i++;
@@ -901,14 +941,11 @@ public final class HunspellDictionary {
         i++;
       }
       if (i > start) {
-        fields.add(new int[] {start, i});
-      }
-    }
-    final int firstComment = firstCommentField(bytes, fields, directive);
-    for (int index = firstComment; index < fields.size(); index++) {
-      if (bytes[fields.get(index)[0]] == '#') {
-        Arrays.fill(bytes, fields.get(index)[0], to, (byte) ' ');
-        return;
+        if (index >= firstComment && bytes[start] == COMMENT_MARK) {
+          Arrays.fill(bytes, start, to, (byte) ' ');
+          return;
+        }
+        index++;
       }
     }
   }
@@ -917,17 +954,21 @@ public final class HunspellDictionary {
    * Finds the first field index a trailing comment may occupy.
    *
    * @param bytes The file content.
-   * @param fields The field boundaries of the line.
    * @param directive The directive name.
+   * @param count The number of leading fields found.
+   * @param starts The start offsets of the leading fields.
+   * @param ends The end offsets of the leading fields.
    * @return The index after the fields the directive consumes.
    */
-  private static int firstCommentField(byte[] bytes, List<int[]> fields, String directive) {
+  private static int firstCommentField(byte[] bytes, String directive, int count,
+      int[] starts, int[] ends) {
     return switch (directive) {
-      case PREFIX_TAG, SUFFIX_TAG -> isAffixHeader(bytes, fields) ? 4 : 5;
-      case REPLACEMENT_TAG, INPUT_CONVERSION_TAG, OUTPUT_CONVERSION_TAG,
+      case PREFIX_TAG, SUFFIX_TAG -> isAffixHeader(bytes, count, starts, ends)
+          ? AFFIX_HEADER_FIELDS : AFFIX_RULE_FIELDS;
+      case INPUT_CONVERSION_TAG, OUTPUT_CONVERSION_TAG,
           COMPOUND_PATTERN_TAG, MORPHOLOGY_ALIAS_TAG -> Integer.MAX_VALUE;
-      case COMPOUND_SYLLABLE_TAG -> 3;
-      default -> 2;
+      case COMPOUND_SYLLABLE_TAG -> COMPOUND_SYLLABLE_FIELDS;
+      default -> DIRECTIVE_VALUE_FIELDS;
     };
   }
 
@@ -936,16 +977,20 @@ public final class HunspellDictionary {
    * rule count, from a rule line.
    *
    * @param bytes The file content.
-   * @param fields The field boundaries of the line.
+   * @param count The number of leading fields found.
+   * @param starts The start offsets of the leading fields.
+   * @param ends The end offsets of the leading fields.
    * @return Whether the line is a block header.
    */
-  private static boolean isAffixHeader(byte[] bytes, List<int[]> fields) {
-    if (fields.size() < 4 || fields.get(2)[1] - fields.get(2)[0] != 1
-        || (bytes[fields.get(2)[0]] != 'Y' && bytes[fields.get(2)[0]] != 'N')) {
+  private static boolean isAffixHeader(byte[] bytes, int count, int[] starts, int[] ends) {
+    if (count < AFFIX_HEADER_FIELDS
+        || ends[CROSS_PRODUCT_FIELD] - starts[CROSS_PRODUCT_FIELD] != 1
+        || (bytes[starts[CROSS_PRODUCT_FIELD]] != CROSS_PRODUCT_MARK
+            && bytes[starts[CROSS_PRODUCT_FIELD]] != NO_CROSS_PRODUCT_MARK)) {
       return false;
     }
-    for (int i = fields.get(3)[0]; i < fields.get(3)[1]; i++) {
-      if (bytes[i] < '0' || bytes[i] > '9') {
+    for (int i = starts[RULE_COUNT_FIELD]; i < ends[RULE_COUNT_FIELD]; i++) {
+      if (!StringUtil.isAsciiDigit(bytes[i])) {
         return false;
       }
     }
@@ -2781,10 +2826,12 @@ public final class HunspellDictionary {
     }
     final boolean suffix = SUFFIX_TAG.equals(header[0]);
     final int flag = parseFlag(header[1], result.flagMode, index + 1);
-    if (!"Y".equals(header[2]) && !"N".equals(header[2])) {
+    final String marker = header[CROSS_PRODUCT_FIELD];
+    if (marker.length() != 1 || (marker.charAt(0) != CROSS_PRODUCT_MARK
+        && marker.charAt(0) != NO_CROSS_PRODUCT_MARK)) {
       throw new IOException("invalid cross-product marker at line " + (index + 1));
     }
-    final boolean crossProduct = "Y".equals(header[2]);
+    final boolean crossProduct = marker.charAt(0) == CROSS_PRODUCT_MARK;
     final int count;
     try {
       count = Integer.parseInt(header[3]);
