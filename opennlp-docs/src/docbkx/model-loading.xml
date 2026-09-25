@@ -170,6 +170,8 @@ for(ClassPathModelEntry entry : models) {
       and the finders put an asterisk in front of it, so <code>custom-opennlp-model.jar</code>
       matches that jar in any directory. Use the actual file name: <code>model-?.jar</code> matches
       <code>model-😀.jar</code>, and a space is written as a space, not as <code>%20</code>.
+      A character outside the Basic Multilingual Plane counts as one character for the question mark.
+      The model and properties URIs returned by the finders remain escaped for opening the resources.
       <code>ClassgraphModelFinder</code> uses ClassGraph's own wildcard rules.
     </para>
     <para>
