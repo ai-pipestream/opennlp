@@ -2024,13 +2024,14 @@ public final class HunspellDictionary {
     // A derivational suffix makes the derived form the stem. That form is built from
     // the entry and its suffixes alone; prefix material appears in the stem only
     // through a surface prefix field.
-    String derived = root;
+    final StringBuilder derived = new StringBuilder(root);
     final StringBuilder surfacePrefix = new StringBuilder(fieldValue(fields, SURFACE_PREFIX_FIELD, ""));
     for (Affix affix : affixes) {
       if (affix.suffix()) {
-        derived = derived.substring(0, derived.length() - affix.strip().length()) + affix.affix();
+        derived.setLength(derived.length() - affix.strip().length());
+        derived.append(affix.affix());
         if (hasField(affix.morphology(), DERIVATIONAL_SUFFIX_FIELD)) {
-          result = derived;
+          result = derived.toString();
         }
       }
       surfacePrefix.append(fieldValue(affix.morphology(), SURFACE_PREFIX_FIELD, ""));
