@@ -78,7 +78,7 @@ public class MorfologikDictionaryBuilder {
    * @param metadataFileName The metadata file name. Must not be {@code null}.
    * @return The dictionary file name.
    */
-  String toDictionaryFileName(String metadataFileName) {
+  private String toDictionaryFileName(String metadataFileName) {
     if (metadataFileName.endsWith(METADATA_FILE_SUFFIX)) {
       return metadataFileName.substring(0, metadataFileName.length() - METADATA_FILE_SUFFIX.length())
           + DICTIONARY_FILE_SUFFIX;
