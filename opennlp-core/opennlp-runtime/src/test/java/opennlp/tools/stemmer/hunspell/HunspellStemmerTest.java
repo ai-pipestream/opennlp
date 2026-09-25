@@ -24,6 +24,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -1958,5 +1959,44 @@ public class HunspellStemmerTest {
             "COMPOUNDFLAG C\nCOMPOUNDMIN 1\nSFX A Y 1\nSFX A 0 s .\n", words))
             .stemAll(word));
     Assertions.assertEquals(List.of(word), stems);
+  }
+
+  /**
+   * Verifies that one part-check budget covers the whole input word. Each part of a
+   * hyphenated chain decomposes within the budget on its own, but a long chain
+   * decomposes every tail again and needs more checks than one word may spend, so
+   * that word is returned unchanged while a short chain is analyzed.
+   *
+   * @throws IOException Thrown if the fixture fails to load.
+   */
+  @Test
+  void testCompoundBudgetCoversEveryBreakPart() throws IOException {
+    final HunspellStemmer stemmer = new HunspellStemmer(load(
+        "COMPOUNDFLAG X\nCOMPOUNDMIN 2\n", "2\nab/X\ncd/X\n"));
+    final String shortChain = String.join("-", "abcd", "abcd", "abcd");
+    Assertions.assertEquals(List.of("ab", "cd"), stemmer.stemAll(shortChain));
+
+    final String longChain = String.join("-", Collections.nCopies(40, "abcd"));
+    Assertions.assertEquals(List.of(longChain), stemmer.stemAll(longChain));
+  }
+
+  /**
+   * Verifies that the spaced forms tested by the compound word-pair check count against
+   * the part-check budget. The dictionary lists a long entry containing a space, so
+   * each text a compound level splits is also tested with a space at every position.
+   * For the long compound those tests alone exceed the budget and it is returned
+   * unchanged, while a short compound is analyzed.
+   *
+   * @throws IOException Thrown if the fixture fails to load.
+   */
+  @Test
+  void testCompoundBudgetCountsSpacedForms() throws IOException {
+    final String spacedEntry = "q" + " q".repeat(25);
+    final HunspellStemmer stemmer = new HunspellStemmer(load(
+        "COMPOUNDFLAG X\nCOMPOUNDMIN 1\n", "2\nab/X\n" + spacedEntry + "\n"));
+    Assertions.assertEquals(List.of("ab"), stemmer.stemAll("ab".repeat(10)));
+
+    final String longCompound = "ab".repeat(50);
+    Assertions.assertEquals(List.of(longCompound), stemmer.stemAll(longCompound));
   }
 }
