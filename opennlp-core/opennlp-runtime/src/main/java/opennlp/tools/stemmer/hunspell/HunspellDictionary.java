@@ -2910,18 +2910,11 @@ public final class HunspellDictionary {
       return List.of();
     }
     if (!aliases.isEmpty()) {
-      try {
-        if (fields.length != 1) {
-          throw new NumberFormatException();
-        }
-        final int index = Integer.parseInt(fields[0]);
-        if (index < 1 || index > aliases.size()) {
-          throw new NumberFormatException();
-        }
-        return aliases.get(index - 1);
-      } catch (NumberFormatException e) {
-        throw new IOException("invalid AM alias at line " + line, e);
+      final int index = fields.length == 1 ? parseCount(fields[0]) : -1;
+      if (index < 1 || index > aliases.size()) {
+        throw new IOException("invalid AM alias at line " + line);
       }
+      return aliases.get(index - 1);
     }
     return List.of(fields);
   }
@@ -2954,6 +2947,27 @@ public final class HunspellDictionary {
       }
     }
     return true;
+  }
+
+  /**
+   * Reads a table count or alias reference written in ASCII digits.
+   *
+   * @param text The field to read.
+   * @return The number, or {@code -1} if the field is empty, contains a character other
+   *     than an ASCII digit, or exceeds {@link Integer#MAX_VALUE}.
+   */
+  static int parseCount(String text) {
+    if (text.isEmpty() || StringUtil.endOfAsciiDigits(text, 0) != text.length()) {
+      return -1;
+    }
+    long value = 0;
+    for (int i = 0; i < text.length(); i++) {
+      value = value * 10 + text.charAt(i) - '0';
+      if (value > Integer.MAX_VALUE) {
+        return -1;
+      }
+    }
+    return (int) value;
   }
 
   /**

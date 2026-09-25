@@ -55,16 +55,9 @@ final class HunspellAffixTable {
         continue;
       }
       if (count < 0) {
-        try {
-          if (fields.length != 2) {
-            throw new NumberFormatException();
-          }
-          count = Integer.parseInt(fields[1]);
-          if (count < 0) {
-            throw new NumberFormatException();
-          }
-        } catch (NumberFormatException e) {
-          throw new IOException("invalid " + tag + " count at line " + (i + 1), e);
+        count = fields.length == 2 ? HunspellDictionary.parseCount(fields[1]) : -1;
+        if (count < 0) {
+          throw new IOException("invalid " + tag + " count at line " + (i + 1));
         }
       } else {
         if (fields.length < minimumFields || fields.length > maximumFields || entries.size() == count) {
