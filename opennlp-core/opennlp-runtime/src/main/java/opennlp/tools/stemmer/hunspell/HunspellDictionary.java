@@ -1313,10 +1313,16 @@ public final class HunspellDictionary {
     INITCAP,
     /** Every letter uppercase. */
     ALLCAP,
-    /** An uppercase start and a further uppercase letter among lowercase ones. */
-    HUHINITCAP,
-    /** Uppercase letters after a lowercase start or among lowercase ones. */
-    HUHCAP
+    /**
+     * An uppercase start and a further uppercase letter among lowercase ones, named
+     * {@code HUHINITCAP} in Hunspell.
+     */
+    INITMIXEDCAP,
+    /**
+     * Uppercase letters after a lowercase start or among lowercase ones, named
+     * {@code HUHCAP} in Hunspell.
+     */
+    MIXEDCAP
   }
 
   /**
@@ -1349,7 +1355,7 @@ public final class HunspellDictionary {
     if (uppers == letters) {
       return CaseType.ALLCAP;
     }
-    return firstUpper ? CaseType.HUHINITCAP : CaseType.HUHCAP;
+    return firstUpper ? CaseType.INITMIXEDCAP : CaseType.MIXEDCAP;
   }
 
   /**
@@ -1365,7 +1371,7 @@ public final class HunspellDictionary {
     final Map<String, List<int[]>> hidden = new HashMap<>();
     for (final Map.Entry<String, List<int[]>> entry : listed.entrySet()) {
       final CaseType type = caseType(entry.getKey());
-      if (type != CaseType.HUHCAP && type != CaseType.HUHINITCAP && type != CaseType.ALLCAP) {
+      if (type != CaseType.MIXEDCAP && type != CaseType.INITMIXEDCAP && type != CaseType.ALLCAP) {
         continue;
       }
       final String capitalized = upperCaseInitial(lowerCase(entry.getKey()));
