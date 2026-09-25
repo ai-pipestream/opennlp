@@ -3143,7 +3143,9 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Splits text into lines with a single character scan, tolerating CRLF endings.
+   * Splits text into lines with a single character scan. A line ends at a line feed, a
+   * carriage return, or a carriage return followed by a line feed, as in the directive
+   * masking, so line numbers agree.
    *
    * @param content The text to split.
    * @return The lines without their terminators. Never {@code null}.
@@ -3152,12 +3154,12 @@ public final class HunspellDictionary {
     final List<String> lines = new ArrayList<>();
     int start = 0;
     for (int i = 0; i <= content.length(); i++) {
-      if (i == content.length() || content.charAt(i) == '\n') {
-        int end = i;
-        if (end > start && content.charAt(end - 1) == '\r') {
-          end--;
+      if (i == content.length() || content.charAt(i) == '\n' || content.charAt(i) == '\r') {
+        lines.add(content.substring(start, i));
+        if (i + 1 < content.length() && content.charAt(i) == '\r'
+            && content.charAt(i + 1) == '\n') {
+          i++;
         }
-        lines.add(content.substring(start, end));
         start = i + 1;
       }
     }
