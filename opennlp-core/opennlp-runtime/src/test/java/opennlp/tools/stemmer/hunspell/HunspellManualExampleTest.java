@@ -17,9 +17,7 @@
 
 package opennlp.tools.stemmer.hunspell;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -53,17 +51,18 @@ public class HunspellManualExampleTest {
   /** Word-list fixture: {@code work} accepts both suffixes. */
   private static final String WORDS = "1\nwork/ES\n";
 
+  /** A directive name Hunspell does not read. */
+  private static final String UNSUPPORTED = "UNSUPPORTED";
+
   /**
-   * Loads the chapter's miniature dictionary, stems through a factory-minted stemmer,
+   * Loads the chapter's miniature dictionary, stems with a stemmer from the factory,
    * and asserts the exact stems the manual prints.
    *
    * @throws IOException Thrown if the in-memory fixture fails to load.
    */
   @Test
   void testLoadAndStemWorkers() throws IOException {
-    final HunspellDictionary dictionary = HunspellDictionary.load(
-        new ByteArrayInputStream(AFFIX.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream(WORDS.getBytes(StandardCharsets.UTF_8)));
+    final HunspellDictionary dictionary = HunspellTestDictionaries.load(AFFIX, WORDS);
     final Stemmer stemmer = new HunspellStemmerFactory(dictionary).newStemmer();
 
     Assertions.assertEquals("work", stemmer.stem("workers").toString());
@@ -75,27 +74,23 @@ public class HunspellManualExampleTest {
   }
 
   /**
-   * Checks partial loading and the diagnostic format used in the manual.
+   * Checks partial loading and the fields of the diagnostic the manual prints.
    *
    * @param directory The temporary fixture directory.
-   * @throws IOException If fixture creation or loading fails.
+   * @throws IOException Thrown if writing or loading the fixture fails.
    */
   @Test
   void testPartialLoadingDiagnostics(@TempDir Path directory) throws IOException {
     final Path affix = directory.resolve("dictionary.aff");
     final Path words = directory.resolve("dictionary.dic");
-    Files.writeString(affix, "UNSUPPORTED value\n" + AFFIX);
+    Files.writeString(affix, UNSUPPORTED + " value\n" + AFFIX);
     Files.writeString(words, WORDS);
     final HunspellDictionary partial = HunspellDictionary.load(
         affix, words, HunspellDictionary.LoadMode.ALLOW_PARTIAL);
 
     Assertions.assertEquals("work",
         new HunspellStemmerFactory(partial).newStemmer().stem("workers").toString());
-    Assertions.assertEquals(1, partial.getUnsupportedDirectives().size());
-    for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupportedDirectives()) {
-      final String message = diagnostic.directive() + " at "
-          + diagnostic.source() + ":" + diagnostic.lineNumber();
-      Assertions.assertEquals("UNSUPPORTED at " + affix + ":1", message);
-    }
+    Assertions.assertEquals(List.of(new HunspellDictionary.UnsupportedDirective(
+        UNSUPPORTED, affix.toString(), 1)), partial.getUnsupportedDirectives());
   }
 }

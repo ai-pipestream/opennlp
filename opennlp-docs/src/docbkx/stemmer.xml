@@ -95,11 +95,15 @@ stemmer.stem("table");     // "table" (unknown vocabulary is unchanged)]]>
 			published dictionary yields for a given form is decided by that dictionary.
 			Acquisition helpers and the supported affix feature set live in
 			<code>dev/README-hunspell-dictionaries.md</code>.
+		</para>
+		<para>
 			An opt-in catalog download accepts an application-supplied
 			<code>DictionaryCatalog</code>, needs
 			<code>-Dopennlp.download.remote=true</code>, and fetches through the
 			digest-verified <code>ResourceInstaller</code> path. A file that already exists
 			in the target is not replaced. Remove old files before refreshing a dictionary.
+		</para>
+		<para>
 			Loading uses <code>HunspellDictionary.LoadMode.STRICT</code> by default.
 			Unsupported affix directives cause an <code>IOException</code> with the
 			directive name and source line. File-based loading also includes the path.
@@ -120,6 +124,8 @@ for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupported
 			for each unsupported directive, in file order. Partial loading does not
 			apply behavior from skipped directives. Strict affix loading does not
 			establish complete Hunspell compatibility.
+		</para>
+		<para>
 			<code>ICONV</code> and <code>OCONV</code> convert input and output;
 			<code>IGNORE</code> removes configured characters. <code>KEEPCASE</code>,
 			<code>CHECKSHARPS</code>, and language-specific lowercase mappings govern
@@ -141,29 +147,31 @@ for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupported
 			public API; the stemmer returns stems.
 		</para>
 		<para>
-			Native Hunspell's spelling, stemming, and analysis operations can return
-			different results from one another. OpenNLP has one engine, so it follows
-			the spell checker for recognition and the analyzer for stems and fields
-			wherever the two agree, and resolves each disagreement the same way for
-			every caller. The results deviate from the native library in the
-			following cases. <code>HunspellCompatibilityEval</code> in
-			<code>opennlp-eval-tests</code> records each expected difference together
-			with the Hunspell output.
+			Hunspell's spell checker and its analyzer can disagree: the analyzer may
+			return stems for a word the spell checker rejects, or no stem for a word
+			it accepts. OpenNLP has one engine, which either recognizes a word and
+			returns its stems or returns the word unchanged. Its recognition mostly
+			matches Hunspell's spell checker and its stems mostly match Hunspell's
+			analyzer; the differences are listed below. The Hunspell tests record
+			Hunspell's result for each fixture and name each difference, and
+			<code>HunspellCompatibilityEval</code> in <code>opennlp-eval-tests</code>
+			records each expected difference on published dictionaries.
 		</para>
 		<itemizedlist>
 			<listitem>
 				<para>
-					Compound stems are the stems of the recognized parts, in order. The
-					native library concatenates the parts and stems the last one, so
+					Compound stems are the stems of the recognized parts, in order.
+					Hunspell's analyzer returns at most one stem for the whole compound, so
 					<code>riverboats</code> gives <code>river</code> and
-					<code>boat</code> here and <code>riverboat</code> natively. The native
-					form is the input with its last part replaced by that part's stem.
+					<code>boat</code> here and <code>riverboat</code> in Hunspell. A
+					closing part without an affix is left out of Hunspell's stem, so
+					<code>riverboat</code> itself gives <code>river</code> there.
 				</para>
 			</listitem>
 			<listitem>
 				<para>
 					Purely numeric tokens such as <code>1.5</code> or <code>42-42</code>
-					are accepted by the native spell checker before any dictionary lookup.
+					are accepted by Hunspell's spell checker before any dictionary lookup.
 					Here they are unknown input and are returned unchanged. Recognize
 					numbers in the tokenizer or before stemming.
 				</para>
@@ -172,7 +180,7 @@ for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupported
 				<para>
 					A word starting with a dotted capital I is lowercased with Unicode
 					mapping outside the Turkic languages, so <code>İnvite</code> is
-					recognized when <code>invite</code> is listed. The native checker
+					recognized when <code>invite</code> is listed. Hunspell's spell checker
 					never tries the lowercase form of such a word without a Turkic
 					<code>LANG</code>. Declare <code>LANG tr</code>, <code>az</code>, or
 					<code>crh</code> for Turkic data, where both implementations keep the
@@ -183,7 +191,7 @@ for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupported
 				<para>
 					A compound of three or more parts that is one edit away from a listed
 					word, such as <code>sunsetlamp</code> next to <code>bunsetlamp</code>, is
-					rejected natively by running the spelling suggester, which OpenNLP
+					rejected by Hunspell's spell checker through its suggester, which OpenNLP
 					does not provide. Such compounds are recognized here. An application
 					that needs the rejection can validate multi-part compounds with a
 					spelling checker, or limit <code>COMPOUNDWORDMAX</code> in the affix
@@ -192,27 +200,38 @@ for (HunspellDictionary.UnsupportedDirective diagnostic : partial.getUnsupported
 			</listitem>
 			<listitem>
 				<para>
-					Where the native spell checker and analyzer disagree, recognition
-					follows the spell checker and output follows the analyzer. This
-					affects all-uppercase Turkish words such as <code>İPEK</code>, which
-					the native checker rejects while its analyzer stems them; mixed-case
-					words with a capitalized initial such as <code>RaMarket</code> and
-					<code>BREAK</code> forms, which the native analyzer does not handle;
-					and forbidden affixed compounds, which the native analyzer stems. In
-					each case OpenNLP recognizes the word when the native checker does and
-					returns the analyzer's stems.
+					All-uppercase Turkish words such as <code>İPEK</code> are recognized
+					with the stem <code>İpek</code>. Hunspell's spell checker rejects
+					them, while its analyzer returns that stem.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					Mixed-case words with a capitalized initial and <code>BREAK</code>
+					forms are accepted by Hunspell's spell checker, but its analyzer
+					returns no stem. OpenNLP returns the stem of the entry, such as
+					<code>eMarket</code> for <code>RaMarket</code>, and the stems of the
+					parts of a <code>BREAK</code> form, such as <code>river</code> and
+					<code>boat</code> for <code>rivers-boats</code>.
+				</para>
+			</listitem>
+			<listitem>
+				<para>
+					Forbidden affixed compounds are rejected by Hunspell's spell checker,
+					while its analyzer stems them. OpenNLP does not recognize them and
+					returns them unchanged.
 				</para>
 			</listitem>
 			<listitem>
 				<para>
 					An affix file without <code>SET</code> is read as UTF-8 and rejected
-					when it is not valid UTF-8; the native default is ISO-8859-1. Add
+					when it is not valid UTF-8; Hunspell's default is ISO-8859-1. Add
 					<code>SET ISO8859-1</code> to such a file.
 				</para>
 			</listitem>
 			<listitem>
 				<para>
-					Malformed declarations are rejected where the native parser guesses:
+					Malformed declarations are rejected where Hunspell's parser guesses:
 					a multi-character flag under the default flag mode, an <code>AF</code>
 					or <code>AM</code> table whose entry count does not match its header,
 					and a numeric flag outside 1 through 65535. Correct the declaration;
