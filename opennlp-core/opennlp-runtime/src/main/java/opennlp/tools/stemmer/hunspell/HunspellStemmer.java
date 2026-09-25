@@ -137,17 +137,16 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Returns morphological analyses as space-separated Hunspell fields. The operation
-   * is package-private until a typed analysis result exists; the public API returns
-   * stems. Each result describes a complete accepted reading. Entries without an explicit
-   * {@code st:} field use the dictionary entry as their stem. Compound components
-   * begin with {@code pa:}; entry and affix fields follow in application order.
+   * Returns morphological analyses as space-separated Hunspell fields. Each result
+   * describes a complete accepted reading. Entries without an explicit {@code st:}
+   * field use the dictionary entry as their stem. Compound components begin with
+   * {@code pa:}; entry and affix fields follow in application order.
    * Results preserve dictionary field text without output conversion.
    *
    * @param word The input to analyze. Must not be {@code null}.
    * @return An immutable list of distinct analyses, or an empty list for unknown input.
    *     At most {@value #MAX_ANALYSES} analyses are returned.
-   * @throws IllegalArgumentException If {@code word} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code word} is {@code null}.
    */
   List<String> analyze(CharSequence word) {
     if (word == null) {
@@ -333,7 +332,7 @@ public final class HunspellStemmer implements Stemmer {
     }
 
     /**
-   * Combines accepted readings before and after a word break.
+     * Combines accepted readings before and after a word break.
      *
      * @param leftText The opening text.
      * @param left The opening readings.
@@ -650,7 +649,7 @@ public final class HunspellStemmer implements Stemmer {
    * preference order reported by {@link #stemAll(CharSequence)}.
    *
    * @param word The case variant to analyze.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void analyze(String word, Analysis analyses) {
     final List<int[]> entries = analyses.lookup(word);
@@ -685,12 +684,13 @@ public final class HunspellStemmer implements Stemmer {
    * affixes must permit the selected component positions and junctions. Recognized
    * spaced forms prevent concatenation. Every candidate part and every spaced or
    * replaced form tested is charged to the input word's budget; output follows
-   * component order.
+   * component order. A word the dictionary lists as forbidden never decomposes, which
+   * blocks one ill-formed compound while its parts stay productive.
    *
    * @param word The case variant to decompose.
    * @param surface The surface form the variant was derived from; character case at
    *                junctions is checked using this input for {@code CHECKCOMPOUNDCASE}.
-   * @param analyses The mutable, insertion-ordered set collecting the part stems.
+   * @param analyses The collector for the part stems.
    * @param request The state of the input word's search.
    */
   private void decompose(String word, String surface, Results analyses, Request request) {
@@ -969,7 +969,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param codePointOffsets UTF-16 offsets for each code point boundary.
    * @param fromPoint The code point index where the next part starts.
    * @param parts The selected part readings.
-   * @param analyses The mutable, insertion-ordered set collecting the part stems.
+   * @param analyses The collector for the part stems.
    * @param request The state of the input word's search.
    * @param junctions The required boundaries for substitutions.
    * @param remainderChecks The cached outcome of {@link #rejectsCompoundText(String, Request)}
@@ -1489,7 +1489,7 @@ public final class HunspellStemmer implements Stemmer {
    *
    * @param word The case variant under analysis.
    * @param suffix The suffix rule to undo.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoSuffix(String word, Affix suffix, Analysis analyses) {
     if (dictionary.compoundOnly(suffix) || dictionary.circumfixOnly(suffix)) {
@@ -1530,7 +1530,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param stem The intermediate stem after the outer removal.
    * @param outer The already-undone outer suffix rule.
    * @param inner The candidate inner suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoInnerSuffix(String stem, Affix outer, Affix inner,
       Analysis analyses) {
@@ -1562,7 +1562,7 @@ public final class HunspellStemmer implements Stemmer {
    *
    * @param word The case variant under analysis.
    * @param prefix The prefix rule to undo.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoPrefix(String word, Affix prefix, Analysis analyses) {
     if (dictionary.compoundOnly(prefix)) {
@@ -1612,7 +1612,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param stem The intermediate stem after the prefix removal.
    * @param prefix The already-undone prefix rule.
    * @param suffix The candidate suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoCrossProductSuffix(String stem, Affix prefix, Affix suffix,
       Analysis analyses) {
@@ -1659,7 +1659,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param prefix The already-undone prefix rule.
    * @param outer The already-undone outer suffix rule.
    * @param inner The candidate inner suffix rule.
-   * @param analyses The mutable, insertion-ordered set collecting the stems found.
+   * @param analyses The analysis context collecting the stems found.
    */
   private void undoCrossProductInnerSuffix(String stem, Affix prefix, Affix outer,
       Affix inner, Analysis analyses) {
