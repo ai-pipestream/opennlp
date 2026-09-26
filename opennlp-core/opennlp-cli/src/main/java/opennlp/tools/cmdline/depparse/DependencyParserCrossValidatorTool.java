@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.cmdline.AbstractCrossValidatorTool;
+import opennlp.tools.cmdline.TerminateToolException;
 import opennlp.tools.cmdline.depparse.DependencyParserCrossValidatorTool.CrossValidationParams;
 import opennlp.tools.cmdline.params.BasicTrainingParams;
 import opennlp.tools.cmdline.params.CVParams;
@@ -71,6 +72,8 @@ public class DependencyParserCrossValidatorTool
           validator.getUasExcludingPunctuation(), validator.getLasExcludingPunctuation());
     } catch (IOException e) {
       throw createTerminationIOException(e);
+    } catch (IllegalArgumentException e) {
+      throw new TerminateToolException(-1, e.getMessage(), e);
     }
   }
 }

@@ -91,7 +91,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   /** The first character of a comment line. */
   private static final char COMMENT = '#';
 
-  /** The digit zero; an ID never starts with it. */
+  /** The digit zero: the base of the digit values, and the one digit an ID must not start with. */
   private static final char ZERO_DIGIT = '0';
 
   private final InputStreamFactory in;
@@ -199,7 +199,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    *         empty, signed, with a leading zero, with a non-ASCII digit, or too large for
    *         an {@code int}.
    */
-  private static int wordIndex(String id) {
+  private int wordIndex(String id) {
     final int length = id.length();
     if (length == 0 || id.charAt(0) == ZERO_DIGIT) {
       return -1;
