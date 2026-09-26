@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.depparse.DependencySample;
@@ -184,9 +185,10 @@ public class ConlluDependencySampleStreamTest {
     }
   }
 
-  @Test
-  void testNonSequentialWordIdsAreSkipped() throws IOException {
-    final String content = line("2", "Dogs", "dog", "NOUN", "NNS", "_", "0",
+  @ParameterizedTest(name = "id = \"{0}\"")
+  @ValueSource(strings = {"2", "01", "+1", "1 ", "\u0661", "\uff11", "", "4294967297"})
+  void testNonSequentialWordIdsAreSkipped(String id) throws IOException {
+    final String content = line(id, "Dogs", "dog", "NOUN", "NNS", "_", "0",
         "root", "_", "_") + "\n";
     final InputStreamFactory in = () -> new ByteArrayInputStream(
         content.getBytes(StandardCharsets.UTF_8));

@@ -91,6 +91,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   /** The first character of a comment line. */
   private static final char COMMENT = '#';
 
+  /** The digit zero; an ID never starts with it. */
+  private static final char ZERO_DIGIT = '0';
+
   private final InputStreamFactory in;
   private final int tagColumn;
 
@@ -189,6 +192,34 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   }
 
   /**
+   * Reads a word ID, the one-based position of a syntactic word in its sentence.
+   *
+   * @param id The ID column of a word line. Must not be {@code null}.
+   * @return The position, or {@code -1} if the column is not a plain decimal number:
+   *         empty, signed, with a leading zero, with a non-ASCII digit, or too large for
+   *         an {@code int}.
+   */
+  private static int wordIndex(String id) {
+    final int length = id.length();
+    if (length == 0 || id.charAt(0) == ZERO_DIGIT) {
+      return -1;
+    }
+    int value = 0;
+    for (int i = 0; i < length; i++) {
+      final char c = id.charAt(i);
+      if (!StringUtil.isAsciiDigit(c)) {
+        return -1;
+      }
+      final int digit = c - ZERO_DIGIT;
+      if (value > (Integer.MAX_VALUE - digit) / 10) {
+        return -1;
+      }
+      value = value * 10 + digit;
+    }
+    return value;
+  }
+
+  /**
    * Converts one sentence into a sample.
    *
    * @param words The word lines of the sentence.
@@ -204,7 +235,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
     final String[] relations = new String[n];
     for (int i = 0; i < n; i++) {
       final String[] word = words.get(i);
-      if (!Integer.toString(i + 1).equals(word[ID])) {
+      if (wordIndex(word[ID]) != i + 1) {
         return null;
       }
       tokens[i] = word[FORM];
