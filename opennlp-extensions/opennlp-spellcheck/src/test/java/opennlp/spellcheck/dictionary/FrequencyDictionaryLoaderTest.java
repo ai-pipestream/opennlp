@@ -147,6 +147,10 @@ public class FrequencyDictionaryLoaderTest {
         Arguments.of("\u00A0", "expected 'word<sep>count'"),
         Arguments.of("\u00A0\u00A0", "expected 'word<sep>count'"),
         Arguments.of("the\t-5", "count must not be negative"),
+        // the sign is reported before the size: all digits, so negative, not overflow
+        Arguments.of("the\t-99999999999999999999", "count must not be negative"),
+        // Long.MAX_VALUE + 1
+        Arguments.of("the\t9223372036854775808", "count is not an integer"),
         Arguments.of("the\t5\u00A0", "count is not an integer"),
         // control characters next to the count are not separators and not digits
         Arguments.of("the\t5\u0001", "count is not an integer"),
@@ -173,9 +177,8 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   /**
-   * Reads a count written in any decimal digits, as {@link Long#parseLong(String)} did before
-   * the columns were scanned by hand: an Arabic-Indic digit, a fullwidth digit, mixed digits,
-   * three Arabic-Indic digits, four fullwidth digits, and a mathematical digit.
+   * Reads a count written in any decimal digits: an Arabic-Indic digit, a fullwidth digit,
+   * mixed digits, three Arabic-Indic digits, four fullwidth digits, and a mathematical digit.
    *
    * @param count The count column.
    * @param value The number it denotes.

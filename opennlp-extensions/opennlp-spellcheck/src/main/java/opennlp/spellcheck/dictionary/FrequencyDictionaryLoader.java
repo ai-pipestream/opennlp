@@ -294,18 +294,23 @@ public final class FrequencyDictionaryLoader {
     if (i == raw.length()) {
       throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
     }
+    for (int at = i; at < raw.length(); at += Character.charCount(raw.codePointAt(at))) {
+      if (Character.digit(raw.codePointAt(at), 10) < 0) {
+        throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
+      }
+    }
+    if (negative) {
+      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
+    }
     long count = 0;
     while (i < raw.length()) {
       final int codePoint = raw.codePointAt(i);
       final int digit = Character.digit(codePoint, 10);
-      if (digit < 0 || count > (Long.MAX_VALUE - digit) / 10) {
+      if (count > (Long.MAX_VALUE - digit) / 10) {
         throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
       }
       count = count * 10 + digit;
       i += Character.charCount(codePoint);
-    }
-    if (negative) {
-      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
     }
     return count;
   }
