@@ -286,7 +286,7 @@ class HunspellCompatibilityTest {
    * Checks the Java implementation on one fixture.
    *
    * @param example The dictionary and assertion.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("examples")
@@ -301,9 +301,9 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * The stems Hunspell returned for a fixture when the fixtures were
-   * recorded, as described in {@code dev/README-hunspell-dictionaries.md}. An empty
-   * reference result is recorded as the input itself.
+   * The stems each fixture was recorded with, from Hunspell as described in
+   * {@code dev/README-hunspell-dictionaries.md}. An empty reference result is recorded
+   * as the input itself; a fixture missing from the list fails.
    *
    * @param example The fixture.
    * @return The recorded reference stems.
@@ -335,8 +335,52 @@ class HunspellCompatibilityTest {
       case "break-default", "break-recursive", "break-start", "break-end", "break-custom",
           "break-number-sign", "hungarian-hyphen-moving-rule", "apostrophe-all-caps",
           "apostrophe-capitalized" -> List.of(example.input());
-      default -> example.name().startsWith("compound-") && example.expected().size() > 1
-          ? List.of(String.join("", example.expected())) : example.expected();
+      case "affixed-explicit-stem", "explicit-stem" -> List.of("foot");
+      case "break-disabled" -> List.of("rivers-boats");
+      case "break-internal-only" -> List.of("-rivers");
+      case "break-unknown-part" -> List.of("rivers-absent");
+      case "complex-prefix-requires-continuation" -> List.of("unredo");
+      case "complex-prefix-single-suffix" -> List.of("walkers");
+      case "compound-duplicate-reject" -> List.of("foobarbar");
+      case "compound-forbid-entry" -> List.of("firewardhouse");
+      case "compound-more-suffixes", "compound-part-stems", "compound-pattern",
+          "compound-rule-homonyms", "compound-rule-long", "compound-rule-numeric" ->
+          List.of("riverboat");
+      case "compound-only-suffix-at-end" -> List.of("lampglassen");
+      case "compound-root-count" -> List.of("raincoatrack");
+      case "compound-rule-optional" -> List.of("stoneboat");
+      case "compound-rule-order" -> List.of("boatriver");
+      case "compound-rule-star" -> List.of("riverstoneboat");
+      case "compound-syllable-limit-reject" -> List.of("raymefa");
+      case "derivational-suffix" -> List.of("kindness");
+      case "derivation-inflectional-prefix" -> List.of("management");
+      case "derivation-surface-prefix" -> List.of("mismanagement");
+      case "flag-number-sign", "flag-number-sign-virtual-stem" -> List.of("foo");
+      case "hidden-capital-all-caps-entry", "hidden-capital-unflagged-all-caps" -> List.of("Acme");
+      case "hidden-capital-listed-form-wins" -> List.of("EBOOKS");
+      case "hidden-capital-mixed-case" -> List.of("Ebook");
+      case "hidden-capital-not-in-compound" -> List.of("EBOOKCOVER");
+      case "hungarian-hyphen-rule-first-part-only" -> List.of("őr-folyómeder");
+      case "hungarian-hyphen-rule-needs-flag" -> List.of("folymeder-őr");
+      case "hungarian-hyphen-rule-needs-hyphen" -> List.of("folyómeder");
+      case "hungarian-hyphen-rule-needs-language" -> List.of("folyómeder-őr");
+      case "ignored-affix", "ignored-input-and-dictionary" -> List.of("pearl");
+      case "input-end-anchor" -> List.of("quartz");
+      case "input-ligature" -> List.of("field");
+      case "keepcase-exact" -> List.of("card");
+      case "longest-input-match" -> List.of("ax");
+      case "mixed-case-is-not-lowercase" -> List.of("cArds");
+      case "morphology-alias" -> List.of("goose");
+      case "numeric-flag-maximum" -> List.of("dog");
+      case "output-conversion" -> List.of("bär");
+      case "surface-prefix" -> List.of("prebase");
+      case "trailing-period-entry" -> List.of("etc.");
+      case "trailing-period-not-added" -> List.of("etc");
+      case "trailing-periods", "trailing-period" -> List.of("text");
+      case "turkic-capitalized-entry" -> List.of("İnci");
+      case "turkish-case" -> List.of("ılık");
+      case "uppercase-proper-name" -> List.of("Maren");
+      default -> throw new IllegalStateException("no recorded stems for " + example.name());
     };
   }
 
@@ -399,7 +443,7 @@ class HunspellCompatibilityTest {
    * {@link #RECOGNITION_DEVIATIONS} must differ, so a stale entry fails too.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "recognition {0}")
   @MethodSource("examples")

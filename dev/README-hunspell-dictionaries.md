@@ -141,7 +141,7 @@ Whitespace inside recorded analyses is normalized to single spaces. The fixture 
 The engine applies `PFX` and `SFX` rules with strip strings and character-class conditions. It supports a prefix and suffix cross-product, a double suffix sequence connected by continuation classes, rules that add and strip no material both on their own and in continuation paths, file-wide `FLAG` modes, file-wide `AF` aliases, and the `SET` encoding declaration. Numeric flags range from 1 through 65535, the full range the reference accepts. A number sign starts a comment at the beginning of a line or after the fields a directive consumes; elsewhere it is an ordinary value, so `BREAK #`, `NEEDAFFIX #`, and affix material consisting of `#` load as written.
 
 `COMPLEXPREFIXES` selects 2 prefix levels and 1 suffix level instead of 1
-prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions;
+prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions, and `_` in an `ICONV`, `OCONV` or `REP` pattern means a space, as in Hunspell;
 `IGNORE` removes configured characters from input, entries, and affix material.
 `KEEPCASE`, `CHECKSHARPS`, `LANG`, `WARN`, and `FORBIDWARN` control case variants
 and warning-marked entries. A capitalized word with a further inner capital is also
@@ -183,17 +183,9 @@ material, and `ds:` makes the form derived by the entry's suffixes the stem.
 metadata have no effect on stemming or analysis in the pinned reference and
 are ignored. The active compound and affix directives remain applicable.
 
-`HunspellStemmer.analyze(text)` returns an immutable list of distinct analyses
-as space-separated Hunspell fields in the reference field order. Entries without
-`st:` use the entry text. A suffix without morphological fields contributes `fl:`
-and its flag after the entry fields. A prefix without morphological fields
-contributes its affix text before the stem when no suffix follows and `fl:` with
-its flag otherwise; an entry without fields then contributes the prefix's `fl:`
-field after the stem. Compound components begin with `pa:`, and a closing
-component without affixes or entry fields carries no `st:` field. Unknown input
-returns an empty list.
-Analysis preserves field text without `OCONV`. The shared `Stemmer` interface
-is unchanged. The manual contains an executable example.
+The morphological analysis format, space-separated Hunspell fields in Hunspell's
+field order, is internal in 3.0 and pinned by `HunspellCompletionTest`; the public
+API returns stems. The shared `Stemmer` interface is unchanged.
 
 Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading in both modes. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
 

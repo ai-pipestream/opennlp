@@ -179,7 +179,7 @@ class HunspellCompletionTest {
    * Tests Java stems under strict loading.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("examples")
@@ -207,7 +207,7 @@ class HunspellCompletionTest {
    * fails too.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "recognition {0}")
   @MethodSource("examples")
@@ -225,7 +225,7 @@ class HunspellCompletionTest {
    * Checks the package-private analysis operation, which preserves entry and affix
    * fields and answers an immutable list.
    *
-   * @throws Exception If loading or analysis fails.
+   * @throws Exception Thrown if loading or analysis fails.
    */
   @Test
   void testMorphologicalAnalysis() throws Exception {
@@ -245,7 +245,7 @@ class HunspellCompletionTest {
   /**
    * Checks the documented maximum number of CHECKSHARPS case variants.
    *
-   * @throws IOException If fixture loading fails.
+   * @throws IOException Thrown if fixture loading fails.
    */
   @Test
   void testSharpVariantLimit() throws IOException {
@@ -268,7 +268,7 @@ class HunspellCompletionTest {
    * Checks that the flag-set lists a lookup answers are immutable and shared across
    * concurrent stemming.
    *
-   * @throws Exception If fixture loading or a worker fails.
+   * @throws Exception Thrown if fixture loading or a worker fails.
    */
   @Test
   void testSharedMorphologyAndImmutableFlags() throws Exception {
@@ -356,7 +356,7 @@ class HunspellCompletionTest {
    * @param words The word list.
    * @param input The analyzed word.
    * @param expected The distinct analyses, as recorded from Hunspell's analyzer.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("zeroAffixAnalyses")
@@ -373,7 +373,7 @@ class HunspellCompletionTest {
    * The Hunspell spell checker accepts {@code reed} with the valid homonym listed first
    * and rejects it with the forbidden homonym listed first.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testForbiddenFirstHomonym() throws IOException {
@@ -397,7 +397,7 @@ class HunspellCompletionTest {
    * @param words The word list.
    * @param input The analyzed word.
    * @param expected The recorded analysis.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("morphology")
