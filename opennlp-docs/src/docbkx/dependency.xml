@@ -85,7 +85,8 @@ opennlp DependencyParserME en-depparse.bin < tagged-sentences.txt]]>
 			CoNLL-U output with one-based heads and <code>0</code> for the root. Input tags
 			are retained in XPOS; UPOS and other unavailable annotations are <code>_</code>.
 			The evaluation and cross-validation tools report UAS and LAS over all scored tokens
-			and over the tokens that are not punctuation.
+			and over the tokens that are not punctuation. With <code>-misclassified true</code>
+			they also print each misparsed sentence next to its gold tree.
 		</para>
 	</section>
 

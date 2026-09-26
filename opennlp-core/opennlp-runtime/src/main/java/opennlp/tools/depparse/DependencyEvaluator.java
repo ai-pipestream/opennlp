@@ -52,10 +52,12 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    * {@link #UNIVERSAL_PUNCTUATION_TAG} as punctuation.
    *
    * @param parser The parser to evaluate. Must not be {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  evaluated sample; {@code null} entries are ignored.
    * @throws IllegalArgumentException Thrown if {@code parser} is {@code null}.
    */
-  public DependencyEvaluator(DependencyParser parser) {
-    this(parser, UNIVERSAL_PUNCTUATION_TAG::equals);
+  public DependencyEvaluator(DependencyParser parser, DependencyEvaluationMonitor... listeners) {
+    this(parser, UNIVERSAL_PUNCTUATION_TAG::equals, listeners);
   }
 
   /**
@@ -65,9 +67,14 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    * @param punctuationTag Decides from a gold part-of-speech tag whether the token is
    *                       punctuation and therefore left out of the punctuation-free
    *                       scores. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  evaluated sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code parser} or
+   *         {@code punctuationTag} is {@code null}.
    */
-  public DependencyEvaluator(DependencyParser parser, Predicate<String> punctuationTag) {
+  public DependencyEvaluator(DependencyParser parser, Predicate<String> punctuationTag,
+      DependencyEvaluationMonitor... listeners) {
+    super(listeners);
     if (parser == null) {
       throw new IllegalArgumentException("parser must not be null");
     }
@@ -82,7 +89,8 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    * {@inheritDoc}
    *
    * <p>The returned sample carries the predicted graph over the reference tokens, and
-   * every token of the reference contributes to both scores.</p>
+   * every token of the reference contributes to both scores. Listeners are told whether
+   * the predicted graph equals the gold graph.</p>
    */
   @Override
   protected DependencySample processSample(DependencySample reference) {
