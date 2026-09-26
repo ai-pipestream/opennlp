@@ -29,7 +29,6 @@ import opennlp.spellcheck.symspell.SymSpell;
 import opennlp.tools.util.InputStreamFactory;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.PlainTextByLineStream;
-import opennlp.tools.util.StringUtil;
 
 /**
  * Loads plain-text frequency dictionaries into a {@link SymSpell} engine.
@@ -279,40 +278,36 @@ public final class FrequencyDictionaryLoader {
   }
 
   /**
-   * Parses the count column, which holds ASCII digits only. A sign, other digits, a decimal
-   * point or an exponent are malformed.
+   * Parses the count column: decimal digits in any script, as {@link Character#digit(int, int)}
+   * accepts them. A sign, a decimal point or an exponent is malformed.
    *
    * @param raw The column text. Must not be {@code null} or empty.
    * @param lineNo The 1-based line number, for the error message.
-   * @param line The whole line, for the error message.
+   * @param line The complete line, for the error message.
    * @return The count, zero or more.
-   * @throws MalformedDictionaryLineException Thrown if the column is not ASCII digits only, is a
+   * @throws MalformedDictionaryLineException Thrown if the column is not digits only, is a
    *         negative number, or does not fit in a {@code long}.
    */
   private long parseCount(String raw, long lineNo, String line) throws IOException {
-    if (raw.charAt(0) == MINUS_SIGN && isAsciiDigits(raw, 1)) {
+    final boolean negative = raw.charAt(0) == MINUS_SIGN;
+    int i = negative ? 1 : 0;
+    if (i == raw.length()) {
+      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
+    }
+    long count = 0;
+    while (i < raw.length()) {
+      final int codePoint = raw.codePointAt(i);
+      final int digit = Character.digit(codePoint, 10);
+      if (digit < 0 || count > (Long.MAX_VALUE - digit) / 10) {
+        throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
+      }
+      count = count * 10 + digit;
+      i += Character.charCount(codePoint);
+    }
+    if (negative) {
       throw new MalformedDictionaryLineException(lineNo, line, COUNT_NEGATIVE);
     }
-    if (!isAsciiDigits(raw, 0)) {
-      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
-    }
-    try {
-      return Long.parseLong(raw);
-    } catch (NumberFormatException e) {
-      throw new MalformedDictionaryLineException(lineNo, line, COUNT_NOT_INTEGER);
-    }
-  }
-
-  /**
-   * Tests whether {@code text} holds at least one character from {@code from} on and all of them
-   * are ASCII digits.
-   *
-   * @param text The text to check. Must not be {@code null}.
-   * @param from The offset the digits start at, between {@code 0} and {@code text.length()}.
-   * @return {@code true} if the rest of {@code text} is one or more ASCII digits.
-   */
-  private boolean isAsciiDigits(String text, int from) {
-    return from < text.length() && StringUtil.endOfAsciiDigits(text, from) == text.length();
+    return count;
   }
 
   /**
