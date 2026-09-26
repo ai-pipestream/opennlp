@@ -90,7 +90,7 @@ final class HunspellConversion {
       if (end <= start) {
         throw new IOException("empty " + directive + " pattern at line " + entry.line());
       }
-      rules.add(new Rule(fields[1].substring(start, end),
+      rules.add(new Rule(fields[1].substring(start, end).replace(SPACE_MARK_CHAR, ' '),
           HunspellDictionary.NO_MATERIAL.equals(fields[2])
               ? "" : fields[2].replace(SPACE_MARK_CHAR, ' '),
           initial, terminal));
