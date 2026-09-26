@@ -47,7 +47,8 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.CompoundPosition;
  * count as standalone analyses.</p>
  *
  * <p>Compound part search is capped at {@value #PART_CHECK_BUDGET} part-licensing
- * attempts per input word; beyond that budget further compound analyses are skipped.
+ * attempts per case variant of the input, and a recursive word-break search has a
+ * budget of its own; beyond a budget further analyses are skipped.
  * The {@link Stemmer} interface leaves thread safety to the implementation. This
  * implementation reads only the immutable dictionary state, so a single instance is
  * safe to share between threads.</p>
@@ -70,12 +71,6 @@ public final class HunspellStemmer implements Stemmer {
 
   /** Maximum distinct morphological readings returned for one input. */
   private static final int MAX_ANALYSES = 2048;
-
-  /** The two-letter spelling that {@code CHECKSHARPS} expands to a sharp s. */
-  private static final String DOUBLE_S = "ss";
-
-  /** The sharp s that {@code CHECKSHARPS} restores in all-uppercase input. */
-  private static final String SHARP_S = "ß";
 
   private final HunspellDictionary dictionary;
 
@@ -127,9 +122,8 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Returns morphological analyses as space-separated Hunspell fields. The operation
-   * is package-private until a typed analysis result exists; the public API returns
-   * stems. Each result describes a complete accepted reading. Entries without an explicit
+   * Returns morphological analyses as space-separated Hunspell fields. Each result
+   * describes a complete accepted reading. Entries without an explicit
    * {@code st:} field use the dictionary entry as their stem. Compound components
    * begin with {@code pa:}; entry and affix fields follow in application order.
    * Results preserve dictionary field text without output conversion.
@@ -137,7 +131,7 @@ public final class HunspellStemmer implements Stemmer {
    * @param word The input to analyze. Must not be {@code null}.
    * @return An immutable list of distinct analyses, or an empty list for unknown input.
    *     At most {@value #MAX_ANALYSES} analyses are returned.
-   * @throws IllegalArgumentException If {@code word} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code word} is {@code null}.
    */
   List<String> analyze(CharSequence word) {
     if (word == null) {
@@ -239,7 +233,7 @@ public final class HunspellStemmer implements Stemmer {
               break;
             }
             next.add(new StringBuilder(prior).append(prior.isEmpty() ? "" : " ")
-                .append("pa:").append(part.surface())
+                .append(HunspellDictionary.COMPOUND_PART_FIELD).append(part.surface())
                 .append(fields.isEmpty() ? "" : " ").append(fields).toString());
           }
         }
@@ -249,7 +243,7 @@ public final class HunspellStemmer implements Stemmer {
     }
 
     /**
-   * Combines accepted readings before and after a word break.
+     * Combines accepted readings before and after a word break.
      *
      * @param leftText The opening text.
      * @param left The opening readings.
@@ -268,8 +262,10 @@ public final class HunspellStemmer implements Stemmer {
             return;
           }
           values.add(new StringBuilder()
-              .append(first.startsWith("pa:") ? "" : "pa:" + leftText + " ").append(first)
-              .append(' ').append(last.startsWith("pa:") ? "" : "pa:" + rightText + " ")
+              .append(first.startsWith(HunspellDictionary.COMPOUND_PART_FIELD) ? ""
+                  : HunspellDictionary.COMPOUND_PART_FIELD + leftText + " ").append(first)
+              .append(' ').append(last.startsWith(HunspellDictionary.COMPOUND_PART_FIELD) ? ""
+                  : HunspellDictionary.COMPOUND_PART_FIELD + rightText + " ")
               .append(last).toString());
         }
       }
@@ -464,9 +460,10 @@ public final class HunspellStemmer implements Stemmer {
     if (variants.size() >= MAX_CASE_VARIANTS) {
       return;
     }
-    for (int at = word.indexOf(DOUBLE_S, from); at >= 0; at = word.indexOf(DOUBLE_S, at + 1)) {
-      final String changed = word.substring(0, at) + SHARP_S
-          + word.substring(at + DOUBLE_S.length());
+    final String doubleS = HunspellDictionary.DOUBLE_S;
+    for (int at = word.indexOf(doubleS, from); at >= 0; at = word.indexOf(doubleS, at + 1)) {
+      final String changed = word.substring(0, at) + HunspellDictionary.SHARP_S
+          + word.substring(at + doubleS.length());
       variants.add(changed);
       variants.add(initialUpper(changed));
       addSharpVariants(changed, at + 1, variants);

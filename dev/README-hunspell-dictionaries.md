@@ -183,17 +183,9 @@ material, and `ds:` makes the form derived by the entry's suffixes the stem.
 metadata have no effect on stemming or analysis in the pinned reference and
 are ignored. The active compound and affix directives remain applicable.
 
-`HunspellStemmer.analyze(text)` returns an immutable list of distinct analyses
-as space-separated Hunspell fields in the reference field order. Entries without
-`st:` use the entry text. A suffix without morphological fields contributes `fl:`
-and its flag after the entry fields. A prefix without morphological fields
-contributes its affix text before the stem when no suffix follows and `fl:` with
-its flag otherwise; an entry without fields then contributes the prefix's `fl:`
-field after the stem. Compound components begin with `pa:`, and a closing
-component without affixes or entry fields carries no `st:` field. Unknown input
-returns an empty list.
-Analysis preserves field text without `OCONV`. The shared `Stemmer` interface
-is unchanged. The manual contains an executable example.
+The morphological analysis format, space-separated Hunspell fields in Hunspell's
+field order, is internal in 3.0 and pinned by `HunspellCompletionTest`; the public
+API returns stems. The shared `Stemmer` interface is unchanged.
 
 Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading in both modes. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
 

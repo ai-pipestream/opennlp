@@ -31,6 +31,19 @@ final class HunspellConversion {
   /** An empty conversion table. */
   static final HunspellConversion NONE = new HunspellConversion(List.of());
 
+  /** Marks a {@code REP} pattern that must begin the word. */
+  private static final String START_ANCHOR = "^";
+  /** Marks a {@code REP} pattern that must end the word. */
+  private static final String END_ANCHOR = "$";
+  /** Stands for a space in {@code ICONV} and {@code OCONV} fields. */
+  private static final char SPACE_MARK_CHAR = '_';
+  /** {@link #SPACE_MARK_CHAR} as text, for the boundary tests. */
+  private static final String SPACE_MARK = String.valueOf(SPACE_MARK_CHAR);
+  /** Separates the input and output of a {@code ph:} field. */
+  private static final String PHONETIC_ARROW = "->";
+  /** Ends a {@code ph:} field whose last character is dropped from both sides. */
+  private static final String PHONETIC_WILDCARD = "*";
+
   /**
    * A conversion with optional word-boundary requirements.
    *
@@ -58,7 +71,7 @@ final class HunspellConversion {
    * @param lines The affix fields indexed by source line.
    * @param directive The table name.
    * @return The conversion table.
-   * @throws IOException If the table is malformed.
+   * @throws IOException Thrown if the table is malformed.
    */
   static HunspellConversion parse(String[][] lines, String directive) throws IOException {
     final List<Rule> rules = new ArrayList<>();
@@ -70,15 +83,16 @@ final class HunspellConversion {
     }
     for (HunspellAffixTable.Entry entry : entries) {
       final String[] fields = entry.fields();
-      final boolean initial = fields[1].startsWith(replacement ? "^" : "_");
-      final boolean terminal = fields[1].endsWith(replacement ? "$" : "_");
+      final boolean initial = fields[1].startsWith(replacement ? START_ANCHOR : SPACE_MARK);
+      final boolean terminal = fields[1].endsWith(replacement ? END_ANCHOR : SPACE_MARK);
       final int start = initial ? 1 : 0;
       final int end = fields[1].length() - (terminal ? 1 : 0);
       if (end <= start) {
         throw new IOException("empty " + directive + " pattern at line " + entry.line());
       }
       rules.add(new Rule(fields[1].substring(start, end),
-          HunspellDictionary.NO_MATERIAL.equals(fields[2]) ? "" : fields[2].replace('_', ' '),
+          HunspellDictionary.NO_MATERIAL.equals(fields[2])
+              ? "" : fields[2].replace(SPACE_MARK_CHAR, ' '),
           initial, terminal));
     }
     return rules.isEmpty() ? NONE : new HunspellConversion(rules);
@@ -102,12 +116,12 @@ final class HunspellConversion {
           }
           String from = field.substring(HunspellDictionary.PHONETIC_FIELD.length());
           String to = word.getKey();
-          final int arrow = from.indexOf("->");
+          final int arrow = from.indexOf(PHONETIC_ARROW);
           if (arrow >= 0) {
-            to = from.substring(arrow + 2);
+            to = from.substring(arrow + PHONETIC_ARROW.length());
             from = from.substring(0, arrow);
-          } else if (from.endsWith("*")) {
-            from = from.substring(0, from.length() - 1);
+          } else if (from.endsWith(PHONETIC_WILDCARD)) {
+            from = from.substring(0, from.length() - PHONETIC_WILDCARD.length());
             if (!from.isEmpty() && !to.isEmpty()) {
               from = from.substring(0, from.offsetByCodePoints(from.length(), -1));
               to = to.substring(0, to.offsetByCodePoints(to.length(), -1));

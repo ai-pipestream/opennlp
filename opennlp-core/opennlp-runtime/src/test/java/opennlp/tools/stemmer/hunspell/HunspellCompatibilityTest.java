@@ -286,7 +286,7 @@ class HunspellCompatibilityTest {
    * Checks the Java implementation on one fixture.
    *
    * @param example The dictionary and assertion.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("examples")
@@ -399,7 +399,7 @@ class HunspellCompatibilityTest {
    * {@link #RECOGNITION_DEVIATIONS} must differ, so a stale entry fails too.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "recognition {0}")
   @MethodSource("examples")

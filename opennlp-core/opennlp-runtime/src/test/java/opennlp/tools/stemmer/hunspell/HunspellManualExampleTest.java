@@ -78,7 +78,7 @@ public class HunspellManualExampleTest {
    * Checks partial loading and the diagnostic format used in the manual.
    *
    * @param directory The temporary fixture directory.
-   * @throws IOException If fixture creation or loading fails.
+   * @throws IOException Thrown if fixture creation or loading fails.
    */
   @Test
   void testPartialLoadingDiagnostics(@TempDir Path directory) throws IOException {
