@@ -67,8 +67,9 @@ class DependencyEventStream implements ObjectStream<Event> {
 
   /**
    * {@inheritDoc}
-   * Returns the events of one sample at a time and moves on to the next sample once
-   * they are exhausted.
+   *
+   * <p>Returns the events of one sample at a time and moves on to the next sample once
+   * they are exhausted.</p>
    *
    * @throws IOException Thrown if reading the underlying samples fails.
    */
@@ -103,7 +104,8 @@ class DependencyEventStream implements ObjectStream<Event> {
 
   /**
    * {@inheritDoc}
-   * Also discards buffered events and the skipped sample count.
+   *
+   * <p>Also discards buffered events and the skipped sample count.</p>
    *
    * @throws IOException Thrown if resetting the underlying samples fails.
    * @throws UnsupportedOperationException Thrown if the underlying samples cannot be reset.

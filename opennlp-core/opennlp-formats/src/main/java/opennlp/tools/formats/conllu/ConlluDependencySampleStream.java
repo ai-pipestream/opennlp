@@ -122,8 +122,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
 
   /**
    * {@inheritDoc}
-   * Sentences without a usable basic dependency annotation are skipped, and their count
-   * is logged once the content is exhausted.
+   *
+   * <p>Sentences without a usable basic dependency annotation are skipped, and their
+   * count is logged once the content is exhausted.</p>
    */
   @Override
   public DependencySample read() throws IOException {
@@ -227,8 +228,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
 
   /**
    * {@inheritDoc}
-   * Reopens the content through the {@link InputStreamFactory}, which must therefore
-   * produce a fresh stream on every call.
+   *
+   * <p>Reopens the content through the {@link InputStreamFactory}, which must therefore
+   * produce a fresh stream on every call.</p>
    */
   @Override
   public void reset() throws IOException, UnsupportedOperationException {
