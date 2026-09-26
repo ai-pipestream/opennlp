@@ -35,9 +35,9 @@ final class HunspellConversion {
   private static final String START_ANCHOR = "^";
   /** Marks a {@code REP} pattern that must end the word. */
   private static final String END_ANCHOR = "$";
-  /** Stands for a space in {@code ICONV} and {@code OCONV} fields. */
+  /** Stands for a space in {@code ICONV}, {@code OCONV} and {@code REP} fields. */
   private static final char SPACE_MARK_CHAR = '_';
-  /** {@link #SPACE_MARK_CHAR} as text, for the boundary tests. */
+  /** {@link #SPACE_MARK_CHAR} as text, for the anchor checks. */
   private static final String SPACE_MARK = String.valueOf(SPACE_MARK_CHAR);
   /** Separates the input and output of a {@code ph:} field. */
   private static final String PHONETIC_ARROW = "->";
