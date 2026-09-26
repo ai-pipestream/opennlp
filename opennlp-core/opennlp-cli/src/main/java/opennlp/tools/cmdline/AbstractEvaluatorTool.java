@@ -17,6 +17,8 @@
 
 package opennlp.tools.cmdline;
 
+import java.io.IOException;
+
 import opennlp.tools.util.ObjectStream;
 
 /**
@@ -36,6 +38,17 @@ public abstract class AbstractEvaluatorTool<T, P> extends AbstractTypedParamTool
    */
   protected AbstractEvaluatorTool(Class<T> sampleType, Class<P> params) {
     super(sampleType, params);
+  }
+
+  /**
+   * Wraps an {@link IOException} raised while reading the samples in the
+   * {@link TerminateToolException} that ends the tool.
+   *
+   * @param e The exception raised while reading the samples.
+   * @return The exception to throw. Never {@code null}.
+   */
+  protected TerminateToolException createTerminationIOException(IOException e) {
+    return new TerminateToolException(-1, "IO error while reading test data: " + e.getMessage(), e);
   }
 
   @Override

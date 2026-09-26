@@ -28,6 +28,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import opennlp.tools.ml.model.AbstractModel;
+import opennlp.tools.ml.model.Context;
 import opennlp.tools.ml.model.MaxentModel;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.TrainingParameters;
@@ -124,10 +126,7 @@ public class DependencyParserMETest {
 
   @Test
   void testConstructorRejectsNullModel() {
-    assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME((DependencyModel) null));
-    assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME((MaxentModel) null));
+    assertThrows(IllegalArgumentException.class, () -> new DependencyParserME(null));
   }
 
   @Test
@@ -189,27 +188,26 @@ public class DependencyParserMETest {
     // The outcome inventory is decoded once up front, so a model trained for another
     // task is rejected when the parser is built rather than mid-sentence.
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME(new OutcomeOnlyModel("NN", "VB")));
+        () -> parserOf(new OutcomeOnlyModel("NN", "VB")));
   }
 
   @Test
   void testIncompleteActionInventoriesAreRejectedAtConstruction() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME(new OutcomeOnlyModel(SHIFT_OUTCOME)));
+        () -> parserOf(new OutcomeOnlyModel(SHIFT_OUTCOME)));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME(new OutcomeOnlyModel(ROOT_ARC_OUTCOME)));
+        () -> parserOf(new OutcomeOnlyModel(ROOT_ARC_OUTCOME)));
   }
 
   @Test
   void testDuplicateActionsAreRejectedAtConstruction() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyParserME(
-            new OutcomeOnlyModel(SHIFT_OUTCOME, SHIFT_OUTCOME, ROOT_ARC_OUTCOME)));
+        () -> parserOf(new OutcomeOnlyModel(SHIFT_OUTCOME, SHIFT_OUTCOME, ROOT_ARC_OUTCOME)));
   }
 
   @Test
   void testModelScoreCountIsValidated() {
-    final DependencyParserME invalid = new DependencyParserME(
+    final DependencyParserME invalid = parserOf(
         new OutcomeOnlyModel(new double[] {1.0}, SHIFT_OUTCOME, ROOT_ARC_OUTCOME));
     final IllegalStateException exception = assertThrows(IllegalStateException.class,
         () -> invalid.parse(new String[] {"word"}, new String[] {"NN"}));
@@ -218,20 +216,28 @@ public class DependencyParserMETest {
 
   @Test
   void testNonFiniteModelScoreIsRejected() {
-    final DependencyParserME invalid = new DependencyParserME(
-        new OutcomeOnlyModel(new double[] {Double.NaN, 1.0},
-            SHIFT_OUTCOME, ROOT_ARC_OUTCOME));
+    final DependencyParserME invalid = parserOf(new OutcomeOnlyModel(
+        new double[] {Double.NaN, 1.0}, SHIFT_OUTCOME, ROOT_ARC_OUTCOME));
     assertThrows(IllegalStateException.class,
         () -> invalid.parse(new String[] {"word"}, new String[] {"NN"}));
   }
 
   /**
-   * A {@link MaxentModel} that only knows its outcome inventory, enough to build a
-   * parser from; any other use fails.
+   * Wraps a raw transition model the way a trained model would be wrapped.
+   *
+   * @param model The transition classification model.
+   * @return A parser over {@code model}. Never {@code null}.
    */
-  private static final class OutcomeOnlyModel implements MaxentModel {
+  private static DependencyParserME parserOf(MaxentModel model) {
+    return new DependencyParserME(new DependencyModel(LANGUAGE, model, null));
+  }
 
-    private final String[] outcomes;
+  /**
+   * An {@link AbstractModel} that only knows its outcome inventory, enough to build a
+   * model and a parser from; any other use fails.
+   */
+  private static final class OutcomeOnlyModel extends AbstractModel {
+
     private final double[] scores;
 
     /**
@@ -250,18 +256,8 @@ public class DependencyParserMETest {
      * @param outcomes The outcome inventory, in index order.
      */
     private OutcomeOnlyModel(double[] scores, String... outcomes) {
+      super(new Context[0], new String[0], outcomes);
       this.scores = scores;
-      this.outcomes = outcomes;
-    }
-
-    @Override
-    public String getOutcome(int i) {
-      return outcomes[i];
-    }
-
-    @Override
-    public int getNumOutcomes() {
-      return outcomes.length;
     }
 
     @Override
@@ -279,21 +275,6 @@ public class DependencyParserMETest {
 
     @Override
     public double[] eval(String[] context, float[] values) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public String getBestOutcome(double[] outcomeScores) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public String getAllOutcomes(double[] outcomeScores) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int getIndex(String outcome) {
       throw new UnsupportedOperationException();
     }
   }

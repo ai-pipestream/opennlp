@@ -31,7 +31,8 @@ import opennlp.tools.util.eval.CrossValidationPartitioner;
  * {@link DependencyParserME#train} on the other {@code k - 1} folds and scored on the
  * held-out fold with a {@link DependencyEvaluator}. The unlabeled and labeled attachment
  * scores are accumulated over all evaluated tokens, so every token of the input counts
- * once, in the fold it was held out from.</p>
+ * once, in the fold it was held out from. The listeners given at construction are told
+ * about each held-out sample.</p>
  *
  * @see DependencyEvaluator
  * @see CrossValidationPartitioner
@@ -45,6 +46,7 @@ public class DependencyCrossValidator {
   private final String languageCode;
   private final TrainingParameters params;
   private final Predicate<String> punctuationTag;
+  private final DependencyEvaluationMonitor[] listeners;
   private final AttachmentScores scores = new AttachmentScores();
 
   /**
@@ -54,10 +56,15 @@ public class DependencyCrossValidator {
    * @param languageCode The ISO language code of the samples. Must not be {@code null}.
    * @param params The {@link TrainingParameters} for the parser of each fold. Must not be
    *               {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  held-out sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code languageCode} or {@code params}
+   *         is {@code null}.
    */
-  public DependencyCrossValidator(String languageCode, TrainingParameters params) {
-    this(languageCode, params, DependencyEvaluator.UNIVERSAL_PUNCTUATION_TAG::equals);
+  public DependencyCrossValidator(String languageCode, TrainingParameters params,
+      DependencyEvaluationMonitor... listeners) {
+    this(languageCode, params, DependencyEvaluator.UNIVERSAL_PUNCTUATION_TAG::equals,
+        listeners);
   }
 
   /**
@@ -69,10 +76,13 @@ public class DependencyCrossValidator {
    * @param punctuationTag Decides from a gold part-of-speech tag whether the token is
    *                       punctuation and therefore left out of the punctuation-free
    *                       scores. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  held-out sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code languageCode}, {@code params} or
+   *         {@code punctuationTag} is {@code null}.
    */
   public DependencyCrossValidator(String languageCode, TrainingParameters params,
-      Predicate<String> punctuationTag) {
+      Predicate<String> punctuationTag, DependencyEvaluationMonitor... listeners) {
     if (languageCode == null) {
       throw new IllegalArgumentException("languageCode must not be null");
     }
@@ -85,6 +95,7 @@ public class DependencyCrossValidator {
     this.languageCode = languageCode;
     this.params = params;
     this.punctuationTag = punctuationTag;
+    this.listeners = listeners == null ? new DependencyEvaluationMonitor[0] : listeners.clone();
   }
 
   /**
@@ -113,7 +124,7 @@ public class DependencyCrossValidator {
           partitioner.next();
       final DependencyModel model = DependencyParserME.train(languageCode, training, params);
       final DependencyEvaluator evaluator =
-          new DependencyEvaluator(new DependencyParserME(model), punctuationTag);
+          new DependencyEvaluator(new DependencyParserME(model), punctuationTag, listeners);
       evaluator.evaluate(training.getTestSampleStream());
       scores.add(evaluator.scores());
     }

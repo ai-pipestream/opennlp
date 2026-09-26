@@ -66,6 +66,27 @@ public class DependencyParserToolsTest {
   private static final DependencyGraph GOLD =
       DependencyGraph.of(new int[] {1, -1}, new String[] {"nsubj", "root"});
 
+  /** The sentence with the heads swapped, which a parser trained on {@link #SENTENCE} misparses. */
+  private static final String REVERSED_SENTENCE = """
+      1\tdogs\tdog\tNOUN\tNNS\t_\t0\troot\t_\t_
+      2\trun\trun\tVERB\tVBP\t_\t1\tobj\t_\t_
+
+      """;
+
+  /** The gold graph of {@link #REVERSED_SENTENCE}. */
+  private static final DependencyGraph REVERSED =
+      DependencyGraph.of(new int[] {-1, 0}, new String[] {"root", "obj"});
+
+  /** The expected block the error listener prints for {@link #REVERSED_SENTENCE}. */
+  private static final String EXPECTED_REVERSED = "Expected: {\n"
+      + "1\tdogs\tNOUN\t0\troot" + System.lineSeparator()
+      + "2\trun\tVERB\t1\tobj" + System.lineSeparator() + "}";
+
+  /** The predicted block the error listener prints for the parse of {@link #SENTENCE}. */
+  private static final String PREDICTED_SENTENCE = "Predicted: {\n"
+      + "1\tdogs\tNOUN\t2\tnsubj" + System.lineSeparator()
+      + "2\trun\tVERB\t0\troot" + System.lineSeparator() + "}";
+
   /** The scores logged for a parser that reproduces all 40 tokens of the data. */
   private static final String PERFECT_SCORES = "Tokens: 40; UAS: 1.0; LAS: 1.0";
 
@@ -186,10 +207,56 @@ public class DependencyParserToolsTest {
         "-data", data.toString(), "-tagset", "invalid"}));
   }
 
+  /**
+   * A fold count below two terminates the tool with a message, as the other cross
+   * validator tools do, instead of escaping as an exception.
+   */
   @Test
   void testCrossValidatorRejectsFoldCountBelowTwo() {
     assertThrows(TerminateToolException.class,
         () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
             "-lang", "eng", "-data", data.toString(), "-folds", "1"}));
+  }
+
+  @Test
+  void testCrossValidatorDefaultsToTenFolds() {
+    final List<String> log = logOf(DependencyParserCrossValidatorTool.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString(), "-misclassified", "true"}));
+    assertEquals(List.of(PERFECT_SCORES, PERFECT_SCORES_EXCLUDING_PUNCTUATION), log);
+  }
+
+  @Test
+  void testEvaluatorPrintsMisparsedSamples() throws IOException {
+    train();
+    final Path test = dir.resolve("test.conllu");
+    Files.writeString(test, REVERSED_SENTENCE);
+    final List<String> log = logOf(DependencyEvaluationErrorListener.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", test.toString(), "-misclassified", "true"}));
+    assertEquals(List.of(EXPECTED_REVERSED + "\n" + PREDICTED_SENTENCE), log);
+  }
+
+  @Test
+  void testEvaluatorWithoutMisclassifiedFlagPrintsNoSamples() throws IOException {
+    train();
+    final Path test = dir.resolve("test.conllu");
+    Files.writeString(test, REVERSED_SENTENCE);
+    final List<String> log = logOf(DependencyEvaluationErrorListener.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", test.toString()}));
+    assertEquals(List.of(), log);
+  }
+
+  @Test
+  void testErrorListenerPrintsBothSamples() {
+    final ByteArrayOutputStream output = new ByteArrayOutputStream();
+    final DependencySample reference = new DependencySample(
+        new String[] {"dogs", "run"}, new String[] {"NOUN", "VERB"}, REVERSED);
+    final DependencySample prediction = new DependencySample(
+        new String[] {"dogs", "run"}, new String[] {"NOUN", "VERB"}, GOLD);
+    new DependencyEvaluationErrorListener(output).misclassified(reference, prediction);
+    assertEquals(EXPECTED_REVERSED + "\n" + PREDICTED_SENTENCE + "\n\n",
+        output.toString(StandardCharsets.UTF_8).replace("\r\n", "\n"));
   }
 }
