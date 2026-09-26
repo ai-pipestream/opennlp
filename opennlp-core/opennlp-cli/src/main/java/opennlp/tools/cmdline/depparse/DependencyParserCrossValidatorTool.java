@@ -23,12 +23,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.cmdline.AbstractCrossValidatorTool;
-import opennlp.tools.cmdline.ArgumentParser.OptionalParameter;
-import opennlp.tools.cmdline.ArgumentParser.ParameterDescription;
-import opennlp.tools.cmdline.TerminateToolException;
 import opennlp.tools.cmdline.depparse.DependencyParserCrossValidatorTool.CrossValidationParams;
 import opennlp.tools.cmdline.params.BasicTrainingParams;
+import opennlp.tools.cmdline.params.CVParams;
 import opennlp.tools.depparse.DependencyCrossValidator;
+import opennlp.tools.depparse.DependencyEvaluationMonitor;
 import opennlp.tools.depparse.DependencySample;
 import opennlp.tools.util.ObjectStream;
 
@@ -36,10 +35,7 @@ import opennlp.tools.util.ObjectStream;
 public class DependencyParserCrossValidatorTool
     extends AbstractCrossValidatorTool<DependencySample, CrossValidationParams> {
 
-  interface CrossValidationParams extends BasicTrainingParams {
-    @ParameterDescription(valueName = "num", description = "number of folds, at least two")
-    @OptionalParameter(defaultValue = "10")
-    Integer getFolds();
+  interface CrossValidationParams extends CVParams, BasicTrainingParams {
   }
 
   private static final Logger logger = LoggerFactory.getLogger(DependencyParserCrossValidatorTool.class);
@@ -60,12 +56,13 @@ public class DependencyParserCrossValidatorTool
   public void run(String format, String[] args) {
     super.run(format, args);
     try (ObjectStream<DependencySample> samples = sampleStream) {
-      if (params.getFolds() < 2) {
-        throw new TerminateToolException(-1, "The number of folds must be at least two");
-      }
       mlParams = DependencyParserTrainerTool.loadTrainingParameters(params.getParams());
+      DependencyEvaluationMonitor errorListener = null;
+      if (params.getMisclassified()) {
+        errorListener = new DependencyEvaluationErrorListener();
+      }
       DependencyCrossValidator validator =
-          new DependencyCrossValidator(params.getLang(), mlParams);
+          new DependencyCrossValidator(params.getLang(), mlParams, errorListener);
       validator.evaluate(samples, params.getFolds());
       logger.info("Tokens: {}; UAS: {}; LAS: {}", validator.getWordCount(),
           validator.getUas(), validator.getLas());
