@@ -61,7 +61,7 @@ public final class DependencySample implements Sample {
     if (graph == null) {
       throw new IllegalArgumentException("graph must not be null");
     }
-    DependencyValidation.checkTokensAndTags(tokens, tags);
+    checkTokensAndTags(tokens, tags);
     if (tokens.length != graph.size()) {
       throw new IllegalArgumentException("tokens, tags and graph must agree in length: "
           + tokens.length + ", " + tags.length + ", " + graph.size());
@@ -69,6 +69,39 @@ public final class DependencySample implements Sample {
     this.tokens = tokens.clone();
     this.tags = tags.clone();
     this.graph = graph;
+  }
+
+  /**
+   * Validates the token and tag arrays of a sentence, the input contract shared by this
+   * sample and {@link DependencyParser#parse(String[], String[])}.
+   *
+   * @param tokens The token array. Must not be {@code null} or empty and must not
+   *               contain {@code null} entries.
+   * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
+   *             {@code null}, must have the same length as {@code tokens}, and must not
+   *             contain {@code null} entries.
+   * @throws IllegalArgumentException Thrown if an array is {@code null}, {@code tokens}
+   *         is empty, the lengths do not match, or an entry is {@code null}.
+   */
+  public static void checkTokensAndTags(String[] tokens, String[] tags) {
+    if (tokens == null || tags == null) {
+      throw new IllegalArgumentException("tokens and tags must not be null");
+    }
+    if (tokens.length == 0) {
+      throw new IllegalArgumentException("tokens must not be empty");
+    }
+    if (tokens.length != tags.length) {
+      throw new IllegalArgumentException("tokens and tags must have the same length: "
+          + tokens.length + " != " + tags.length);
+    }
+    for (int i = 0; i < tokens.length; i++) {
+      if (tokens[i] == null) {
+        throw new IllegalArgumentException("token must not be null at index " + i);
+      }
+      if (tags[i] == null) {
+        throw new IllegalArgumentException("tag must not be null at index " + i);
+      }
+    }
   }
 
   /**

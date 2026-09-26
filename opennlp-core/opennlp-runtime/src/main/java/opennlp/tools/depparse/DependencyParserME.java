@@ -58,38 +58,12 @@ public class DependencyParserME implements DependencyParser {
    *         outcome inventory is invalid or cannot parse a sentence.
    */
   public DependencyParserME(DependencyModel model) {
-    this(parserModelOf(model));
-  }
-
-  /**
-   * Initializes a {@link DependencyParserME} with a raw transition model.
-   *
-   * @param model The transition classification model. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code model} is {@code null} or an
-   *         outcome inventory is invalid or cannot parse a sentence.
-   */
-  public DependencyParserME(MaxentModel model) {
     if (model == null) {
       throw new IllegalArgumentException("model must not be null");
     }
-    this.model = model;
+    this.model = model.getParserModel();
     this.contextGenerator = new DependencyContextGenerator();
-    this.transitions = decodeOutcomes(model);
-  }
-
-  /**
-   * Unwraps the transition model so that the {@link DependencyModel} constructor can
-   * delegate to the {@link MaxentModel} one.
-   *
-   * @param model The model to unwrap.
-   * @return The transition classification model of {@code model}.
-   * @throws IllegalArgumentException Thrown if {@code model} is {@code null}.
-   */
-  private static MaxentModel parserModelOf(DependencyModel model) {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
-    return model.getParserModel();
+    this.transitions = decodeOutcomes(this.model);
   }
 
   /**
@@ -136,7 +110,7 @@ public class DependencyParserME implements DependencyParser {
    */
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    DependencyValidation.checkTokensAndTags(tokens, tags);
+    DependencySample.checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));

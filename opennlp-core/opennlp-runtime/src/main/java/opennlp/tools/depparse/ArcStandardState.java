@@ -79,32 +79,6 @@ final class ArcStandardState {
   }
 
   /**
-   * Deep-copies {@code source}; used only by {@link #copy()}.
-   *
-   * @param source The state to copy.
-   */
-  private ArcStandardState(ArcStandardState source) {
-    this.tokenCount = source.tokenCount;
-    this.stack = source.stack.clone();
-    this.heads = source.heads.clone();
-    this.relations = source.relations.clone();
-    this.assignedDependents = source.assignedDependents.clone();
-    this.leftmostDependents = source.leftmostDependents.clone();
-    this.rightmostDependents = source.rightmostDependents.clone();
-    this.top = source.top;
-    this.bufferFront = source.bufferFront;
-  }
-
-  /**
-   * Creates an independent copy for advancing a search alternative.
-   *
-   * @return A copy that can be advanced without affecting this state. Never {@code null}.
-   */
-  ArcStandardState copy() {
-    return new ArcStandardState(this);
-  }
-
-  /**
    * @return {@code true} if the buffer is empty and only the artificial root remains on
    *         the stack, so the parse is complete.
    */
@@ -219,7 +193,9 @@ final class ArcStandardState {
     return bufferFront + fromFront;
   }
 
-  /** {@return the number of tokens in this parse} */
+  /**
+   * @return The number of tokens in this parse.
+   */
   int tokenCount() {
     return tokenCount;
   }
