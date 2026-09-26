@@ -187,13 +187,38 @@ public class ConlluDependencySampleStreamTest {
 
   @ParameterizedTest(name = "id = \"{0}\"")
   @ValueSource(strings = {"2", "01", "+1", "1 ", "\u0661", "\uff11", "", "4294967297"})
-  void testNonSequentialWordIdsAreSkipped(String id) throws IOException {
+  void testWordIdsOtherThanThePositionAreSkipped(String id) throws IOException {
     final String content = line(id, "Dogs", "dog", "NOUN", "NNS", "_", "0",
         "root", "_", "_") + "\n";
     final InputStreamFactory in = () -> new ByteArrayInputStream(
         content.getBytes(StandardCharsets.UTF_8));
     try (ConlluDependencySampleStream samples =
         new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      assertNull(samples.read());
+    }
+  }
+
+  /**
+   * Reads a sentence whose tenth word has the two-digit ID {@code 10}, so the position
+   * comparison covers more than one digit.
+   *
+   * @throws IOException Thrown if reading fails.
+   */
+  @Test
+  void testTwoDigitWordIdIsRead() throws IOException {
+    final StringBuilder content = new StringBuilder();
+    for (int i = 1; i <= 10; i++) {
+      content.append(line(Integer.toString(i), "w" + i, "w" + i, "NOUN", "NN", "_",
+          i == 1 ? "0" : "1", i == 1 ? "root" : "nmod", "_", "_")).append('\n');
+    }
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.toString().getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertEquals(10, sample.getTokens().length);
+      assertEquals("w10", sample.getTokens()[9]);
       assertNull(samples.read());
     }
   }
