@@ -88,7 +88,7 @@ class HunspellDictionaryLoadTest {
    * file with carriage return line endings loads like one with line feeds.
    *
    * @param separator A supported line separator.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {"\n", "\r\n", "\r"})
@@ -126,7 +126,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Identifies the source file when path-based loading rejects a directive.
    *
-   * @throws IOException If writing a fixture fails.
+   * @throws IOException Thrown if writing a fixture fails.
    */
   @Test
   void testPathErrorIdentifiesAffixFile() throws IOException {
@@ -144,7 +144,7 @@ class HunspellDictionaryLoadTest {
    * Loads settings outside the stemmer's operations without a diagnostic.
    *
    * @param setting A metadata or suggestion setting.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -192,13 +192,13 @@ class HunspellDictionaryLoadTest {
   }
 
   /**
-   * Keeps a number sign that is a directive value, which the reference format allows
+   * Keeps a number sign that is a directive value, which the Hunspell format allows
    * for flags, separators, and affix material.
    *
    * @param affix Affix content in which {@code #} is a value.
    * @param input The stemmed word.
    * @param expected The stem.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("numberSignValues")
@@ -227,7 +227,7 @@ class HunspellDictionaryLoadTest {
    * implementation ignores those fields.
    *
    * @param affix Affix content with a trailing comment.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -246,7 +246,7 @@ class HunspellDictionaryLoadTest {
    * Reports the first location for each skipped directive in source order.
    *
    * @param separator A supported line separator.
-   * @throws IOException If partial loading fails.
+   * @throws IOException Thrown if partial loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {"\n", "\r\n", "\r"})
@@ -267,7 +267,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Includes the affix path in partial-loading diagnostics.
    *
-   * @throws IOException If writing or loading fixtures fails.
+   * @throws IOException Thrown if writing or loading fixtures fails.
    */
   @Test
   void testPartialLoadingReportsFilePath() throws IOException {
@@ -344,7 +344,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Accepts legacy bytes in recognized metadata without decoding them as rules.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testLegacyMetadataBytesAreIgnored() throws IOException {
@@ -359,7 +359,7 @@ class HunspellDictionaryLoadTest {
    * Preserves raw flag bytes in compound-boundary conditions without changing word text.
    *
    * @param matchingFlag Whether the left entry has the boundary flag.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
@@ -382,7 +382,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Loads supported affix rules after a UTF-8 byte-order mark.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testByteOrderMarkDoesNotHideSupportedDirective() throws IOException {
@@ -397,7 +397,7 @@ class HunspellDictionaryLoadTest {
    *
    * @param affix The affix content following the byte-order mark.
    * @param words The word list.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("flagDeclarationsAfterByteOrderMark")
@@ -460,7 +460,7 @@ class HunspellDictionaryLoadTest {
    * Preserves ownership of input streams on success and failure.
    *
    * @param mode The loading policy.
-   * @throws IOException If valid content fails to load.
+   * @throws IOException Thrown if valid content fails to load.
    */
   @ParameterizedTest
   @EnumSource(LoadMode.class)
