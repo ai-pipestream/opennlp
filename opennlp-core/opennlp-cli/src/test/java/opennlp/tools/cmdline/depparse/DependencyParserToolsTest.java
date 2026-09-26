@@ -207,9 +207,13 @@ public class DependencyParserToolsTest {
         "-data", data.toString(), "-tagset", "invalid"}));
   }
 
+  /**
+   * A fold count below two terminates the tool with a message, as the other cross
+   * validator tools do, instead of escaping as an exception.
+   */
   @Test
   void testCrossValidatorRejectsFoldCountBelowTwo() {
-    assertThrows(IllegalArgumentException.class,
+    assertThrows(TerminateToolException.class,
         () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
             "-lang", "eng", "-data", data.toString(), "-folds", "1"}));
   }
