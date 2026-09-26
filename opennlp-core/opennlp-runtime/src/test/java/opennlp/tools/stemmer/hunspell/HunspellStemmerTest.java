@@ -1963,8 +1963,9 @@ public class HunspellStemmerTest {
   /**
    * Verifies that an underscore inside an {@code ICONV} or {@code OCONV} pattern stands
    * for a space, as Hunspell reads it, after the leading and trailing anchors are
-   * removed. The input conversion turns {@code b ok} into the listed {@code book}; the
-   * output conversion turns the listed {@code a b} into {@code ab}.
+   * removed. The input conversion turns {@code b ok} into the listed {@code book}, also
+   * with a mathematical bold b in the pattern; the output conversion turns the listed
+   * {@code a b} into {@code ab}.
    *
    * @param affix The conversion table.
    * @param words The word list.
@@ -1976,7 +1977,9 @@ public class HunspellStemmerTest {
   @CsvSource(delimiter = '|', value = {
       "ICONV 1\\nICONV b_ok book|1\\nbook|b ok|book",
       "ICONV 1\\nICONV _b_ok_ book|1\\nbook|b ok|book",
-      "OCONV 1\\nOCONV a_b ab|1\\na b|a b|ab"
+      "OCONV 1\\nOCONV a_b ab|1\\na b|a b|ab",
+      // a supplementary code point before the underscore, so the scan stays on code points
+      "ICONV 1\\nICONV \uD835\uDC1B_ok book|1\\nbook|\uD835\uDC1B ok|book"
   })
   void testConversionPatternUnderscoreIsSpace(String affix, String words, String input,
       String expected) throws IOException {
