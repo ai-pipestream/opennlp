@@ -141,7 +141,7 @@ Whitespace inside recorded analyses is normalized to single spaces. The fixture 
 The engine applies `PFX` and `SFX` rules with strip strings and character-class conditions. It supports a prefix and suffix cross-product, a double suffix sequence connected by continuation classes, rules that add and strip no material both on their own and in continuation paths, file-wide `FLAG` modes, file-wide `AF` aliases, and the `SET` encoding declaration. Numeric flags range from 1 through 65535, the full range the reference accepts. A number sign starts a comment at the beginning of a line or after the fields a directive consumes; elsewhere it is an ordinary value, so `BREAK #`, `NEEDAFFIX #`, and affix material consisting of `#` load as written.
 
 `COMPLEXPREFIXES` selects 2 prefix levels and 1 suffix level instead of 1
-prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions, and `_` in a pattern means a space, as in Hunspell;
+prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions, and `_` in an `ICONV`, `OCONV` or `REP` pattern means a space, as in Hunspell;
 `IGNORE` removes configured characters from input, entries, and affix material.
 `KEEPCASE`, `CHECKSHARPS`, `LANG`, `WARN`, and `FORBIDWARN` control case variants
 and warning-marked entries. A capitalized word with a further inner capital is also

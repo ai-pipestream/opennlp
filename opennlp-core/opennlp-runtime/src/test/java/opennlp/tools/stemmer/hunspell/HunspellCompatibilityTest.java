@@ -301,9 +301,9 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * The stems Hunspell returned for a fixture when the fixtures were
-   * recorded, as described in {@code dev/README-hunspell-dictionaries.md}. An empty
-   * reference result is recorded as the input itself.
+   * The stems each fixture was recorded with, from Hunspell as described in
+   * {@code dev/README-hunspell-dictionaries.md}. An empty reference result is recorded
+   * as the input itself; a fixture missing from the list fails.
    *
    * @param example The fixture.
    * @return The recorded reference stems.
