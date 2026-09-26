@@ -1959,4 +1959,29 @@ public class HunspellStemmerTest {
             .stemAll(word));
     Assertions.assertEquals(List.of(word), stems);
   }
+
+  /**
+   * Verifies that an underscore inside an {@code ICONV} or {@code OCONV} pattern stands
+   * for a space, as Hunspell reads it, after the leading and trailing anchors are
+   * removed. The input conversion turns {@code b ok} into the listed {@code book}; the
+   * output conversion turns the listed {@code a b} into {@code ab}.
+   *
+   * @param affix The conversion table.
+   * @param words The word list.
+   * @param input The stemmed text.
+   * @param expected The stem after both conversions.
+   * @throws IOException Thrown if the fixture fails to load.
+   */
+  @ParameterizedTest
+  @CsvSource(delimiter = '|', value = {
+      "ICONV 1\\nICONV b_ok book|1\\nbook|b ok|book",
+      "ICONV 1\\nICONV _b_ok_ book|1\\nbook|b ok|book",
+      "OCONV 1\\nOCONV a_b ab|1\\na b|a b|ab"
+  })
+  void testConversionPatternUnderscoreIsSpace(String affix, String words, String input,
+      String expected) throws IOException {
+    final HunspellStemmer stemmer = new HunspellStemmer(load(
+        affix.replace("\\n", "\n") + "\n", words.replace("\\n", "\n") + "\n"));
+    Assertions.assertEquals(expected, stemmer.stem(input).toString());
+  }
 }
