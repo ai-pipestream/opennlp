@@ -19,6 +19,7 @@ package opennlp.tools.depparse;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 
@@ -98,11 +99,44 @@ public class DependencyEvaluatorTest {
   }
 
   @Test
+  void testListenersHearMisparsedSamples() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyEvaluator evaluator =
+        new DependencyEvaluator((tokens, tags) -> PREDICTED, monitor);
+    evaluate(evaluator, UNIVERSAL_TAGS);
+    assertEquals(List.of(), monitor.correct);
+    assertEquals(List.of(new DependencySample(TOKENS, UNIVERSAL_TAGS, GOLD)), monitor.wrong);
+    assertEquals(List.of(new DependencySample(TOKENS, UNIVERSAL_TAGS, PREDICTED)),
+        monitor.predictions);
+  }
+
+  @Test
+  void testListenersHearCorrectSamplesWithCustomPunctuation() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyEvaluator evaluator =
+        new DependencyEvaluator((tokens, tags) -> GOLD, "."::equals, monitor);
+    evaluate(evaluator, PENN_TAGS);
+    assertEquals(List.of(new DependencySample(TOKENS, PENN_TAGS, GOLD)), monitor.correct);
+    assertEquals(List.of(), monitor.wrong);
+    assertEquals(3, evaluator.getWordCountExcludingPunctuation());
+  }
+
+  @Test
+  void testNullListenersAreIgnored() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyEvaluator evaluator = new DependencyEvaluator(
+        (tokens, tags) -> PREDICTED, (DependencyEvaluationMonitor) null, monitor);
+    evaluate(evaluator, UNIVERSAL_TAGS);
+    assertEquals(1, monitor.wrong.size());
+    assertEquals(4, evaluator.getWordCount());
+  }
+
+  @Test
   void testRejectsNullArguments() {
     assertThrows(IllegalArgumentException.class, () -> new DependencyEvaluator(null));
     assertThrows(IllegalArgumentException.class,
         () -> new DependencyEvaluator(null, DependencyEvaluator.UNIVERSAL_PUNCTUATION_TAG::equals));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyEvaluator((tokens, tags) -> PREDICTED, null));
+        () -> new DependencyEvaluator((tokens, tags) -> PREDICTED, (Predicate<String>) null));
   }
 }

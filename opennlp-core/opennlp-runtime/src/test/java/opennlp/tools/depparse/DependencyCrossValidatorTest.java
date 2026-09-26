@@ -19,6 +19,7 @@ package opennlp.tools.depparse;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -117,6 +118,28 @@ public class DependencyCrossValidatorTest {
   }
 
   @Test
+  void testListenersHearEveryHeldOutSample() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 4);
+    assertEquals(CORPUS_SENTENCES, monitor.correct.size(),
+        "each sentence is held out once and the corpus is memorizable");
+    assertEquals(List.of(), monitor.wrong);
+  }
+
+  @Test
+  void testListenersWithCustomPunctuation() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), "DT"::equals, monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2);
+    assertEquals(CORPUS_SENTENCES, monitor.correct.size() + monitor.wrong.size());
+    assertEquals(CORPUS_WORDS - CORPUS_DETERMINERS,
+        validator.getWordCountExcludingPunctuation());
+  }
+
+  @Test
   void testEmptyValidatorScoresZero() {
     final DependencyCrossValidator validator = validator();
     assertEquals(0, validator.getWordCount());
@@ -141,7 +164,7 @@ public class DependencyCrossValidatorTest {
     assertThrows(IllegalArgumentException.class,
         () -> new DependencyCrossValidator(LANGUAGE, null));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyCrossValidator(LANGUAGE, parameters, null));
+        () -> new DependencyCrossValidator(LANGUAGE, parameters, (Predicate<String>) null));
     assertThrows(IllegalArgumentException.class, () -> validator().evaluate(null, 2));
   }
 
