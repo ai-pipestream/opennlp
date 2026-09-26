@@ -105,6 +105,23 @@ public class DependencySampleTest {
   }
 
   @Test
+  void testSharedValidationMatchesTheConstructor() {
+    DependencySample.checkTokensAndTags(TOKENS, TAGS);
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(null, TAGS));
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(TOKENS, null));
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(new String[0], new String[0]));
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(new String[] {"one"}, TAGS));
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(new String[] {"the", null, "barks"}, TAGS));
+    assertThrows(IllegalArgumentException.class,
+        () -> DependencySample.checkTokensAndTags(TOKENS, new String[] {"DT", null, "VBZ"}));
+  }
+
+  @Test
   void testInputArraysAreCopied() {
     final String[] tokens = TOKENS.clone();
     final DependencySample sample = new DependencySample(tokens, TAGS, graph());

@@ -50,14 +50,14 @@ import opennlp.tools.util.TrainingParameters;
  * and both again over the tokens that are not tagged {@code PUNCT}, the customary
  * reporting convention for Universal Dependencies.</p>
  *
- * <p>The parser is trained with a feature cutoff of {@value #TRANSITION_CUTOFF} and
+ * <p>The parser is trained with a feature cutoff of {@value #FEATURE_CUTOFF} and
  * evaluated on English, German, Spanish, and French. The English cross validation uses
  * {@value #ENGLISH_FOLDS} folds of the training split.</p>
  */
 public class UniversalDependencyParserEval extends AbstractEvalTest {
 
-  /** The feature cutoff of the transition parser. */
-  private static final int TRANSITION_CUTOFF = 5;
+  /** The feature cutoff of the parser. */
+  private static final int FEATURE_CUTOFF = 5;
 
   /** The fold count of the English cross validation. */
   private static final int ENGLISH_FOLDS = 5;
@@ -65,7 +65,7 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   /**
    * One treebank: its language code and its training and development splits.
    *
-   * @param language The ISO 639-3 code passed to the transition trainer.
+   * @param language The ISO 639-3 code passed to the trainer.
    * @param train The training split.
    * @param dev The development split.
    */
@@ -160,16 +160,16 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   }
 
   /**
-   * Cross validates the transition parser on the English training split: five parsers,
+   * Cross validates the parser on the English training split: five parsers,
    * each trained on four fifths of the split and scored on the remaining fifth, so every
    * training sentence is scored once by a parser that did not see it.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void crossValidateTransitionParserEnglish() throws IOException {
+  void crossValidateEnglish() throws IOException {
     final DependencyCrossValidator validator =
-        new DependencyCrossValidator(english.language(), transitionParameters());
+        new DependencyCrossValidator(english.language(), trainingParameters());
     try (ConlluDependencySampleStream train = samples(english.train())) {
       validator.evaluate(train, ENGLISH_FOLDS);
     }
@@ -178,77 +178,77 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   }
 
   /**
-   * Trains the transition parser on the English training split and scores it on the
+   * Trains the parser on the English training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserEnglish() throws IOException {
+  void trainAndEvalEnglish() throws IOException {
     assertScores(new Scores(25148, 22065, 0.8181565134404326d, 0.7861460155877207d,
             0.8372082483571267d, 0.8014502605937004d),
-        evaluate(transitionParser(english), english.dev()));
+        evaluate(train(english), english.dev()));
   }
 
   /**
-   * Trains the transition parser on the German training split and scores it on the
+   * Trains the parser on the German training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserGerman() throws IOException {
+  void trainAndEvalGerman() throws IOException {
     assertScores(new Scores(12348, 10730, 0.7843375445416262d, 0.7305636540330418d,
             0.802982292637465d, 0.7413793103448276d),
-        evaluate(transitionParser(german), german.dev()));
+        evaluate(train(german), german.dev()));
   }
 
   /**
-   * Trains the transition parser on the Spanish AnCora training split and scores it on
+   * Trains the parser on the Spanish AnCora training split and scores it on
    * the development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserSpanishAncora() throws IOException {
+  void trainAndEvalSpanishAncora() throws IOException {
     assertScores(new Scores(52336, 46058, 0.8355243044940385d, 0.7914437480892693d,
             0.8598506231273612d, 0.8098918754613748d),
-        evaluate(transitionParser(spanish), spanish.dev()));
+        evaluate(train(spanish), spanish.dev()));
   }
 
   /**
-   * Trains the transition parser on the French training split and scores it on the
+   * Trains the parser on the French training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserFrench() throws IOException {
+  void trainAndEvalFrench() throws IOException {
     assertScores(new Scores(35766, 31947, 0.8501370016216518d, 0.8191578594195604d,
             0.8794879018374182d, 0.8450245719472878d),
-        evaluate(transitionParser(french), french.dev()));
+        evaluate(train(french), french.dev()));
   }
 
   /**
-   * @return The training parameters of the transition parser. Never {@code null}.
+   * @return The training parameters of the parser. Never {@code null}.
    */
-  private static TrainingParameters transitionParameters() {
+  private static TrainingParameters trainingParameters() {
     final TrainingParameters parameters = TrainingParameters.defaultParams();
-    parameters.put(Parameters.CUTOFF_PARAM, TRANSITION_CUTOFF);
+    parameters.put(Parameters.CUTOFF_PARAM, FEATURE_CUTOFF);
     return parameters;
   }
 
   /**
-   * Trains the transition parser on a treebank's training split.
+   * Trains the parser on a treebank's training split.
    *
    * @param treebank The treebank.
    * @return The trained parser. Never {@code null}.
    * @throws IOException Thrown if reading or training fails.
    */
-  private static DependencyParser transitionParser(Treebank treebank) throws IOException {
+  private static DependencyParser train(Treebank treebank) throws IOException {
     final DependencyModel model;
     try (ConlluDependencySampleStream train = samples(treebank.train())) {
-      model = DependencyParserME.train(treebank.language(), train, transitionParameters());
+      model = DependencyParserME.train(treebank.language(), train, trainingParameters());
     }
     return new DependencyParserME(model);
   }

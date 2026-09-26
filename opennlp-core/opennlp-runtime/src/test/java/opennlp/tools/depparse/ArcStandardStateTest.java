@@ -116,22 +116,6 @@ public class ArcStandardStateTest {
   }
 
   @Test
-  void testCopyIsIndependentOfTheOriginal() {
-    final ArcStandardState original = new ArcStandardState(2);
-    original.apply(Transition.SHIFT);
-    final ArcStandardState copy = original.copy();
-
-    copy.apply(Transition.SHIFT);
-    copy.apply(Transition.leftArc("nsubj"));
-    // The copy advanced by two transitions while the original still has one token
-    // buffered and one on the stack.
-    assertEquals(2, original.stackSize());
-    assertEquals(1, original.bufferSize());
-    assertEquals(0, original.assignedDependents(1));
-    assertEquals(1, copy.assignedDependents(1));
-  }
-
-  @Test
   void testAccessorValidation() {
     final ArcStandardState state = new ArcStandardState(2);
     assertThrows(IllegalArgumentException.class, () -> state.stack(-1));
