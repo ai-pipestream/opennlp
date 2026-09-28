@@ -147,6 +147,10 @@ public class FrequencyDictionaryLoaderTest {
         Arguments.of("\u00A0", "expected 'word<sep>count'"),
         Arguments.of("\u00A0\u00A0", "expected 'word<sep>count'"),
         Arguments.of("the\t-5", "count must not be negative"),
+        // the sign is reported before the size: all digits, so negative, not overflow
+        Arguments.of("the\t-99999999999999999999", "count must not be negative"),
+        // Long.MAX_VALUE + 1
+        Arguments.of("the\t9223372036854775808", "count is not an integer"),
         Arguments.of("the\t5\u00A0", "count is not an integer"),
         // control characters next to the count are not separators and not digits
         Arguments.of("the\t5\u0001", "count is not an integer"),
@@ -173,9 +177,9 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   /**
-   * Reads a count written in any decimal digits, as {@link Long#parseLong(String)} did before
-   * the columns were scanned by hand: an Arabic-Indic digit, a fullwidth digit, mixed digits,
-   * three Arabic-Indic digits, four fullwidth digits, and a mathematical digit.
+   * Reads a count written in any decimal digits: an Arabic-Indic digit, a fullwidth digit,
+   * mixed digits, three Arabic-Indic digits, four fullwidth digits, a mathematical digit,
+   * zero, leading zeros, and an Arabic-Indic leading zero.
    *
    * @param count The count column.
    * @param value The number it denotes.
@@ -183,7 +187,7 @@ public class FrequencyDictionaryLoaderTest {
    */
   @ParameterizedTest
   @CsvSource({"\u0665, 5", "\uFF15, 5", "5\u0665, 55", "\u0661\u0662\u0663, 123",
-      "\uFF19\uFF12\uFF12\uFF13, 9223", "\uD835\uDFCE, 0"})
+      "\uFF19\uFF12\uFF12\uFF13, 9223", "\uD835\uDFCE, 0", "0, 0", "007, 7", "\u0660\u0665, 5"})
   void testCountsInAnyDecimalDigits(String count, long value) throws IOException {
     final Map<String, Long> unigrams = new LinkedHashMap<>();
     final Map<String, Long> bigrams = new LinkedHashMap<>();
@@ -195,16 +199,19 @@ public class FrequencyDictionaryLoaderTest {
   }
 
   /**
-   * Rejects a signed count whatever its digits: a plus before a fullwidth digit is not an
-   * integer, and a minus before an Arabic-Indic digit is negative.
+   * Rejects a count that is not digits only: a plus before a fullwidth digit, a sign with
+   * nothing after it, an emoji, a digit with a combining mark, and a superscript two, which
+   * is a number but not a decimal digit. A minus before an Arabic-Indic digit is negative.
    *
    * @param count The count column.
    * @param reason The expected reason in the message.
    */
   @ParameterizedTest
   @CsvSource({"+\uFF15, count is not an integer", "-\u0660, count must not be negative",
-      "-\u0665, count must not be negative", "+5, count is not an integer"})
-  void testSignedCountsAreRejected(String count, String reason) {
+      "-\u0665, count must not be negative", "+5, count is not an integer",
+      "-, count is not an integer", "\uD83D\uDE00, count is not an integer",
+      "\u0665\u0301, count is not an integer", "\u00B2, count is not an integer"})
+  void testCountsThatAreNotDigitsAreRejected(String count, String reason) {
     final FrequencyDictionaryLoader loader = new FrequencyDictionaryLoader();
     final MalformedDictionaryLineException unigram = Assertions.assertThrows(
         MalformedDictionaryLineException.class,
