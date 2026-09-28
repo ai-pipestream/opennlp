@@ -46,9 +46,10 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.CompoundPosition;
  * parts ({@code ONLYINCOMPOUND}), or forbidden words ({@code FORBIDDENWORD}) do not
  * count as standalone analyses.</p>
  *
- * <p>Compound part search is capped at {@value #PART_CHECK_BUDGET} part-licensing
- * attempts per case variant of the input, and a recursive word-break search has a
- * budget of its own; beyond a budget further analyses are skipped.
+ * <p>Compound part search stops after {@value #PART_CHECK_BUDGET} part-licensing
+ * attempts. The budget applies separately to each capitalization form of the input
+ * and to each word-break search. Once it is used up, further compound analyses are
+ * skipped.
  * The {@link Stemmer} interface leaves thread safety to the implementation. This
  * implementation reads only the immutable dictionary state, so a single instance is
  * safe to share between threads.</p>

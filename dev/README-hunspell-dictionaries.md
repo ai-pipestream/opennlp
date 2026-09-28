@@ -183,11 +183,10 @@ material, and `ds:` makes the form derived by the entry's suffixes the stem.
 metadata have no effect on stemming or analysis in the pinned reference and
 are ignored. The active compound and affix directives remain applicable.
 
-`HunspellStemmer.analyze` is package-private in 3.0. It returns the analyses as
-space-separated Hunspell fields in the same order Hunspell prints them, and
-`HunspellCompletionTest` checks that output against results recorded from Hunspell.
-The public API returns stems only; the shared `Stemmer` interface is unchanged. A
-typed analysis result is tracked in apache/opennlp#1324.
+`HunspellStemmer.analyze` is package-private in 3.0. It returns each analysis as
+Hunspell fields separated by spaces, in the order Hunspell prints them, and
+`HunspellCompletionTest` compares that output with results recorded from Hunspell.
+The public API returns stems. The shared `Stemmer` interface is unchanged.
 
 Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading in both modes. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
 
