@@ -237,23 +237,23 @@ class HunspellCompatibilityTest {
             "2\nfoo/#A\nbar/A\n", "foo", List.of("foo")),
         new Example("hidden-capital-mixed-case", PLURAL, "1\neBook/A\n", "EBOOKS", List.of("Ebook")),
         new Example("hidden-capital-initial-capital", PLURAL, "1\neBook/A\n", "Ebooks", List.of("Ebooks")),
-        new Example("hidden-capital-all-caps-entry", "SFX S N 1\nSFX S 0 's .\n",
-            "1\nACME/S\n", "ACME'S", List.of("Acme")),
+        new Example("hidden-capital-all-caps-entry", "SFX M Y 1\nSFX M 0 less .\n",
+            "1\nRADAR/M\n", "RADARLESS", List.of("Radar")),
         new Example("hidden-capital-listed-form-wins", PLURAL, "2\neBook/A\nEbook\n",
             "EBOOKS", List.of("EBOOKS")),
         new Example("hidden-capital-unflagged-all-caps", PLURAL, "1\nACME\n", "Acme", List.of("Acme")),
         new Example("hidden-capital-not-in-compound", COMPOUND + PLURAL, "2\neBook/AC\ncover/C\n",
             "EBOOKCOVER", List.of("EBOOKCOVER")),
         new Example("hungarian-hyphen-moving-rule", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "folyómeder-őr", List.of("folyó", "meder", "őr")),
+            "hegytető-lakó", List.of("hegy", "tető", "lakó")),
         new Example("hungarian-hyphen-rule-needs-hyphen", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "folyómeder", List.of("folyómeder")),
+            "hegytető", List.of("hegytető")),
         new Example("hungarian-hyphen-rule-needs-language", HUNGARIAN_HYPHEN.replace("LANG hu", "LANG de"),
-            HUNGARIAN_WORDS, "folyómeder-őr", List.of("folyómeder-őr")),
+            HUNGARIAN_WORDS, "hegytető-lakó", List.of("hegytető-lakó")),
         new Example("hungarian-hyphen-rule-needs-flag", HUNGARIAN_HYPHEN,
-            "3\nfoly/S\nmeder/Y\nőr/Y\n", "folymeder-őr", List.of("folymeder-őr")),
+            "3\nhegy/X\ntető/W\nlakó\n", "hegytető-lakó", List.of("hegytető-lakó")),
         new Example("hungarian-hyphen-rule-first-part-only", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "őr-folyómeder", List.of("őr-folyómeder")),
+            "lakó-hegytető", List.of("lakó-hegytető")),
         new Example("apostrophe-all-caps", "PFX P Y 1\nPFX P 0 d' .\n", "1\nOrient/P\n",
             "D'ORIENT", List.of("Orient")),
         new Example("apostrophe-capitalized", "PFX P Y 1\nPFX P 0 d' .\n", "1\nOrient/P\n",
@@ -269,9 +269,8 @@ class HunspellCompatibilityTest {
             "riverboats", List.of("river", "boat")));
   }
 
-  private static final String HUNGARIAN_HYPHEN = "LANG hu\nCOMPOUNDFLAG Y\nCOMPOUNDMIN 2\n"
-      + "COMPOUNDFORBIDFLAG !\nBREAK 1\nBREAK -\nSFX S Y 1\nSFX S 0 ó .\n";
-  private static final String HUNGARIAN_WORDS = "4\nfoly/S\nmeder/Y\nfolyó/F!\nőr/Y\n";
+  private static final String HUNGARIAN_HYPHEN = "LANG hu\nCOMPOUNDFLAG W\nCOMPOUNDFORBIDFLAG X\n";
+  private static final String HUNGARIAN_WORDS = "3\nhegy/FX\ntető/W\nlakó\n";
   private static final String COMPOUND_FORBID = "COMPOUNDFLAG K\nCOMPOUNDPERMITFLAG L\n"
       + "COMPOUNDFORBIDFLAG M\nSFX T Y 2\nSFX T 0 wood/LK .\nSFX T 0 ward/LK .\n";
   private static final String COMPOUND_FORBID_WORDS = "3\nfire/T\nhouse/K\nfireward/M\n";
@@ -356,14 +355,15 @@ class HunspellCompatibilityTest {
       case "derivation-inflectional-prefix" -> List.of("management");
       case "derivation-surface-prefix" -> List.of("mismanagement");
       case "flag-number-sign", "flag-number-sign-virtual-stem" -> List.of("foo");
-      case "hidden-capital-all-caps-entry", "hidden-capital-unflagged-all-caps" -> List.of("Acme");
+      case "hidden-capital-all-caps-entry" -> List.of("Radar");
+      case "hidden-capital-unflagged-all-caps" -> List.of("Acme");
       case "hidden-capital-listed-form-wins" -> List.of("EBOOKS");
       case "hidden-capital-mixed-case" -> List.of("Ebook");
       case "hidden-capital-not-in-compound" -> List.of("EBOOKCOVER");
-      case "hungarian-hyphen-rule-first-part-only" -> List.of("őr-folyómeder");
-      case "hungarian-hyphen-rule-needs-flag" -> List.of("folymeder-őr");
-      case "hungarian-hyphen-rule-needs-hyphen" -> List.of("folyómeder");
-      case "hungarian-hyphen-rule-needs-language" -> List.of("folyómeder-őr");
+      case "hungarian-hyphen-rule-first-part-only" -> List.of("lakó-hegytető");
+      case "hungarian-hyphen-rule-needs-flag", "hungarian-hyphen-rule-needs-language" ->
+          List.of("hegytető-lakó");
+      case "hungarian-hyphen-rule-needs-hyphen" -> List.of("hegytető");
       case "ignored-affix", "ignored-input-and-dictionary" -> List.of("pearl");
       case "input-end-anchor" -> List.of("quartz");
       case "input-ligature" -> List.of("field");
