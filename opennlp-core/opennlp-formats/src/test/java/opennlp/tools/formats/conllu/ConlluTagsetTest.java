@@ -22,6 +22,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import opennlp.tools.cmdline.TerminateToolException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -39,5 +41,23 @@ public class ConlluTagsetTest {
   @ValueSource(strings = {"U", "X", "upos", "invalid"})
   void testUnknownParametersAreRejected(String parameter) {
     assertThrows(IllegalArgumentException.class, () -> ConlluTagset.fromParameter(parameter));
+  }
+
+  /** The factory parameter reader accepts the same two values as the parameter reader. */
+  @ParameterizedTest
+  @CsvSource({"u, U", "x, X"})
+  void testKnownFactoryParameters(String parameter, ConlluTagset tagset) {
+    assertEquals(tagset, ConlluTagset.fromFactoryParameter(parameter));
+  }
+
+  /** An unknown factory parameter ends the tool with code -1 and the parameter reader's message. */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {"U", "X", "upos", "xpos", " u", "u ", "invalid"})
+  void testUnknownFactoryParametersTerminateTheTool(String parameter) {
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> ConlluTagset.fromFactoryParameter(parameter));
+    assertEquals(-1, exception.getCode());
+    assertEquals("Unknown tagset parameter: " + parameter, exception.getMessage());
   }
 }

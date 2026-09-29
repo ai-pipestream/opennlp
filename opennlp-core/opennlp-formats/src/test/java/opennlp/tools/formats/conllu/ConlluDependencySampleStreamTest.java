@@ -21,10 +21,13 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.depparse.DependencyArc;
@@ -186,8 +189,8 @@ public class ConlluDependencySampleStreamTest {
   }
 
   @ParameterizedTest(name = "id = \"{0}\"")
-  @ValueSource(strings = {"2", "01", "+1", "1 ", "\u0661", "\uff11", "\uD835\uDFCF", "", "0",
-      "4294967297", "2147483648"})
+  @ValueSource(strings = {"2", "01", "+1", "-1", "1 ", " 1", "\u0661", "\uff11", "\uD835\uDFCF", "",
+      "0", "1-2", "1.1", "2147483647", "2147483648", "4294967297", "9999999999999999999"})
   void testWordIdsOtherThanThePositionAreSkipped(String id) throws IOException {
     final String content = line(id, "Dogs", "dog", "NOUN", "NNS", "_", "0",
         "root", "_", "_") + "\n";
@@ -195,6 +198,61 @@ public class ConlluDependencySampleStreamTest {
         content.getBytes(StandardCharsets.UTF_8));
     try (ConlluDependencySampleStream samples =
         new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      assertNull(samples.read());
+    }
+  }
+
+  /**
+   * Word ID sequences that do not count up from one: a gap, a swap, a repeat, and a
+   * one-based sequence that starts at two.
+   *
+   * @return The ID columns of a three-word sentence.
+   */
+  static Stream<Arguments> misnumberedSentences() {
+    return Stream.of(
+        Arguments.of("gap", new String[] {"1", "3", "4"}),
+        Arguments.of("swap", new String[] {"2", "1", "3"}),
+        Arguments.of("repeat", new String[] {"1", "1", "2"}),
+        Arguments.of("starts at two", new String[] {"2", "3", "4"}),
+        Arguments.of("descending", new String[] {"3", "2", "1"}));
+  }
+
+  /** A sentence whose IDs do not count up from one is skipped and the next sentence is read. */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("misnumberedSentences")
+  void testMisnumberedSentenceIsSkipped(String description, String[] ids) throws IOException {
+    final String content = String.join("\n",
+        line(ids[0], "Dogs", "dog", "NOUN", "NNS", "_", "2", "nsubj", "_", "_"),
+        line(ids[1], "bark", "bark", "VERB", "VBP", "_", "0", "root", "_", "_"),
+        line(ids[2], "loudly", "loudly", "ADV", "RB", "_", "2", "advmod", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertArrayEquals(new String[] {"Fine"}, sample.getTokens());
+      assertNull(samples.read());
+    }
+  }
+
+  /** A sentence made only of range and empty-node lines has no words and is passed over. */
+  @Test
+  void testSentenceWithoutWordLinesIsPassedOver() throws IOException {
+    final String content = String.join("\n",
+        line("1-2", "im", "_", "_", "_", "_", "_", "_", "_", "_"),
+        line("1.1", "gap", "gap", "NOUN", "NN", "_", "_", "_", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      assertArrayEquals(new String[] {"Fine"}, samples.read().getTokens());
       assertNull(samples.read());
     }
   }

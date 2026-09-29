@@ -25,6 +25,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import ch.qos.logback.classic.Level;
@@ -88,6 +89,24 @@ public class DependencyParserToolsTest {
   private static final String PREDICTED_SENTENCE = "Predicted: {\n"
       + "1\tdogs\tNOUN\t2\tnsubj" + System.lineSeparator()
       + "2\trun\tVERB\t0\troot" + System.lineSeparator() + "}";
+
+  /** The sentence with the subject relabeled, so only a label differs from {@link #SENTENCE}. */
+  private static final String RELABELED_SENTENCE = """
+      1\tdogs\tdog\tNOUN\tNNS\t_\t2\tnmod\t_\t_
+      2\trun\trun\tVERB\tVBP\t_\t0\troot\t_\t_
+
+      """;
+
+  /** The expected block the error listener prints for {@link #RELABELED_SENTENCE}. */
+  private static final String EXPECTED_RELABELED = "Expected: {\n"
+      + "1\tdogs\tNOUN\t2\tnmod" + System.lineSeparator()
+      + "2\trun\tVERB\t0\troot" + System.lineSeparator() + "}";
+
+  /** The message prefix of a tool ended by an unusable argument value. */
+  private static final String INVALID_ARGUMENT = "Invalid argument: ";
+
+  /** The message of the CoNLL-U format for an encoding other than UTF-8. */
+  private static final String UTF_8_REQUIRED = "CoNLL-U data must use UTF-8";
 
   /** The scores logged for a parser that reproduces all 40 tokens of the data. */
   private static final String PERFECT_SCORES = "Tokens: 40; UAS: 1.0; LAS: 1.0";
@@ -247,6 +266,170 @@ public class DependencyParserToolsTest {
         () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
             "-model", model.toString(), "-data", test.toString()}));
     assertEquals(List.of(), log);
+  }
+
+  /** With {@code -misclassified false} the evaluator prints no samples either. */
+  @Test
+  void testEvaluatorWithMisclassifiedFalsePrintsNoSamples() throws IOException {
+    train();
+    final Path test = dir.resolve("test.conllu");
+    Files.writeString(test, REVERSED_SENTENCE);
+    final List<String> log = logOf(DependencyEvaluationErrorListener.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", test.toString(), "-misclassified", "false"}));
+    assertEquals(List.of(), log);
+  }
+
+  /** A sentence that differs only in a label counts for UAS, not LAS, and is printed as misparsed. */
+  @Test
+  void testEvaluatorPrintsLabelOnlyDifference() throws IOException {
+    train();
+    final Path test = dir.resolve("test.conllu");
+    Files.writeString(test, RELABELED_SENTENCE);
+    final List<List<String>> listenerLog = new ArrayList<>();
+    final List<String> scores = logOf(DependencyParserEvaluatorTool.class,
+        () -> listenerLog.add(logOf(DependencyEvaluationErrorListener.class,
+            () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+                "-model", model.toString(), "-data", test.toString(), "-misclassified", "true"}))));
+    assertEquals(List.of("Tokens: 2; UAS: 1.0; LAS: 0.5",
+        "Tokens excluding punctuation: 2; UAS: 1.0; LAS: 0.5"), scores);
+    assertEquals(List.of(List.of(EXPECTED_RELABELED + "\n" + PREDICTED_SENTENCE)), listenerLog);
+  }
+
+  /** The cross validator prints a held-out sentence the parser of its fold misparses. */
+  @Test
+  void testCrossValidatorPrintsMisparsedSamples() throws IOException {
+    Files.writeString(data, SENTENCE.repeat(REPETITIONS) + REVERSED_SENTENCE);
+    final List<String> log = logOf(DependencyEvaluationErrorListener.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString(), "-folds", "2", "-misclassified", "true"}));
+    assertEquals(List.of(EXPECTED_REVERSED + "\n" + PREDICTED_SENTENCE), log);
+  }
+
+  /** With {@code -misclassified false}, or without the flag, the cross validator prints no samples. */
+  @ParameterizedTest(name = "-misclassified \"{0}\"")
+  @ValueSource(strings = {"false", ""})
+  void testCrossValidatorWithoutMisclassifiedPrintsNoSamples(String flag) throws IOException {
+    Files.writeString(data, SENTENCE.repeat(REPETITIONS) + REVERSED_SENTENCE);
+    final List<String> args = new ArrayList<>(List.of(
+        "-lang", "eng", "-data", data.toString(), "-folds", "2"));
+    if (!flag.isEmpty()) {
+      args.addAll(List.of("-misclassified", flag));
+    }
+    final List<String> log = logOf(DependencyEvaluationErrorListener.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", args.toArray(new String[0])));
+    assertEquals(List.of(), log);
+  }
+
+  /** A fold count that is not an integer is rejected by the argument parser with code 1. */
+  @ParameterizedTest(name = "folds = \"{0}\"")
+  @ValueSource(strings = {"abc", "2.5", "", "0x2", "two", " 2"})
+  void testCrossValidatorRejectsNonIntegerFoldCount(String folds) {
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString(), "-folds", folds}));
+    assertEquals(1, exception.getCode());
+    assertTrue(exception.getMessage().startsWith(INVALID_ARGUMENT + "-folds " + folds),
+        exception.getMessage());
+    assertTrue(exception.getMessage().endsWith("Value must be an integer!"), exception.getMessage());
+  }
+
+  /** Both tools pass an {@code -encoding} other than UTF-8 on to the format, which rejects it. */
+  @Test
+  void testToolsRejectOtherEncodings() {
+    train();
+    final TerminateToolException evaluator = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", data.toString(), "-encoding", "ISO-8859-1"}));
+    assertEquals(-1, evaluator.getCode());
+    assertEquals(UTF_8_REQUIRED, evaluator.getMessage());
+    final TerminateToolException validator = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString(), "-encoding", "UTF-16"}));
+    assertEquals(-1, validator.getCode());
+    assertEquals(UTF_8_REQUIRED, validator.getMessage());
+  }
+
+  /** A missing data file ends both tools while the format opens the data. */
+  @Test
+  void testToolsRejectMissingDataFile() {
+    train();
+    final Path missing = dir.resolve("missing.conllu");
+    final String message = "The Data file does not exist! Path: " + missing.toAbsolutePath();
+    final TerminateToolException evaluator = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", missing.toString()}));
+    assertEquals(-1, evaluator.getCode());
+    assertEquals(message, evaluator.getMessage());
+    final TerminateToolException validator = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", missing.toString()}));
+    assertEquals(-1, validator.getCode());
+    assertEquals(message, validator.getMessage());
+  }
+
+  /** Unreadable test data ends the evaluator with the evaluation I/O message. */
+  @Test
+  void testEvaluatorReportsUnreadableTestData() throws IOException {
+    train();
+    final Path bad = dir.resolve("bad.conllu");
+    Files.write(bad, malformedUtf8());
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", bad.toString()}));
+    assertEquals(-1, exception.getCode());
+    assertTrue(exception.getMessage().startsWith("IO error while reading test data: "),
+        exception.getMessage());
+    assertTrue(exception.getCause() instanceof IOException);
+  }
+
+  /** Unreadable training data ends the cross validator with the training I/O message. */
+  @Test
+  void testCrossValidatorReportsUnreadableTrainingData() throws IOException {
+    Files.write(data, malformedUtf8());
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString()}));
+    assertEquals(-1, exception.getCode());
+    assertTrue(exception.getMessage().startsWith(
+        "IO error while reading training data or indexing data: "), exception.getMessage());
+  }
+
+  /** Empty test data scores zero tokens without failing. */
+  @Test
+  void testEvaluatorOnEmptyDataLogsZeroScores() throws IOException {
+    train();
+    final Path empty = dir.resolve("empty.conllu");
+    Files.writeString(empty, "");
+    final List<String> log = logOf(DependencyParserEvaluatorTool.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", empty.toString(), "-misclassified", "true"}));
+    assertEquals(List.of("Tokens: 0; UAS: 0.0; LAS: 0.0",
+        "Tokens excluding punctuation: 0; UAS: 0.0; LAS: 0.0"), log);
+  }
+
+  /** Empty training data ends the cross validator with the training data message. */
+  @Test
+  void testCrossValidatorOnEmptyDataTerminates() throws IOException {
+    Files.writeString(data, "");
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString()}));
+    assertEquals(-1, exception.getCode());
+    assertTrue(exception.getMessage().contains("Not enough training data"), exception.getMessage());
+  }
+
+  /**
+   * Builds a word line whose form holds a truncated UTF-8 sequence.
+   *
+   * @return The bytes of one word line and a newline.
+   */
+  private static byte[] malformedUtf8() {
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    bytes.writeBytes("1\t".getBytes(StandardCharsets.UTF_8));
+    bytes.write(0xc3);
+    bytes.writeBytes("\t_\tNOUN\tNNS\t_\t0\troot\t_\t_\n".getBytes(StandardCharsets.UTF_8));
+    return bytes.toByteArray();
   }
 
   @Test
