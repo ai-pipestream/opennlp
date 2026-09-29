@@ -27,14 +27,40 @@ import org.xml.sax.SAXException;
 
 public class MascNamedEntityParserTest {
 
+  /**
+   * Parses an annotation fixture.
+   *
+   * @param xml The annotation XML.
+   * @return The parser containing the annotations.
+   * @throws Exception Thrown if parsing fails.
+   */
   private static MascNamedEntityParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascNamedEntityParser());
   }
 
+  /**
+   * Builds a person annotation for a node reference.
+   *
+   * @param ref The node reference.
+   * @return The annotation XML.
+   */
+  private static String entity(String ref) {
+    return "<a ref=\"" + ref + "\" label=\"person\"/>";
+  }
+
+  /**
+   * Checks that malformed annotations retain their validation cause.
+   *
+   * @param xml The malformed annotation XML.
+   */
+  private static void assertRejected(String xml) {
+    SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
+    Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());
+  }
+
   @Test
   void testEntityAndTokenIdsLoseTheirPrefix() throws Exception {
-    MascNamedEntityParser parser = parse("<graph>"
-        + "<a ref=\"ne-n3\" label=\"person\"/>"
+    MascNamedEntityParser parser = parse("<graph>" + entity("ne-n3")
         + "<edge from=\"ne-n3\" to=\"penn-n4\"/>"
         + "<edge from=\"ne-n3\" to=\"penn-n15\"/>"
         + "</graph>");
@@ -46,21 +72,17 @@ public class MascNamedEntityParserTest {
   // doubled prefix, missing prefix, other prefix, no digits, trailing text
   @ValueSource(strings = {"ne-nne-n3", "3", "penn-n3", "ne-n", "ne-n3x"})
   void testMalformedEntityIdsAreRejected(String ref) {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><a ref=\"" + ref + "\" label=\"person\"/></graph>"));
+    assertRejected("<graph>" + entity(ref) + "</graph>");
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"penn-npenn-n4", "4", "seg-r4", "penn-n", "penn-n4x"})
   void testMalformedTokenIdsAreRejected(String to) {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><a ref=\"ne-n3\" label=\"person\"/>"
-        + "<edge from=\"ne-n3\" to=\"" + to + "\"/></graph>"));
+    assertRejected("<graph>" + entity("ne-n3") + "<edge from=\"ne-n3\" to=\"" + to + "\"/></graph>");
   }
 
   @Test
   void testMissingIdAttributeIsRejected() {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><a label=\"person\"/></graph>"));
+    assertRejected("<graph><a label=\"person\"/></graph>");
   }
 }

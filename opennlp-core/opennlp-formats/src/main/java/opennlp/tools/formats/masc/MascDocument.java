@@ -25,7 +25,6 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -389,8 +388,7 @@ public class MascDocument {
       hasPennTags = true;
 
     } catch (Exception e) {
-      throw new IOException("Could not attach POS tags to words. " +
-          e.getMessage() + Arrays.toString(e.getStackTrace()));
+      throw new IOException("Could not attach POS tags to words", e);
     }
   }
 
