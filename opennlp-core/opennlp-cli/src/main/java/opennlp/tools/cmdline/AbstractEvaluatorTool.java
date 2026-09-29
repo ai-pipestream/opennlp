@@ -41,8 +41,7 @@ public abstract class AbstractEvaluatorTool<T, P> extends AbstractTypedParamTool
   }
 
   /**
-   * Wraps an {@link IOException} raised while reading the samples in the
-   * {@link TerminateToolException} that ends the tool.
+   * Creates a {@link TerminateToolException} for an I/O error while reading evaluation data.
    *
    * @param e The exception raised while reading the samples.
    * @return The exception to throw. Never {@code null}.

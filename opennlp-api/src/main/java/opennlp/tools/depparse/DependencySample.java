@@ -72,8 +72,8 @@ public final class DependencySample implements Sample {
   }
 
   /**
-   * Validates the token and tag arrays of a sentence, the input contract shared by this
-   * sample and {@link DependencyParser#parse(String[], String[])}.
+   * Validates token and tag arrays for this sample and
+   * {@link DependencyParser#parse(String[], String[])}.
    *
    * @param tokens The token array. Must not be {@code null} or empty and must not
    *               contain {@code null} entries.

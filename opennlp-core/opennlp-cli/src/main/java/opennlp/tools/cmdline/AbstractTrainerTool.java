@@ -42,7 +42,7 @@ public abstract class AbstractTrainerTool<T, P> extends AbstractEvaluatorTool<T,
   /**
    * {@inheritDoc}
    *
-   * <p>Names the training data in the message and explains an
+   * <p>Reports training-data errors, with a specific message for
    * {@link InsufficientTrainingDataException}.</p>
    */
   @Override

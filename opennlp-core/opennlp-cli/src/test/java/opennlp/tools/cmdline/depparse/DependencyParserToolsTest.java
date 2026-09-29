@@ -34,6 +34,8 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.cmdline.CLI;
@@ -207,19 +209,18 @@ public class DependencyParserToolsTest {
         "-data", data.toString(), "-tagset", "invalid"}));
   }
 
-  /**
-   * A fold count below two terminates the tool with a message, as the other cross
-   * validator tools do, instead of escaping as an exception.
-   */
-  @Test
-  void testCrossValidatorRejectsFoldCountBelowTwo() {
-    assertThrows(TerminateToolException.class,
+  @ParameterizedTest
+  @ValueSource(ints = {Integer.MIN_VALUE, -1, 0, 1})
+  void testCrossValidatorRejectsFoldCountBelowTwo(int folds) {
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
         () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
-            "-lang", "eng", "-data", data.toString(), "-folds", "1"}));
+            "-lang", "eng", "-data", data.toString(), "-folds", Integer.toString(folds)}));
+    assertEquals(-1, exception.getCode());
+    assertEquals("folds must be at least 2: " + folds, exception.getMessage());
   }
 
   @Test
-  void testCrossValidatorDefaultsToTenFolds() {
+  void testCrossValidatorRunsWithDefaultFoldCount() {
     final List<String> log = logOf(DependencyParserCrossValidatorTool.class,
         () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
             "-lang", "eng", "-data", data.toString(), "-misclassified", "true"}));
@@ -256,7 +257,8 @@ public class DependencyParserToolsTest {
     final DependencySample prediction = new DependencySample(
         new String[] {"dogs", "run"}, new String[] {"NOUN", "VERB"}, GOLD);
     new DependencyEvaluationErrorListener(output).misclassified(reference, prediction);
-    assertEquals(EXPECTED_REVERSED + "\n" + PREDICTED_SENTENCE + "\n\n",
+    final String expected = EXPECTED_REVERSED + "\n" + PREDICTED_SENTENCE + "\n\n";
+    assertEquals(expected.replace("\r\n", "\n"),
         output.toString(StandardCharsets.UTF_8).replace("\r\n", "\n"));
   }
 }
