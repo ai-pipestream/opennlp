@@ -59,12 +59,7 @@ public class ConlluLemmaSampleStreamFactory extends
   public ObjectStream<LemmaSample> create(String[] args) {
     Parameters params = validateBasicFormatParameters(args, Parameters.class);
 
-    ConlluTagset tagset;
-    try {
-      tagset = ConlluTagset.fromParameter(params.getTagset());
-    } catch (IllegalArgumentException e) {
-      throw new TerminateToolException(-1, e.getMessage());
-    }
+    final ConlluTagset tagset = ConlluTagset.fromFactoryParameter(params.getTagset());
 
     try {
       return new ConlluLemmaSampleStream(new ConlluStream(

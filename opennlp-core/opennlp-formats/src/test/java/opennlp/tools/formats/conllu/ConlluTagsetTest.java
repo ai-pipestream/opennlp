@@ -17,8 +17,8 @@
 
 package opennlp.tools.formats.conllu;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -28,10 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Tests the command line parameter mapping of {@link ConlluTagset}. */
 public class ConlluTagsetTest {
 
-  @Test
-  void testKnownParameters() {
-    assertEquals(ConlluTagset.U, ConlluTagset.fromParameter("u"));
-    assertEquals(ConlluTagset.X, ConlluTagset.fromParameter("x"));
+  @ParameterizedTest
+  @CsvSource({"u, U", "x, X"})
+  void testKnownParameters(String parameter, ConlluTagset tagset) {
+    assertEquals(tagset, ConlluTagset.fromParameter(parameter));
   }
 
   @ParameterizedTest

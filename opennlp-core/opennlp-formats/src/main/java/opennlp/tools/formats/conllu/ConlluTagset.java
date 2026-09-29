@@ -17,6 +17,8 @@
 
 package opennlp.tools.formats.conllu;
 
+import opennlp.tools.cmdline.TerminateToolException;
+
 public enum ConlluTagset {
   U,
   X;
@@ -38,5 +40,20 @@ public enum ConlluTagset {
       return X;
     }
     throw new IllegalArgumentException("Unknown tagset parameter: " + parameter);
+  }
+
+  /**
+   * Reads the {@code -tagset} parameter of a command line format factory.
+   *
+   * @param parameter The parameter value, {@code u} or {@code x}.
+   * @return The tagset.
+   * @throws TerminateToolException Thrown if the parameter is unknown.
+   */
+  static ConlluTagset fromFactoryParameter(String parameter) {
+    try {
+      return fromParameter(parameter);
+    } catch (IllegalArgumentException e) {
+      throw new TerminateToolException(-1, e.getMessage());
+    }
   }
 }

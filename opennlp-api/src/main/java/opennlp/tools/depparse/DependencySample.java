@@ -37,7 +37,7 @@ import opennlp.tools.commons.ThreadSafe;
 public final class DependencySample implements Sample {
 
   @Serial
-  private static final long serialVersionUID = -5427524093301109186L;
+  private static final long serialVersionUID = 3074843369898695370L;
 
   private final String[] tokens;
   private final String[] tags;

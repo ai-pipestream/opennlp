@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package opennlp.tools.formats.conllu;
 
 import java.io.IOException;
@@ -38,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests the UTF-8 requirement of the dependency sample stream factory. */
-class ConlluDependencySampleStreamFactoryTest {
+public class ConlluDependencySampleStreamFactoryTest {
 
   private static final String TOKEN = "café";
 
