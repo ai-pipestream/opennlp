@@ -70,6 +70,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   /** The column holding the one-based index of the head, {@code 0} for the root. */
   private static final int HEAD = 6;
 
+  /** The HEAD column value of the root word, which has no governing word. */
+  private static final String ROOT_HEAD_ID = "0";
+
   /** The column holding the relation label to the head. */
   private static final int DEPREL = 7;
 
@@ -192,9 +195,10 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   }
 
   /**
-   * Reads a word ID, the one-based position of a syntactic word in its sentence.
+   * Reads a word ID, the one-based position of a syntactic word in its sentence, from the
+   * ID column or from the HEAD column of another word.
    *
-   * @param id The ID column of a word line. Must not be {@code null}.
+   * @param id The column value. Must not be {@code null}.
    * @return The position, or {@code -1} if the column is not a plain decimal number:
    *         empty, signed, with a leading zero, with a non-ASCII digit, or too large for
    *         an {@code int}.
@@ -224,8 +228,8 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    *
    * @param words The word lines of the sentence.
    * @return The converted sample, or {@code null} when the sentence's annotation is
-   *         unusable, for example an underscore head, selected tag or relation or a graph that is not
-   *         a tree.
+   *         unusable: an ID or head that is not a plain decimal, an underscore head,
+   *         selected tag or relation, or a graph that is not a tree.
    */
   private DependencySample convert(List<String[]> words) {
     final int n = words.size();
@@ -244,11 +248,11 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
         return null;
       }
       relations[i] = word[DEPREL];
-      try {
-        heads[i] = Integer.parseInt(word[HEAD]) - 1;
-      } catch (NumberFormatException e) {
+      final int head = ROOT_HEAD_ID.equals(word[HEAD]) ? 0 : wordIndex(word[HEAD]);
+      if (head < 0) {
         return null;
       }
+      heads[i] = head - 1;
     }
     try {
       return new DependencySample(tokens, tags, DependencyGraph.of(heads, relations));
