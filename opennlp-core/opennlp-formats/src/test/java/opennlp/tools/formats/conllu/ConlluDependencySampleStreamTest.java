@@ -239,6 +239,53 @@ public class ConlluDependencySampleStreamTest {
     }
   }
 
+  /**
+   * A head that is not a plain decimal like the ID column is skipped: signed, with a
+   * leading zero, with a non-ASCII digit, padded, empty, or fractional.
+   *
+   * @param head The HEAD column of the second word, whose plain form is {@code 1}.
+   * @throws IOException Thrown if reading fails.
+   */
+  @ParameterizedTest(name = "head = \"{0}\"")
+  @ValueSource(strings = {"+1", "01", "\u0661", "\uff11", "-1", " 1", "1 ", "", "1.0", "1e0", "_"})
+  void testHeadsOtherThanPlainDecimalsAreSkipped(String head) throws IOException {
+    final String content = String.join("\n",
+        line("1", "Dogs", "dog", "NOUN", "NNS", "_", "0", "root", "_", "_"),
+        line("2", "bark", "bark", "VERB", "VBP", "_", head, "dep", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertArrayEquals(new String[] {"Fine"}, sample.getTokens());
+      assertNull(samples.read());
+    }
+  }
+
+  /** The root head {@code 0} and a two-digit head are read as written. */
+  @Test
+  void testRootAndTwoDigitHeadsAreRead() throws IOException {
+    final StringBuilder content = new StringBuilder();
+    for (int i = 1; i <= 10; i++) {
+      content.append(line(Integer.toString(i), "w" + i, "w" + i, "NOUN", "NN", "_",
+          i == 10 ? "0" : "10", i == 10 ? "root" : "nmod", "_", "_")).append('\n');
+    }
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.toString().getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertEquals(DependencyArc.ROOT_HEAD, sample.getGraph().headOf(9));
+      assertEquals(9, sample.getGraph().headOf(0));
+      assertNull(samples.read());
+    }
+  }
+
   /** A sentence made only of range and empty-node lines has no words and is passed over. */
   @Test
   void testSentenceWithoutWordLinesIsPassedOver() throws IOException {
