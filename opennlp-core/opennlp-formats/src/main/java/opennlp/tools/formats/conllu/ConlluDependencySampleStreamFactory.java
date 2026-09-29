@@ -18,6 +18,8 @@
 package opennlp.tools.formats.conllu;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 import opennlp.tools.cmdline.ArgumentParser;
 import opennlp.tools.cmdline.StreamFactoryRegistry;
@@ -44,6 +46,13 @@ public class ConlluDependencySampleStreamFactory extends
 
   /** The command line parameters of the CoNLL-U dependency format. */
   public interface Parameters extends BasicFormatParams {
+    /** {@inheritDoc} */
+    @Override
+    @ArgumentParser.ParameterDescription(valueName = "charsetName",
+        description = "CoNLL-U data must use UTF-8")
+    @ArgumentParser.OptionalParameter(defaultValue = "UTF-8")
+    Charset getEncoding();
+
     @ArgumentParser.ParameterDescription(valueName = "tagset",
         description = "u|x u for unified tags and x for language-specific part-of-speech tags")
     @ArgumentParser.OptionalParameter(defaultValue = "u")
@@ -74,12 +83,16 @@ public class ConlluDependencySampleStreamFactory extends
   /**
    * {@inheritDoc}
    *
-   * @throws TerminateToolException Thrown if the tagset parameter is unknown or the data
-   *         cannot be opened.
+   * @throws TerminateToolException Thrown if the encoding is not UTF-8, the tagset
+   *         parameter is unknown, or the data cannot be opened.
    */
   @Override
   public ObjectStream<DependencySample> create(String[] args) {
     Parameters params = validateBasicFormatParameters(args, Parameters.class);
+
+    if (!StandardCharsets.UTF_8.equals(params.getEncoding())) {
+      throw new TerminateToolException(-1, "CoNLL-U data must use UTF-8");
+    }
 
     ConlluTagset tagset;
     try {

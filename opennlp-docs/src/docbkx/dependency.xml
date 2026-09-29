@@ -68,7 +68,8 @@ DependencyParser parser =
 	<section xml:id="tools.dependency.cli">
 		<title>Command-line tools</title>
 		<para>
-			Training, evaluation, and cross validation read UTF-8 CoNLL-U files. Use
+			Training, evaluation, and cross validation read UTF-8 CoNLL-U files.
+			An <code>-encoding</code> value other than UTF-8 is rejected. Use
 			<code>-tagset u</code> (the default) for UPOS or <code>-tagset x</code> for XPOS.
 			Use the same tagset for training and inference. An optional <code>-params</code>
 			file supplies the standard training parameters. For example:

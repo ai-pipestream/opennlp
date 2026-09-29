@@ -17,6 +17,12 @@
 
 package opennlp.tools.depparse;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InvalidClassException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.util.Base64;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Tests the invariants and accessors of {@link DependencyGraph} and {@link DependencyArc}.
  */
 public class DependencyGraphTest {
+
+  /** Serialized heads [1, -1] and relations [nsubj, root], without a cached root field. */
+  private static final String GRAPH_WITHOUT_CACHED_ROOT =
+      "rO0ABXNyACZvcGVubmxwLnRvb2xzLmRlcHBhcnNlLkRlcGVuZGVuY3lHcmFwaKMmtL0nhVuPAgAC"
+          + "WwAFaGVhZHN0AAJbSVsACXJlbGF0aW9uc3QAE1tMamF2YS9sYW5nL1N0cmluZzt4cHVyAAJbSU26"
+          + "YCZ26rKlAgAAeHAAAAACAAAAAf////91cgATW0xqYXZhLmxhbmcuU3RyaW5nO63SVufpHXtHAgAA"
+          + "eHAAAAACdAAFbnN1Ymp0AARyb290";
 
   /** The three-token graph shared by the accessor tests. */
   private static DependencyGraph sample() {
@@ -45,6 +58,29 @@ public class DependencyGraphTest {
     assertEquals(DependencyArc.ROOT_HEAD, graph.headOf(2));
     assertEquals("nsubj", graph.relationOf(1));
     assertEquals(2, graph.root());
+  }
+
+  @Test
+  void testSerializationPreservesRoot() throws Exception {
+    final DependencyGraph graph = sample();
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
+      out.writeObject(graph);
+    }
+    try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+      final DependencyGraph restored = (DependencyGraph) in.readObject();
+      assertEquals(graph, restored);
+      assertEquals(graph.root(), restored.root());
+      assertEquals(DependencyArc.ROOT_HEAD, restored.headOf(restored.root()));
+    }
+  }
+
+  @Test
+  void testSerializedGraphWithoutCachedRootIsRejected() throws Exception {
+    final byte[] bytes = Base64.getDecoder().decode(GRAPH_WITHOUT_CACHED_ROOT);
+    try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
+      assertThrows(InvalidClassException.class, in::readObject);
+    }
   }
 
   @Test

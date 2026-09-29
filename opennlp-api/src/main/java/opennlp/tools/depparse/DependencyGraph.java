@@ -41,7 +41,7 @@ import opennlp.tools.util.StringUtil;
 public final class DependencyGraph implements Serializable {
 
   @Serial
-  private static final long serialVersionUID = -6690461471907423345L;
+  private static final long serialVersionUID = 5144949884365294061L;
 
   /** Traversal state of a token whose head chain has not been followed yet. */
   private static final byte UNVISITED = 0;
