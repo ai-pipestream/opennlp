@@ -158,6 +158,11 @@ public class TokenizerCharacterPolicyTest {
     assertFalse(TokenizerCharacterPolicy.ascii().test(input));
   }
 
+  /**
+   * Supplies a null value for each category in turn.
+   *
+   * @return Category sets with one null argument.
+   */
   static Stream<Arguments> nullSets() {
     return Stream.of(
         Arguments.of(null, EMPTY, EMPTY),
@@ -179,6 +184,11 @@ public class TokenizerCharacterPolicyTest {
             EMPTY, EMPTY, CodePointSet.of(ACUTE_ACCENT)));
   }
 
+  /**
+   * Supplies an overlap between each pair of categories.
+   *
+   * @return Category sets with a shared code point.
+   */
   static Stream<Arguments> overlappingSets() {
     return Stream.of(
         Arguments.of(A, A, EMPTY),

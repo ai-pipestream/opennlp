@@ -25,8 +25,7 @@ import opennlp.tools.util.normalizer.UnicodeWhitespace;
  * An immutable policy for testing token eligibility against explicit character sets.
  *
  * <p>A token consists of one or more letters or digits. Each letter or digit may be followed by
- * zero or more marks, as in Unicode word boundary rule WB4 of
- * <a href="https://www.unicode.org/reports/tr29/#WB4">UAX #29</a>. A mark cannot start a token.
+ * zero or more marks. A mark cannot start a token.
  * The supplied sets express a caller's tokenization policy; this class does not infer Unicode
  * character categories.</p>
  *

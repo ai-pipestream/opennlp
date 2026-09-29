@@ -213,6 +213,7 @@ double[] tokenProbs = tokenizer.getTokenProbabilities();]]>
 			not infer Unicode character categories, so callers choose the exact script
 			coverage. The predicate checks a complete candidate without finding token
 			boundaries or changing its text.
+			This policy does not yet configure tokenizer training or inference.
 		</para>
 		<programlisting language="java">
 <![CDATA[TokenizerCharacterPolicy policy = TokenizerCharacterPolicy.of(
