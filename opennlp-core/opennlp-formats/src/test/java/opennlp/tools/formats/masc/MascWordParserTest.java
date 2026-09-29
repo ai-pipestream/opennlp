@@ -28,14 +28,34 @@ import org.xml.sax.SAXException;
 
 public class MascWordParserTest {
 
+  /**
+   * Parses an annotation fixture.
+   *
+   * @param xml The annotation XML.
+   * @return The parser containing the annotations.
+   * @throws Exception Thrown if parsing fails.
+   */
   private static MascWordParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascWordParser());
   }
 
+  /**
+   * Builds a segmentation region with the given offsets.
+   *
+   * @param id The region identifier.
+   * @param anchors The region offsets.
+   * @return The annotation XML.
+   */
   private static String region(String id, String anchors) {
     return "<graph><region xml:id=\"" + id + "\" anchors=\"" + anchors + "\"/></graph>";
   }
 
+  /**
+   * Checks that malformed annotations retain their validation cause.
+   *
+   * @param xml The malformed annotation XML.
+   * @return The parsing exception.
+   */
   private static SAXException assertRejected(String xml) {
     SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
     Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());
@@ -74,12 +94,21 @@ public class MascWordParserTest {
   }
 
   @ParameterizedTest
-  // wrong arity, non-XML whitespace, text, sign, digits of another script, negative, reversed,
+  // wrong arity, non-XML whitespace, text, negative, reversed,
   // overflowing, or missing
-  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0 x", "+0 4", "0 \u0664", "0 \uFF14", "-1 4",
+  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0 x", "-1 4",
       "4 0", "0 2147483648", "", " "})
   void testMalformedAnchorsAreRejectedWithTheReason(String anchors) {
     SAXException e = assertRejected(region("seg-r0", anchors));
     Assertions.assertTrue(e.getMessage().startsWith("Could not parse the word segmentation"), e.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("opennlp.tools.formats.masc.MascParserTestUtil#equivalentAnchors")
+  void testWordAnchorsAcceptEquivalentIntegerForms(String anchors) throws Exception {
+    List<MascWord> words = parse(region("seg-r0", anchors)).getAnchors();
+    Assertions.assertEquals(1, words.size());
+    Assertions.assertEquals(0, words.get(0).getStart());
+    Assertions.assertEquals(4, words.get(0).getEnd());
   }
 }

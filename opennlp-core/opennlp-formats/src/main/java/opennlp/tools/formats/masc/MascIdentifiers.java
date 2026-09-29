@@ -144,7 +144,7 @@ final class MascIdentifiers {
       throw new IllegalArgumentException("MASC region anchors must contain exactly two offsets: " + anchors);
     }
     try {
-      return new Span(parseAsciiInt(items[0], 0), parseAsciiInt(items[1], 0));
+      return new Span(Integer.parseInt(items[0]), Integer.parseInt(items[1]));
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("Invalid MASC region anchors: " + anchors, e);
     }

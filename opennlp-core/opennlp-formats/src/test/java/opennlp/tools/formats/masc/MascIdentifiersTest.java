@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.util.Span;
@@ -104,13 +105,19 @@ public class MascIdentifiersTest {
   }
 
   @ParameterizedTest
-  // sign, digits of another script, reversed, negative, overflowing, wrong arity,
+  // reversed, negative, overflowing, wrong arity,
   // other whitespace, text, and empty
-  @ValueSource(strings = {"+0 4", "0 +4", "0 \u0664", "0 \uFF14", "\u0660 4", "4 0", "-1 4",
+  @ValueSource(strings = {"4 0", "-1 4",
       "0 2147483648", "0", "0 4 5", "0\u00A04", "0 x", "", " "})
   void testParseAnchorsRejectsAnythingElse(String anchors) {
     Assertions.assertThrows(IllegalArgumentException.class,
         () -> MascIdentifiers.parseAnchors(anchors));
+  }
+
+  @ParameterizedTest
+  @MethodSource("opennlp.tools.formats.masc.MascParserTestUtil#equivalentAnchors")
+  void testParseAnchorsAcceptsEquivalentIntegerForms(String anchors) {
+    Assertions.assertEquals(new Span(0, 4), MascIdentifiers.parseAnchors(anchors));
   }
 
   @Test

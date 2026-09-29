@@ -26,14 +26,34 @@ import org.xml.sax.SAXException;
 
 public class MascPennTagParserTest {
 
+  /**
+   * Parses an annotation fixture.
+   *
+   * @param xml The annotation XML.
+   * @return The parser containing the annotations.
+   * @throws Exception Thrown if parsing fails.
+   */
   private static MascPennTagParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascPennTagParser());
   }
 
+  /**
+   * Builds a token node linked to segmentation regions.
+   *
+   * @param id The token identifier.
+   * @param targets The region identifiers.
+   * @return The annotation XML.
+   */
   private static String tokenWithTargets(String id, String targets) {
     return "<graph><node xml:id=\"" + id + "\"><link targets=\"" + targets + "\"/></node></graph>";
   }
 
+  /**
+   * Checks that malformed annotations retain their validation cause.
+   *
+   * @param xml The malformed annotation XML.
+   * @return The parsing exception.
+   */
   private static SAXException assertRejected(String xml) {
     SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
     Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());

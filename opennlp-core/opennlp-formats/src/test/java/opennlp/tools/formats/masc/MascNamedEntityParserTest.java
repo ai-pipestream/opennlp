@@ -27,14 +27,32 @@ import org.xml.sax.SAXException;
 
 public class MascNamedEntityParserTest {
 
+  /**
+   * Parses an annotation fixture.
+   *
+   * @param xml The annotation XML.
+   * @return The parser containing the annotations.
+   * @throws Exception Thrown if parsing fails.
+   */
   private static MascNamedEntityParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascNamedEntityParser());
   }
 
+  /**
+   * Builds a person annotation for a node reference.
+   *
+   * @param ref The node reference.
+   * @return The annotation XML.
+   */
   private static String entity(String ref) {
     return "<a ref=\"" + ref + "\" label=\"person\"/>";
   }
 
+  /**
+   * Checks that malformed annotations retain their validation cause.
+   *
+   * @param xml The malformed annotation XML.
+   */
   private static void assertRejected(String xml) {
     SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
     Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());

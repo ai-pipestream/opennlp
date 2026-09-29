@@ -30,14 +30,33 @@ import opennlp.tools.util.Span;
 
 public class MascSentenceParserTest {
 
+  /**
+   * Parses an annotation fixture.
+   *
+   * @param xml The annotation XML.
+   * @return The parser containing the annotations.
+   * @throws Exception Thrown if parsing fails.
+   */
   private static MascSentenceParser parse(String xml) throws Exception {
     return MascParserTestUtil.parse(xml, new MascSentenceParser());
   }
 
+  /**
+   * Builds a sentence region with the given offsets.
+   *
+   * @param anchors The region offsets.
+   * @return The annotation XML.
+   */
   private static String region(String anchors) {
     return "<graph><region anchors=\"" + anchors + "\"/></graph>";
   }
 
+  /**
+   * Checks that malformed annotations retain their validation cause.
+   *
+   * @param xml The malformed annotation XML.
+   * @return The parsing exception.
+   */
   private static SAXException assertRejected(String xml) {
     SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml));
     Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());
@@ -52,11 +71,17 @@ public class MascSentenceParserTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0&#x85;4", "0 x", "+0 4", "0 \u0664",
-      "0 \uFF14", "-1 4", "4 0", "0 2147483648", "", " "})
+  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0&#x85;4", "0 x",
+      "-1 4", "4 0", "0 2147483648", "", " "})
   void testMalformedSentenceAnchorsPreserveTheCause(String anchors) {
     SAXException error = assertRejected(region(anchors));
     Assertions.assertTrue(error.getMessage().contains("anchors"), error.getMessage());
+  }
+
+  @ParameterizedTest
+  @MethodSource("opennlp.tools.formats.masc.MascParserTestUtil#equivalentAnchors")
+  void testSentenceAnchorsAcceptEquivalentIntegerForms(String anchors) throws Exception {
+    Assertions.assertEquals(List.of(new Span(0, 4)), parse(region(anchors)).getAnchors());
   }
 
   @Test
