@@ -173,24 +173,17 @@ String category = myCategorizer.getBestCategory(outcomes);]]>
 				For additional examples, refer to the <code>DocumentCategorizerDLEval</code> class.
 			</para>
 			<para>
-				The vocabulary file is either plain text, with one token per line and the line number as
-				the token ID, as in <code>vocab.txt</code>, or a JSON object that maps each token to a
-				non-negative integer ID, as in <code>vocab.json</code>. A file is read as JSON when its
-				first non-whitespace character is an opening brace, and a leading byte order mark is
-				ignored. A Hugging Face <code>tokenizer.json</code> is not a vocabulary file and is
-				rejected; support for it is tracked in OPENNLP-1988. A vocabulary that cannot be read is
-				rejected with an <code>InvalidFormatException</code> that names the file and the position
-				of the problem.
+				The vocabulary file is either plain text with one token per line, as in
+				<code>vocab.txt</code>, or a JSON object mapping each token to an integer ID, as in
+				<code>vocab.json</code>. A Hugging Face <code>tokenizer.json</code> is not supported yet
+				(<ulink url="https://issues.apache.org/jira/browse/OPENNLP-1988">OPENNLP-1988</ulink>).
+				An unreadable vocabulary is rejected with an <code>InvalidFormatException</code>.
 			</para>
 			<para>
 				When a configuration file is given in place of the categories map, its top-level
-				<code>id2label</code> object supplies the categories, mapping each output index to a
-				label. A configuration without a top-level <code>id2label</code> gives no categories.
-				A configuration that is not well-formed JSON, or whose <code>id2label</code> is not an
-				object of strings keyed by integers, is rejected with an
-				<code>InvalidFormatException</code>. The values <code>NaN</code> and
-				<code>Infinity</code>, which Python writes into some configurations, are accepted
-				outside <code>id2label</code>.
+				<code>id2label</code> object maps each output index to a category label. A configuration
+				that is not well-formed JSON, or whose <code>id2label</code> is not an object of strings
+				keyed by integers, is rejected with an <code>InvalidFormatException</code>.
 			</para>
 			<para>
 				Like <code>NameFinderDL</code>, long input is split into overlapping chunks on the full
