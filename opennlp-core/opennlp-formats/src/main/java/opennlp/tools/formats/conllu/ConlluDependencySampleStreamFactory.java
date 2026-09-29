@@ -32,6 +32,9 @@ import opennlp.tools.formats.FormatUtil;
 import opennlp.tools.util.ObjectStream;
 
 /**
+ * Creates {@link ConlluDependencySampleStream} instances for the command line tools. The
+ * data is always read as UTF-8, as the CoNLL-U format requires.
+ * <p>
  * <b>Note:</b> Do not use this class, internal use only!
  *
  * @see DependencySample
@@ -41,8 +44,7 @@ import opennlp.tools.util.ObjectStream;
 public class ConlluDependencySampleStreamFactory extends
         AbstractSampleStreamFactory<DependencySample, ConlluDependencySampleStreamFactory.Parameters> {
 
-  public static final String CONLLU_FORMAT = "conllu";
-
+  /** The command line parameters of the CoNLL-U dependency format. */
   public interface Parameters extends BasicFormatParams {
     /** {@inheritDoc} */
     @Override
@@ -57,17 +59,33 @@ public class ConlluDependencySampleStreamFactory extends
     String getTagset();
   }
 
+  /**
+   * Registers the factory as the default and as the {@code conllu} format for
+   * {@link DependencySample dependency samples}.
+   */
   public static void registerFactory() {
     StreamFactoryRegistry.registerFactory(DependencySample.class,
         StreamFactoryRegistry.DEFAULT_FORMAT, new ConlluDependencySampleStreamFactory(Parameters.class));
     StreamFactoryRegistry.registerFactory(DependencySample.class,
-        CONLLU_FORMAT, new ConlluDependencySampleStreamFactory(Parameters.class));
+        ConlluPOSSampleStreamFactory.CONLLU_FORMAT,
+        new ConlluDependencySampleStreamFactory(Parameters.class));
   }
 
+  /**
+   * Initializes the factory.
+   *
+   * @param params The parameters interface the command line arguments are parsed into.
+   */
   protected ConlluDependencySampleStreamFactory(Class<Parameters> params) {
     super(params);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @throws TerminateToolException Thrown if the encoding is not UTF-8, the tagset
+   *         parameter is unknown, or the data cannot be opened.
+   */
   @Override
   public ObjectStream<DependencySample> create(String[] args) {
     Parameters params = validateBasicFormatParameters(args, Parameters.class);
@@ -76,11 +94,12 @@ public class ConlluDependencySampleStreamFactory extends
       throw new TerminateToolException(-1, "CoNLL-U data must use UTF-8");
     }
 
-    ConlluTagset tagset = switch (params.getTagset()) {
-      case "u" -> ConlluTagset.U;
-      case "x" -> ConlluTagset.X;
-      default -> throw new TerminateToolException(-1, "Unknown tagset parameter: " + params.getTagset());
-    };
+    ConlluTagset tagset;
+    try {
+      tagset = ConlluTagset.fromParameter(params.getTagset());
+    } catch (IllegalArgumentException e) {
+      throw new TerminateToolException(-1, e.getMessage());
+    }
 
     try {
       return new ConlluDependencySampleStream(FormatUtil.createInputStreamFactory(params.getData()), tagset);

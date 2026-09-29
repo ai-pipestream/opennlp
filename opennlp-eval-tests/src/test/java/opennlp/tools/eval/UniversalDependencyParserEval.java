@@ -50,11 +50,9 @@ import opennlp.tools.util.TrainingParameters;
  * and both again over the tokens that are not tagged {@code PUNCT}, the customary
  * reporting convention for Universal Dependencies.</p>
  *
- * <p>The transition parser is the maximum-entropy arc-standard parser trained with a
- * feature cutoff of {@value #TRANSITION_CUTOFF}, evaluated on English, German, Spanish,
- * and French. The English cross validation uses {@value #ENGLISH_FOLDS} folds of the training
- * split, the same fold count as the
- * constituency parser evaluation.</p>
+ * <p>The parser is trained with a feature cutoff of {@value #TRANSITION_CUTOFF} and
+ * evaluated on English, German, Spanish, and French. The English cross validation uses
+ * {@value #ENGLISH_FOLDS} folds of the training split.</p>
  */
 public class UniversalDependencyParserEval extends AbstractEvalTest {
 
@@ -170,9 +168,8 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
    */
   @Test
   void crossValidateTransitionParserEnglish() throws IOException {
-    final DependencyCrossValidator validator = new DependencyCrossValidator(
-        samples -> new DependencyParserME(
-            DependencyParserME.train(english.language(), samples, transitionParameters())));
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(english.language(), transitionParameters());
     try (ConlluDependencySampleStream train = samples(english.train())) {
       validator.evaluate(train, ENGLISH_FOLDS);
     }
@@ -242,7 +239,7 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   }
 
   /**
-   * Trains the maximum-entropy transition parser on a treebank's training split.
+   * Trains the transition parser on a treebank's training split.
    *
    * @param treebank The treebank.
    * @return The trained parser. Never {@code null}.

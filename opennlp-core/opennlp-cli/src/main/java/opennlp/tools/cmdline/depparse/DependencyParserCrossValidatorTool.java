@@ -25,21 +25,18 @@ import org.slf4j.LoggerFactory;
 import opennlp.tools.cmdline.AbstractCrossValidatorTool;
 import opennlp.tools.cmdline.ArgumentParser.OptionalParameter;
 import opennlp.tools.cmdline.ArgumentParser.ParameterDescription;
-import opennlp.tools.cmdline.CmdLineUtil;
 import opennlp.tools.cmdline.TerminateToolException;
 import opennlp.tools.cmdline.depparse.DependencyParserCrossValidatorTool.CrossValidationParams;
+import opennlp.tools.cmdline.params.BasicTrainingParams;
 import opennlp.tools.depparse.DependencyCrossValidator;
-import opennlp.tools.depparse.DependencyParserFactory;
-import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
 import opennlp.tools.util.ObjectStream;
-import opennlp.tools.util.TrainingParameters;
 
 /** Cross validates an arc-standard dependency parser on CoNLL-U samples. */
 public class DependencyParserCrossValidatorTool
     extends AbstractCrossValidatorTool<DependencySample, CrossValidationParams> {
 
-  interface CrossValidationParams extends TrainingParams {
+  interface CrossValidationParams extends BasicTrainingParams {
     @ParameterDescription(valueName = "num", description = "number of folds, at least two")
     @OptionalParameter(defaultValue = "10")
     Integer getFolds();
@@ -66,16 +63,15 @@ public class DependencyParserCrossValidatorTool
       if (params.getFolds() < 2) {
         throw new TerminateToolException(-1, "The number of folds must be at least two");
       }
-      mlParams = CmdLineUtil.loadTrainingParameters(params.getParams(), false);
-      if (mlParams == null) {
-        mlParams = TrainingParameters.defaultParams();
-      }
-      DependencyCrossValidator validator = new DependencyCrossValidator(training ->
-          new DependencyParserME(DependencyParserME.train(params.getLang(), training, mlParams,
-              DependencyParserFactory.create(params.getFactory()))));
+      mlParams = DependencyParserTrainerTool.loadTrainingParameters(params.getParams());
+      DependencyCrossValidator validator =
+          new DependencyCrossValidator(params.getLang(), mlParams);
       validator.evaluate(samples, params.getFolds());
       logger.info("Tokens: {}; UAS: {}; LAS: {}", validator.getWordCount(),
           validator.getUas(), validator.getLas());
+      logger.info("Tokens excluding punctuation: {}; UAS: {}; LAS: {}",
+          validator.getWordCountExcludingPunctuation(),
+          validator.getUasExcludingPunctuation(), validator.getLasExcludingPunctuation());
     } catch (IOException e) {
       throw createTerminationIOException(e);
     }

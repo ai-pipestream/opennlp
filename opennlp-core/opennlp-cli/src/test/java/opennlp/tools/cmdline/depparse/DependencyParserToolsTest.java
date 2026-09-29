@@ -19,14 +19,22 @@ package opennlp.tools.cmdline.depparse;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import opennlp.tools.cmdline.CLI;
 import opennlp.tools.cmdline.StreamFactoryRegistry;
@@ -41,36 +49,110 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Exercises CLI registration, CoNLL-U input, training, persistence and inference together. */
+/** Exercises CLI registration, CoNLL-U input, training, persistence and inference. */
 public class DependencyParserToolsTest {
 
+  /** A two-token sentence in CoNLL-U; the tests repeat it to build a corpus. */
   private static final String SENTENCE = """
       1\tdogs\tdog\tNOUN\tNNS\t_\t2\tnsubj\t_\t_
       2\trun\trun\tVERB\tVBP\t_\t0\troot\t_\t_
 
       """;
 
+  /** How often {@link #SENTENCE} is repeated in the training data. */
+  private static final int REPETITIONS = 20;
+
+  /** The gold graph of {@link #SENTENCE}. */
+  private static final DependencyGraph GOLD =
+      DependencyGraph.of(new int[] {1, -1}, new String[] {"nsubj", "root"});
+
+  /** The scores logged for a parser that reproduces all 40 tokens of the data. */
+  private static final String PERFECT_SCORES = "Tokens: 40; UAS: 1.0; LAS: 1.0";
+
+  /** The punctuation-free scores logged for the same parser; the data has no punctuation. */
+  private static final String PERFECT_SCORES_EXCLUDING_PUNCTUATION =
+      "Tokens excluding punctuation: 40; UAS: 1.0; LAS: 1.0";
+
+  @TempDir
+  private Path dir;
+
+  private Path data;
+  private Path model;
+
+  @BeforeEach
+  void writeData() throws IOException {
+    data = dir.resolve("train.conllu");
+    model = dir.resolve("parser.bin");
+    Files.writeString(data, SENTENCE.repeat(REPETITIONS));
+  }
+
+  /** Trains a model into {@link #model} through the trainer tool. */
+  private void train() {
+    new DependencyParserTrainerTool().run("conllu", new String[] {
+        "-lang", "eng", "-data", data.toString(), "-model", model.toString()});
+  }
+
+  /**
+   * Runs a tool while capturing the INFO messages its logger emits.
+   *
+   * @param tool The tool class whose logger is captured.
+   * @param run Runs the tool.
+   * @return The formatted log messages, in order. Never {@code null}.
+   */
+  private static List<String> logOf(Class<?> tool, Runnable run) {
+    final Logger logger = (Logger) LoggerFactory.getLogger(tool);
+    final Level previous = logger.getLevel();
+    final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+    logger.setLevel(Level.INFO);
+    try {
+      run.run();
+    } finally {
+      logger.setLevel(previous);
+      logger.detachAppender(appender);
+    }
+    return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+  }
+
   @Test
-  void testTrainEvaluateCrossValidateAndParse(@TempDir Path dir) throws Exception {
-    Path data = dir.resolve("train.conllu");
-    Path model = dir.resolve("parser.bin");
-    Files.writeString(data, SENTENCE.repeat(20));
+  void testToolsAreRegistered() {
     assertTrue(CLI.getToolNames().contains("DependencyParserME"));
     assertTrue(CLI.getToolNames().contains("DependencyParserTrainerME"));
     assertTrue(CLI.getToolNames().contains("DependencyParserEvaluator"));
     assertTrue(CLI.getToolNames().contains("DependencyParserCrossValidator"));
-    new DependencyParserTrainerTool().run("conllu", new String[] {
-        "-lang", "eng", "-data", data.toString(), "-model", model.toString()});
-    DependencyModel loaded = new DependencyModel(model);
-    assertEquals(DependencyGraph.of(new int[] {1, -1}, new String[] {"nsubj", "root"}),
-        new DependencyParserME(loaded).parse(new String[] {"dogs", "run"}, new String[] {"NOUN", "VERB"}));
-    new DependencyParserEvaluatorTool().run("conllu", new String[] {
-        "-model", model.toString(), "-data", data.toString()});
-    new DependencyParserCrossValidatorTool().run("conllu", new String[] {
-        "-lang", "eng", "-data", data.toString(), "-folds", "2"});
-    InputStream previousIn = System.in;
-    PrintStream previousOut = System.out;
-    ByteArrayOutputStream output = new ByteArrayOutputStream();
+  }
+
+  @Test
+  void testTrainerWritesALoadableModel() throws IOException {
+    train();
+    assertEquals(GOLD, new DependencyParserME(new DependencyModel(model))
+        .parse(new String[] {"dogs", "run"}, new String[] {"NOUN", "VERB"}));
+  }
+
+  @Test
+  void testEvaluatorLogsAttachmentScores() {
+    train();
+    final List<String> log = logOf(DependencyParserEvaluatorTool.class,
+        () -> new DependencyParserEvaluatorTool().run("conllu", new String[] {
+            "-model", model.toString(), "-data", data.toString()}));
+    assertEquals(List.of(PERFECT_SCORES, PERFECT_SCORES_EXCLUDING_PUNCTUATION), log);
+  }
+
+  @Test
+  void testCrossValidatorLogsAttachmentScores() {
+    final List<String> log = logOf(DependencyParserCrossValidatorTool.class,
+        () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
+            "-lang", "eng", "-data", data.toString(), "-folds", "2"}));
+    assertEquals(List.of(PERFECT_SCORES, PERFECT_SCORES_EXCLUDING_PUNCTUATION), log);
+  }
+
+  @Test
+  void testParserToolPrintsConllu() {
+    train();
+    final InputStream previousIn = System.in;
+    final PrintStream previousOut = System.out;
+    final ByteArrayOutputStream output = new ByteArrayOutputStream();
     try {
       System.setIn(new ByteArrayInputStream("dogs_NOUN run_VERB\n".getBytes(StandardCharsets.UTF_8)));
       System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
@@ -85,18 +167,27 @@ public class DependencyParserToolsTest {
   }
 
   @Test
-  void testRegisteredStreamTagsetsAndInvalidOptions(@TempDir Path dir) throws Exception {
-    Path data = dir.resolve("train.conllu");
-    Files.writeString(data, SENTENCE);
-    var factory = StreamFactoryRegistry.getFactory(DependencySample.class, "conllu");
+  void testConlluFormatReadsTheSelectedTagset() throws IOException {
+    final var factory = StreamFactoryRegistry.getFactory(DependencySample.class, "conllu");
     try (ObjectStream<DependencySample> samples = factory.create(new String[] {
         "-data", data.toString(), "-tagset", "x"})) {
       assertEquals("NNS", samples.read().getTags()[0]);
     }
-    assertThrows(TerminateToolException.class, () -> factory.create(new String[] {
-        "-data", data.toString(), "-encoding", "ISO-8859-1"}));
+    try (ObjectStream<DependencySample> samples = factory.create(new String[] {
+        "-data", data.toString()})) {
+      assertEquals("NOUN", samples.read().getTags()[0]);
+    }
+  }
+
+  @Test
+  void testConlluFormatRejectsUnknownTagset() {
+    final var factory = StreamFactoryRegistry.getFactory(DependencySample.class, "conllu");
     assertThrows(TerminateToolException.class, () -> factory.create(new String[] {
         "-data", data.toString(), "-tagset", "invalid"}));
+  }
+
+  @Test
+  void testCrossValidatorRejectsFoldCountBelowTwo() {
     assertThrows(TerminateToolException.class,
         () -> new DependencyParserCrossValidatorTool().run("conllu", new String[] {
             "-lang", "eng", "-data", data.toString(), "-folds", "1"}));

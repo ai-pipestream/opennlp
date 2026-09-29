@@ -15,24 +15,24 @@
  * limitations under the License.
  */
 
-package opennlp.tools.cmdline.depparse;
-
-import opennlp.tools.cmdline.ArgumentParser.OptionalParameter;
-import opennlp.tools.cmdline.ArgumentParser.ParameterDescription;
-import opennlp.tools.cmdline.params.BasicTrainingParams;
-import opennlp.tools.commons.Internal;
+package opennlp.tools.formats.conllu;
 
 /**
- * TrainingParams for DependencyParser tools.
- * <p>
- * <b>Note:</b> Do not use this class, internal use only!
+ * Builds CoNLL-U content for the tests of this package.
  */
-@Internal
-interface TrainingParams extends BasicTrainingParams {
+final class ConlluTestLines {
 
-  @ParameterDescription(valueName = "factoryName",
-      description = "A sub-class of DependencyParserFactory where to get implementation and resources.")
-  @OptionalParameter
-  String getFactory();
+  /** Prevents construction of this utility class. */
+  private ConlluTestLines() {
+  }
 
+  /**
+   * Joins the columns of one word line with tabs.
+   *
+   * @param fields The column values; the format expects exactly ten.
+   * @return The joined word line. Never {@code null}.
+   */
+  static String line(String... fields) {
+    return String.join("\t", fields);
+  }
 }

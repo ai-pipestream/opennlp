@@ -23,12 +23,15 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.depparse.DependencySample;
 import opennlp.tools.util.InputStreamFactory;
 import opennlp.tools.util.InvalidFormatException;
 
+import static opennlp.tools.formats.conllu.ConlluTestLines.line;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -41,11 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * without a usable annotation.
  */
 public class ConlluDependencySampleStreamTest {
-
-  /** Joins the ten CoNLL-U columns of one word line with tabs. */
-  private static String line(String... fields) {
-    return String.join("\t", fields);
-  }
 
   private static final String CONLLU = String.join("\n",
       "# sent_id = test-1",
@@ -226,20 +224,41 @@ public class ConlluDependencySampleStreamTest {
     }
   }
 
+  @ParameterizedTest
+  @EnumSource(ConlluTagset.class)
+  void testMissingSelectedPosTagIsSkipped(ConlluTagset tagset) throws IOException {
+    final String content = String.join("\n",
+        line("1", "Missing", "missing", tagset == ConlluTagset.U ? "_" : "NOUN",
+            tagset == ConlluTagset.U ? "NN" : "_", "_", "0", "root", "_", "_"),
+        "",
+        line("1", "Valid", "valid", "NOUN", "NN", "_", "0", "root", "_", "_"), "");
+    final InputStreamFactory input = () ->
+        new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples = new ConlluDependencySampleStream(input, tagset)) {
+      assertArrayEquals(new String[] {"Valid"}, samples.read().getTokens());
+      assertNull(samples.read());
+    }
+  }
+
   @Test
-  void testMissingSelectedPosTagIsSkipped() throws IOException {
-    for (ConlluTagset tagset : ConlluTagset.values()) {
-      final String content = String.join("\n",
-          line("1", "Missing", "missing", tagset == ConlluTagset.U ? "_" : "NOUN",
-              tagset == ConlluTagset.U ? "NN" : "_", "_", "0", "root", "_", "_"),
-          "",
-          line("1", "Valid", "valid", "NOUN", "NN", "_", "0", "root", "_", "_"), "");
-      final InputStreamFactory input = () ->
-          new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
-      try (ConlluDependencySampleStream samples = new ConlluDependencySampleStream(input, tagset)) {
-        assertArrayEquals(new String[] {"Valid"}, samples.read().getTokens());
-        assertNull(samples.read());
-      }
+  void testEmptyNodeLinesAreDropped() throws IOException {
+    // An empty node (id 1.1) only carries enhanced dependencies; the basic tree is
+    // formed by the surrounding word lines.
+    final String content = String.join("\n",
+        line("1", "Dogs", "dog", "NOUN", "NNS", "_", "2", "nsubj", "_", "_"),
+        line("1.1", "bark", "bark", "VERB", "VBP", "_", "_", "_", "2:conj", "CopyOf=2"),
+        line("2", "bark", "bark", "VERB", "VBP", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertArrayEquals(new String[] {"Dogs", "bark"}, sample.getTokens());
+      assertEquals(1, sample.getGraph().headOf(0));
+      assertEquals(DependencyArc.ROOT_HEAD, sample.getGraph().headOf(1));
+      assertNull(samples.read());
     }
   }
 

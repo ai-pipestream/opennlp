@@ -17,9 +17,6 @@
 
 package opennlp.tools.depparse;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import opennlp.tools.commons.ThreadSafe;
 
 /**
@@ -49,6 +46,117 @@ class DependencyContextGenerator {
 
   /** The number of features {@link #getContext(ArcStandardState, String[], String[])} emits. */
   private static final int FEATURE_COUNT = 37;
+
+  /** Feature prefix: the word on top of the stack. */
+  private static final String S0_WORD = "s0w=";
+
+  /** Feature prefix: the tag on top of the stack. */
+  private static final String S0_TAG = "s0t=";
+
+  /** Feature prefix: the second stack word. */
+  private static final String S1_WORD = "s1w=";
+
+  /** Feature prefix: the second stack tag. */
+  private static final String S1_TAG = "s1t=";
+
+  /** Feature prefix: the third stack tag. */
+  private static final String S2_TAG = "s2t=";
+
+  /** Feature prefix: the first buffer word. */
+  private static final String B0_WORD = "b0w=";
+
+  /** Feature prefix: the first buffer tag. */
+  private static final String B0_TAG = "b0t=";
+
+  /** Feature prefix: the second buffer word. */
+  private static final String B1_WORD = "b1w=";
+
+  /** Feature prefix: the second buffer tag. */
+  private static final String B1_TAG = "b1t=";
+
+  /** Feature prefix: the third buffer tag. */
+  private static final String B2_TAG = "b2t=";
+
+  /** Feature prefix: word and tag on top of the stack. */
+  private static final String S0_WORD_TAG = "s0wt=";
+
+  /** Feature prefix: word and tag of the second stack position. */
+  private static final String S1_WORD_TAG = "s1wt=";
+
+  /** Feature prefix: word and tag of the first buffer position. */
+  private static final String B0_WORD_TAG = "b0wt=";
+
+  /** Feature prefix: stack top word with first buffer word. */
+  private static final String S0_WORD_B0_WORD = "s0w,b0w=";
+
+  /** Feature prefix: stack top tag with first buffer tag. */
+  private static final String S0_TAG_B0_TAG = "s0t,b0t=";
+
+  /** Feature prefix: stack top word with first buffer tag. */
+  private static final String S0_WORD_B0_TAG = "s0w,b0t=";
+
+  /** Feature prefix: stack top tag with first buffer word. */
+  private static final String S0_TAG_B0_WORD = "s0t,b0w=";
+
+  /** Feature prefix: stack top word and tag with first buffer tag. */
+  private static final String S0_WORD_TAG_B0_TAG = "s0wt,b0t=";
+
+  /** Feature prefix: second stack tag with stack top tag. */
+  private static final String S1_TAG_S0_TAG = "s1t,s0t=";
+
+  /** Feature prefix: second stack tag with stack top word. */
+  private static final String S1_TAG_S0_WORD = "s1t,s0w=";
+
+  /** Feature prefix: second stack word with stack top tag. */
+  private static final String S1_WORD_S0_TAG = "s1w,s0t=";
+
+  /** Feature prefix: second stack, stack top and first buffer tags. */
+  private static final String S1_TAG_S0_TAG_B0_TAG = "s1t,s0t,b0t=";
+
+  /** Feature prefix: stack top, first and second buffer tags. */
+  private static final String S0_TAG_B0_TAG_B1_TAG = "s0t,b0t,b1t=";
+
+  /** Feature prefix: the three topmost stack tags. */
+  private static final String S2_TAG_S1_TAG_S0_TAG = "s2t,s1t,s0t=";
+
+  /** Feature prefix: tag of the leftmost dependent of the stack top. */
+  private static final String S0_LEFT_DEPENDENT_TAG = "s0lct=";
+
+  /** Feature prefix: tag of the rightmost dependent of the stack top. */
+  private static final String S0_RIGHT_DEPENDENT_TAG = "s0rct=";
+
+  /** Feature prefix: tag of the leftmost dependent of the second stack position. */
+  private static final String S1_LEFT_DEPENDENT_TAG = "s1lct=";
+
+  /** Feature prefix: tag of the rightmost dependent of the second stack position. */
+  private static final String S1_RIGHT_DEPENDENT_TAG = "s1rct=";
+
+  /** Feature prefix: relation of the leftmost dependent of the stack top. */
+  private static final String S0_LEFT_DEPENDENT_RELATION = "s0lcl=";
+
+  /** Feature prefix: relation of the rightmost dependent of the stack top. */
+  private static final String S0_RIGHT_DEPENDENT_RELATION = "s0rcl=";
+
+  /** Feature prefix: relation of the rightmost dependent of the second stack position. */
+  private static final String S1_RIGHT_DEPENDENT_RELATION = "s1rcl=";
+
+  /** Feature prefix: second stack tag, its rightmost dependent tag, and stack top tag. */
+  private static final String S1_TAG_S1_RIGHT_DEPENDENT_TAG_S0_TAG = "s1t,s1rct,s0t=";
+
+  /** Feature prefix: stack top tag, its leftmost dependent tag, and first buffer tag. */
+  private static final String S0_TAG_S0_LEFT_DEPENDENT_TAG_B0_TAG = "s0t,s0lct,b0t=";
+
+  /** Feature prefix: dependent count of the stack top. */
+  private static final String S0_DEPENDENTS = "s0deps=";
+
+  /** Feature prefix: dependent count of the second stack position. */
+  private static final String S1_DEPENDENTS = "s1deps=";
+
+  /** Feature prefix: distance between stack top and first buffer position. */
+  private static final String DISTANCE = "dist=";
+
+  /** Feature prefix: distance with stack top and first buffer tags. */
+  private static final String DISTANCE_S0_TAG_B0_TAG = "dist,s0t,b0t=";
 
   /** Valency counts at or above this bound share one feature value. */
   private static final int MAX_VALENCY = 3;
@@ -106,49 +214,62 @@ class DependencyContextGenerator {
     final String s0rcl = dependentRelation(state, s0, false);
     final String s1rcl = dependentRelation(state, s1, false);
 
-    final List<String> features = new ArrayList<>(FEATURE_COUNT);
-    features.add("s0w=" + s0w);
-    features.add("s0t=" + s0t);
-    features.add("s1w=" + s1w);
-    features.add("s1t=" + s1t);
-    features.add("s2t=" + s2t);
-    features.add("b0w=" + b0w);
-    features.add("b0t=" + b0t);
-    features.add("b1w=" + b1w);
-    features.add("b1t=" + b1t);
-    features.add("b2t=" + b2t);
-    features.add("s0wt=" + s0w + WORD_TAG_SEPARATOR + s0t);
-    features.add("s1wt=" + s1w + WORD_TAG_SEPARATOR + s1t);
-    features.add("b0wt=" + b0w + WORD_TAG_SEPARATOR + b0t);
-    features.add("s0w,b0w=" + s0w + POSITION_SEPARATOR + b0w);
-    features.add("s0t,b0t=" + s0t + POSITION_SEPARATOR + b0t);
-    features.add("s0w,b0t=" + s0w + POSITION_SEPARATOR + b0t);
-    features.add("s0t,b0w=" + s0t + POSITION_SEPARATOR + b0w);
-    features.add("s0wt,b0t=" + s0w + WORD_TAG_SEPARATOR + s0t + POSITION_SEPARATOR + b0t);
-    features.add("s1t,s0t=" + s1t + POSITION_SEPARATOR + s0t);
-    features.add("s1t,s0w=" + s1t + POSITION_SEPARATOR + s0w);
-    features.add("s1w,s0t=" + s1w + POSITION_SEPARATOR + s0t);
-    features.add("s1t,s0t,b0t=" + s1t + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t);
-    features.add("s0t,b0t,b1t=" + s0t + POSITION_SEPARATOR + b0t + POSITION_SEPARATOR + b1t);
-    features.add("s2t,s1t,s0t=" + s2t + POSITION_SEPARATOR + s1t + POSITION_SEPARATOR + s0t);
-    features.add("s0lct=" + s0lct);
-    features.add("s0rct=" + s0rct);
-    features.add("s1lct=" + s1lct);
-    features.add("s1rct=" + s1rct);
-    features.add("s0lcl=" + s0lcl);
-    features.add("s0rcl=" + s0rcl);
-    features.add("s1rcl=" + s1rcl);
-    features.add("s1t,s1rct,s0t=" + s1t + POSITION_SEPARATOR + s1rct + POSITION_SEPARATOR + s0t);
-    features.add("s0t,s0lct,b0t=" + s0t + POSITION_SEPARATOR + s0lct + POSITION_SEPARATOR + b0t);
-    features.add("s0deps=" + dependents(state, s0));
-    features.add("s1deps=" + dependents(state, s1));
     final String distance = distance(s0, b0);
-    features.add("dist=" + distance);
-    features.add("dist,s0t,b0t=" + distance + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t);
-    return features.toArray(new String[0]);
+    final String[] features = new String[FEATURE_COUNT];
+    int f = 0;
+    features[f++] = S0_WORD + s0w;
+    features[f++] = S0_TAG + s0t;
+    features[f++] = S1_WORD + s1w;
+    features[f++] = S1_TAG + s1t;
+    features[f++] = S2_TAG + s2t;
+    features[f++] = B0_WORD + b0w;
+    features[f++] = B0_TAG + b0t;
+    features[f++] = B1_WORD + b1w;
+    features[f++] = B1_TAG + b1t;
+    features[f++] = B2_TAG + b2t;
+    features[f++] = S0_WORD_TAG + s0w + WORD_TAG_SEPARATOR + s0t;
+    features[f++] = S1_WORD_TAG + s1w + WORD_TAG_SEPARATOR + s1t;
+    features[f++] = B0_WORD_TAG + b0w + WORD_TAG_SEPARATOR + b0t;
+    features[f++] = S0_WORD_B0_WORD + s0w + POSITION_SEPARATOR + b0w;
+    features[f++] = S0_TAG_B0_TAG + s0t + POSITION_SEPARATOR + b0t;
+    features[f++] = S0_WORD_B0_TAG + s0w + POSITION_SEPARATOR + b0t;
+    features[f++] = S0_TAG_B0_WORD + s0t + POSITION_SEPARATOR + b0w;
+    features[f++] = S0_WORD_TAG_B0_TAG + s0w + WORD_TAG_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
+    features[f++] = S1_TAG_S0_TAG + s1t + POSITION_SEPARATOR + s0t;
+    features[f++] = S1_TAG_S0_WORD + s1t + POSITION_SEPARATOR + s0w;
+    features[f++] = S1_WORD_S0_TAG + s1w + POSITION_SEPARATOR + s0t;
+    features[f++] = S1_TAG_S0_TAG_B0_TAG
+        + s1t + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
+    features[f++] = S0_TAG_B0_TAG_B1_TAG
+        + s0t + POSITION_SEPARATOR + b0t + POSITION_SEPARATOR + b1t;
+    features[f++] = S2_TAG_S1_TAG_S0_TAG
+        + s2t + POSITION_SEPARATOR + s1t + POSITION_SEPARATOR + s0t;
+    features[f++] = S0_LEFT_DEPENDENT_TAG + s0lct;
+    features[f++] = S0_RIGHT_DEPENDENT_TAG + s0rct;
+    features[f++] = S1_LEFT_DEPENDENT_TAG + s1lct;
+    features[f++] = S1_RIGHT_DEPENDENT_TAG + s1rct;
+    features[f++] = S0_LEFT_DEPENDENT_RELATION + s0lcl;
+    features[f++] = S0_RIGHT_DEPENDENT_RELATION + s0rcl;
+    features[f++] = S1_RIGHT_DEPENDENT_RELATION + s1rcl;
+    features[f++] = S1_TAG_S1_RIGHT_DEPENDENT_TAG_S0_TAG
+        + s1t + POSITION_SEPARATOR + s1rct + POSITION_SEPARATOR + s0t;
+    features[f++] = S0_TAG_S0_LEFT_DEPENDENT_TAG_B0_TAG
+        + s0t + POSITION_SEPARATOR + s0lct + POSITION_SEPARATOR + b0t;
+    features[f++] = S0_DEPENDENTS + dependents(state, s0);
+    features[f++] = S1_DEPENDENTS + dependents(state, s1);
+    features[f++] = DISTANCE + distance;
+    features[f++] = DISTANCE_S0_TAG_B0_TAG
+        + distance + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
+    return features;
   }
 
-  /** The word at a position, or the marker value for the root and absent positions. */
+  /**
+   * Looks up the word at a stack or buffer position.
+   *
+   * @param tokens The sentence tokens.
+   * @param index The token index, {@link ArcStandardState#ROOT} or {@link ArcStandardState#NONE}.
+   * @return The word, or the marker value for the root and absent positions.
+   */
   private String word(String[] tokens, int index) {
     if (index == ArcStandardState.ROOT) {
       return ROOT_VALUE;
@@ -156,7 +277,13 @@ class DependencyContextGenerator {
     return index == ArcStandardState.NONE ? NONE_VALUE : tokens[index];
   }
 
-  /** The tag at a position, or the marker value for the root and absent positions. */
+  /**
+   * Looks up the tag at a stack or buffer position.
+   *
+   * @param tags The part-of-speech tags of the sentence.
+   * @param index The token index, {@link ArcStandardState#ROOT} or {@link ArcStandardState#NONE}.
+   * @return The tag, or the marker value for the root and absent positions.
+   */
   private String tag(String[] tags, int index) {
     if (index == ArcStandardState.ROOT) {
       return ROOT_VALUE;
@@ -164,7 +291,15 @@ class DependencyContextGenerator {
     return index == ArcStandardState.NONE ? NONE_VALUE : tags[index];
   }
 
-  /** The tag of a token's leftmost or rightmost dependent attached so far. */
+  /**
+   * Looks up the tag of a token's leftmost or rightmost dependent attached so far.
+   *
+   * @param state The current configuration.
+   * @param tags The part-of-speech tags of the sentence.
+   * @param index The token index, or a negative value for the root and absent positions.
+   * @param leftmost {@code true} for the leftmost dependent, {@code false} for the rightmost.
+   * @return The dependent's tag, or the marker value if there is no such dependent.
+   */
   private String dependentTag(ArcStandardState state, String[] tags, int index,
       boolean leftmost) {
     if (index < 0) {
@@ -175,7 +310,14 @@ class DependencyContextGenerator {
     return tag(tags, dependent);
   }
 
-  /** The relation of a token's leftmost or rightmost dependent attached so far. */
+  /**
+   * Looks up the relation of a token's leftmost or rightmost dependent attached so far.
+   *
+   * @param state The current configuration.
+   * @param index The token index, or a negative value for the root and absent positions.
+   * @param leftmost {@code true} for the leftmost dependent, {@code false} for the rightmost.
+   * @return The dependent's relation, or the marker value if there is no such dependent.
+   */
   private String dependentRelation(ArcStandardState state, int index,
       boolean leftmost) {
     if (index < 0) {
@@ -190,13 +332,27 @@ class DependencyContextGenerator {
     return relation == null ? NONE_VALUE : relation;
   }
 
-  /** A token's dependent count so far, capped at {@link #MAX_VALENCY}. */
+  /**
+   * Counts the dependents a token has been assigned so far.
+   *
+   * @param state The current configuration.
+   * @param index The token index, or a negative value for the root and absent positions.
+   * @return The count, capped at {@link #MAX_VALENCY}, or the marker value for the root
+   *         and absent positions.
+   */
   private String dependents(ArcStandardState state, int index) {
     return index < 0 ? NONE_VALUE
         : Integer.toString(Math.min(state.assignedDependents(index), MAX_VALENCY));
   }
 
-  /** The bucketed distance between stack top and buffer front, capped at {@link #MAX_DISTANCE}. */
+  /**
+   * Buckets the distance between the stack top and the buffer front.
+   *
+   * @param s0 The token index on top of the stack, negative for the root or none.
+   * @param b0 The token index at the buffer front, negative for none.
+   * @return The distance, {@link #LONG_DISTANCE} at {@link #MAX_DISTANCE} or more, or the
+   *         marker value if either position is not a token.
+   */
   private String distance(int s0, int b0) {
     if (s0 < 0 || b0 < 0) {
       return NONE_VALUE;

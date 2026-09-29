@@ -34,7 +34,7 @@ import opennlp.tools.commons.ThreadSafe;
  * @since 3.0.0
  */
 @ThreadSafe
-public class DependencySample implements Sample {
+public final class DependencySample implements Sample {
 
   @Serial
   private static final long serialVersionUID = -5427524093301109186L;
@@ -53,14 +53,15 @@ public class DependencySample implements Sample {
    *             contain {@code null} entries.
    * @param graph The dependency graph over the tokens. Must not be {@code null} and its
    *              {@link DependencyGraph#size()} must equal the number of tokens.
-   * @throws IllegalArgumentException Thrown if any parameter is {@code null} or the
-   *         lengths disagree.
+   * @throws IllegalArgumentException Thrown if any parameter is {@code null},
+   *         {@code tokens} is empty, {@code tokens} or {@code tags} contains a
+   *         {@code null} entry, or the lengths of tokens, tags and graph disagree.
    */
   public DependencySample(String[] tokens, String[] tags, DependencyGraph graph) {
     if (graph == null) {
       throw new IllegalArgumentException("graph must not be null");
     }
-    checkTokensAndTags(tokens, tags);
+    DependencyValidation.checkTokensAndTags(tokens, tags);
     if (tokens.length != graph.size()) {
       throw new IllegalArgumentException("tokens, tags and graph must agree in length: "
           + tokens.length + ", " + tags.length + ", " + graph.size());
@@ -68,35 +69,6 @@ public class DependencySample implements Sample {
     this.tokens = tokens.clone();
     this.tags = tags.clone();
     this.graph = graph;
-  }
-
-  /**
-   * Validates token and tag arrays shared by samples and parser entry points.
-   *
-   * @param tokens The token array.
-   * @param tags The aligned tag array.
-   * @throws IllegalArgumentException Thrown if an array is null or empty, the lengths
-   *         do not match, or an entry is null.
-   */
-  static void checkTokensAndTags(String[] tokens, String[] tags) {
-    if (tokens == null || tags == null) {
-      throw new IllegalArgumentException("tokens and tags must not be null");
-    }
-    if (tokens.length == 0) {
-      throw new IllegalArgumentException("tokens must not be empty");
-    }
-    if (tokens.length != tags.length) {
-      throw new IllegalArgumentException("tokens and tags must have the same length: "
-          + tokens.length + " != " + tags.length);
-    }
-    for (int i = 0; i < tokens.length; i++) {
-      if (tokens[i] == null) {
-        throw new IllegalArgumentException("token must not be null at index " + i);
-      }
-      if (tags[i] == null) {
-        throw new IllegalArgumentException("tag must not be null at index " + i);
-      }
-    }
   }
 
   /**
