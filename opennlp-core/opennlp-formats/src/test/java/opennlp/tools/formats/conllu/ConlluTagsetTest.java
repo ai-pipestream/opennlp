@@ -17,10 +17,12 @@
 
 package opennlp.tools.formats.conllu;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import opennlp.tools.cmdline.TerminateToolException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,10 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Tests the command line parameter mapping of {@link ConlluTagset}. */
 public class ConlluTagsetTest {
 
-  @Test
-  void testKnownParameters() {
-    assertEquals(ConlluTagset.U, ConlluTagset.fromParameter("u"));
-    assertEquals(ConlluTagset.X, ConlluTagset.fromParameter("x"));
+  @ParameterizedTest
+  @CsvSource({"u, U", "x, X"})
+  void testKnownParameters(String parameter, ConlluTagset tagset) {
+    assertEquals(tagset, ConlluTagset.fromParameter(parameter));
   }
 
   @ParameterizedTest
@@ -39,5 +41,23 @@ public class ConlluTagsetTest {
   @ValueSource(strings = {"U", "X", "upos", "invalid"})
   void testUnknownParametersAreRejected(String parameter) {
     assertThrows(IllegalArgumentException.class, () -> ConlluTagset.fromParameter(parameter));
+  }
+
+  /** The factory parameter reader accepts the same two values as the parameter reader. */
+  @ParameterizedTest
+  @CsvSource({"u, U", "x, X"})
+  void testKnownFactoryParameters(String parameter, ConlluTagset tagset) {
+    assertEquals(tagset, ConlluTagset.fromFactoryParameter(parameter));
+  }
+
+  /** An unknown factory parameter ends the tool with code -1 and the parameter reader's message. */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {"U", "X", "upos", "xpos", " u", "u ", "invalid"})
+  void testUnknownFactoryParametersTerminateTheTool(String parameter) {
+    final TerminateToolException exception = assertThrows(TerminateToolException.class,
+        () -> ConlluTagset.fromFactoryParameter(parameter));
+    assertEquals(-1, exception.getCode());
+    assertEquals("Unknown tagset parameter: " + parameter, exception.getMessage());
   }
 }

@@ -18,13 +18,16 @@
 package opennlp.tools.depparse;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.ml.perceptron.SimplePerceptronSequenceTrainer;
+import opennlp.tools.util.InsufficientTrainingDataException;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Parameters;
 import opennlp.tools.util.TrainingParameters;
@@ -33,9 +36,11 @@ import static opennlp.tools.depparse.DependencyTestSamples.CORPUS_SENTENCES;
 import static opennlp.tools.depparse.DependencyTestSamples.CORPUS_WORDS;
 import static opennlp.tools.depparse.DependencyTestSamples.LANGUAGE;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
+import static opennlp.tools.depparse.DependencyTestSamples.sentences;
 import static opennlp.tools.depparse.DependencyTestSamples.trainingParameters;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link DependencyCrossValidator}: the tokens it counts, its punctuation handling,
@@ -117,6 +122,111 @@ public class DependencyCrossValidatorTest {
   }
 
   @Test
+  void testListenersHearEveryHeldOutSample() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 4);
+    assertEquals(CORPUS_SENTENCES, monitor.correct.size(),
+        "each sentence is held out once and the corpus is memorizable");
+    assertEquals(List.of(), monitor.wrong);
+  }
+
+  @Test
+  void testListenersWithCustomPunctuation() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), "DT"::equals, monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2);
+    assertEquals(CORPUS_SENTENCES, monitor.correct.size() + monitor.wrong.size());
+    assertEquals(CORPUS_WORDS - CORPUS_DETERMINERS,
+        validator.getWordCountExcludingPunctuation());
+  }
+
+  /** A {@code null} listener array and {@code null} entries mean no listeners. */
+  @Test
+  void testNullListenersAreIgnored() throws IOException {
+    final DependencyCrossValidator noArray = new DependencyCrossValidator(LANGUAGE,
+        trainingParameters(), (DependencyEvaluationMonitor[]) null);
+    noArray.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2);
+    assertEquals(CORPUS_WORDS, noArray.getWordCount());
+
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator nullEntry = new DependencyCrossValidator(LANGUAGE,
+        trainingParameters(), "DT"::equals, null, monitor, null);
+    nullEntry.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2);
+    assertEquals(CORPUS_SENTENCES, monitor.correct.size() + monitor.wrong.size());
+  }
+
+  /** The same listener given twice is told twice about every held-out sample. */
+  @Test
+  void testDuplicateListenerIsToldTwice() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), monitor, monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2);
+    assertEquals(2 * CORPUS_SENTENCES, monitor.correct.size() + monitor.wrong.size());
+    assertEquals(CORPUS_WORDS, validator.getWordCount());
+  }
+
+  /** Two folds over exactly two sentences train each fold on the other sentence. */
+  @Test
+  void testTwoFoldsOverTwoSentences() throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), monitor);
+    final List<DependencySample> two = sentences().subList(0, 2);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(two), 2);
+    assertEquals(5, validator.getWordCount(), "3 + 2 tokens, each held out once");
+    final List<DependencySample> heldOut = new ArrayList<>(monitor.correct);
+    heldOut.addAll(monitor.wrong);
+    assertEquals(2, heldOut.size());
+    assertTrue(heldOut.containsAll(two));
+  }
+
+  /** More folds than sentences: the extra folds hold out nothing and every token still counts once. */
+  @ParameterizedTest(name = "folds = {0}")
+  @ValueSource(ints = {4, 5, 10})
+  void testMoreFoldsThanSentences(int folds) throws IOException {
+    final RecordingMonitor monitor = new RecordingMonitor();
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(LANGUAGE, trainingParameters(), monitor);
+    validator.evaluate(ObjectStreamUtils.createObjectStream(sentences()), folds);
+    assertEquals(8, validator.getWordCount());
+    assertEquals(3, monitor.correct.size() + monitor.wrong.size());
+  }
+
+  /** A fold whose training part is empty cannot train a parser and fails loudly. */
+  @Test
+  void testFoldWithoutTrainingDataFails() {
+    final DependencyCrossValidator validator = validator();
+    final List<DependencySample> one = sentences().subList(0, 1);
+    assertThrows(InsufficientTrainingDataException.class,
+        () -> validator.evaluate(ObjectStreamUtils.createObjectStream(one), 2));
+    assertEquals(0, validator.getWordCount());
+  }
+
+  /** A feature cutoff above the event count of a fold leaves no training data and fails loudly. */
+  @Test
+  void testCutoffAboveFoldSizeFails() {
+    final TrainingParameters parameters = trainingParameters();
+    parameters.put(Parameters.CUTOFF_PARAM, 1_000);
+    final DependencyCrossValidator validator = new DependencyCrossValidator(LANGUAGE, parameters);
+    assertThrows(InsufficientTrainingDataException.class,
+        () -> validator.evaluate(ObjectStreamUtils.createObjectStream(corpus()), 2));
+    assertEquals(0, validator.getWordCount());
+  }
+
+  /** An empty sample stream trains nothing and fails loudly, like an empty fold. */
+  @Test
+  void testEmptyStreamFails() {
+    final DependencyCrossValidator validator = validator();
+    assertThrows(InsufficientTrainingDataException.class, () -> validator.evaluate(
+        ObjectStreamUtils.createObjectStream(List.<DependencySample>of()), 2));
+    assertEquals(0, validator.getWordCount());
+  }
+
+  @Test
   void testEmptyValidatorScoresZero() {
     final DependencyCrossValidator validator = validator();
     assertEquals(0, validator.getWordCount());
@@ -141,7 +251,7 @@ public class DependencyCrossValidatorTest {
     assertThrows(IllegalArgumentException.class,
         () -> new DependencyCrossValidator(LANGUAGE, null));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencyCrossValidator(LANGUAGE, parameters, null));
+        () -> new DependencyCrossValidator(LANGUAGE, parameters, (Predicate<String>) null));
     assertThrows(IllegalArgumentException.class, () -> validator().evaluate(null, 2));
   }
 

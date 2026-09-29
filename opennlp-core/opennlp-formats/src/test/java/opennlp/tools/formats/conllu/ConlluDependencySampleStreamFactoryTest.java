@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package opennlp.tools.formats.conllu;
 
 import java.io.IOException;
@@ -36,9 +35,10 @@ import static opennlp.tools.formats.conllu.ConlluTestLines.line;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests the UTF-8 requirement of the dependency sample stream factory. */
-class ConlluDependencySampleStreamFactoryTest {
+public class ConlluDependencySampleStreamFactoryTest {
 
   private static final String TOKEN = "café";
 
@@ -73,7 +73,8 @@ class ConlluDependencySampleStreamFactoryTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"ISO-8859-1", "UTF-16", "US-ASCII"})
+  @ValueSource(strings = {"ISO-8859-1", "UTF-16", "UTF-16LE", "UTF-16BE", "US-ASCII", "windows-1252",
+      "UTF-32"})
   void testOtherEncodingsAreRejected(String encoding) {
     final TerminateToolException error = assertThrows(TerminateToolException.class, () -> {
       try (ObjectStream<DependencySample> ignored = factory.create(new String[] {
@@ -81,6 +82,32 @@ class ConlluDependencySampleStreamFactoryTest {
         // Close the stream if an unsupported encoding is incorrectly accepted.
       }
     });
+    assertEquals(-1, error.getCode());
     assertEquals("CoNLL-U data must use UTF-8", error.getMessage());
+  }
+
+  /** An encoding name the platform does not know is rejected by the argument parser first. */
+  @ParameterizedTest
+  @ValueSource(strings = {"UTF_8", "utf 8", "X-NO-SUCH-CHARSET", ""})
+  void testUnknownEncodingNamesAreRejectedByTheArgumentParser(String encoding) {
+    final TerminateToolException error = assertThrows(TerminateToolException.class, () -> {
+      try (ObjectStream<DependencySample> ignored = factory.create(new String[] {
+          "-data", data.toString(), "-encoding", encoding})) {
+        // Close the stream if an unknown encoding is incorrectly accepted.
+      }
+    });
+    assertEquals(1, error.getCode());
+    assertTrue(error.getMessage().startsWith("Invalid argument: -encoding " + encoding),
+        error.getMessage());
+  }
+
+  /** A missing data file ends the tool before the encoding is checked. */
+  @Test
+  void testMissingDataFileIsRejected() {
+    final Path missing = directory.resolve("missing.conllu");
+    final TerminateToolException error = assertThrows(TerminateToolException.class,
+        () -> factory.create(new String[] {"-data", missing.toString(), "-encoding", "ISO-8859-1"}));
+    assertEquals(-1, error.getCode());
+    assertEquals("The Data file does not exist! Path: " + missing.toAbsolutePath(), error.getMessage());
   }
 }

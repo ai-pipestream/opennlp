@@ -21,10 +21,14 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.depparse.DependencySample;
@@ -184,14 +188,143 @@ public class ConlluDependencySampleStreamTest {
     }
   }
 
-  @Test
-  void testNonSequentialWordIdsAreSkipped() throws IOException {
-    final String content = line("2", "Dogs", "dog", "NOUN", "NNS", "_", "0",
+  @ParameterizedTest(name = "id = \"{0}\"")
+  @ValueSource(strings = {"2", "01", "+1", "-1", "1 ", " 1", "\u0661", "\uff11", "\uD835\uDFCF", "",
+      "0", "1-2", "1.1", "2147483647", "2147483648", "4294967297", "9999999999999999999"})
+  void testWordIdsOtherThanThePositionAreSkipped(String id) throws IOException {
+    final String content = line(id, "Dogs", "dog", "NOUN", "NNS", "_", "0",
         "root", "_", "_") + "\n";
     final InputStreamFactory in = () -> new ByteArrayInputStream(
         content.getBytes(StandardCharsets.UTF_8));
     try (ConlluDependencySampleStream samples =
         new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      assertNull(samples.read());
+    }
+  }
+
+  /**
+   * Word ID sequences that do not count up from one: a gap, a swap, a repeat, and a
+   * one-based sequence that starts at two.
+   *
+   * @return The ID columns of a three-word sentence.
+   */
+  static Stream<Arguments> misnumberedSentences() {
+    return Stream.of(
+        Arguments.of("gap", new String[] {"1", "3", "4"}),
+        Arguments.of("swap", new String[] {"2", "1", "3"}),
+        Arguments.of("repeat", new String[] {"1", "1", "2"}),
+        Arguments.of("starts at two", new String[] {"2", "3", "4"}),
+        Arguments.of("descending", new String[] {"3", "2", "1"}));
+  }
+
+  /** A sentence whose IDs do not count up from one is skipped and the next sentence is read. */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("misnumberedSentences")
+  void testMisnumberedSentenceIsSkipped(String description, String[] ids) throws IOException {
+    final String content = String.join("\n",
+        line(ids[0], "Dogs", "dog", "NOUN", "NNS", "_", "2", "nsubj", "_", "_"),
+        line(ids[1], "bark", "bark", "VERB", "VBP", "_", "0", "root", "_", "_"),
+        line(ids[2], "loudly", "loudly", "ADV", "RB", "_", "2", "advmod", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertArrayEquals(new String[] {"Fine"}, sample.getTokens());
+      assertNull(samples.read());
+    }
+  }
+
+  /**
+   * A head that is not a plain decimal like the ID column is skipped: signed, with a
+   * leading zero, with a non-ASCII digit, padded, empty, or fractional.
+   *
+   * @param head The HEAD column of the second word, whose plain form is {@code 1}.
+   * @throws IOException Thrown if reading fails.
+   */
+  @ParameterizedTest(name = "head = \"{0}\"")
+  @ValueSource(strings = {"+1", "01", "\u0661", "\uff11", "-1", " 1", "1 ", "", "1.0", "1e0", "_"})
+  void testHeadsOtherThanPlainDecimalsAreSkipped(String head) throws IOException {
+    final String content = String.join("\n",
+        line("1", "Dogs", "dog", "NOUN", "NNS", "_", "0", "root", "_", "_"),
+        line("2", "bark", "bark", "VERB", "VBP", "_", head, "dep", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertArrayEquals(new String[] {"Fine"}, sample.getTokens());
+      assertNull(samples.read());
+    }
+  }
+
+  /** The root head {@code 0} and a two-digit head are read as written. */
+  @Test
+  void testRootAndTwoDigitHeadsAreRead() throws IOException {
+    final StringBuilder content = new StringBuilder();
+    for (int i = 1; i <= 10; i++) {
+      content.append(line(Integer.toString(i), "w" + i, "w" + i, "NOUN", "NN", "_",
+          i == 10 ? "0" : "10", i == 10 ? "root" : "nmod", "_", "_")).append('\n');
+    }
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.toString().getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertEquals(DependencyArc.ROOT_HEAD, sample.getGraph().headOf(9));
+      assertEquals(9, sample.getGraph().headOf(0));
+      assertNull(samples.read());
+    }
+  }
+
+  /** A sentence made only of range and empty-node lines has no words and is passed over. */
+  @Test
+  void testSentenceWithoutWordLinesIsPassedOver() throws IOException {
+    final String content = String.join("\n",
+        line("1-2", "im", "_", "_", "_", "_", "_", "_", "_", "_"),
+        line("1.1", "gap", "gap", "NOUN", "NN", "_", "_", "_", "_", "_"),
+        "",
+        line("1", "Fine", "fine", "ADJ", "JJ", "_", "0", "root", "_", "_"),
+        "") + "\n";
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      assertArrayEquals(new String[] {"Fine"}, samples.read().getTokens());
+      assertNull(samples.read());
+    }
+  }
+
+  /**
+   * Reads a sentence whose tenth word has the two-digit ID {@code 10}, so the position
+   * comparison covers more than one digit.
+   *
+   * @throws IOException Thrown if reading fails.
+   */
+  @Test
+  void testTwoDigitWordIdIsRead() throws IOException {
+    final StringBuilder content = new StringBuilder();
+    for (int i = 1; i <= 10; i++) {
+      content.append(line(Integer.toString(i), "w" + i, "w" + i, "NOUN", "NN", "_",
+          i == 1 ? "0" : "1", i == 1 ? "root" : "nmod", "_", "_")).append('\n');
+    }
+    final InputStreamFactory in = () -> new ByteArrayInputStream(
+        content.toString().getBytes(StandardCharsets.UTF_8));
+    try (ConlluDependencySampleStream samples =
+        new ConlluDependencySampleStream(in, ConlluTagset.U)) {
+      final DependencySample sample = samples.read();
+      assertNotNull(sample);
+      assertEquals(10, sample.getTokens().length);
+      assertEquals("w10", sample.getTokens()[9]);
       assertNull(samples.read());
     }
   }

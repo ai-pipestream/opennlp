@@ -195,16 +195,16 @@ class DependencyContextGenerator {
     final int b1 = state.buffer(1);
     final int b2 = state.buffer(2);
 
-    final String s0w = word(tokens, s0);
-    final String s0t = tag(tags, s0);
-    final String s1w = word(tokens, s1);
-    final String s1t = tag(tags, s1);
-    final String s2t = tag(tags, s2);
-    final String b0w = word(tokens, b0);
-    final String b0t = tag(tags, b0);
-    final String b1w = word(tokens, b1);
-    final String b1t = tag(tags, b1);
-    final String b2t = tag(tags, b2);
+    final String s0w = valueAt(tokens, s0);
+    final String s0t = valueAt(tags, s0);
+    final String s1w = valueAt(tokens, s1);
+    final String s1t = valueAt(tags, s1);
+    final String s2t = valueAt(tags, s2);
+    final String b0w = valueAt(tokens, b0);
+    final String b0t = valueAt(tags, b0);
+    final String b1w = valueAt(tokens, b1);
+    final String b1t = valueAt(tags, b1);
+    final String b2t = valueAt(tags, b2);
 
     final String s0lct = dependentTag(state, tags, s0, true);
     final String s0rct = dependentTag(state, tags, s0, false);
@@ -264,31 +264,17 @@ class DependencyContextGenerator {
   }
 
   /**
-   * Looks up the word at a stack or buffer position.
+   * Looks up the word or tag at a stack or buffer position.
    *
-   * @param tokens The sentence tokens.
+   * @param values The sentence tokens or their part-of-speech tags.
    * @param index The token index, {@link ArcStandardState#ROOT} or {@link ArcStandardState#NONE}.
-   * @return The word, or the marker value for the root and absent positions.
+   * @return The value, or the marker value for the root and absent positions.
    */
-  private String word(String[] tokens, int index) {
+  private String valueAt(String[] values, int index) {
     if (index == ArcStandardState.ROOT) {
       return ROOT_VALUE;
     }
-    return index == ArcStandardState.NONE ? NONE_VALUE : tokens[index];
-  }
-
-  /**
-   * Looks up the tag at a stack or buffer position.
-   *
-   * @param tags The part-of-speech tags of the sentence.
-   * @param index The token index, {@link ArcStandardState#ROOT} or {@link ArcStandardState#NONE}.
-   * @return The tag, or the marker value for the root and absent positions.
-   */
-  private String tag(String[] tags, int index) {
-    if (index == ArcStandardState.ROOT) {
-      return ROOT_VALUE;
-    }
-    return index == ArcStandardState.NONE ? NONE_VALUE : tags[index];
+    return index == ArcStandardState.NONE ? NONE_VALUE : values[index];
   }
 
   /**
@@ -307,7 +293,7 @@ class DependencyContextGenerator {
     }
     final int dependent =
         leftmost ? state.leftmostDependent(index) : state.rightmostDependent(index);
-    return tag(tags, dependent);
+    return valueAt(tags, dependent);
   }
 
   /**

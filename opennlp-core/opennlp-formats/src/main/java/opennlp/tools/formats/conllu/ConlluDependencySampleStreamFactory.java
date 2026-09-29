@@ -44,12 +44,15 @@ import opennlp.tools.util.ObjectStream;
 public class ConlluDependencySampleStreamFactory extends
         AbstractSampleStreamFactory<DependencySample, ConlluDependencySampleStreamFactory.Parameters> {
 
+  /** The message for an {@code -encoding} value other than UTF-8. */
+  private static final String UTF_8_REQUIRED = "CoNLL-U data must use UTF-8";
+
   /** The command line parameters of the CoNLL-U dependency format. */
   public interface Parameters extends BasicFormatParams {
     /** {@inheritDoc} */
     @Override
     @ArgumentParser.ParameterDescription(valueName = "charsetName",
-        description = "CoNLL-U data must use UTF-8")
+        description = UTF_8_REQUIRED)
     @ArgumentParser.OptionalParameter(defaultValue = "UTF-8")
     Charset getEncoding();
 
@@ -91,15 +94,10 @@ public class ConlluDependencySampleStreamFactory extends
     Parameters params = validateBasicFormatParameters(args, Parameters.class);
 
     if (!StandardCharsets.UTF_8.equals(params.getEncoding())) {
-      throw new TerminateToolException(-1, "CoNLL-U data must use UTF-8");
+      throw new TerminateToolException(-1, UTF_8_REQUIRED);
     }
 
-    ConlluTagset tagset;
-    try {
-      tagset = ConlluTagset.fromParameter(params.getTagset());
-    } catch (IllegalArgumentException e) {
-      throw new TerminateToolException(-1, e.getMessage());
-    }
+    final ConlluTagset tagset = ConlluTagset.fromFactoryParameter(params.getTagset());
 
     try {
       return new ConlluDependencySampleStream(FormatUtil.createInputStreamFactory(params.getData()), tagset);

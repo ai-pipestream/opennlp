@@ -17,34 +17,28 @@
 
 package opennlp.tools.cmdline.depparse;
 
-import java.io.File;
 import java.io.IOException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.cmdline.AbstractEvaluatorTool;
-import opennlp.tools.cmdline.ArgumentParser.ParameterDescription;
-import opennlp.tools.cmdline.TerminateToolException;
-import opennlp.tools.cmdline.depparse.DependencyParserEvaluatorTool.EvalParams;
+import opennlp.tools.cmdline.params.EvaluatorParams;
+import opennlp.tools.depparse.DependencyEvaluationMonitor;
 import opennlp.tools.depparse.DependencyEvaluator;
 import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
 import opennlp.tools.util.ObjectStream;
 
 /** Reports labeled and unlabeled attachment scores against gold CoNLL-U trees. */
-public class DependencyParserEvaluatorTool extends AbstractEvaluatorTool<DependencySample, EvalParams> {
-
-  interface EvalParams {
-    @ParameterDescription(valueName = "model", description = "the dependency parser model file")
-    File getModel();
-  }
+public class DependencyParserEvaluatorTool
+    extends AbstractEvaluatorTool<DependencySample, EvaluatorParams> {
 
   private static final Logger logger = LoggerFactory.getLogger(DependencyParserEvaluatorTool.class);
 
   /** Creates the evaluator tool. */
   public DependencyParserEvaluatorTool() {
-    super(DependencySample.class, EvalParams.class);
+    super(DependencySample.class, EvaluatorParams.class);
   }
 
   /** {@inheritDoc} */
@@ -58,8 +52,12 @@ public class DependencyParserEvaluatorTool extends AbstractEvaluatorTool<Depende
   public void run(String format, String[] args) {
     super.run(format, args);
     try (ObjectStream<DependencySample> samples = sampleStream) {
+      DependencyEvaluationMonitor errorListener = null;
+      if (params.getMisclassified()) {
+        errorListener = new DependencyEvaluationErrorListener();
+      }
       DependencyEvaluator evaluator = new DependencyEvaluator(new DependencyParserME(
-          new DependencyModelLoader().load(params.getModel())));
+          new DependencyModelLoader().load(params.getModel())), errorListener);
       evaluator.evaluate(samples);
       logger.info("Tokens: {}; UAS: {}; LAS: {}", evaluator.getWordCount(),
           evaluator.getUas(), evaluator.getLas());
@@ -67,7 +65,7 @@ public class DependencyParserEvaluatorTool extends AbstractEvaluatorTool<Depende
           evaluator.getWordCountExcludingPunctuation(),
           evaluator.getUasExcludingPunctuation(), evaluator.getLasExcludingPunctuation());
     } catch (IOException e) {
-      throw new TerminateToolException(-1, "Error reading dependency evaluation data", e);
+      throw createTerminationIOException(e);
     }
   }
 }
