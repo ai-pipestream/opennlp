@@ -24,7 +24,6 @@ import opennlp.tools.cmdline.CmdLineUtil;
 import opennlp.tools.cmdline.depparse.DependencyParserTrainerTool.TrainerParams;
 import opennlp.tools.cmdline.params.TrainingToolParams;
 import opennlp.tools.depparse.DependencyModel;
-import opennlp.tools.depparse.DependencyParserFactory;
 import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
 import opennlp.tools.util.ObjectStream;
@@ -33,7 +32,7 @@ import opennlp.tools.util.TrainingParameters;
 /** Trains and saves an arc-standard dependency parser model. */
 public class DependencyParserTrainerTool extends AbstractTrainerTool<DependencySample, TrainerParams> {
 
-  interface TrainerParams extends TrainingParams, TrainingToolParams {
+  interface TrainerParams extends TrainingToolParams {
   }
 
   /** Creates the trainer tool. */
@@ -59,15 +58,23 @@ public class DependencyParserTrainerTool extends AbstractTrainerTool<DependencyS
     super.run(format, args);
     try (ObjectStream<DependencySample> samples = sampleStream) {
       CmdLineUtil.checkOutputFile("dependency parser model", params.getModel());
-      mlParams = CmdLineUtil.loadTrainingParameters(params.getParams(), false);
-      if (mlParams == null) {
-        mlParams = TrainingParameters.defaultParams();
-      }
-      DependencyModel model = DependencyParserME.train(params.getLang(), samples, mlParams,
-          DependencyParserFactory.create(params.getFactory()));
+      mlParams = loadTrainingParameters(params.getParams());
+      DependencyModel model = DependencyParserME.train(params.getLang(), samples, mlParams);
       CmdLineUtil.writeModel("dependency parser", params.getModel(), model);
     } catch (IOException e) {
       throw createTerminationIOException(e);
     }
+  }
+
+  /**
+   * Loads the training parameters file named on the command line, falling back to the
+   * default parameters when none is given.
+   *
+   * @param paramsFile The parameters file name, or {@code null} if none was given.
+   * @return The training parameters. Never {@code null}.
+   */
+  static TrainingParameters loadTrainingParameters(String paramsFile) {
+    TrainingParameters loaded = CmdLineUtil.loadTrainingParameters(paramsFile, false);
+    return loaded == null ? TrainingParameters.defaultParams() : loaded;
   }
 }

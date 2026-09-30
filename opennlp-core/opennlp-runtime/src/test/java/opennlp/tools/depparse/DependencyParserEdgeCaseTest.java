@@ -31,43 +31,23 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import opennlp.tools.util.ObjectStreamUtils;
-import opennlp.tools.util.Parameters;
-import opennlp.tools.util.TrainingParameters;
-
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TOKENS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TAGS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TOKENS;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
 import static opennlp.tools.depparse.DependencyTestSamples.sample;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests parser boundaries, non-projective input, model persistence and thread sharing.
  */
 public class DependencyParserEdgeCaseTest {
-
-  /** The language code of the test corpus. */
-  private static final String LANGUAGE = "eng";
-
-  /** The tokens of the first corpus sentence. */
-  private static final String[] THE_DOG_BARKS_TOKENS = {"the", "dog", "barks"};
-
-  /** The tags of the first corpus sentence. */
-  private static final String[] THE_DOG_BARKS_TAGS = {"DT", "NN", "VBZ"};
-
-  /** The gold graph of the first corpus sentence. */
-  private static final DependencyGraph THE_DOG_BARKS_GRAPH =
-      DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
-
-  /** The tokens of the third corpus sentence. */
-  private static final String[] SHE_EATS_FISH_TOKENS = {"she", "eats", "fish"};
-
-  /** The tags of the third corpus sentence. */
-  private static final String[] SHE_EATS_FISH_TAGS = {"PRP", "VBZ", "NN"};
-
-  /** The gold graph of the third corpus sentence. */
-  private static final DependencyGraph SHE_EATS_FISH_GRAPH =
-      DependencyGraph.of(new int[] {1, -1, 1}, new String[] {"nsubj", "root", "obj"});
 
   /** The number of threads parsing concurrently in the sharing test. */
   private static final int THREADS = 8;
@@ -75,8 +55,8 @@ public class DependencyParserEdgeCaseTest {
   /** The number of parses each thread performs in the sharing test. */
   private static final int ITERATIONS_PER_THREAD = 50;
 
-  private static DependencyModel maxentModel;
-  private static DependencyParserME maxentParser;
+  private static DependencyModel model;
+  private static DependencyParserME parser;
 
   /**
    * Builds a four-token sample whose gold arcs (2,0) and (3,1) cross, so the tree is
@@ -96,18 +76,15 @@ public class DependencyParserEdgeCaseTest {
    * @throws IOException Thrown if reading the in-memory samples fails.
    */
   @BeforeAll
-  static void trainParsers() throws IOException {
-    final TrainingParameters parameters = TrainingParameters.defaultParams();
-    parameters.put(Parameters.CUTOFF_PARAM, 0);
-    maxentModel = DependencyParserME.train(LANGUAGE,
-        ObjectStreamUtils.createObjectStream(corpus()), parameters);
-    maxentParser = new DependencyParserME(maxentModel);
+  static void trainParser() throws IOException {
+    model = DependencyTestSamples.train(corpus());
+    parser = new DependencyParserME(model);
   }
 
   @Test
   void testEmptySentenceIsRejected() {
     assertThrows(IllegalArgumentException.class,
-        () -> maxentParser.parse(new String[0], new String[0]));
+        () -> parser.parse(new String[0], new String[0]));
     // The transition system itself has no configuration for zero tokens either.
     assertThrows(IllegalArgumentException.class, () -> new ArcStandardState(0));
   }
@@ -115,9 +92,9 @@ public class DependencyParserEdgeCaseTest {
   @Test
   void testNullTokenOrTagIsRejected() {
     assertThrows(IllegalArgumentException.class,
-        () -> maxentParser.parse(new String[] {null}, new String[] {"NN"}));
+        () -> parser.parse(new String[] {null}, new String[] {"NN"}));
     assertThrows(IllegalArgumentException.class,
-        () -> maxentParser.parse(new String[] {"word"}, new String[] {null}));
+        () -> parser.parse(new String[] {"word"}, new String[] {null}));
   }
 
   @Test
@@ -132,9 +109,9 @@ public class DependencyParserEdgeCaseTest {
   void testSingleTokenSentenceAttachesToTheRoot() {
     // A single token permits only the derivation shift then right-arc, so the head is
     // forced to the artificial root and the model only chooses the relation label.
-    final DependencyGraph maxentParse =
-        maxentParser.parse(new String[] {"Run"}, new String[] {"VB"});
-    assertEquals(DependencyGraph.of(new int[] {-1}, new String[] {"root"}), maxentParse);
+    final DependencyGraph parsed =
+        parser.parse(new String[] {"Run"}, new String[] {"VB"});
+    assertEquals(DependencyGraph.of(new int[] {-1}, new String[] {"root"}), parsed);
   }
 
   @Test
@@ -143,13 +120,12 @@ public class DependencyParserEdgeCaseTest {
     // proceeds on the remaining samples and still memorizes the projective sentences.
     final List<DependencySample> mixed = new ArrayList<>(corpus());
     mixed.add(nonProjectiveSample());
-    final TrainingParameters parameters = TrainingParameters.defaultParams();
-    parameters.put(Parameters.CUTOFF_PARAM, 0);
-    final DependencyModel model = DependencyParserME.train(LANGUAGE,
-        ObjectStreamUtils.createObjectStream(mixed), parameters);
-    final DependencyParserME parser = new DependencyParserME(model);
-    assertEquals(THE_DOG_BARKS_GRAPH, parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
-    assertEquals(SHE_EATS_FISH_GRAPH, parser.parse(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS));
+    final DependencyParserME mixedParser =
+        new DependencyParserME(DependencyTestSamples.train(mixed));
+    assertEquals(THE_DOG_BARKS_GRAPH,
+        mixedParser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
+    assertEquals(SHE_EATS_FISH_GRAPH,
+        mixedParser.parse(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS));
   }
 
   @Test
@@ -157,22 +133,19 @@ public class DependencyParserEdgeCaseTest {
     // The parser can only emit arc-standard derivations, so for a sentence whose gold
     // tree is non-projective the prediction is necessarily a different, projective tree.
     final DependencySample gold = nonProjectiveSample();
-    final DependencyGraph parsed = maxentParser.parse(gold.getTokens(), gold.getTags());
+    final DependencyGraph parsed = parser.parse(gold.getTokens(), gold.getTags());
     assertNotEquals(gold.getGraph(), parsed);
-    assertEquals(0, crossingArcCount(parsed));
-    // The expected projective result is deterministic for the test model.
-    assertEquals(DependencyGraph.of(new int[] {1, 2, 3, -1},
-        new String[] {"det", "nsubj", "nsubj", "root"}), parsed);
+    assertTrue(ArcStandardOracle.isProjective(parsed), parsed.toString());
   }
 
   @Test
-  void testMaxentModelFileRoundTripParsesIdentically(@TempDir Path dir)
+  void testModelFileRoundTripParsesIdentically(@TempDir Path dir)
       throws IOException {
     final Path file = dir.resolve("depparse.bin");
-    maxentModel.serialize(file);
+    model.serialize(file);
     final DependencyParserME reloaded = new DependencyParserME(new DependencyModel(file));
     for (final DependencySample sample : corpus()) {
-      assertEquals(maxentParser.parse(sample.getTokens(), sample.getTags()),
+      assertEquals(parser.parse(sample.getTokens(), sample.getTags()),
           reloaded.parse(sample.getTokens(), sample.getTags()),
           Arrays.toString(sample.getTokens()));
     }
@@ -186,7 +159,7 @@ public class DependencyParserEdgeCaseTest {
       tasks.add(() -> {
         for (int iteration = 0; iteration < ITERATIONS_PER_THREAD; iteration++) {
           assertEquals(THE_DOG_BARKS_GRAPH,
-              maxentParser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
+              parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
         }
         return null;
       });
@@ -201,34 +174,5 @@ public class DependencyParserEdgeCaseTest {
     } finally {
       executor.shutdownNow();
     }
-  }
-
-  /**
-   * Counts the pairs of crossing arcs in a graph, treating the root arc as spanning
-   * from a virtual position left of the sentence to its dependent. A projective tree
-   * has zero crossing pairs.
-   *
-   * @param graph The graph to inspect. Must not be {@code null}.
-   * @return The number of crossing arc pairs.
-   * @throws IllegalArgumentException Thrown if {@code graph} is {@code null}.
-   */
-  private static int crossingArcCount(DependencyGraph graph) {
-    if (graph == null) {
-      throw new IllegalArgumentException("graph must not be null");
-    }
-    int crossings = 0;
-    for (int i = 0; i < graph.size(); i++) {
-      for (int j = i + 1; j < graph.size(); j++) {
-        final int iLow = Math.min(i, graph.headOf(i));
-        final int iHigh = Math.max(i, graph.headOf(i));
-        final int jLow = Math.min(j, graph.headOf(j));
-        final int jHigh = Math.max(j, graph.headOf(j));
-        if ((iLow < jLow && jLow < iHigh && iHigh < jHigh)
-            || (jLow < iLow && iLow < jHigh && jHigh < iHigh)) {
-          crossings++;
-        }
-      }
-    }
-    return crossings;
   }
 }

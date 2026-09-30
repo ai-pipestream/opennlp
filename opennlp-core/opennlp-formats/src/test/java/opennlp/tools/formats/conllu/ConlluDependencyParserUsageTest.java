@@ -46,6 +46,7 @@ import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Parameters;
 import opennlp.tools.util.TrainingParameters;
 
+import static opennlp.tools.formats.conllu.ConlluTestLines.line;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -57,16 +58,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * the expected training results deterministic.</p>
  */
 public class ConlluDependencyParserUsageTest {
-
-  /**
-   * Joins the ten CoNLL-U columns of one word line with tabs.
-   *
-   * @param fields The column values; exactly ten are expected by the format.
-   * @return The joined word line. Never {@code null}.
-   */
-  private static String line(String... fields) {
-    return String.join("\t", fields);
-  }
 
   /**
    * The training fixture: four gold sentences in CoNLL-U form. The {@code HEAD} column

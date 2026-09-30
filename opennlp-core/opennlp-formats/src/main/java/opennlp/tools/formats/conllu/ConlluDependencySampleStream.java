@@ -73,6 +73,15 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   /** The column holding the relation label to the head. */
   private static final int DEPREL = 7;
 
+  /** Separates the columns of a word line. */
+  private static final char FIELD_SEPARATOR = '\t';
+
+  /** Marks a multiword token range id such as {@code 1-2}. */
+  private static final char MULTIWORD_RANGE = '-';
+
+  /** Marks an empty node id such as {@code 1.1}. */
+  private static final char EMPTY_NODE = '.';
+
   /** The CoNLL-U placeholder of a missing value. */
   private static final String PLACEHOLDER = "_";
 
@@ -139,8 +148,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    * ranges, and empty nodes are dropped; an empty list means the end of the content.
    *
    * <p>Sentences are separated by any line {@link StringUtil#isBlank(CharSequence)}
-   * accepts, so a separator carrying a stray no-break space still separates rather than
-   * reaching the word line parser.</p>
+   * accepts.</p>
    *
    * @return The word lines of the next sentence, or an empty list at the end of the
    *         content. Never {@code null}.
@@ -166,13 +174,13 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
       if (line.charAt(0) == COMMENT) {
         continue;
       }
-      final String[] fields = StringUtil.split(line, '\t', -1);
+      final String[] fields = StringUtil.split(line, FIELD_SEPARATOR, -1);
       if (fields.length != COLUMNS) {
         throw new InvalidFormatException("CoNLL-U word line has " + fields.length
             + " columns, expected " + COLUMNS + ": " + line);
       }
       final String id = fields[ID];
-      if (id.indexOf('-') < 0 && id.indexOf('.') < 0) {
+      if (id.indexOf(MULTIWORD_RANGE) < 0 && id.indexOf(EMPTY_NODE) < 0) {
         words.add(fields);
       }
     }

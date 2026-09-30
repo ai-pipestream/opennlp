@@ -98,7 +98,7 @@ class FeedforwardDependencyScoringTest {
    * @param name The arithmetic condition.
    * @param calculation The input values and expected result.
    * @param negative Whether to negate the hidden sum.
-   * @throws IOException If model serialization or loading fails.
+   * @throws IOException Thrown if model serialization or loading fails.
    */
   @ParameterizedTest(name = "{0}, negative={2}")
   @MethodSource("calculations")
@@ -205,7 +205,7 @@ class FeedforwardDependencyScoringTest {
    *
    * @param offset The score shared by all transitions.
    * @param refinement Whether to use the refinement optimizer's normalization.
-   * @throws ReflectiveOperationException If the normalization method cannot be called.
+   * @throws ReflectiveOperationException Thrown if the normalization method cannot be called.
    */
   @ParameterizedTest
   @MethodSource("normalizationCases")
@@ -229,7 +229,7 @@ class FeedforwardDependencyScoringTest {
    *
    * @param offset The common score shift.
    * @param refinement Whether to use refinement normalization.
-   * @throws ReflectiveOperationException If the normalization method cannot be called.
+   * @throws ReflectiveOperationException Thrown if the normalization method cannot be called.
    */
   @ParameterizedTest
   @MethodSource("unequalNormalizationCases")
@@ -249,7 +249,7 @@ class FeedforwardDependencyScoringTest {
    * @param scores The finite raw scores; refinement overwrites them.
    * @param refinement Whether to use refinement normalization.
    * @return The log probabilities.
-   * @throws ReflectiveOperationException If the normalizer cannot be called.
+   * @throws ReflectiveOperationException Thrown if the normalizer cannot be called.
    */
   private double[] normalizedScores(double[] scores, boolean refinement)
       throws ReflectiveOperationException {
@@ -287,7 +287,7 @@ class FeedforwardDependencyScoringTest {
    *
    * @param round The independent run.
    * @param shared Whether requests use the same embedding row.
-   * @throws Exception If a worker or cache inspection fails.
+   * @throws Exception Thrown if a worker or cache inspection fails.
    */
   @ParameterizedTest
   @MethodSource("contentionCases")
@@ -342,7 +342,7 @@ class FeedforwardDependencyScoringTest {
    * Concurrent parser constructors initialize one cache on a shared model.
    *
    * @param round The independent run.
-   * @throws Exception If a worker or cache inspection fails.
+   * @throws Exception Thrown if a worker or cache inspection fails.
    */
   @ParameterizedTest
   @ValueSource(ints = {0, 1, 2, 3})
@@ -376,7 +376,7 @@ class FeedforwardDependencyScoringTest {
    * Full caches retain their capacity and agree with direct calculations on misses.
    *
    * @param budget The cache capacity to exercise.
-   * @throws ReflectiveOperationException If cache inspection fails.
+   * @throws ReflectiveOperationException Thrown if cache inspection fails.
    */
   @ParameterizedTest
   @ValueSource(ints = {0, 1, 3, CACHE_ENTRY_LIMIT})
@@ -413,7 +413,7 @@ class FeedforwardDependencyScoringTest {
    *
    * @param cache The model cache.
    * @return The retained entry count.
-   * @throws ReflectiveOperationException If cache inspection fails.
+   * @throws ReflectiveOperationException Thrown if cache inspection fails.
    */
   private int cachedEntries(Object cache) throws ReflectiveOperationException {
     int entries = 0;
@@ -433,7 +433,7 @@ class FeedforwardDependencyScoringTest {
    * @param owner The field owner.
    * @param name The field name.
    * @return The field value.
-   * @throws ReflectiveOperationException If field access fails.
+   * @throws ReflectiveOperationException Thrown if field access fails.
    */
   private Object field(Object owner, String name) throws ReflectiveOperationException {
     final Field field = owner.getClass().getDeclaredField(name);
@@ -446,7 +446,7 @@ class FeedforwardDependencyScoringTest {
    *
    * @param model The model.
    * @return Its binary representation.
-   * @throws IOException If writing fails.
+   * @throws IOException Thrown if writing fails.
    */
   private byte[] serialize(FeedforwardDependencyModel model) throws IOException {
     final ByteArrayOutputStream output = new ByteArrayOutputStream();
