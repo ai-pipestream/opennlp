@@ -86,6 +86,7 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
 
   private static final char AT = '@';
   private static final char DOT = '.';
+  private static final char COMMA = ',';
   private static final char UNDERSCORE = '_';
 
   /** The correction mode. */
@@ -504,7 +505,7 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
       final char c = core.charAt(i);
       if (c >= '0' && c <= '9') {
         sawDigit = true;
-      } else if (c != '.' && c != ',') {
+      } else if (c != DOT && c != COMMA) {
         return false;
       }
     }
