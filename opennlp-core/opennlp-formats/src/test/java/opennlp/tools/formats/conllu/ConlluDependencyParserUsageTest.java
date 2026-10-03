@@ -19,9 +19,7 @@ package opennlp.tools.formats.conllu;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,18 +32,14 @@ import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.depparse.DependencyEvaluator;
 import opennlp.tools.depparse.DependencyGraph;
 import opennlp.tools.depparse.DependencyModel;
-import opennlp.tools.depparse.DependencyParser;
 import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
-import opennlp.tools.depparse.FeedforwardDependencyModel;
-import opennlp.tools.depparse.FeedforwardDependencyParser;
-import opennlp.tools.depparse.FeedforwardDependencyTrainer;
 import opennlp.tools.util.InputStreamFactory;
-import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Parameters;
 import opennlp.tools.util.TrainingParameters;
 
+import static opennlp.tools.formats.conllu.ConlluTestLines.line;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -57,16 +51,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * the expected training results deterministic.</p>
  */
 public class ConlluDependencyParserUsageTest {
-
-  /**
-   * Joins the ten CoNLL-U columns of one word line with tabs.
-   *
-   * @param fields The column values; exactly ten are expected by the format.
-   * @return The joined word line. Never {@code null}.
-   */
-  private static String line(String... fields) {
-    return String.join("\t", fields);
-  }
 
   /**
    * The training fixture: four gold sentences in CoNLL-U form. The {@code HEAD} column
@@ -102,9 +86,6 @@ public class ConlluDependencyParserUsageTest {
 
   /** The tokens of the four fixture sentences. */
   private static final long FIXTURE_WORDS = 14;
-
-  /** The beam size of the manual's feedforward example. */
-  private static final int BEAM_SIZE = 4;
 
   private static final String[] ALICE_TOKENS = {"Alice", "sent", "Bob", "a", "message", "."};
   private static final String[] ALICE_TAGS = {"PROPN", "VERB", "PROPN", "DET", "NOUN", "PUNCT"};
@@ -205,51 +186,6 @@ public class ConlluDependencyParserUsageTest {
         "a -> message (det)",
         "message -> sent (obj)",
         ". -> sent (punct)"), lines);
-  }
-
-  @Test
-  void testFeedforwardTrainSaveReloadAndParse(@TempDir Path dir) throws IOException {
-    // The manual's feedforward example: train from the CoNLL-U reader with the default
-    // settings, save the model, load it back, and parse with a beam of four. The parse
-    // of the reloaded model must equal the parse of the model in memory.
-    final Path treebank = dir.resolve("train.conllu");
-    Files.writeString(treebank, repeat(CONLLU, REPETITIONS), StandardCharsets.UTF_8);
-    final Path modelFile = dir.resolve("en-depparse-ff.bin");
-    final InputStreamFactory trainingData = () -> Files.newInputStream(treebank);
-
-    FeedforwardDependencyModel model;
-    try (ObjectStream<DependencySample> samples =
-        new ConlluDependencySampleStream(trainingData, ConlluTagset.U)) {
-      model = FeedforwardDependencyTrainer.train(
-          samples, FeedforwardDependencyTrainer.Settings.defaults());
-    }
-    try (OutputStream out = Files.newOutputStream(modelFile)) {
-      model.serialize(out);
-    }
-
-    DependencyParser reloaded = new FeedforwardDependencyParser(
-        FeedforwardDependencyModel.load(modelFile), BEAM_SIZE);
-    final DependencyGraph expected =
-        new FeedforwardDependencyParser(model, BEAM_SIZE).parse(ALICE_TOKENS, ALICE_TAGS);
-    final DependencyGraph parse = reloaded.parse(ALICE_TOKENS, ALICE_TAGS);
-    assertEquals(expected, parse);
-    assertEquals(ALICE_TOKENS.length, parse.size());
-    assertEquals(ALICE_GRAPH.root(), parse.root());
-  }
-
-  /**
-   * Repeats CoNLL-U content so a small fixture gives the trainers enough evidence.
-   *
-   * @param conllu The content to repeat; sentences are separated by a blank line.
-   * @param times How often to repeat it.
-   * @return The repeated content. Never {@code null}.
-   */
-  private static String repeat(String conllu, int times) {
-    final StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < times; i++) {
-      sb.append(conllu).append("\n\n");
-    }
-    return sb.toString();
   }
 
   @Test

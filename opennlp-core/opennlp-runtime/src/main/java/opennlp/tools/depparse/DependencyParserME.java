@@ -33,8 +33,8 @@ import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.TrainingParameters;
 
 /**
- * A greedy transition-based {@link DependencyParser}: a maximum entropy classifier picks
- * the next arc-standard {@link Transition} for each configuration until the parse is
+ * A greedy transition-based {@link DependencyParser}: a classifier picks the next
+ * arc-standard {@link Transition} for each configuration until the parse is
  * complete, always taking the highest scoring transition that is applicable.
  *
  * <p>The parser holds an immutable model and no per-parse state, so one instance can be
@@ -64,22 +64,6 @@ public class DependencyParserME implements DependencyParser {
     this.model = model.getParserModel();
     this.contextGenerator = new DependencyContextGenerator();
     this.transitions = decodeOutcomes(this.model);
-  }
-
-  /**
-   * Initializes a {@link DependencyParserME} with a raw transition model.
-   *
-   * @param model The transition classification model. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code model} is {@code null} or an
-   *         outcome inventory is invalid or cannot parse a sentence.
-   */
-  public DependencyParserME(MaxentModel model) {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
-    this.model = model;
-    this.contextGenerator = new DependencyContextGenerator();
-    this.transitions = decodeOutcomes(model);
   }
 
   /**
@@ -126,7 +110,7 @@ public class DependencyParserME implements DependencyParser {
    */
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    ParserInput.check(tokens, tags);
+    DependencySample.checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));

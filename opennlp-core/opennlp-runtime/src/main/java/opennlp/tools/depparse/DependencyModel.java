@@ -40,7 +40,7 @@ import opennlp.tools.util.model.BaseModel;
 public class DependencyModel extends BaseModel {
 
   @Serial
-  private static final long serialVersionUID = -2928968185269611443L;
+  private static final long serialVersionUID = 6397845119220799380L;
 
   /** The component name recorded in the model manifest. */
   private static final String COMPONENT_NAME = "DependencyParserME";

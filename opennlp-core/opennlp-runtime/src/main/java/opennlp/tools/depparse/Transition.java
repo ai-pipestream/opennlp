@@ -31,12 +31,12 @@ import opennlp.tools.util.StringUtil;
  *
  * @since 3.0.0
  */
-public record Transition(Type type, String label) {
+record Transition(Type type, String label) {
 
   /**
    * The kinds of arc-standard action.
    */
-  public enum Type {
+  enum Type {
     /** Pushes the front of the buffer onto the stack. */
     SHIFT,
     /** Attaches the second stack token to the top one and removes the second. */
@@ -46,7 +46,7 @@ public record Transition(Type type, String label) {
   }
 
   /** The single shift transition; shifts carry no label. */
-  public static final Transition SHIFT = new Transition(Type.SHIFT, null);
+  static final Transition SHIFT = new Transition(Type.SHIFT, null);
 
   /** Separates the type name from the label in an encoded arc transition. */
   private static final char SEPARATOR = ':';
@@ -57,7 +57,7 @@ public record Transition(Type type, String label) {
    * @throws IllegalArgumentException Thrown if {@code type} is {@code null}, a shift
    *         carries a label, or an arc action has a {@code null} or blank label.
    */
-  public Transition {
+  Transition {
     if (type == null) {
       throw new IllegalArgumentException("type must not be null");
     }
@@ -77,7 +77,7 @@ public record Transition(Type type, String label) {
    * @return A {@link Transition} of {@link Type#LEFT_ARC}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code label} is {@code null} or blank.
    */
-  public static Transition leftArc(String label) {
+  static Transition leftArc(String label) {
     return new Transition(Type.LEFT_ARC, label);
   }
 
@@ -88,7 +88,7 @@ public record Transition(Type type, String label) {
    * @return A {@link Transition} of {@link Type#RIGHT_ARC}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code label} is {@code null} or blank.
    */
-  public static Transition rightArc(String label) {
+  static Transition rightArc(String label) {
     return new Transition(Type.RIGHT_ARC, label);
   }
 
@@ -98,7 +98,7 @@ public record Transition(Type type, String label) {
    *
    * @return The outcome string. Never {@code null}.
    */
-  public String encode() {
+  String encode() {
     return type == Type.SHIFT ? type.name() : type.name() + SEPARATOR + label;
   }
 
@@ -110,7 +110,7 @@ public record Transition(Type type, String label) {
    * @throws IllegalArgumentException Thrown if {@code outcome} is {@code null} or does not
    *         name a valid transition.
    */
-  public static Transition decode(String outcome) {
+  static Transition decode(String outcome) {
     if (outcome == null) {
       throw new IllegalArgumentException("outcome must not be null");
     }

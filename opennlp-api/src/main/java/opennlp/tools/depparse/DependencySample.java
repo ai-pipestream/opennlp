@@ -17,9 +17,11 @@
 
 package opennlp.tools.depparse;
 
+import java.io.Serial;
 import java.util.Arrays;
 import java.util.Objects;
 
+import opennlp.tools.commons.Sample;
 import opennlp.tools.commons.ThreadSafe;
 
 /**
@@ -32,7 +34,10 @@ import opennlp.tools.commons.ThreadSafe;
  * @since 3.0.0
  */
 @ThreadSafe
-public class DependencySample {
+public final class DependencySample implements Sample {
+
+  @Serial
+  private static final long serialVersionUID = 3074843369898695370L;
 
   private final String[] tokens;
   private final String[] tags;
@@ -48,8 +53,9 @@ public class DependencySample {
    *             contain {@code null} entries.
    * @param graph The dependency graph over the tokens. Must not be {@code null} and its
    *              {@link DependencyGraph#size()} must equal the number of tokens.
-   * @throws IllegalArgumentException Thrown if any parameter is {@code null} or the
-   *         lengths disagree.
+   * @throws IllegalArgumentException Thrown if any parameter is {@code null},
+   *         {@code tokens} is empty, {@code tokens} or {@code tags} contains a
+   *         {@code null} entry, or the lengths of tokens, tags and graph disagree.
    */
   public DependencySample(String[] tokens, String[] tags, DependencyGraph graph) {
     if (graph == null) {
@@ -66,14 +72,18 @@ public class DependencySample {
   }
 
   /**
-   * Validates token and tag arrays shared by samples and parser entry points.
+   * Validates token and tag arrays for this sample and
+   * {@link DependencyParser#parse(String[], String[])}.
    *
-   * @param tokens The token array.
-   * @param tags The aligned tag array.
-   * @throws IllegalArgumentException Thrown if an array is null or empty, the lengths
-   *         do not match, or an entry is null.
+   * @param tokens The token array. Must not be {@code null} or empty and must not
+   *               contain {@code null} entries.
+   * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
+   *             {@code null}, must have the same length as {@code tokens}, and must not
+   *             contain {@code null} entries.
+   * @throws IllegalArgumentException Thrown if an array is {@code null}, {@code tokens}
+   *         is empty, the lengths do not match, or an entry is {@code null}.
    */
-  static void checkTokensAndTags(String[] tokens, String[] tags) {
+  public static void checkTokensAndTags(String[] tokens, String[] tags) {
     if (tokens == null || tags == null) {
       throw new IllegalArgumentException("tokens and tags must not be null");
     }

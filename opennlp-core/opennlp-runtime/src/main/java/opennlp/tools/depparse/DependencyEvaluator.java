@@ -20,7 +20,6 @@ package opennlp.tools.depparse;
 import java.util.function.Predicate;
 
 import opennlp.tools.util.eval.Evaluator;
-import opennlp.tools.util.eval.Mean;
 
 /**
  * Measures the quality of a {@link DependencyParser} against gold
@@ -46,20 +45,19 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
 
   private final DependencyParser parser;
   private final Predicate<String> punctuationTag;
-  private final Mean uas = new Mean();
-  private final Mean las = new Mean();
-  private final Mean uasExcludingPunctuation = new Mean();
-  private final Mean lasExcludingPunctuation = new Mean();
+  private final AttachmentScores scores = new AttachmentScores();
 
   /**
    * Initializes a {@link DependencyEvaluator} that treats tokens tagged
    * {@link #UNIVERSAL_PUNCTUATION_TAG} as punctuation.
    *
    * @param parser The parser to evaluate. Must not be {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  evaluated sample; {@code null} entries are ignored.
    * @throws IllegalArgumentException Thrown if {@code parser} is {@code null}.
    */
-  public DependencyEvaluator(DependencyParser parser) {
-    this(parser, UNIVERSAL_PUNCTUATION_TAG::equals);
+  public DependencyEvaluator(DependencyParser parser, DependencyEvaluationMonitor... listeners) {
+    this(parser, UNIVERSAL_PUNCTUATION_TAG::equals, listeners);
   }
 
   /**
@@ -69,9 +67,14 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    * @param punctuationTag Decides from a gold part-of-speech tag whether the token is
    *                       punctuation and therefore left out of the punctuation-free
    *                       scores. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  evaluated sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code parser} or
+   *         {@code punctuationTag} is {@code null}.
    */
-  public DependencyEvaluator(DependencyParser parser, Predicate<String> punctuationTag) {
+  public DependencyEvaluator(DependencyParser parser, Predicate<String> punctuationTag,
+      DependencyEvaluationMonitor... listeners) {
+    super(listeners);
     if (parser == null) {
       throw new IllegalArgumentException("parser must not be null");
     }
@@ -86,46 +89,43 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    * {@inheritDoc}
    *
    * <p>The returned sample carries the predicted graph over the reference tokens, and
-   * every token of the reference contributes to both scores.</p>
+   * every token of the reference contributes to both scores. Listeners are told whether
+   * the predicted graph equals the gold graph.</p>
    */
   @Override
   protected DependencySample processSample(DependencySample reference) {
     final DependencyGraph gold = reference.getGraph();
+    final String[] tokens = reference.getTokens();
     final String[] tags = reference.getTags();
-    final DependencyGraph predicted = parser.parse(reference.getTokens(), tags);
+    final DependencyGraph predicted = parser.parse(tokens, tags);
     for (int i = 0; i < gold.size(); i++) {
       final boolean headMatches = gold.headOf(i) == predicted.headOf(i);
       final boolean labelMatches =
           headMatches && gold.relationOf(i).equals(predicted.relationOf(i));
-      uas.add(headMatches ? 1 : 0);
-      las.add(labelMatches ? 1 : 0);
-      if (!punctuationTag.test(tags[i])) {
-        uasExcludingPunctuation.add(headMatches ? 1 : 0);
-        lasExcludingPunctuation.add(labelMatches ? 1 : 0);
-      }
+      scores.add(headMatches, labelMatches, punctuationTag.test(tags[i]));
     }
-    return new DependencySample(reference.getTokens(), tags, predicted);
+    return new DependencySample(tokens, tags, predicted);
   }
 
   /**
    * @return The unlabeled attachment score over all evaluated tokens.
    */
   public double getUas() {
-    return uas.mean();
+    return scores.getUas();
   }
 
   /**
    * @return The labeled attachment score over all evaluated tokens.
    */
   public double getLas() {
-    return las.mean();
+    return scores.getLas();
   }
 
   /**
    * @return The number of tokens scored so far.
    */
   public long getWordCount() {
-    return uas.count();
+    return scores.getWordCount();
   }
 
   /**
@@ -133,7 +133,7 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    *         punctuation.
    */
   public double getUasExcludingPunctuation() {
-    return uasExcludingPunctuation.mean();
+    return scores.getUasExcludingPunctuation();
   }
 
   /**
@@ -141,13 +141,20 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
    *         punctuation.
    */
   public double getLasExcludingPunctuation() {
-    return lasExcludingPunctuation.mean();
+    return scores.getLasExcludingPunctuation();
   }
 
   /**
    * @return The number of tokens scored so far that are not punctuation.
    */
   public long getWordCountExcludingPunctuation() {
-    return uasExcludingPunctuation.count();
+    return scores.getWordCountExcludingPunctuation();
+  }
+
+  /**
+   * @return The accumulated scores, for merging into a cross validation total.
+   */
+  AttachmentScores scores() {
+    return scores;
   }
 }

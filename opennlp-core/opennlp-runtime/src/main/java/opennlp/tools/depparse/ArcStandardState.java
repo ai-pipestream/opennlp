@@ -37,10 +37,10 @@ import java.util.Arrays;
 final class ArcStandardState {
 
   /** The stack value representing the artificial root node. */
-  public static final int ROOT = -1;
+  static final int ROOT = DependencyArc.ROOT_HEAD;
 
   /** The value returned for stack or buffer positions that do not exist. */
-  public static final int NONE = -2;
+  static final int NONE = -2;
 
   private final int tokenCount;
   private final int[] stack;
@@ -79,36 +79,10 @@ final class ArcStandardState {
   }
 
   /**
-   * Deep-copies {@code source}; used only by {@link #copy()}.
-   *
-   * @param source The state to copy.
-   */
-  private ArcStandardState(ArcStandardState source) {
-    this.tokenCount = source.tokenCount;
-    this.stack = source.stack.clone();
-    this.heads = source.heads.clone();
-    this.relations = source.relations.clone();
-    this.assignedDependents = source.assignedDependents.clone();
-    this.leftmostDependents = source.leftmostDependents.clone();
-    this.rightmostDependents = source.rightmostDependents.clone();
-    this.top = source.top;
-    this.bufferFront = source.bufferFront;
-  }
-
-  /**
-   * Creates an independent copy for advancing a search alternative.
-   *
-   * @return A copy that can be advanced without affecting this state. Never {@code null}.
-   */
-  ArcStandardState copy() {
-    return new ArcStandardState(this);
-  }
-
-  /**
    * @return {@code true} if the buffer is empty and only the artificial root remains on
    *         the stack, so the parse is complete.
    */
-  public boolean isTerminal() {
+  boolean isTerminal() {
     return bufferFront == tokenCount && top == 0;
   }
 
@@ -119,7 +93,7 @@ final class ArcStandardState {
    * @return {@code true} if {@link #apply(Transition)} would succeed.
    * @throws IllegalArgumentException Thrown if {@code transition} is {@code null}.
    */
-  public boolean canApply(Transition transition) {
+  boolean canApply(Transition transition) {
     if (transition == null) {
       throw new IllegalArgumentException("transition must not be null");
     }
@@ -138,7 +112,7 @@ final class ArcStandardState {
    * @throws IllegalArgumentException Thrown if the transition is {@code null} or not
    *         applicable in the current configuration.
    */
-  public void apply(Transition transition) {
+  void apply(Transition transition) {
     if (!canApply(transition)) {
       throw new IllegalArgumentException("transition not applicable: " + transition
           + " in " + this);
@@ -158,7 +132,6 @@ final class ArcStandardState {
         attach(stack[top - 1], stack[top], transition.label());
         top--;
       }
-      default -> throw new IllegalArgumentException("unsupported type: " + transition.type());
     }
   }
 
@@ -193,7 +166,7 @@ final class ArcStandardState {
    *         {@link #NONE} if the position does not exist.
    * @throws IllegalArgumentException Thrown if {@code fromTop} is negative.
    */
-  public int stack(int fromTop) {
+  int stack(int fromTop) {
     if (fromTop < 0) {
       throw new IllegalArgumentException("fromTop must not be negative: " + fromTop);
     }
@@ -210,7 +183,7 @@ final class ArcStandardState {
    *         exist.
    * @throws IllegalArgumentException Thrown if {@code fromFront} is negative.
    */
-  public int buffer(int fromFront) {
+  int buffer(int fromFront) {
     if (fromFront < 0) {
       throw new IllegalArgumentException("fromFront must not be negative: " + fromFront);
     }
@@ -220,7 +193,9 @@ final class ArcStandardState {
     return bufferFront + fromFront;
   }
 
-  /** {@return the number of tokens in this parse} */
+  /**
+   * @return The number of tokens in this parse.
+   */
   int tokenCount() {
     return tokenCount;
   }
@@ -228,14 +203,14 @@ final class ArcStandardState {
   /**
    * @return The number of stack elements including the artificial root.
    */
-  public int stackSize() {
+  int stackSize() {
     return top + 1;
   }
 
   /**
    * @return The number of tokens still in the buffer.
    */
-  public int bufferSize() {
+  int bufferSize() {
     return tokenCount - bufferFront;
   }
 
@@ -246,7 +221,7 @@ final class ArcStandardState {
    * @return The number of arcs assigned with the token as head.
    * @throws IllegalArgumentException Thrown if {@code index} is out of range.
    */
-  public int assignedDependents(int index) {
+  int assignedDependents(int index) {
     checkTokenIndex(index);
     return assignedDependents[index];
   }
@@ -270,7 +245,7 @@ final class ArcStandardState {
    * @return The dependent's token index, or {@link #NONE} when none is attached.
    * @throws IllegalArgumentException Thrown if {@code index} is out of range.
    */
-  public int leftmostDependent(int index) {
+  int leftmostDependent(int index) {
     checkTokenIndex(index);
     return leftmostDependents[index];
   }
@@ -282,7 +257,7 @@ final class ArcStandardState {
    * @return The dependent's token index, or {@link #NONE} when none is attached.
    * @throws IllegalArgumentException Thrown if {@code index} is out of range.
    */
-  public int rightmostDependent(int index) {
+  int rightmostDependent(int index) {
     checkTokenIndex(index);
     return rightmostDependents[index];
   }
@@ -294,7 +269,7 @@ final class ArcStandardState {
    * @return The relation label, or {@code null} when the token is still unattached.
    * @throws IllegalArgumentException Thrown if {@code index} is out of range.
    */
-  public String assignedRelation(int index) {
+  String assignedRelation(int index) {
     checkTokenIndex(index);
     return relations[index];
   }
@@ -305,7 +280,7 @@ final class ArcStandardState {
    * @return The parsed graph. Never {@code null}.
    * @throws IllegalStateException Thrown if the parse is not yet terminal.
    */
-  public DependencyGraph toGraph() {
+  DependencyGraph toGraph() {
     if (!isTerminal()) {
       throw new IllegalStateException("parse is not terminal: " + this);
     }

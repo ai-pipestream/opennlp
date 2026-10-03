@@ -70,8 +70,20 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   /** The column holding the one-based index of the head, {@code 0} for the root. */
   private static final int HEAD = 6;
 
+  /** The HEAD column value of the root word, which has no governing word. */
+  private static final String ROOT_HEAD_ID = "0";
+
   /** The column holding the relation label to the head. */
   private static final int DEPREL = 7;
+
+  /** Separates the columns of a word line. */
+  private static final char FIELD_SEPARATOR = '\t';
+
+  /** Marks a multiword token range id such as {@code 1-2}. */
+  private static final char MULTIWORD_RANGE = '-';
+
+  /** Marks an empty node id such as {@code 1.1}. */
+  private static final char EMPTY_NODE = '.';
 
   /** The CoNLL-U placeholder of a missing value. */
   private static final String PLACEHOLDER = "_";
@@ -81,6 +93,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
 
   /** The first character of a comment line. */
   private static final char COMMENT = '#';
+
+  /** The digit zero: the base of the digit values, and the one digit an ID must not start with. */
+  private static final char ZERO_DIGIT = '0';
 
   private final InputStreamFactory in;
   private final int tagColumn;
@@ -113,8 +128,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
 
   /**
    * {@inheritDoc}
-   * Sentences without a usable basic dependency annotation are skipped, and their count
-   * is logged once the content is exhausted.
+   *
+   * <p>Sentences without a usable basic dependency annotation are skipped, and their
+   * count is logged once the content is exhausted.</p>
    */
   @Override
   public DependencySample read() throws IOException {
@@ -139,8 +155,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    * ranges, and empty nodes are dropped; an empty list means the end of the content.
    *
    * <p>Sentences are separated by any line {@link StringUtil#isBlank(CharSequence)}
-   * accepts, so a separator carrying a stray no-break space still separates rather than
-   * reaching the word line parser.</p>
+   * accepts.</p>
    *
    * @return The word lines of the next sentence, or an empty list at the end of the
    *         content. Never {@code null}.
@@ -166,13 +181,13 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
       if (line.charAt(0) == COMMENT) {
         continue;
       }
-      final String[] fields = splitFields(line);
+      final String[] fields = StringUtil.split(line, FIELD_SEPARATOR, -1);
       if (fields.length != COLUMNS) {
         throw new InvalidFormatException("CoNLL-U word line has " + fields.length
             + " columns, expected " + COLUMNS + ": " + line);
       }
       final String id = fields[ID];
-      if (id.indexOf('-') < 0 && id.indexOf('.') < 0) {
+      if (id.indexOf(MULTIWORD_RANGE) < 0 && id.indexOf(EMPTY_NODE) < 0) {
         words.add(fields);
       }
     }
@@ -180,22 +195,32 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
   }
 
   /**
-   * Splits a CoNLL-U word line into its tab-delimited fields, retaining empty fields.
+   * Reads a word ID, the one-based position of a syntactic word in its sentence, from the
+   * ID column or from the HEAD column of another word.
    *
-   * @param line The line to split.
-   * @return The fields in source order. Never {@code null}.
+   * @param id The column value. Must not be {@code null}.
+   * @return The position, or {@code -1} if the column is not a plain decimal number:
+   *         empty, signed, with a leading zero, with a non-ASCII digit, or too large for
+   *         an {@code int}.
    */
-  private String[] splitFields(String line) {
-    final List<String> fields = new ArrayList<>();
-    int fieldStart = 0;
-    for (int i = 0; i < line.length(); i++) {
-      if (line.charAt(i) == '\t') {
-        fields.add(line.substring(fieldStart, i));
-        fieldStart = i + 1;
-      }
+  private int wordIndex(String id) {
+    final int length = id.length();
+    if (length == 0 || id.charAt(0) == ZERO_DIGIT) {
+      return -1;
     }
-    fields.add(line.substring(fieldStart));
-    return fields.toArray(String[]::new);
+    int value = 0;
+    for (int i = 0; i < length; i++) {
+      final char c = id.charAt(i);
+      if (!StringUtil.isAsciiDigit(c)) {
+        return -1;
+      }
+      final int digit = c - ZERO_DIGIT;
+      if (value > (Integer.MAX_VALUE - digit) / 10) {
+        return -1;
+      }
+      value = value * 10 + digit;
+    }
+    return value;
   }
 
   /**
@@ -203,8 +228,8 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
    *
    * @param words The word lines of the sentence.
    * @return The converted sample, or {@code null} when the sentence's annotation is
-   *         unusable, for example an underscore head or relation or a graph that is not
-   *         a tree.
+   *         unusable: an ID or head that is not a plain decimal, an underscore head,
+   *         selected tag or relation, or a graph that is not a tree.
    */
   private DependencySample convert(List<String[]> words) {
     final int n = words.size();
@@ -214,20 +239,20 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
     final String[] relations = new String[n];
     for (int i = 0; i < n; i++) {
       final String[] word = words.get(i);
-      if (!Integer.toString(i + 1).equals(word[ID])) {
+      if (wordIndex(word[ID]) != i + 1) {
         return null;
       }
       tokens[i] = word[FORM];
       tags[i] = word[tagColumn];
-      if (PLACEHOLDER.equals(word[DEPREL])) {
+      if (PLACEHOLDER.equals(tags[i]) || PLACEHOLDER.equals(word[DEPREL])) {
         return null;
       }
       relations[i] = word[DEPREL];
-      try {
-        heads[i] = Integer.parseInt(word[HEAD]) - 1;
-      } catch (NumberFormatException e) {
+      final int head = ROOT_HEAD_ID.equals(word[HEAD]) ? 0 : wordIndex(word[HEAD]);
+      if (head < 0) {
         return null;
       }
+      heads[i] = head - 1;
     }
     try {
       return new DependencySample(tokens, tags, DependencyGraph.of(heads, relations));
@@ -238,8 +263,9 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
 
   /**
    * {@inheritDoc}
-   * Reopens the content through the {@link InputStreamFactory}, which must therefore
-   * produce a fresh stream on every call.
+   *
+   * <p>Reopens the content through the {@link InputStreamFactory}, which must therefore
+   * produce a fresh stream on every call.</p>
    */
   @Override
   public void reset() throws IOException, UnsupportedOperationException {

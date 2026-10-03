@@ -17,6 +17,8 @@
 
 package opennlp.tools.depparse;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,7 +38,10 @@ import opennlp.tools.util.StringUtil;
  * @since 3.0.0
  */
 @ThreadSafe
-public final class DependencyGraph {
+public final class DependencyGraph implements Serializable {
+
+  @Serial
+  private static final long serialVersionUID = 5144949884365294061L;
 
   /** Traversal state of a token whose head chain has not been followed yet. */
   private static final byte UNVISITED = 0;
@@ -49,16 +54,19 @@ public final class DependencyGraph {
 
   private final int[] heads;
   private final String[] relations;
+  private final int root;
 
   /**
    * Wraps already validated arrays; instances are created through {@link #of}.
    *
    * @param heads The validated head array, owned by the new instance.
    * @param relations The validated relation array, owned by the new instance.
+   * @param root The index of the single token whose head is {@link DependencyArc#ROOT_HEAD}.
    */
-  private DependencyGraph(int[] heads, String[] relations) {
+  private DependencyGraph(int[] heads, String[] relations, int root) {
     this.heads = heads;
     this.relations = relations;
+    this.root = root;
   }
 
   /**
@@ -87,9 +95,11 @@ public final class DependencyGraph {
           + heads.length + " != " + relations.length);
     }
     int roots = 0;
+    int root = DependencyArc.ROOT_HEAD;
     for (int i = 0; i < heads.length; i++) {
       if (heads[i] == DependencyArc.ROOT_HEAD) {
         roots++;
+        root = i;
       } else if (heads[i] < 0 || heads[i] >= heads.length) {
         throw new IllegalArgumentException("head of token " + i
             + " is out of range: " + heads[i]);
@@ -104,7 +114,7 @@ public final class DependencyGraph {
       throw new IllegalArgumentException("expected exactly one root, found " + roots);
     }
     checkAcyclic(heads);
-    return new DependencyGraph(heads.clone(), relations.clone());
+    return new DependencyGraph(heads.clone(), relations.clone(), root);
   }
 
   /**
@@ -169,16 +179,9 @@ public final class DependencyGraph {
 
   /**
    * @return The zero-based index of the sentence root token.
-   * @throws IllegalStateException Thrown if no token carries {@link DependencyArc#ROOT_HEAD},
-   *         which {@link #of} rules out.
    */
   public int root() {
-    for (int i = 0; i < heads.length; i++) {
-      if (heads[i] == DependencyArc.ROOT_HEAD) {
-        return i;
-      }
-    }
-    throw new IllegalStateException("graph invariant violated: no root present");
+    return root;
   }
 
   /**

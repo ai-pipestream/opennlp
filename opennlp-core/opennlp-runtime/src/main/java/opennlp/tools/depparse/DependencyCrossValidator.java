@@ -21,18 +21,18 @@ import java.io.IOException;
 import java.util.function.Predicate;
 
 import opennlp.tools.util.ObjectStream;
+import opennlp.tools.util.TrainingParameters;
 import opennlp.tools.util.eval.CrossValidationPartitioner;
-import opennlp.tools.util.eval.Mean;
 
 /**
- * Cross validator for a {@link DependencyParser}.
+ * Cross validator for {@link DependencyParserME}.
  *
- * <p>The samples are split into {@code k} folds. For each fold a parser is trained on the
- * other {@code k - 1} folds through the supplied {@link Trainer} and scored on the
+ * <p>The samples are split into {@code k} folds. For each fold a parser is trained with
+ * {@link DependencyParserME#train} on the other {@code k - 1} folds and scored on the
  * held-out fold with a {@link DependencyEvaluator}. The unlabeled and labeled attachment
  * scores are accumulated over all evaluated tokens, so every token of the input counts
- * once, in the fold it was held out from. Both parser implementations of this package can
- * be validated, because the trainer is supplied by the caller.</p>
+ * once, in the fold it was held out from. The listeners given at construction are told
+ * about each held-out sample.</p>
  *
  * @see DependencyEvaluator
  * @see CrossValidationPartitioner
@@ -43,59 +43,59 @@ public class DependencyCrossValidator {
   /** The smallest fold count that leaves training data for every fold. */
   private static final int MIN_FOLDS = 2;
 
-  /**
-   * Trains a {@link DependencyParser} on the samples of the folds that are not held out.
-   */
-  @FunctionalInterface
-  public interface Trainer {
-
-    /**
-     * Trains a parser.
-     *
-     * @param samples The training samples of the current fold. Never {@code null}; the
-     *                stream is read once and not closed by the validator.
-     * @return The trained parser. Must not be {@code null}.
-     * @throws IOException Thrown if reading the samples or training fails.
-     */
-    DependencyParser train(ObjectStream<DependencySample> samples) throws IOException;
-  }
-
-  private final Trainer trainer;
+  private final String languageCode;
+  private final TrainingParameters params;
   private final Predicate<String> punctuationTag;
-  private final Mean uas = new Mean();
-  private final Mean las = new Mean();
-  private final Mean uasExcludingPunctuation = new Mean();
-  private final Mean lasExcludingPunctuation = new Mean();
+  private final DependencyEvaluationMonitor[] listeners;
+  private final AttachmentScores scores = new AttachmentScores();
 
   /**
    * Initializes a {@link DependencyCrossValidator} that treats tokens tagged
    * {@link DependencyEvaluator#UNIVERSAL_PUNCTUATION_TAG} as punctuation.
    *
-   * @param trainer Trains the parser of each fold. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if {@code trainer} is {@code null}.
+   * @param languageCode The ISO language code of the samples. Must not be {@code null}.
+   * @param params The {@link TrainingParameters} for the parser of each fold. Must not be
+   *               {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  held-out sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code languageCode} or {@code params}
+   *         is {@code null}.
    */
-  public DependencyCrossValidator(Trainer trainer) {
-    this(trainer, DependencyEvaluator.UNIVERSAL_PUNCTUATION_TAG::equals);
+  public DependencyCrossValidator(String languageCode, TrainingParameters params,
+      DependencyEvaluationMonitor... listeners) {
+    this(languageCode, params, DependencyEvaluator.UNIVERSAL_PUNCTUATION_TAG::equals,
+        listeners);
   }
 
   /**
    * Initializes a {@link DependencyCrossValidator} with a custom notion of punctuation.
    *
-   * @param trainer Trains the parser of each fold. Must not be {@code null}.
+   * @param languageCode The ISO language code of the samples. Must not be {@code null}.
+   * @param params The {@link TrainingParameters} for the parser of each fold. Must not be
+   *               {@code null}.
    * @param punctuationTag Decides from a gold part-of-speech tag whether the token is
    *                       punctuation and therefore left out of the punctuation-free
    *                       scores. Must not be {@code null}.
-   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
+   * @param listeners The {@link DependencyEvaluationMonitor listeners} told about each
+   *                  held-out sample; {@code null} entries are ignored.
+   * @throws IllegalArgumentException Thrown if {@code languageCode}, {@code params} or
+   *         {@code punctuationTag} is {@code null}.
    */
-  public DependencyCrossValidator(Trainer trainer, Predicate<String> punctuationTag) {
-    if (trainer == null) {
-      throw new IllegalArgumentException("trainer must not be null");
+  public DependencyCrossValidator(String languageCode, TrainingParameters params,
+      Predicate<String> punctuationTag, DependencyEvaluationMonitor... listeners) {
+    if (languageCode == null) {
+      throw new IllegalArgumentException("languageCode must not be null");
+    }
+    if (params == null) {
+      throw new IllegalArgumentException("params must not be null");
     }
     if (punctuationTag == null) {
       throw new IllegalArgumentException("punctuationTag must not be null");
     }
-    this.trainer = trainer;
+    this.languageCode = languageCode;
+    this.params = params;
     this.punctuationTag = punctuationTag;
+    this.listeners = listeners == null ? new DependencyEvaluationMonitor[0] : listeners.clone();
   }
 
   /**
@@ -105,10 +105,10 @@ public class DependencyCrossValidator {
    *                support {@link ObjectStream#reset()}, because every fold reads the
    *                stream from the start. The stream is not closed.
    * @param folds The number of folds. Must be at least {@code 2}.
-   * @throws IOException Thrown if reading the samples or training fails.
-   * @throws IllegalArgumentException Thrown if {@code samples} is {@code null} or
-   *         {@code folds} is below {@code 2}.
-   * @throws IllegalStateException Thrown if the trainer returns {@code null}.
+   * @throws IOException Thrown if reading the samples fails.
+   * @throws IllegalArgumentException Thrown if {@code samples} is {@code null},
+   *         {@code folds} is below {@code 2}, or the training parameters do not select
+   *         an event model trainer.
    */
   public void evaluate(ObjectStream<DependencySample> samples, int folds) throws IOException {
     if (samples == null) {
@@ -119,23 +119,14 @@ public class DependencyCrossValidator {
     }
     final CrossValidationPartitioner<DependencySample> partitioner =
         new CrossValidationPartitioner<>(samples, folds);
-    int fold = 0;
     while (partitioner.hasNext()) {
       final CrossValidationPartitioner.TrainingSampleStream<DependencySample> training =
           partitioner.next();
-      final DependencyParser parser = trainer.train(training);
-      if (parser == null) {
-        throw new IllegalStateException("trainer returned null for fold " + fold);
-      }
-      final DependencyEvaluator evaluator = new DependencyEvaluator(parser, punctuationTag);
+      final DependencyModel model = DependencyParserME.train(languageCode, training, params);
+      final DependencyEvaluator evaluator =
+          new DependencyEvaluator(new DependencyParserME(model), punctuationTag, listeners);
       evaluator.evaluate(training.getTestSampleStream());
-      uas.add(evaluator.getUas(), evaluator.getWordCount());
-      las.add(evaluator.getLas(), evaluator.getWordCount());
-      uasExcludingPunctuation.add(evaluator.getUasExcludingPunctuation(),
-          evaluator.getWordCountExcludingPunctuation());
-      lasExcludingPunctuation.add(evaluator.getLasExcludingPunctuation(),
-          evaluator.getWordCountExcludingPunctuation());
-      fold++;
+      scores.add(evaluator.scores());
     }
   }
 
@@ -143,14 +134,14 @@ public class DependencyCrossValidator {
    * @return The unlabeled attachment score over all tokens evaluated so far.
    */
   public double getUas() {
-    return uas.mean();
+    return scores.getUas();
   }
 
   /**
    * @return The labeled attachment score over all tokens evaluated so far.
    */
   public double getLas() {
-    return las.mean();
+    return scores.getLas();
   }
 
   /**
@@ -158,7 +149,7 @@ public class DependencyCrossValidator {
    *         number of tokens in the samples, because every token is held out once.
    */
   public long getWordCount() {
-    return uas.count();
+    return scores.getWordCount();
   }
 
   /**
@@ -166,7 +157,7 @@ public class DependencyCrossValidator {
    *         punctuation.
    */
   public double getUasExcludingPunctuation() {
-    return uasExcludingPunctuation.mean();
+    return scores.getUasExcludingPunctuation();
   }
 
   /**
@@ -174,13 +165,13 @@ public class DependencyCrossValidator {
    *         punctuation.
    */
   public double getLasExcludingPunctuation() {
-    return lasExcludingPunctuation.mean();
+    return scores.getLasExcludingPunctuation();
   }
 
   /**
    * @return The number of evaluated tokens that are not punctuation.
    */
   public long getWordCountExcludingPunctuation() {
-    return uasExcludingPunctuation.count();
+    return scores.getWordCountExcludingPunctuation();
   }
 }

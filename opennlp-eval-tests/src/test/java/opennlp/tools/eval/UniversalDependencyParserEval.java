@@ -30,9 +30,6 @@ import opennlp.tools.depparse.DependencyEvaluator;
 import opennlp.tools.depparse.DependencyModel;
 import opennlp.tools.depparse.DependencyParser;
 import opennlp.tools.depparse.DependencyParserME;
-import opennlp.tools.depparse.FeedforwardDependencyModel;
-import opennlp.tools.depparse.FeedforwardDependencyParser;
-import opennlp.tools.depparse.FeedforwardDependencyTrainer;
 import opennlp.tools.formats.conllu.ConlluDependencySampleStream;
 import opennlp.tools.formats.conllu.ConlluTagset;
 import opennlp.tools.util.MarkableFileInputStreamFactory;
@@ -40,7 +37,7 @@ import opennlp.tools.util.Parameters;
 import opennlp.tools.util.TrainingParameters;
 
 /**
- * Measures the accuracy of the two dependency parsers on Universal Dependencies 2.0
+ * Measures the accuracy of the dependency parser on Universal Dependencies 2.0
  * treebanks and pins the exact scores.
  *
  * <p>Every test trains from scratch on a treebank's training split and scores the parser
@@ -53,18 +50,14 @@ import opennlp.tools.util.TrainingParameters;
  * and both again over the tokens that are not tagged {@code PUNCT}, the customary
  * reporting convention for Universal Dependencies.</p>
  *
- * <p>The transition parser is the maximum-entropy arc-standard parser trained with a
- * feature cutoff of {@value #TRANSITION_CUTOFF}; the feedforward parser is trained with
- * {@link FeedforwardDependencyTrainer.Settings#defaults()} and parsed greedily. The
- * transition parser is evaluated on English, German, Spanish, and French, the feedforward
- * parser on English and Spanish. The English cross validation uses
- * {@value #ENGLISH_FOLDS} folds of the training split, the same fold count as the
- * constituency parser evaluation.</p>
+ * <p>The parser is trained with a feature cutoff of {@value #FEATURE_CUTOFF} and
+ * evaluated on English, German, Spanish, and French. The English cross validation uses
+ * {@value #ENGLISH_FOLDS} folds of the training split.</p>
  */
 public class UniversalDependencyParserEval extends AbstractEvalTest {
 
-  /** The feature cutoff of the transition parser. */
-  private static final int TRANSITION_CUTOFF = 5;
+  /** The feature cutoff of the parser. */
+  private static final int FEATURE_CUTOFF = 5;
 
   /** The fold count of the English cross validation. */
   private static final int ENGLISH_FOLDS = 5;
@@ -72,7 +65,7 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   /**
    * One treebank: its language code and its training and development splits.
    *
-   * @param language The ISO 639-3 code passed to the transition trainer.
+   * @param language The ISO 639-3 code passed to the trainer.
    * @param train The training split.
    * @param dev The development split.
    */
@@ -167,17 +160,16 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   }
 
   /**
-   * Cross validates the transition parser on the English training split: five parsers,
+   * Cross validates the parser on the English training split: five parsers,
    * each trained on four fifths of the split and scored on the remaining fifth, so every
    * training sentence is scored once by a parser that did not see it.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void crossValidateTransitionParserEnglish() throws IOException {
-    final DependencyCrossValidator validator = new DependencyCrossValidator(
-        samples -> new DependencyParserME(
-            DependencyParserME.train(english.language(), samples, transitionParameters())));
+  void crossValidateEnglish() throws IOException {
+    final DependencyCrossValidator validator =
+        new DependencyCrossValidator(english.language(), trainingParameters());
     try (ConlluDependencySampleStream train = samples(english.train())) {
       validator.evaluate(train, ENGLISH_FOLDS);
     }
@@ -186,122 +178,79 @@ public class UniversalDependencyParserEval extends AbstractEvalTest {
   }
 
   /**
-   * Trains the transition parser on the English training split and scores it on the
+   * Trains the parser on the English training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserEnglish() throws IOException {
+  void trainAndEvalEnglish() throws IOException {
     assertScores(new Scores(25148, 22065, 0.8181565134404326d, 0.7861460155877207d,
             0.8372082483571267d, 0.8014502605937004d),
-        evaluate(transitionParser(english), english.dev()));
+        evaluate(train(english), english.dev()));
   }
 
   /**
-   * Trains the transition parser on the German training split and scores it on the
+   * Trains the parser on the German training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserGerman() throws IOException {
+  void trainAndEvalGerman() throws IOException {
     assertScores(new Scores(12348, 10730, 0.7843375445416262d, 0.7305636540330418d,
             0.802982292637465d, 0.7413793103448276d),
-        evaluate(transitionParser(german), german.dev()));
+        evaluate(train(german), german.dev()));
   }
 
   /**
-   * Trains the transition parser on the Spanish AnCora training split and scores it on
+   * Trains the parser on the Spanish AnCora training split and scores it on
    * the development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserSpanishAncora() throws IOException {
+  void trainAndEvalSpanishAncora() throws IOException {
     assertScores(new Scores(52336, 46058, 0.8355243044940385d, 0.7914437480892693d,
             0.8598506231273612d, 0.8098918754613748d),
-        evaluate(transitionParser(spanish), spanish.dev()));
+        evaluate(train(spanish), spanish.dev()));
   }
 
   /**
-   * Trains the transition parser on the French training split and scores it on the
+   * Trains the parser on the French training split and scores it on the
    * development split.
    *
    * @throws IOException Thrown if reading or training fails.
    */
   @Test
-  void trainAndEvalTransitionParserFrench() throws IOException {
+  void trainAndEvalFrench() throws IOException {
     assertScores(new Scores(35766, 31947, 0.8501370016216518d, 0.8191578594195604d,
             0.8794879018374182d, 0.8450245719472878d),
-        evaluate(transitionParser(french), french.dev()));
+        evaluate(train(french), french.dev()));
   }
 
   /**
-   * Trains the feedforward parser with its default settings on the English training
-   * split and scores it on the development split.
-   *
-   * @throws IOException Thrown if reading or training fails.
+   * @return The training parameters of the parser. Never {@code null}.
    */
-  @Test
-  void trainAndEvalFeedforwardParserEnglish() throws IOException {
-    assertScores(new Scores(25148, 22065, 0.8412597423254334d, 0.8174009861619215d,
-            0.8539768864717879d, 0.8272830274189894d),
-        evaluate(feedforwardParser(english), english.dev()));
-  }
-
-  /**
-   * Trains the feedforward parser with its default settings on the Spanish AnCora
-   * training split and scores it on the development split.
-   *
-   * @throws IOException Thrown if reading or training fails.
-   */
-  @Test
-  void trainAndEvalFeedforwardParserSpanishAncora() throws IOException {
-    assertScores(new Scores(52336, 46058, 0.8617013145826964d, 0.8279195964536838d,
-            0.8780016500933605d, 0.839615267705936d),
-        evaluate(feedforwardParser(spanish), spanish.dev()));
-  }
-
-  /**
-   * @return The training parameters of the transition parser. Never {@code null}.
-   */
-  private static TrainingParameters transitionParameters() {
+  private static TrainingParameters trainingParameters() {
     final TrainingParameters parameters = TrainingParameters.defaultParams();
-    parameters.put(Parameters.CUTOFF_PARAM, TRANSITION_CUTOFF);
+    parameters.put(Parameters.CUTOFF_PARAM, FEATURE_CUTOFF);
     return parameters;
   }
 
   /**
-   * Trains the maximum-entropy transition parser on a treebank's training split.
+   * Trains the parser on a treebank's training split.
    *
    * @param treebank The treebank.
    * @return The trained parser. Never {@code null}.
    * @throws IOException Thrown if reading or training fails.
    */
-  private static DependencyParser transitionParser(Treebank treebank) throws IOException {
+  private static DependencyParser train(Treebank treebank) throws IOException {
     final DependencyModel model;
     try (ConlluDependencySampleStream train = samples(treebank.train())) {
-      model = DependencyParserME.train(treebank.language(), train, transitionParameters());
+      model = DependencyParserME.train(treebank.language(), train, trainingParameters());
     }
     return new DependencyParserME(model);
-  }
-
-  /**
-   * Trains the feedforward parser with its default settings on a treebank's training
-   * split.
-   *
-   * @param treebank The treebank.
-   * @return The trained parser, decoding greedily. Never {@code null}.
-   * @throws IOException Thrown if reading or training fails.
-   */
-  private static DependencyParser feedforwardParser(Treebank treebank) throws IOException {
-    final FeedforwardDependencyModel model;
-    try (ConlluDependencySampleStream train = samples(treebank.train())) {
-      model = FeedforwardDependencyTrainer.train(train,
-          FeedforwardDependencyTrainer.Settings.defaults());
-    }
-    return new FeedforwardDependencyParser(model);
   }
 
   /**
