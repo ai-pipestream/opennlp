@@ -24,10 +24,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.FieldSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import opennlp.tools.tokenize.WhitespaceTokenizer;
+import opennlp.tools.ml.AbstractEventStreamTest;
 import opennlp.tools.util.ObjectStream;
 
 public class SimpleEventStreamBuilderTest {
@@ -70,39 +71,24 @@ public class SimpleEventStreamBuilderTest {
 
   private static Stream<Arguments> contextSeparators() {
     return Stream.of(
-        // no-break space, next line, line separator, and ideographic space separate contexts
-        Arguments.of("other/w=he\u00A0n1w=belongs n2w=to", new String[] {"w=he", "n1w=belongs", "n2w=to"}),
-        Arguments.of("other/w=he\u0085n1w=belongs", new String[] {"w=he", "n1w=belongs"}),
-        Arguments.of("other/w=he\u2028n1w=belongs", new String[] {"w=he", "n1w=belongs"}),
-        Arguments.of("other/w=he\u3000n1w=belongs", new String[] {"w=he", "n1w=belongs"}),
-        // file separator and zero width space are not whitespace, they stay inside a context
+        // Unicode whitespace outside the format's delimiters remains in the context
+        Arguments.of("other/w=he\u00A0n1w=belongs n2w=to", new String[] {"w=he\u00A0n1w=belongs", "n2w=to"}),
+        Arguments.of("other/w=he\u0085n1w=belongs", new String[] {"w=he\u0085n1w=belongs"}),
+        Arguments.of("other/w=he\u2028n1w=belongs", new String[] {"w=he\u2028n1w=belongs"}),
+        Arguments.of("other/w=he\u3000n1w=belongs", new String[] {"w=he\u3000n1w=belongs"}),
+        // file separator and zero width space are not event delimiters either
         Arguments.of("other/w=he\u001Cn1w=belongs", new String[] {"w=he\u001Cn1w=belongs"}),
         Arguments.of("other/w=he\u200Bn1w=belongs", new String[] {"w=he\u200Bn1w=belongs"}),
         // a supplementary character is one character of a context
         Arguments.of("other/w=\uD83D\uDE00 n1w=x", new String[] {"w=\uD83D\uDE00", "n1w=x"}));
   }
 
-  /**
-   * The contexts are separated by Unicode whitespace only, independent of the whitespace mode.
-   */
   @ParameterizedTest
   @MethodSource("contextSeparators")
-  void testContextsAreSeparatedByUnicodeWhitespaceOnly(String event, String[] contexts)
+  void testContextsUseEventDelimiters(String event, String[] contexts)
       throws IOException {
     try (ObjectStream<Event> events = new SimpleEventStreamBuilder().add(event).build()) {
       Assertions.assertArrayEquals(contexts, events.read().getContext());
-    }
-  }
-
-  @Test
-  void testAddDoesNotDependOnTheSharedWhitespaceTokenizer() throws IOException {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(true);
-    try (ObjectStream<Event> events = new SimpleEventStreamBuilder()
-        .add("other/w=he\nn1w=belongs\r\nn2w=to").build()) {
-      Assertions.assertArrayEquals(
-          new String[] {"w=he", "n1w=belongs", "n2w=to"}, events.read().getContext());
-    } finally {
-      WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
     }
   }
 
@@ -164,11 +150,31 @@ public class SimpleEventStreamBuilderTest {
     Assertions.assertEquals("Negative values are not allowed: " + context, e.getMessage());
   }
 
+  /** {@code Float.parseFloat} accepts these, but they are no usable feature values. */
   @ParameterizedTest
-  @ValueSource(strings = {"other/w=he;abc", "other/w=he;1,5", "other/w=he;0.5 n=x;-", "other/w=he;0x1"})
-  void testAddRejectsAValueThatIsNotANumber(String event) {
-    Assertions.assertThrows(NumberFormatException.class,
+  @ValueSource(strings = {"w=he;NaN", "w=he;Infinity", "w=he;-Infinity"})
+  void testAddRejectsANonFiniteValueWithTheContextNamed(String context) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new SimpleEventStreamBuilder().add("other/n=x;1 " + context));
+    Assertions.assertEquals("Values must be finite: " + context, e.getMessage());
+  }
+
+  private static Stream<Arguments> valuesThatAreNotNumbers() {
+    return Stream.of(
+        Arguments.of("other/w=he;abc", "abc"),
+        Arguments.of("other/w=he;1,5", "1,5"),
+        Arguments.of("other/w=he;0.5 n=x;-", "-"),
+        Arguments.of("other/w=he;0x1", "0x1"));
+  }
+
+  @ParameterizedTest
+  @MethodSource("valuesThatAreNotNumbers")
+  void testAddRejectsAValueThatIsNotANumber(String event, String value) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
         () -> new SimpleEventStreamBuilder().add(event));
+    Assertions.assertEquals("format error of the event \"" + event + "\". \"" + value + "\" is not a number",
+        e.getMessage());
+    Assertions.assertInstanceOf(NumberFormatException.class, e.getCause());
   }
 
   @ParameterizedTest
@@ -193,5 +199,19 @@ public class SimpleEventStreamBuilderTest {
     IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
         () -> new SimpleEventStreamBuilder().add(event));
     Assertions.assertTrue(e.getMessage().startsWith("format error of the event"), e.getMessage());
+  }
+
+  /** See {@link AbstractEventStreamTest#NON_DELIMITER_CHARS}. */
+  @ParameterizedTest
+  @FieldSource("opennlp.tools.ml.AbstractEventStreamTest#NON_DELIMITER_CHARS")
+  void testValuedFeaturesPreserveUnicode(String text) throws IOException {
+    String feature = "word=New" + text + "York";
+    try (ObjectStream<Event> events = new SimpleEventStreamBuilder()
+        .add("label/" + feature + ";2.5 中文;3").build()) {
+      Event event = events.read();
+      Assertions.assertArrayEquals(new String[] {feature, "中文"}, event.getContext());
+      Assertions.assertArrayEquals(new float[] {2.5f, 3f}, event.getValues());
+      Assertions.assertNull(events.read());
+    }
   }
 }

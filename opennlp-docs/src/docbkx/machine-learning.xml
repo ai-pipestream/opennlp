@@ -80,13 +80,37 @@ under the License.
 		</para>
 		<para>
 		<code>BasicContextGenerator</code> turns one string of contextual predicates into the
-		predicate array. Without arguments it separates on runs of whitespace under the Unicode
-		White_Space property (<code>StringUtil.isUnicodeWhitespace</code>), independent of the
+		predicate array. Without arguments, runs of Unicode whitespace (the White_Space property,
+		which includes no-break and ideographic spaces) separate predicates, independent of the
 		<code>opennlp.whitespace.mode</code> setting. A separator given to the constructor is
-		taken as written, not as a regular expression, and must not be null, empty, or contain an
-		unpaired surrogate. A predicate is never empty: leading, repeated, or trailing separators
-		produce none, and an empty input gives no predicates.
+		literal text, not a regular expression, and a separator containing a backslash is rejected
+		with an <code>IllegalArgumentException</code>. Empty predicates are not returned.
 		</para>
+		<table xml:id="tools.ml.context-generator.separators">
+			<title>Separators written for the regular expression of 2.x</title>
+			<tgroup cols="2">
+				<thead>
+					<row>
+						<entry>Separator in 2.x</entry>
+						<entry>In 3.x</entry>
+					</row>
+				</thead>
+				<tbody>
+					<row>
+						<entry><code>"\\|"</code>, <code>"\\."</code></entry>
+						<entry><code>"|"</code>, <code>"."</code></entry>
+					</row>
+					<row>
+						<entry><code>"\\s+"</code>, <code>" +"</code></entry>
+						<entry>the constructor without arguments</entry>
+					</row>
+					<row>
+						<entry><code>"[,;]"</code></entry>
+						<entry>one separator, <code>","</code> or <code>";"</code></entry>
+					</row>
+				</tbody>
+			</tgroup>
+		</table>
 		<para>
 		We have also set in place some interfaces and code to make it easier to automate the training
 		and evaluation process (the Evaluable interface and the TrainEval class). It is not necessary
@@ -95,24 +119,20 @@ under the License.
 		component which uses this functionality.
 		</para>
 		<para>
-		Events with real-valued features can also be read from a text file, one event per line,
-		through <code>RealValueFileEventStream</code>, or from any line stream through
-		<code>RealBasicEventStream</code>. The fields of a line are separated by runs of Unicode
-		whitespace, that is characters with the <code>White_Space</code> property such as a tab or a
-		no-break space; this definition is fixed and does not depend on the
-		<code>opennlp.whitespace.mode</code> property. Leading, trailing, and repeated whitespace is
-		ignored. The first field is the outcome and each further field is a context, optionally
-		followed by <code>=</code> and its real value. The value follows the last <code>=</code>, so a
-		context name may contain that character; a context whose text after the last <code>=</code>
-		is not a number is kept as written with the value 1, and an error is logged. A line with only
-		an outcome is an event without contexts, and a blank line is reported as an
-		<code>InvalidFormatException</code>. <code>FileEventStream</code> is unchanged: it reads
-		events without values and splits on spaces, tabs, and form feeds only. An example with real
-		values:
+		<code>FileEventStream</code> reads events from a text file, one event per line, and
+		<code>RealValueFileEventStream</code> and <code>RealBasicEventStream</code> read events
+		with real-valued features. The first field of a line is the outcome and each further field
+		is a context, optionally followed by <code>=</code> and its value after the last
+		<code>=</code>. Space, tab, carriage return, line feed and form feed separate fields; other
+		characters, including no-break spaces, stay inside feature names. A line with only an
+		outcome is an event without contexts, and a blank line is an error. Since 3.0, an
+		outcome-only line no longer ends a <code>RealBasicEventStream</code>. For example:
 		<screen>
 <![CDATA[other wc=ic=1.0 w&c=he,ic=2.0 n1wc=lc=3.0
 org-start wc=ic=1.0 w&c=apache,ic=2.0 p1wc=lc=3.0]]>
 		</screen>
+		<code>SimpleEventStreamBuilder</code> takes <code>outcome/context1 context2</code> or
+		<code>outcome/context1;value1 context2;value2</code>.
 		</para>
 		<para>
 		We have managed to use several techniques to reduce the size of the models when writing them to

@@ -18,14 +18,18 @@
 package opennlp.tools.formats.masc;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Assertions;
+import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
 import opennlp.tools.util.XmlUtil;
 
 /**
- * Runs a MASC annotation handler over an XML document given as text.
+ * Feeds MASC annotation text to a handler or a document parser.
  */
 final class MascParserTestUtil {
 
@@ -44,5 +48,39 @@ final class MascParserTestUtil {
     XmlUtil.createSaxParser().parse(
         new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), handler);
     return handler;
+  }
+
+  /**
+   * Checks that {@code handler} rejects {@code xml} with a {@link SAXException} whose cause is
+   * the {@link IllegalArgumentException} that names the malformed value.
+   *
+   * @param xml The malformed annotation XML.
+   * @param handler The parser expected to reject it.
+   * @return The parsing exception.
+   */
+  static SAXException assertRejected(String xml, DefaultHandler handler) {
+    SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(xml, handler));
+    Assertions.assertInstanceOf(IllegalArgumentException.class, e.getCause());
+    return e;
+  }
+
+  /**
+   * Lists XML whitespace as it can separate two items of an attribute value: written
+   * literally, repeated, or supplied through character references.
+   *
+   * @return The separators, each to be placed between two items.
+   */
+  static Stream<String> xmlWhitespaceSeparators() {
+    return Stream.of(" ", "   ", "\t", "\n", "\r\n", "&#9;", "&#10;", "&#13;", " &#10; ");
+  }
+
+  /**
+   * Wraps {@code text} as a UTF-8 input stream.
+   *
+   * @param text The document text.
+   * @return A stream over the UTF-8 bytes of {@code text}.
+   */
+  static InputStream input(String text) {
+    return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
   }
 }

@@ -88,7 +88,7 @@ accordingly; no conversion is required.
 
 ## Testing against real dictionaries
 
-The runtime tests use project-authored fixtures. `HunspellCompatibilityEval` in `opennlp-eval-tests` extends `AbstractEvalTest` and loads the LibreOffice `en_US`, `de_DE_frami`, and `hu_HU` dictionaries from the `hunspell/` directory of `OPENNLP_DATA_DIR`, the shared `opennlp-data.zip` archive every evaluation uses. It checks strict loading, expected inflections, compounds, concurrent stemming and analysis, and the results recorded from the reference implementation as described below.
+The runtime tests use project-authored fixtures. `HunspellCompatibilityEval` in `opennlp-eval-tests` extends `AbstractEvalTest` and loads the LibreOffice `en_US`, `de_DE_frami`, and `hu_HU` dictionaries from the `hunspell/` directory of `OPENNLP_DATA_DIR`, the shared `opennlp-data.zip` archive every evaluation uses. It checks strict loading, expected inflections, compounds, concurrent stemming, and the stems and recognition recorded from Hunspell as described below.
 
 The dictionary revision is
 [`32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4`](https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4).
@@ -112,8 +112,9 @@ before proposing to bundle any dictionary.
     -Dopennlp.forkCount=1 -DOPENNLP_DATA_DIR=/path/to/opennlp-data
 ```
 
-The evaluation compares 49 input forms with the stems, analyses, and recognition
-recorded from the reference implementation. It reports exact result-set matches,
+The evaluation compares 49 input forms with the stems and the recognition recorded
+from Hunspell. Morphological analyses are compared on the fixtures in
+`HunspellCompletionTest` only. It reports exact result-set matches,
 expected differences, unknown-input identity fallbacks, and unexpected results
 separately, and fails on an unexpected result. Expected differences specify the
 complete OpenNLP output for inputs whose recorded reference output differs, so a
@@ -140,7 +141,7 @@ Whitespace inside recorded analyses is normalized to single spaces. The fixture 
 The engine applies `PFX` and `SFX` rules with strip strings and character-class conditions. It supports a prefix and suffix cross-product, a double suffix sequence connected by continuation classes, rules that add and strip no material both on their own and in continuation paths, file-wide `FLAG` modes, file-wide `AF` aliases, and the `SET` encoding declaration. Numeric flags range from 1 through 65535, the full range the reference accepts. A number sign starts a comment at the beginning of a line or after the fields a directive consumes; elsewhere it is an ordinary value, so `BREAK #`, `NEEDAFFIX #`, and affix material consisting of `#` load as written.
 
 `COMPLEXPREFIXES` selects 2 prefix levels and 1 suffix level instead of 1
-prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions;
+prefix and 2 suffixes. `ICONV` and `OCONV` use longest-match conversions, and `_` in an `ICONV`, `OCONV` or `REP` pattern means a space, as in Hunspell;
 `IGNORE` removes configured characters from input, entries, and affix material.
 `KEEPCASE`, `CHECKSHARPS`, `LANG`, `WARN`, and `FORBIDWARN` control case variants
 and warning-marked entries. A capitalized word with a further inner capital is also
@@ -166,11 +167,11 @@ entries and dictionary `ph:` replacements. Compound boundaries and minimum
 lengths use Unicode code points. `BREAK` splits recognized parts recursively;
 the default separators are `-`, `^-`, and `-$`, and `BREAK 0` disables them.
 
-The compound restrictions follow the reference implementation in detail. `CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair checks apply to the complete input and to every remainder a further level splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt from the other patterns. A listed spelling whose first homonym carries `COMPOUNDFORBIDFLAG` is barred from every position but the last, including its affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
+The compound restrictions follow Hunspell in detail. `CHECKCOMPOUNDDUP` compares the two parts joined at each level, so only a repeated closing part rejects a compound. The `CHECKCOMPOUNDREP` and word-pair checks apply to the complete input and to every remainder a further level splits. A junction restored from a `CHECKCOMPOUNDPATTERN` replacement is exempt from the other patterns. A listed spelling whose first homonym carries `COMPOUNDFORBIDFLAG` is barred from every position but the last, including its affixed readings, and a suffix marked `ONLYINCOMPOUND` cannot close a compound.
 
 `NEEDAFFIX` (also named `PSEUDOROOT`), `ONLYINCOMPOUND`, `FORBIDDENWORD`,
-`CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted. As in the
-reference implementation, the first listed homonym decides whether a spelling is
+`CIRCUMFIX`, and `FULLSTRIP` control whether an analysis is accepted. As in
+Hunspell, the first listed homonym decides whether a spelling is
 forbidden, and a forbidden direct or affixed reading also blocks the compound and
 `BREAK` readings of that input. Morphology
 aliases use `AM`; `st:` supplies an explicit stem, `sp:` prepends surface
@@ -182,17 +183,10 @@ material, and `ds:` makes the form derived by the entry's suffixes the stem.
 metadata have no effect on stemming or analysis in the pinned reference and
 are ignored. The active compound and affix directives remain applicable.
 
-`HunspellStemmer.analyze(text)` returns an immutable list of distinct analyses
-as space-separated Hunspell fields in the reference field order. Entries without
-`st:` use the entry text. A suffix without morphological fields contributes `fl:`
-and its flag after the entry fields. A prefix without morphological fields
-contributes its affix text before the stem when no suffix follows and `fl:` with
-its flag otherwise; an entry without fields then contributes the prefix's `fl:`
-field after the stem. Compound components begin with `pa:`, and a closing
-component without affixes or entry fields carries no `st:` field. Unknown input
-returns an empty list.
-Analysis preserves field text without `OCONV`. The shared `Stemmer` interface
-is unchanged. The manual contains an executable example.
+`HunspellStemmer.analyze` is package-private in 3.0. It returns each analysis as
+Hunspell fields separated by spaces, in the order Hunspell prints them, and
+`HunspellCompletionTest` compares that output with results recorded from Hunspell.
+The public API returns stems. The shared `Stemmer` interface is unchanged.
 
 Comments and unused metadata may contain legacy-encoded bytes even when the file uses UTF-8. Parsed rules and dictionary text are decoded strictly. Default and `long` flag modes preserve raw one-byte flag values used by published UTF-8 dictionaries. Invalid rule counts, aliases, flags, and compound limits fail during loading in both modes. Each affix or dictionary stream is rejected when it exceeds `HunspellDictionary.MAX_STREAM_BYTES` (64 MiB).
 
@@ -237,24 +231,22 @@ analyses. These limits can exclude valid analyses; all included candidates
 must pass validation. Simplified triple letters can be restored at multiple
 junctions. `CHECKCOMPOUNDPATTERN` replacement applies at one junction.
 
-Native Hunspell's `stem()` and `spell()` do not have equivalent acceptance rules.
-The native stemmer can return a stem for KEEPCASE or FORBIDWARN input rejected by
+Hunspell's `stem()` and `spell()` do not have equivalent acceptance rules.
+The Hunspell stemmer can return a stem for KEEPCASE or FORBIDWARN input rejected by
 the spell checker, or return no stem for accepted complex-prefix and simplified
 compound forms. OpenNLP applies the dictionary restrictions and returns recognized
-compound part stems separately. Tests record native stemming and recognition
+compound part stems separately. Tests record Hunspell's stemming and recognition
 results independently. Compatibility requires checking recognition and output.
 
 The German comparisons also distinguish standalone entries from compound-only
-readings. For example, OpenNLP returns `Kind` for `Kinder`; native stemming also
+readings. For example, OpenNLP returns `Kind` for `Kinder`; Hunspell's stemmer also
 returns the compound-only `kind` and an identity-affixed `kinder` reading.
-For `Vorschläge`, the pinned native implementation recognizes the input but
-returns no stem or morphological analysis. OpenNLP returns component stems and
-fields. These are documented differences, not exact matches or a general
-accuracy claim.
+For `Vorschläge`, Hunspell recognizes the input but returns no stem. OpenNLP
+returns the component stems. These are documented differences, not exact matches
+or a general accuracy claim.
 
-For prefix-only forms without morphological fields, native analysis may include
-untagged prefix text, such as `un st:done fl:U` for `undone`. OpenNLP uses
-`fl:U st:done`. The evaluation classifies this formatting distinction as an
-expected difference. It also checks incomplete native output for `well-known`
-and German compounds such as `Haustür`, without treating additional OpenNLP
-output as a general correctness advantage.
+Hunspell returns no stem for `well-known` and for German compounds such as
+`Haustür`, while OpenNLP returns the part stems. The evaluation records each of
+these as an expected difference with the complete OpenNLP output, without treating
+the additional output as a general correctness advantage. Prefix-only forms such
+as `undone` stem the same way in both and are exact matches.

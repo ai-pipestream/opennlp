@@ -26,24 +26,24 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
+import opennlp.tools.commons.Internal;
 import opennlp.tools.util.StringUtil;
 
 /**
- * Reads the JSON files of the deep-learning components, vocabularies and model configurations,
- * in one pass over the text. Structure, whitespace, numbers, and string escapes follow
- * <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a>, with three additions: a byte
- * order mark as the first character is skipped, as
- * <a href="https://www.rfc-editor.org/rfc/rfc8259#section-8.1">section 8.1</a> allows; the
- * control characters {@code U+0000} to {@code U+001F} are accepted as content inside a string,
- * in keys as well as in values; and the values {@code NaN}, {@code Infinity}, and
- * {@code -Infinity}, which Python's {@code json} module writes by default, are accepted where a
- * value is skipped, never where one is read. Nesting is bounded by memory, not by the call
- * stack. Malformed text is reported as an {@link IllegalArgumentException} whose message names
- * the offset at which reading stopped.
- *
- * <p>{@link #stringObject(String, String)} is the only API of this class; its other members
- * serve the classes of this package.
+ * Reads the JSON files of the deep-learning components, vocabularies and model configurations.
+ * Structure, whitespace, numbers, and string escapes follow
+ * <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a>, with three additions:
+ * <ul>
+ *   <li>a byte order mark as the first character is skipped, as
+ *   <a href="https://www.rfc-editor.org/rfc/rfc8259#section-8.1">section 8.1</a> allows;</li>
+ *   <li>the control characters {@code U+0000} to {@code U+001F} are accepted inside a string;</li>
+ *   <li>the values {@code NaN}, {@code Infinity}, and {@code -Infinity} are accepted where a
+ *   value is skipped, never where one is read.</li>
+ * </ul>
+ * Malformed text is reported as an {@link IllegalArgumentException} whose message names the
+ * offset at which reading stopped.
  */
+@Internal(since = "3.0.0")
 public final class JsonScan {
 
   private static final String TRUE = "true";
@@ -54,7 +54,6 @@ public final class JsonScan {
   private static final String NEGATIVE_INFINITY = "-Infinity";
   private static final String[] LITERALS = {TRUE, FALSE, NULL, NAN, INFINITY, NEGATIVE_INFINITY};
 
-  private static final char BYTE_ORDER_MARK = (char) 0xFEFF;
   private static final char OBJECT_OPEN = '{';
   private static final char OBJECT_CLOSE = '}';
   private static final char ARRAY_OPEN = '[';
@@ -75,6 +74,7 @@ public final class JsonScan {
   private static final int MESSAGE_CONTEXT_LENGTH = 20;
 
   private static final String TEXT_MUST_NOT_BE_NULL = "text must not be null";
+  private static final String KEY_MUST_NOT_BE_NULL = "key must not be null";
 
   private JsonScan() {
   }
@@ -93,7 +93,7 @@ public final class JsonScan {
 
     Member {
       if (key == null) {
-        throw new IllegalArgumentException("key must not be null");
+        throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
       }
       if (valueStart < 0 || valueEnd < valueStart) {
         throw new IllegalArgumentException(
@@ -119,7 +119,7 @@ public final class JsonScan {
   public static Map<String, String> stringObject(String text, String key) {
     requireText(text);
     if (key == null) {
-      throw new IllegalArgumentException("key must not be null");
+      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
     }
     final Map<String, String> entries = new HashMap<>();
     if (isBlank(text)) {
@@ -195,7 +195,7 @@ public final class JsonScan {
       throw new IllegalArgumentException("members must not be null");
     }
     if (key == null) {
-      throw new IllegalArgumentException("key must not be null");
+      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
     }
     Member found = null;
     for (Member m : members) {
@@ -281,7 +281,7 @@ public final class JsonScan {
    * @return {@code 1} if the text starts with a byte order mark, {@code 0} otherwise.
    */
   private static int afterByteOrderMark(String text) {
-    return !text.isEmpty() && text.charAt(0) == BYTE_ORDER_MARK ? 1 : 0;
+    return StringUtil.startsWithByteOrderMark(text) ? 1 : 0;
   }
 
   /**
@@ -345,8 +345,8 @@ public final class JsonScan {
    * @throws IllegalArgumentException Thrown if an escape is not one of RFC 8259.
    */
   private static String unescape(String text, int start, int end) {
-    final int firstBackslash = text.indexOf(BACKSLASH, start);
-    if (firstBackslash < 0 || firstBackslash >= end) {
+    final int firstBackslash = text.indexOf(BACKSLASH, start, end);
+    if (firstBackslash < 0) {
       return text.substring(start, end);
     }
     final StringBuilder result = new StringBuilder(end - start);

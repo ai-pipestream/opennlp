@@ -29,15 +29,13 @@ import opennlp.tools.util.StringUtil;
  * <p>
  * {@code cp_1 cp_2 ... cp_n}
  * </p>
- * A different separator can be given, which is taken as written. A predicate is not empty:
- * a leading, repeated, or trailing separator does not produce one.
- * <p>
- * Since 3.0.0 the separator is taken as written, not as a regular expression (OPENNLP-1929).
- * </p>
+ * A separator given to the constructor is literal text; empty predicates are not returned.
  */
 public class BasicContextGenerator implements ContextGenerator<String> {
 
   private static final String[] NO_PREDICATES = new String[0];
+
+  private static final char BACKSLASH = '\\';
 
   /**
    * The separator, or {@code null} to split on whitespace.
@@ -59,14 +57,18 @@ public class BasicContextGenerator implements ContextGenerator<String> {
    * whitespace is part of the predicates.
    *
    * @param sep The separator, taken as written and not as a regular expression.
-   *            Must not be {@code null} or empty, and must be well-formed text: an unpaired
-   *            surrogate is not a character and could split a code point of the input.
-   * @throws IllegalArgumentException If {@code sep} is {@code null}, empty, or contains an
-   *                                  unpaired surrogate.
+   *            Must not be {@code null} or empty, and must not contain a backslash or
+   *            an unpaired surrogate.
+   * @throws IllegalArgumentException Thrown if {@code sep} is {@code null}, empty, contains a
+   *                                  backslash, or contains an unpaired surrogate.
    */
   public BasicContextGenerator(String sep) {
     if (sep == null || sep.isEmpty()) {
       throw new IllegalArgumentException("sep must not be null or empty");
+    }
+    if (sep.indexOf(BACKSLASH) >= 0) {
+      throw new IllegalArgumentException(
+          "sep is taken as written and must not contain a backslash: " + sep);
     }
     if (sep.codePoints().anyMatch(this::isUnpairedSurrogate)) {
       throw new IllegalArgumentException("sep must not contain an unpaired surrogate");
@@ -88,8 +90,6 @@ public class BasicContextGenerator implements ContextGenerator<String> {
   /**
    * {@inheritDoc}
    * Splits {@code o} at each occurrence of the separator and leaves out empty parts.
-   *
-   * @throws IllegalArgumentException If {@code o} is {@code null}.
    */
   @Override
   public String[] getContext(String o) {

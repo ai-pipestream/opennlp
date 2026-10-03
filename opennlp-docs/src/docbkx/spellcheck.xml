@@ -303,20 +303,14 @@ for (SuggestItem item : suggestions) {
 		<para>
 			A SpellChecker is driven by plain-text frequency dictionaries, loaded into an engine by the
 			<code>FrequencyDictionaryLoader</code>. Two UTF-8 (by default) line-based formats are supported.
-			In both, columns are separated by a TAB or by a run of spaces and TABs, so the space-delimited
-			SymSpell reference dictionaries load as they are. Whitespace at the start and the end of a line
-			is removed as <code>String.strip()</code> does it, so a vertical tab, a form feed, or an em
-			space there is ignored as well. Between the columns, other whitespace such as a no-break space
-			is part of the word, so <code>a&#xA0;b&lt;TAB&gt;5</code> is the single word
-			<code>a&#xA0;b</code> with count 5 and <code>the&#xA0;100</code> is reported as malformed.
-			Blank lines, lines of Unicode whitespace only, and lines starting with <code>#</code>
-			(comments) are skipped.
+			In both, columns are separated by TABs or spaces, so the space-delimited
+			<ulink url="https://github.com/wolfgarbe/SymSpell#dictionary-file-format">SymSpell
+			reference dictionaries</ulink> load as they are. Blank lines and lines starting with
+			<code>#</code> (comments) are skipped.
 		</para>
 		<para>
 			The <emphasis>unigram</emphasis> dictionary lists one <code>word&lt;TAB&gt;count</code> per line,
-			where <code>count</code> is the term's corpus frequency, written in ASCII digits with an
-			optional sign. A count in the digits of another script, a decimal point, an exponent, or a
-			negative count is reported as malformed:
+			where <code>count</code> is the term's corpus frequency, a nonnegative integer:
 			<screen>
 <![CDATA[the	23135851162
 of	13151942776
@@ -429,20 +423,6 @@ CharSequence clean = normalizer.normalize("the qick brwn fox"); // -> "the quick
 			</programlisting>
 		</para>
 		<para>
-			In per-token mode, letter and capitalization checks include supplementary Unicode code points.
-			A lowercase letter prevents all-uppercase correction. An uppercase token of one code point
-			uses initial-capital correction. Known dictionary words keep their original casing.
-			This example uses U+10428, a lowercase Deseret letter:
-			<programlisting language="java">
-<![CDATA[SymSpell engine = new SymSpell();
-engine.add("\uD801\uDC28word", 1000);
-CharSequenceNormalizer normalizer = new SpellCheckingCharSequenceNormalizer(engine);
-
-String corrected = normalizer.normalize("\uD801\uDC28WROLD").toString();
-// corrected is "\uD801\uDC28word"]]>
-			</programlisting>
-		</para>
-		<para>
 			For stream-based preprocessing two <code>FilterObjectStream&lt;String, String&gt;</code>
 			implementations wrap an existing <code>ObjectStream&lt;String&gt;</code> and correct each element as
 			it is read:
@@ -474,14 +454,4 @@ while ((line = corrected.read()) != null) {
 			</programlisting>
 		</para>
 	</section>
-  <section xml:id="tools.spellcheck.case-mapping">
-    <title>Case mapping</title>
-    <para>Spelling normalization uses locale-independent code-point case mapping
-      through <code>StringUtil</code> for dictionary lookup and uppercase corrections.
-      Prepare dictionary keys with the same mapping. Greek sigma does not receive
-      contextual final-sigma conversion, dotted uppercase I maps to one lowercase i,
-      and uppercase corrections do not expand sharp S into multiple characters.
-      Recognized words keep their original spelling and capitalization.
-    </para>
-  </section>
 </chapter>

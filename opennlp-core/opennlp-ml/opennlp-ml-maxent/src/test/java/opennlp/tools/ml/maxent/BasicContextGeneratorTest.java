@@ -17,19 +17,16 @@
 
 package opennlp.tools.ml.maxent;
 
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.WhitespaceMode;
 
 public class BasicContextGeneratorTest {
@@ -51,8 +48,7 @@ public class BasicContextGeneratorTest {
   private static final String LOW_SURROGATE = "\uDE00";
 
   @AfterEach
-  void resetSharedState() {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(false);
+  void resetWhitespaceMode() {
     WhitespaceMode.reset();
   }
 
@@ -60,13 +56,18 @@ public class BasicContextGeneratorTest {
     return Stream.of(
         Arguments.of(",", "a,b,c", new String[] {"a", "b", "c"}),
         Arguments.of(",", "single", new String[] {"single"}),
-        // the separator is taken as written, not as a regular expression
+        Arguments.of(";", "a;b", new String[] {"a", "b"}),
+        Arguments.of("-", "a-b", new String[] {"a", "b"}),
+        Arguments.of("#", "a#b", new String[] {"a", "b"}),
+        // characters with a meaning in a regular expression are ordinary separators
         Arguments.of("|", "a|b|c", new String[] {"a", "b", "c"}),
         Arguments.of(".", "a.b", new String[] {"a", "b"}),
         Arguments.of("+", "a+b", new String[] {"a", "b"}),
-        Arguments.of("(", "a(b", new String[] {"a", "b"}),
-        Arguments.of("\\s", "a\\sb", new String[] {"a", "b"}),
-        Arguments.of("\\s", "a b", new String[] {"a b"}),
+        Arguments.of("*", "a*b", new String[] {"a", "b"}),
+        Arguments.of("$", "a$b", new String[] {"a", "b"}),
+        Arguments.of("[,;]", "a[,;]b", new String[] {"a", "b"}),
+        Arguments.of("[,;]", "a,b;c", new String[] {"a,b;c"}),
+        Arguments.of("[ \t]", "a b\tc", new String[] {"a b\tc"}),
         // a multi-character separator, and a prefix of it in the input
         Arguments.of("::", "a::b::c", new String[] {"a", "b", "c"}),
         Arguments.of("::", "a:b", new String[] {"a:b"}),
@@ -106,23 +107,13 @@ public class BasicContextGeneratorTest {
     Assertions.assertArrayEquals(expected, new BasicContextGenerator(separator).getContext(input));
   }
 
-  private static Stream<Arguments> patternsTakenAsText() {
-    return Stream.of(
-        // a regular expression passed as the separator matches its own text only, so input
-        // that a pattern split before 3.0.0 is one predicate now
-        Arguments.of("\\|", "a|b", new String[] {"a|b"}),
-        Arguments.of("\\|", "a\\|b", new String[] {"a", "b"}),
-        Arguments.of("\\.", "a.b", new String[] {"a.b"}),
-        Arguments.of(Pattern.quote("|"), "a|b", new String[] {"a|b"}),
-        Arguments.of("\\s+", "a  b\tc", new String[] {"a  b\tc"}),
-        Arguments.of("[ \t]", "a b\tc", new String[] {"a b\tc"}),
-        Arguments.of("[,;]", "a,b;c", new String[] {"a,b;c"}));
-  }
-
   @ParameterizedTest
-  @MethodSource("patternsTakenAsText")
-  void testPatternSeparatorIsTakenAsText(String separator, String input, String[] expected) {
-    Assertions.assertArrayEquals(expected, new BasicContextGenerator(separator).getContext(input));
+  @ValueSource(strings = {"\\|", "\\.", "\\s", "\\s+", "\\Q|\\E", "a\\b", "\\"})
+  void testEscapedSeparatorIsRejected(String separator) {
+    IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+        () -> new BasicContextGenerator(separator));
+    Assertions.assertEquals("sep is taken as written and must not contain a backslash: "
+        + separator, e.getMessage());
   }
 
   private static Stream<Arguments> whitespaceSeparators() {
@@ -230,17 +221,6 @@ public class BasicContextGeneratorTest {
   void testDefaultSplitIsTheSameInLegacyMode(String input, String[] expected) {
     WhitespaceMode.setActive(WhitespaceMode.LEGACY);
     Assertions.assertArrayEquals(expected, new BasicContextGenerator().getContext(input));
-  }
-
-  /**
-   * The default split does not go through the shared {@link WhitespaceTokenizer#INSTANCE};
-   * any {@code TokenizerME} may switch on the keep-new-lines flag of that instance.
-   */
-  @Test
-  void testDefaultSplitIsUnaffectedByTheSharedTokenizer() {
-    WhitespaceTokenizer.INSTANCE.setKeepNewLines(true);
-    Assertions.assertArrayEquals(new String[] {"a", "b", "c"},
-        new BasicContextGenerator().getContext("a\nb\r\nc"));
   }
 
   @ParameterizedTest

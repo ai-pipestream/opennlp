@@ -40,13 +40,8 @@ import opennlp.tools.util.normalizer.UrlCharSequenceNormalizer;
 public class LanguageDetectorFactory extends BaseToolFactory {
 
   /**
-   * @return Retrieves a {@link LanguageDetectorContextGenerator}. The deprecated emoji
-   *     normalizer stays in this chain because existing models were trained with it. Since
-   *     3.0.0 it keeps hyphens and Basic Multilingual Plane characters (OPENNLP-1974), so
-   *     models trained with an earlier release see those characters in their n-grams
-   *     unless {@link opennlp.tools.util.CompatibilityMode#LEGACY} is active.
+   * @return Retrieves a {@link LanguageDetectorContextGenerator}.
    */
-  @SuppressWarnings("deprecation")
   public LanguageDetectorContextGenerator getContextGenerator() {
     return new DefaultLanguageDetectorContextGenerator(1, 3,
         EmojiCharSequenceNormalizer.getInstance(),

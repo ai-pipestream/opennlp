@@ -85,15 +85,24 @@ public class DownloadParserTest {
         Arguments.of("<a href=\"a.bin\">x</a><a href=\"d.bin\">y", List.of("a.bin")),
         // the first "</a>" closes the link, so nested anchor markup is swallowed
         Arguments.of("<a href=\"d.bin\">x <a href=\"e.bin\">y</a>", List.of("d.bin")),
-        // the href value ends at the first "\">", so it may hold other markup
+        // the href value ends at the closing quote followed by ">", so it may hold other markup
         Arguments.of("<a href=\"f<b>g.bin\">f</a>", List.of("f<b>g.bin")),
         // values and link text may span lines
         Arguments.of("<a href=\"a.bin\">x</a> <a href=\"h\ni.bin\">y\nz</a>", List.of("a.bin", "h\ni.bin")),
         Arguments.of("no links here", List.of()),
         Arguments.of("", List.of()),
-        // an empty href value is kept, a single-quoted one is not an anchor
+        // an empty href value is kept
         Arguments.of("<a href=\"\"></a>", List.of("")),
-        Arguments.of("<a href='a.bin'>x</a>", List.of()),
+        // single quotes are valid HTML and the other quote is content inside them
+        Arguments.of("<a href='a.bin'>x</a>", List.of("a.bin")),
+        Arguments.of("<a href='a.bin'>x</a><a href=\"b.bin\">y</a>", List.of("a.bin", "b.bin")),
+        Arguments.of("<a href='a\"b.bin'>x</a>", List.of("a\"b.bin")),
+        Arguments.of("<a href=\"a'b.bin\">x</a>", List.of("a'b.bin")),
+        Arguments.of("<A HREF='c.bin'>z</A>", List.of("c.bin")),
+        // an unquoted value or a value closed with the other quote is not an anchor
+        Arguments.of("<a href=a.bin>x</a>", List.of()),
+        Arguments.of("<a href='a.bin\">x</a><a href=\"b.bin\">y</a>", List.of("b.bin")),
+        Arguments.of("<a href=", List.of()),
         // the closing tag is matched case-insensitively and only as "</a>"
         Arguments.of("<a href=\"a.bin\">x</ A><a href=\"b.bin\">y</A >z</a>", List.of("a.bin")),
         Arguments.of("<a href=\"\uD83D\uDE00.bin\">x</a>", List.of("\uD83D\uDE00.bin")),
@@ -109,7 +118,9 @@ public class DownloadParserTest {
   @ParameterizedTest
   @MethodSource("indexPages")
   void testExtractLinks(String page, List<String> expected) {
-    assertEquals(expected, DownloadUtil.DownloadParser.extractLinks(page));
+    final DownloadUtil.DownloadParser downloadParser =
+        new DownloadUtil.DownloadParser(fromClasspath("opennlp/tools/util/index.html"));
+    assertEquals(expected, downloadParser.extractLinks(page));
   }
 
   @Test

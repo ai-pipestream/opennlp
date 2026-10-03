@@ -35,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
 import opennlp.tools.models.AbstractClassPathFinderTest;
 import opennlp.tools.models.ClassPathModelEntry;
 import opennlp.tools.models.ClassPathModelFinder;
+import opennlp.tools.util.StringUtil;
 
 /**
  * Runs the shared finder tests against a directory holding copies of the model jars
@@ -48,6 +49,7 @@ public class DirectoryModelFinderTest extends AbstractClassPathFinderTest {
   @TempDir
   private static Path root;
   private static Path modelDir;
+  private static int modelJarCount;
 
   @BeforeAll
   static void copyModelJars() throws IOException, URISyntaxException {
@@ -57,6 +59,7 @@ public class DirectoryModelFinderTest extends AbstractClassPathFinderTest {
     for (Path jar : jars) {
       Files.copy(jar, modelDir.resolve(jar.getFileName()));
     }
+    modelJarCount = jars.size();
   }
 
   private static List<Path> modelJarsOnClassPath() throws URISyntaxException {
@@ -70,7 +73,8 @@ public class DirectoryModelFinderTest extends AbstractClassPathFinderTest {
       }
     }
     if (jars.isEmpty()) {
-      for (String element : System.getProperty("java.class.path", "").split(File.pathSeparator)) {
+      final String classPath = System.getProperty("java.class.path", "");
+      for (String element : StringUtil.splitNonEmpty(classPath, File.pathSeparatorChar)) {
         addIfModelJar(Path.of(element), jars);
       }
     }
@@ -104,7 +108,7 @@ public class DirectoryModelFinderTest extends AbstractClassPathFinderTest {
   @Test
   void testNonRecursiveFindsDirectChildren() {
     final Set<ClassPathModelEntry> models = new DirectoryModelFinder(null, modelDir, false).findModels(false);
-    Assertions.assertEquals(4, models.size());
+    Assertions.assertEquals(modelJarCount, models.size());
   }
 
   @Test

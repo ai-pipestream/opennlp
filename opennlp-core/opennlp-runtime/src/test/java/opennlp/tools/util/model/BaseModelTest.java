@@ -20,6 +20,7 @@ package opennlp.tools.util.model;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InvalidClassException;
 import java.io.ObjectOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,7 +39,6 @@ import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.Parameters;
 import opennlp.tools.util.PlainTextByLineStream;
 import opennlp.tools.util.TrainingParameters;
-import opennlp.tools.util.jvm.NativeImage;
 
 /**
  * Tests {@link BaseModel#deserialize(Class, java.io.InputStream)} and the
@@ -91,17 +91,15 @@ public class BaseModelTest {
   }
 
   @Test
-  void testDeserializeIsUnsupportedInNativeImage() throws Exception {
-    final ByteArrayOutputStream bytesOut = new ByteArrayOutputStream();
-    try (ObjectOutputStream oos = new ObjectOutputStream(bytesOut)) {
-      oos.writeObject(model);
+  void testBaseModelDoesNotReferenceObjectInputFilter() throws Exception {
+    // java.io.ObjectInputFilter is not available on Android, so BaseModel itself
+    // must not reference it - otherwise every model fails to load there.
+    // See: https://github.com/GrapheneOS/SpeechServices/issues/32
+    final String bytecode;
+    try (InputStream in = BaseModel.class.getResourceAsStream("BaseModel.class")) {
+      Assertions.assertNotNull(in);
+      bytecode = new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
     }
-    System.setProperty(NativeImage.IMAGE_CODE_PROPERTY, "runtime");
-    try {
-      Assertions.assertThrows(UnsupportedOperationException.class, () ->
-          BaseModel.deserialize(ChunkerModel.class, new ByteArrayInputStream(bytesOut.toByteArray())));
-    } finally {
-      System.clearProperty(NativeImage.IMAGE_CODE_PROPERTY);
-    }
+    Assertions.assertFalse(bytecode.contains("java/io/ObjectInputFilter"));
   }
 }

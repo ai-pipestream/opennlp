@@ -46,8 +46,10 @@ import opennlp.tools.stemmer.hunspell.HunspellDictionary.CompoundPosition;
  * parts ({@code ONLYINCOMPOUND}), or forbidden words ({@code FORBIDDENWORD}) do not
  * count as standalone analyses.</p>
  *
- * <p>Compound part search is capped at {@value #PART_CHECK_BUDGET} part-licensing
- * attempts per input word; beyond that budget further compound analyses are skipped.
+ * <p>Compound part search stops after {@value #PART_CHECK_BUDGET} part-licensing
+ * attempts. The budget applies separately to each capitalization form of the input
+ * and to each word-break search. Once it is used up, further compound analyses are
+ * skipped.
  * The {@link Stemmer} interface leaves thread safety to the implementation. This
  * implementation reads only the immutable dictionary state, so a single instance is
  * safe to share between threads.</p>
@@ -121,8 +123,8 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Returns morphological analyses as space-separated Hunspell fields.
-   * Each result describes a complete accepted reading. Entries without an explicit
+   * Returns morphological analyses as space-separated Hunspell fields. Each result
+   * describes a complete accepted reading. Entries without an explicit
    * {@code st:} field use the dictionary entry as their stem. Compound components
    * begin with {@code pa:}; entry and affix fields follow in application order.
    * Results preserve dictionary field text without output conversion.
@@ -130,9 +132,9 @@ public final class HunspellStemmer implements Stemmer {
    * @param word The input to analyze. Must not be {@code null}.
    * @return An immutable list of distinct analyses, or an empty list for unknown input.
    *     At most {@value #MAX_ANALYSES} analyses are returned.
-   * @throws IllegalArgumentException If {@code word} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code word} is {@code null}.
    */
-  public List<String> analyze(CharSequence word) {
+  List<String> analyze(CharSequence word) {
     if (word == null) {
       throw new IllegalArgumentException("word must not be null");
     }
@@ -140,9 +142,9 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Finds the readings of a complete input. Trailing periods are removed first, as
-   * the reference implementation does for abbreviations; when the shortened form has
-   * no reading, one period is restored for entries listed with it.
+   * Finds the readings of a complete input. Trailing periods are removed first so
+   * that abbreviations match their entries; when the shortened form has no reading,
+   * one period is restored for entries listed with it.
    *
    * @param input The input after conversion.
    * @param morphological Whether results contain morphological fields.
@@ -232,7 +234,7 @@ public final class HunspellStemmer implements Stemmer {
               break;
             }
             next.add(new StringBuilder(prior).append(prior.isEmpty() ? "" : " ")
-                .append("pa:").append(part.surface())
+                .append(HunspellDictionary.COMPOUND_PART_FIELD).append(part.surface())
                 .append(fields.isEmpty() ? "" : " ").append(fields).toString());
           }
         }
@@ -242,7 +244,7 @@ public final class HunspellStemmer implements Stemmer {
     }
 
     /**
-   * Combines accepted readings before and after a word break.
+     * Combines accepted readings before and after a word break.
      *
      * @param leftText The opening text.
      * @param left The opening readings.
@@ -261,8 +263,10 @@ public final class HunspellStemmer implements Stemmer {
             return;
           }
           values.add(new StringBuilder()
-              .append(first.startsWith("pa:") ? "" : "pa:" + leftText + " ").append(first)
-              .append(' ').append(last.startsWith("pa:") ? "" : "pa:" + rightText + " ")
+              .append(first.startsWith(HunspellDictionary.COMPOUND_PART_FIELD) ? ""
+                  : HunspellDictionary.COMPOUND_PART_FIELD + leftText + " ").append(first)
+              .append(' ').append(last.startsWith(HunspellDictionary.COMPOUND_PART_FIELD) ? ""
+                  : HunspellDictionary.COMPOUND_PART_FIELD + rightText + " ")
               .append(last).toString());
         }
       }
@@ -294,25 +298,25 @@ public final class HunspellStemmer implements Stemmer {
     }
     final Results analyses = new Results(morphological);
     final boolean allCaps = HunspellDictionary.caseType(input) == HunspellDictionary.CaseType.ALLCAP;
-    for (final String variant : variants(input)) {
+    final List<String> variants = variants(input);
+    for (final String variant : variants) {
       analyze(variant, new Analysis(input, variant, analyses, allCaps));
     }
     // a forbidden direct or affixed reading forbids the spelling as a whole, so no
-    // compound or break reading is attempted, as in the reference implementation
+    // compound or break reading is attempted
     if (analyses.isEmpty() && !analyses.forbidden && dictionary.compoundsDeclared()) {
-      for (final String variant : variants(input)) {
+      for (final String variant : variants) {
         decompose(variant, input, analyses);
       }
     }
     if (analyses.isEmpty() && !analyses.forbidden) {
-      for (String declaration : dictionary.wordBreaks()) {
+      for (final HunspellDictionary.WordBreak wordBreak : dictionary.wordBreaks()) {
         if (budget[0] <= 0) {
           break;
         }
-        final boolean start = declaration.startsWith("^");
-        final boolean end = declaration.endsWith("$");
-        final String separator = declaration.substring(start ? 1 : 0,
-            declaration.length() - (end ? 1 : 0));
+        final boolean start = wordBreak.atStart();
+        final boolean end = wordBreak.atEnd();
+        final String separator = wordBreak.separator();
         for (int at = input.indexOf(separator); at >= 0 && budget[0] > 0;
             at = input.indexOf(separator, at + separator.length())) {
           final int after = at + separator.length();
@@ -348,9 +352,9 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Finds the readings of the part of a Hungarian word before a hyphen, which the
-   * reference implementation accepts as a listed word ending in the hyphen or as a
-   * compound under the moving rule.
+   * Finds the readings of the part of a Hungarian word before a hyphen, which is
+   * accepted as a listed word ending in the hyphen or as a compound under the moving
+   * rule.
    *
    * @param text The part before the hyphen.
    * @param morphological Whether results contain morphological fields.
@@ -420,10 +424,11 @@ public final class HunspellStemmer implements Stemmer {
       variants.add(lowered);
       if (allUpper) {
         variants.add(initialUpper(lowered));
-        if (surface.charAt(0) == 'İ') {
-          // the reference keeps a dotted capital I when it capitalizes an all-uppercase
-          // word, so an entry such as İzmir is found outside the Turkic languages too
-          variants.add("İ" + lowered.substring(Character.charCount(lowered.codePointAt(0))));
+        if (surface.startsWith(HunspellDictionary.DOTTED_CAPITAL_I)) {
+          // capitalizing an all-uppercase word keeps a dotted capital I, so an entry
+          // such as İnci is found outside the Turkic languages too
+          variants.add(HunspellDictionary.DOTTED_CAPITAL_I
+              + lowered.substring(Character.charCount(lowered.codePointAt(0))));
         }
         if (dictionary.checkSharps()) {
           addSharpVariants(lowered, 0, variants);
@@ -456,8 +461,10 @@ public final class HunspellStemmer implements Stemmer {
     if (variants.size() >= MAX_CASE_VARIANTS) {
       return;
     }
-    for (int at = word.indexOf("ss", from); at >= 0; at = word.indexOf("ss", at + 1)) {
-      final String changed = word.substring(0, at) + "ß" + word.substring(at + 2);
+    final String doubleS = HunspellDictionary.DOUBLE_S;
+    for (int at = word.indexOf(doubleS, from); at >= 0; at = word.indexOf(doubleS, at + 1)) {
+      final String changed = word.substring(0, at) + HunspellDictionary.SHARP_S
+          + word.substring(at + doubleS.length());
       variants.add(changed);
       variants.add(initialUpper(changed));
       addSharpVariants(changed, at + 1, variants);
@@ -473,8 +480,8 @@ public final class HunspellStemmer implements Stemmer {
     private final String variant;
     private final Results stems;
     /**
-     * Whether the input is all uppercase, in which case the reference implementation
-     * also matches the hidden capitalized forms of mixed-case entries.
+     * Whether the input is all uppercase, in which case the hidden capitalized forms
+     * of mixed-case entries also match.
      */
     private final boolean allCaps;
 
@@ -529,6 +536,18 @@ public final class HunspellStemmer implements Stemmer {
         stems.forbidden = true;
       }
     }
+
+    /**
+     * Records that an affix analysis reached a forbidden homonym.
+     *
+     * @param flags One entry's flag set.
+     * @param flag The removed affix's flag.
+     */
+    private void noteForbidden(int[] flags, int flag) {
+      if (dictionary.forbidsAffixed(flags, flag)) {
+        stems.forbidden = true;
+      }
+    }
   }
 
   /**
@@ -550,7 +569,7 @@ public final class HunspellStemmer implements Stemmer {
         return;
       }
       for (int[] flags : entries) {
-        if (dictionary.validStandalone(List.of(flags))) {
+        if (dictionary.validStandalone(flags)) {
           analyses.add(word, flags);
         }
       }
@@ -618,9 +637,9 @@ public final class HunspellStemmer implements Stemmer {
   }
 
   /**
-   * Applies the text-level compound checks the reference implementation runs on the
-   * text every compound level splits: a {@code CHECKCOMPOUNDREP} replacement or a
-   * space inserted at any position must not produce a recognized non-compound form.
+   * Applies the text-level compound checks to the text every compound level splits: a
+   * {@code CHECKCOMPOUNDREP} replacement or a space inserted at any position must not
+   * produce a recognized non-compound form.
    *
    * @param text The complete input or the remainder a compound level splits.
    * @return {@code true} if a check forbids splitting the text.
@@ -628,6 +647,11 @@ public final class HunspellStemmer implements Stemmer {
   private boolean rejectsCompoundText(String text) {
     if (dictionary.rejectsCompoundReplacement(text, this::isNoncompoundForm)) {
       return true;
+    }
+    // without this bound every split position of a long word would be analyzed again
+    // at every compound level
+    if (!dictionary.mayReadSpacedForm(text.length() + 1)) {
+      return false;
     }
     for (int at = Character.charCount(text.codePointAt(0)); at < text.length();
         at += Character.charCount(text.codePointAt(at))) {
@@ -825,7 +849,8 @@ public final class HunspellStemmer implements Stemmer {
     for (int[] entry : entries) {
       if (dictionary.acceptsRulePart(entry, last, affixes)
           && dictionary.acceptsCase(entry, surface, part, affixes)
-          && (affixes.length == 0 || HunspellDictionary.hasFlag(List.of(entry), affixes[0].flag()))) {
+          && (affixes.length == 0
+              || HunspellDictionary.contains(entry, affixes[0].flag()))) {
         result.add(new CompoundPart(part, root, entry, List.of(affixes),
             dictionary.morphologicalStems(root, entry, affixes)));
       }
@@ -874,8 +899,8 @@ public final class HunspellStemmer implements Stemmer {
     if (remaining < min) {
       return;
     }
-    // this call splits the remainder into further parts, which the reference
-    // implementation subjects to the same text checks as the complete input
+    // this call splits the remainder into further parts, which are subject to the
+    // same text checks as the complete input
     if (!first) {
       if (remainderChecks[fromPoint] == 0) {
         remainderChecks[fromPoint] = (byte) (rejectsCompoundText(word.substring(from)) ? 2 : 1);
@@ -932,8 +957,8 @@ public final class HunspellStemmer implements Stemmer {
 
   /**
    * Applies the junction declarations. {@code CHECKCOMPOUNDDUP} forbids the closing
-   * part from repeating the part before it; the reference implementation compares the
-   * two parts it joins at each level, so an earlier repetition is not checked. A
+   * part from repeating the part before it; only the two parts joined at each level
+   * are compared, so an earlier repetition is not checked. A
    * junction restored from a pattern replacement must satisfy that pattern's flag
    * conditions and is exempt from the other patterns; any other junction is forbidden
    * when some pattern matches it.
@@ -1045,7 +1070,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> entries = dictionary.lookup(part);
     if (entries != null) {
       for (int[] flags : entries) {
-        if ((dictionary.mayStand(List.of(flags), position)
+        if ((dictionary.mayStand(flags, position)
             || (movingRule && !last && dictionary.opensHyphenatedCompound(flags)))
             && dictionary.acceptsCase(flags, surface, part)) {
           readings.add(new CompoundPart(part, part, flags, List.of(),
@@ -1173,7 +1198,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> flagSets = dictionary.lookup(stem);
     if (flagSets != null && !dictionary.needsFurtherAffix(affix)) {
       for (int[] flags : flagSets) {
-        if (dictionary.supportsPart(List.of(flags), affix.flag(), position,
+        if (dictionary.supportsPart(flags, affix.flag(), position,
             dictionary.affixAdmits(affix, position))
             && dictionary.acceptsCase(flags, surface, part, affix)) {
           readings.add(new CompoundPart(part, stem, flags, List.of(affix),
@@ -1221,7 +1246,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> entries = dictionary.lookup(root);
     if (entries != null && !dictionary.circumfixOnly(inner)) {
       for (int[] flags : entries) {
-        if (dictionary.supportsPart(List.of(flags), inner.flag(), position,
+        if (dictionary.supportsPart(flags, inner.flag(), position,
             dictionary.affixAdmits(inner, position) || dictionary.affixAdmits(outer, position))
             && dictionary.acceptsCase(flags, surface, part, inner, outer)) {
           readings.add(new CompoundPart(part, root, flags, List.of(inner, outer),
@@ -1381,7 +1406,7 @@ public final class HunspellStemmer implements Stemmer {
       if (flagSets != null) {
         analyses.noteForbidden(flagSets, suffix.flag());
         for (int[] flags : flagSets) {
-          if (dictionary.supports(List.of(flags), suffix.flag())) {
+          if (dictionary.supports(flags, suffix.flag())) {
             analyses.add(stem, flags, suffix);
           }
         }
@@ -1422,7 +1447,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> innerFlags = analyses.lookup(doubleStem);
     if (innerFlags != null) {
       for (int[] flags : innerFlags) {
-        if (dictionary.supports(List.of(flags), inner.flag())) {
+        if (dictionary.supports(flags, inner.flag())) {
           analyses.add(doubleStem, flags, inner, outer);
         }
       }
@@ -1454,7 +1479,7 @@ public final class HunspellStemmer implements Stemmer {
       if (flagSets != null) {
         analyses.noteForbidden(flagSets, prefix.flag());
         for (int[] flags : flagSets) {
-          if (dictionary.supports(List.of(flags), prefix.flag())) {
+          if (dictionary.supports(flags, prefix.flag())) {
             analyses.add(stem, flags, prefix);
           }
         }
@@ -1508,9 +1533,9 @@ public final class HunspellStemmer implements Stemmer {
         && dictionary.needsFurtherAffix(suffix))) {
       for (int[] flags : both) {
         if (dictionary.licensesCrossProduct(flags, prefix, suffix)) {
-          analyses.noteForbidden(List.of(flags), suffix.flag());
+          analyses.noteForbidden(flags, suffix.flag());
         }
-        if (dictionary.supportsCrossProduct(List.of(flags), prefix, suffix)) {
+        if (dictionary.supportsCrossProduct(flags, prefix, suffix)) {
           analyses.add(doubleStem, flags, prefix, suffix);
         }
       }
@@ -1553,7 +1578,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> flagSets = analyses.lookup(root);
     if (flagSets != null) {
       for (int[] flags : flagSets) {
-        if (dictionary.supportsCrossProduct(List.of(flags), prefix, inner)) {
+        if (dictionary.supportsCrossProduct(flags, prefix, inner)) {
           analyses.add(root, flags, prefix, inner, outer);
         }
       }
@@ -1580,7 +1605,7 @@ public final class HunspellStemmer implements Stemmer {
     final List<int[]> entries = analyses.lookup(root);
     if (entries != null && !dictionary.circumfixOnly(inner)) {
       for (int[] flags : entries) {
-        if (dictionary.supports(List.of(flags), inner.flag())) {
+        if (dictionary.supports(flags, inner.flag())) {
           analyses.add(root, flags, inner, outer);
         }
       }
@@ -1615,7 +1640,7 @@ public final class HunspellStemmer implements Stemmer {
       final List<int[]> entries = analyses.lookup(root);
       if (entries != null) {
         for (int[] flags : entries) {
-          if (dictionary.supportsCrossProduct(List.of(flags), inner, suffix)) {
+          if (dictionary.supportsCrossProduct(flags, inner, suffix)) {
             analyses.add(root, flags, inner, outer, suffix);
           }
         }

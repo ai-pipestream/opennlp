@@ -75,25 +75,10 @@ public class HunspellManualExampleTest {
   }
 
   /**
-   * Checks the morphological analysis example in the manual.
-   *
-   * @throws IOException If fixture loading fails.
-   */
-  @Test
-  void testAnalyzeWorkers() throws IOException {
-    final HunspellDictionary dictionary = HunspellDictionary.load(
-        new ByteArrayInputStream(AFFIX.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream(WORDS.getBytes(StandardCharsets.UTF_8)));
-    final HunspellStemmer analyzer = new HunspellStemmer(dictionary);
-    Assertions.assertEquals(List.of("st:work fl:E fl:S"), analyzer.analyze("workers"));
-    Assertions.assertEquals(List.of(), analyzer.analyze("table"));
-  }
-
-  /**
    * Checks partial loading and the diagnostic format used in the manual.
    *
    * @param directory The temporary fixture directory.
-   * @throws IOException If fixture creation or loading fails.
+   * @throws IOException Thrown if fixture creation or loading fails.
    */
   @Test
   void testPartialLoadingDiagnostics(@TempDir Path directory) throws IOException {

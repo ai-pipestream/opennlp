@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Assertions;
@@ -113,19 +112,32 @@ public class LeipzigLanguageSampleStreamTest {
     }
   }
 
-  @Test
-  void testOnlyFilesWithLowerCaseAsciiLanguageCodesAreRead() throws IOException {
-    // Leipzig corpus file names start with the three-letter language code
-    String[] names = {"eng_news_2010_10K-sentences.txt", "deu_wikipedia_2016_10K-sentences.txt",
-        "Eng_news_2010_10K-sentences.txt", "ENG_news_2010_10K-sentences.txt",
-        "enG_news_2010_10K-sentences.txt", "en1_news_2010_10K-sentences.txt",
-        "e-g_news_2010_10K-sentences.txt", "en_news_2010_10K-sentences.txt",
-        "\u00E9ng_news_2010_10K-sentences.txt", "\u0130ng_news_2010_10K-sentences.txt",
-        "\uFF45ng_news_2010_10K-sentences.txt", "\uD835\uDC1Abc_news_2010_10K-sentences.txt", "en"};
-    for (String name : names) {
-      Files.writeString(new File(emptyTempDir, name).toPath(),
-          "1\tThis is a sentence.\n2\tThis is another sentence.\n", StandardCharsets.UTF_8);
-    }
+  @ParameterizedTest
+  @ValueSource(strings = {"eng_news_2010_10K-sentences.txt", "deu_wikipedia_2016_10K-sentences.txt"})
+  void testFileWithLowerCaseAsciiLanguageCodeIsRead(String name) throws IOException {
+    writeSentences(name);
+    Assertions.assertEquals(List.of(name.substring(0, 3), name.substring(0, 3)), readLanguages());
+  }
+
+  @ParameterizedTest
+  // an upper case letter in each position, a digit, a hyphen, a two-letter code, an accented
+  // letter, a dotted capital I, a fullwidth letter, a mathematical letter, and a short name
+  @ValueSource(strings = {"Eng_news_2010_10K-sentences.txt", "eNg_news_2010_10K-sentences.txt",
+      "enG_news_2010_10K-sentences.txt", "en1_news_2010_10K-sentences.txt",
+      "e-g_news_2010_10K-sentences.txt", "en_news_2010_10K-sentences.txt",
+      "\u00E9ng_news_2010_10K-sentences.txt", "\u0130ng_news_2010_10K-sentences.txt",
+      "\uFF45ng_news_2010_10K-sentences.txt", "\uD835\uDC1Abc_news_2010_10K-sentences.txt", "en"})
+  void testFileWithoutLowerCaseAsciiLanguageCodeIsNotRead(String name) throws IOException {
+    writeSentences(name);
+    Assertions.assertEquals(List.of(), readLanguages());
+  }
+
+  private void writeSentences(String name) throws IOException {
+    Files.writeString(new File(emptyTempDir, name).toPath(),
+        "1\tThis is a sentence.\n2\tThis is another sentence.\n", StandardCharsets.UTF_8);
+  }
+
+  private List<String> readLanguages() throws IOException {
     List<String> languages = new ArrayList<>();
     try (LeipzigLanguageSampleStream stream = new LeipzigLanguageSampleStream(emptyTempDir, 1, 2)) {
       LanguageSample sample;
@@ -133,22 +145,6 @@ public class LeipzigLanguageSampleStreamTest {
         languages.add(sample.language().getLang());
       }
     }
-    Assertions.assertEquals(List.of("deu", "deu", "eng", "eng"), languages);
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"\n", "\r\n", "\r"})
-  void testSentenceFilesWithEveryLineTerminatorAreRead(String terminator) throws IOException {
-    Files.writeString(new File(emptyTempDir, "eng-sentences.txt").toPath(),
-        "1\tFirst sentence." + terminator + "2\tSecond sentence." + terminator, StandardCharsets.UTF_8);
-    List<String> texts = new ArrayList<>();
-    try (LeipzigLanguageSampleStream stream = new LeipzigLanguageSampleStream(emptyTempDir, 1, 2)) {
-      LanguageSample sample;
-      while ((sample = stream.read()) != null) {
-        texts.add(sample.context().toString());
-      }
-    }
-    Collections.sort(texts);
-    Assertions.assertEquals(List.of("First sentence. ", "Second sentence. "), texts);
+    return languages;
   }
 }

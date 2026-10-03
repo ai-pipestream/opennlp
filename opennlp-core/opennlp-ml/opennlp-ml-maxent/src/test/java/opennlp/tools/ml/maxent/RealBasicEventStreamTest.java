@@ -84,15 +84,9 @@ public class RealBasicEventStreamTest extends AbstractEventStreamTest {
   @Test
   void testReadWithInvalidNegativeValues() throws IOException {
     try (RealBasicEventStream eventStream = createEventStream(EVENTS_INVALID_NEGATIVE)) {
-      eventStream.read();
-      fail("Negative values should not be tolerated as input!");
-    } catch (RuntimeException rte) {
-      //noinspection StatementWithEmptyBody
-      if (rte.getMessage().startsWith("Negative values are not allowed")) {
-        // expected behviour
-      } else {
-        fail(rte);
-      }
+      IllegalArgumentException e = Assertions.assertThrows(IllegalArgumentException.class,
+          eventStream::read);
+      Assertions.assertEquals("Negative values are not allowed: wc=ic=-1.0", e.getMessage());
     }
   }
 
@@ -106,20 +100,20 @@ public class RealBasicEventStreamTest extends AbstractEventStreamTest {
   }
 
   /**
-   * Every line goes through {@link RealValueFileEventStream#parseEvent(String)}: an outcome-only
-   * line is an event without contexts and does not end the stream, fields are separated by
-   * Unicode whitespace, and a blank line is reported.
+   * An outcome-only line is an event without contexts and does not end the stream, a tab
+   * separates fields, a no-break space does not, and a blank line is reported.
    */
   @Test
-  void testReadParsesEveryLineWithParseEvent() throws IOException {
-    String input = "other\r\nother\twc=lc=1.0\u00A0n1wc=ic=2.0\n \nother wc=x=1.0\n";
+  void testOutcomeOnlyLineDoesNotEndTheStream() throws IOException {
+    String input = "other\r\nsecond\tword=New\u00A0York=2.0\t中文=3.0\n \nother wc=x=1.0\n";
     try (ObjectStream<Event> eventStream = createEventStream(input)) {
       Event e = eventStream.read();
       Assertions.assertEquals("other", e.getOutcome());
       Assertions.assertEquals(0, e.getContext().length);
       e = eventStream.read();
-      Assertions.assertArrayEquals(new String[] {"wc=lc", "n1wc=ic"}, e.getContext());
-      Assertions.assertArrayEquals(new float[] {1.0f, 2.0f}, e.getValues());
+      Assertions.assertEquals("second", e.getOutcome());
+      Assertions.assertArrayEquals(new String[] {"word=New\u00A0York", "中文"}, e.getContext());
+      Assertions.assertArrayEquals(new float[] {2.0f, 3.0f}, e.getValues());
       Assertions.assertThrows(InvalidFormatException.class, eventStream::read);
     }
   }

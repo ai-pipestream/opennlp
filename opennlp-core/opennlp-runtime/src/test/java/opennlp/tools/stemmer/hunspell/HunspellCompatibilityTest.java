@@ -28,7 +28,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** Original dictionary fixtures for Hunspell conversion, casing and morphology. */
+/**
+ * Dictionary fixtures for Hunspell conversion, casing, compounding, and morphology.
+ * The fixtures are written for this test: each declares its own words and flags for
+ * the rule it exercises. The reference outcomes are recorded from Hunspell as described
+ * in {@code dev/README-hunspell-dictionaries.md}.
+ */
 class HunspellCompatibilityTest {
 
   private static final String PLURAL = "SFX A Y 1\nSFX A 0 s .\n";
@@ -53,7 +58,7 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * Supplies independently written fixtures, not excerpts from published dictionaries.
+   * Supplies the fixtures.
    *
    * @return The examples.
    */
@@ -104,9 +109,9 @@ class HunspellCompatibilityTest {
         new Example("surface-prefix", PLURAL, "1\nroot/A sp:pre st:base\n",
             "roots", List.of("prebase")),
         new Example("sharp-s-uppercase", "CHECKSHARPS\n" + PLURAL,
-            "1\nstraße/A\n", "STRASSES", List.of("straße")),
+            "1\nsoße/A\n", "SOSSES", List.of("soße")),
         new Example("sharp-s-keepcase", "CHECKSHARPS\nKEEPCASE K\n" + PLURAL,
-            "1\nstraße/AK\n", "STRASSES", List.of("straße")),
+            "1\nsoße/AK\n", "SOSSES", List.of("soße")),
         new Example("forbidden-warning", "WARN W\nFORBIDWARN\n" + PLURAL,
             "1\ncard/AW\n", "cards", List.of("cards")),
         new Example("compound-rule", "COMPOUNDMIN 1\nCOMPOUNDRULE 1\nCOMPOUNDRULE RS\n"
@@ -182,104 +187,106 @@ class HunspellCompatibilityTest {
         new Example("replacement-morphology-star", COMPOUND + "CHECKCOMPOUNDREP\n" + PLURAL,
             "4\nrain/C\ncoat/C\nrainboats/A ph:raincoats*\nrainboat\n",
             "raincoat", List.of("raincoat")),
-        new Example("derivation-surface-prefix", "PFX U Y 1\nPFX U 0 un . dp:pfx_un sp:un\n"
-            + "SFX A Y 1\nSFX A 0 able/U . ds:der_able\n", "1\ndrink/A po:verb\n",
-            "undrinkable", List.of("undrinkable")),
-        new Example("derivation-inflectional-prefix", "PFX P Y 1\nPFX P 0 un . ip:un\n"
-            + "SFX R Y 1\nSFX R 0 able/P . ds:DER\n", "1\ndrink/R po:verb\n",
-            "undrinkable", List.of("drinkable")),
+        new Example("derivation-surface-prefix", "PFX U Y 1\nPFX U 0 mis . dp:pfx_mis sp:mis\n"
+            + "SFX A Y 1\nSFX A 0 ment/U . ds:der_ment\n", "1\nmanage/A po:verb\n",
+            "mismanagement", List.of("mismanagement")),
+        new Example("derivation-inflectional-prefix", "PFX P Y 1\nPFX P 0 mis . ip:mis\n"
+            + "SFX R Y 1\nSFX R 0 ment/P . ds:DER\n", "1\nmanage/R po:verb\n",
+            "mismanagement", List.of("management")),
         new Example("compound-pattern-substitution-only", COMPOUND + "CHECKCOMPOUNDPATTERN 2\n"
-            + "CHECKCOMPOUNDPATTERN o b z\nCHECKCOMPOUNDPATTERN oo ba u\n",
-            "2\nfoo/C\nbar/C\n", "fozar", List.of("foo", "bar")),
+            + "CHECKCOMPOUNDPATTERN a t k\nCHECKCOMPOUNDPATTERN ea ta y\n",
+            "2\nsea/C\ntable/C\n", "sekable", List.of("sea", "table")),
         new Example("compound-pattern-substitution-second", COMPOUND + "CHECKCOMPOUNDPATTERN 2\n"
-            + "CHECKCOMPOUNDPATTERN o b z\nCHECKCOMPOUNDPATTERN oo ba u\n",
-            "2\nfoo/C\nbar/C\n", "fur", List.of("foo", "bar")),
+            + "CHECKCOMPOUNDPATTERN a t k\nCHECKCOMPOUNDPATTERN ea ta y\n",
+            "2\nsea/C\ntable/C\n", "syble", List.of("sea", "table")),
         new Example("compound-duplicate-last-parts", COMPOUND + "CHECKCOMPOUNDDUP\n",
             "2\nfoo/C\nbar/C\n", "foofoobar", List.of("foo", "bar")),
         new Example("compound-duplicate-reject", COMPOUND + "CHECKCOMPOUNDDUP\n",
             "2\nfoo/C\nbar/C\n", "foobarbar", List.of("foobarbar")),
-        new Example("compound-forbid-entry", "COMPOUNDFLAG X\nCOMPOUNDPERMITFLAG Y\n"
-            + "COMPOUNDFORBIDFLAG Z\nSFX S Y 2\nSFX S 0 bar/YX .\nSFX S 0 baz/YX .\n",
-            "3\nfoo/S\nexample/X\nfoobaz/Z\n", "foobazexample", List.of("foobazexample")),
-        new Example("compound-forbid-entry-other-suffix", "COMPOUNDFLAG X\nCOMPOUNDPERMITFLAG Y\n"
-            + "COMPOUNDFORBIDFLAG Z\nSFX S Y 2\nSFX S 0 bar/YX .\nSFX S 0 baz/YX .\n",
-            "3\nfoo/S\nexample/X\nfoobaz/Z\n", "foobarexample", List.of("foo", "example")),
-        new Example("compound-only-suffix-at-end", COMPOUND + "ONLYINCOMPOUND O\n"
-            + "COMPOUNDPERMITFLAG P\nSFX B Y 1\nSFX B 0 s/OP .\n",
-            "2\nfoo/C\npseudo/CB\n", "foopseudos", List.of("foopseudos")),
-        new Example("compound-only-suffix-inside", COMPOUND + "ONLYINCOMPOUND O\n"
-            + "COMPOUNDPERMITFLAG P\nSFX B Y 1\nSFX B 0 s/OP .\n",
-            "2\nfoo/C\npseudo/CB\n", "pseudosfoo", List.of("pseudo", "foo")),
+        new Example("compound-forbid-entry", COMPOUND_FORBID, COMPOUND_FORBID_WORDS,
+            "firewardhouse", List.of("firewardhouse")),
+        new Example("compound-forbid-entry-other-suffix", COMPOUND_FORBID, COMPOUND_FORBID_WORDS,
+            "firewoodhouse", List.of("fire", "house")),
+        new Example("compound-only-suffix-at-end", ONLY_IN_COMPOUND, ONLY_IN_COMPOUND_WORDS,
+            "lampglassen", List.of("lampglassen")),
+        new Example("compound-only-suffix-inside", ONLY_IN_COMPOUND, ONLY_IN_COMPOUND_WORDS,
+            "glassenlamp", List.of("glass", "lamp")),
         new Example("compound-replacement-inner", COMPOUND + "CHECKCOMPOUNDREP\n"
-            + "REP 1\nREP forbiddenroot forbidden_root\n",
-            "3\nroot/C\nforbidden/C\nforbidden root\n", "rootforbiddenroot",
-            List.of("rootforbiddenroot")),
+            + "REP 1\nREP wallpaper wall_paper\n",
+            "3\nwall/C\npaper/C\nwall paper\n", "paperwallpaper",
+            List.of("paperwallpaper")),
         new Example("compound-replacement-inner-unaffected", COMPOUND + "CHECKCOMPOUNDREP\n"
-            + "REP 1\nREP forbiddenroot forbidden_root\n",
-            "3\nroot/C\nforbidden/C\nforbidden root\n", "rootforbidden",
-            List.of("root", "forbidden")),
-        new Example("mixed-case-initial-capital", "PFX a Y 1\nPFX a u no u\n",
-            "1\nuLinda/a\n", "NoLinda", List.of("uLinda")),
-        new Example("mixed-case-initial-capital-entry", "PFX a Y 1\nPFX a u no u\n",
-            "1\nuLinda/a\n", "ULinda", List.of("uLinda")),
-        new Example("forbidden-affixed-blocks-compound", "FORBIDDENWORD F\nCOMPOUNDFLAG C\n"
-            + "COMPOUNDMIN 1\nSFX S Y 1\nSFX S 0 s .\n",
-            "4\nfoo/CS\nword/C\nbar/CS\nfoowordbar/FS\n", "foowordbars", List.of("foowordbars")),
-        new Example("forbidden-affixed-other-order", "FORBIDDENWORD F\nCOMPOUNDFLAG C\n"
-            + "COMPOUNDMIN 1\nSFX S Y 1\nSFX S 0 s .\n",
-            "4\nfoo/CS\nword/C\nbar/CS\nfoowordbar/FS\n", "barwordfoos",
-            List.of("bar", "word", "foo")),
-        new Example("turkic-capitalized-entry", "LANG tr\n", "1\nİzmir\n",
-            "İZMİR", List.of("İzmir")),
+            + "REP 1\nREP wallpaper wall_paper\n",
+            "3\nwall/C\npaper/C\nwall paper\n", "paperwall",
+            List.of("paper", "wall")),
+        new Example("mixed-case-initial-capital", "PFX b Y 1\nPFX b e ra e\n",
+            "1\neMarket/b\n", "RaMarket", List.of("eMarket")),
+        new Example("mixed-case-initial-capital-entry", "PFX b Y 1\nPFX b e ra e\n",
+            "1\neMarket/b\n", "EMarket", List.of("eMarket")),
+        new Example("forbidden-affixed-blocks-compound", FORBIDDEN_AFFIXED, FORBIDDEN_AFFIXED_WORDS,
+            "sunlightrooms", List.of("sunlightrooms")),
+        new Example("forbidden-affixed-other-order", FORBIDDEN_AFFIXED, FORBIDDEN_AFFIXED_WORDS,
+            "roomlightsuns", List.of("room", "light", "sun")),
+        new Example("turkic-capitalized-entry", "LANG tr\n", "1\nİnci\n",
+            "İNCİ", List.of("İnci")),
         new Example("break-number-sign", "BREAK 1\nBREAK #\n" + PLURAL,
             "2\nriver/A\nboat/A\n", "rivers#boats", List.of("river", "boat")),
         new Example("flag-number-sign", "NEEDAFFIX #\n" + PLURAL,
             "2\nfoo/#A\nbar/A\n", "foos", List.of("foo")),
         new Example("flag-number-sign-virtual-stem", "NEEDAFFIX #\n" + PLURAL,
             "2\nfoo/#A\nbar/A\n", "foo", List.of("foo")),
-        new Example("hidden-capital-mixed-case", PLURAL, "1\niPod/A\n", "IPODS", List.of("Ipod")),
-        new Example("hidden-capital-initial-capital", PLURAL, "1\niPod/A\n", "Ipods", List.of("Ipods")),
+        new Example("hidden-capital-mixed-case", PLURAL, "1\neBook/A\n", "EBOOKS", List.of("Ebook")),
+        new Example("hidden-capital-initial-capital", PLURAL, "1\neBook/A\n", "Ebooks", List.of("Ebooks")),
         new Example("hidden-capital-all-caps-entry", "SFX S N 1\nSFX S 0 's .\n",
-            "1\nUNICEF/S\n", "UNICEF'S", List.of("Unicef")),
-        new Example("hidden-capital-listed-form-wins", PLURAL, "2\niPod/A\nIpod\n",
-            "IPODS", List.of("IPODS")),
-        new Example("hidden-capital-unflagged-all-caps", PLURAL, "1\nNASA\n", "Nasa", List.of("Nasa")),
-        new Example("hidden-capital-not-in-compound", COMPOUND + PLURAL, "2\niPod/AC\ncase/C\n",
-            "IPODCASE", List.of("IPODCASE")),
+            "1\nACME/S\n", "ACME'S", List.of("Acme")),
+        new Example("hidden-capital-listed-form-wins", PLURAL, "2\neBook/A\nEbook\n",
+            "EBOOKS", List.of("EBOOKS")),
+        new Example("hidden-capital-unflagged-all-caps", PLURAL, "1\nACME\n", "Acme", List.of("Acme")),
+        new Example("hidden-capital-not-in-compound", COMPOUND + PLURAL, "2\neBook/AC\ncover/C\n",
+            "EBOOKCOVER", List.of("EBOOKCOVER")),
         new Example("hungarian-hyphen-moving-rule", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "forróvíz-tartály", List.of("forró", "víz", "tartály")),
+            "folyómeder-őr", List.of("folyó", "meder", "őr")),
         new Example("hungarian-hyphen-rule-needs-hyphen", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "forróvíz", List.of("forróvíz")),
+            "folyómeder", List.of("folyómeder")),
         new Example("hungarian-hyphen-rule-needs-language", HUNGARIAN_HYPHEN.replace("LANG hu", "LANG de"),
-            HUNGARIAN_WORDS, "forróvíz-tartály", List.of("forróvíz-tartály")),
+            HUNGARIAN_WORDS, "folyómeder-őr", List.of("folyómeder-őr")),
         new Example("hungarian-hyphen-rule-needs-flag", HUNGARIAN_HYPHEN,
-            "3\nforr/S\nvíz/Y\ntartály/Y\n", "forrvíz-tartály", List.of("forrvíz-tartály")),
+            "3\nfoly/S\nmeder/Y\nőr/Y\n", "folymeder-őr", List.of("folymeder-őr")),
         new Example("hungarian-hyphen-rule-first-part-only", HUNGARIAN_HYPHEN, HUNGARIAN_WORDS,
-            "tartály-forróvíz", List.of("tartály-forróvíz")),
-        new Example("apostrophe-all-caps", "PFX P Y 1\nPFX P 0 l' .\n", "1\nAfrique/P\n",
-            "L'AFRIQUE", List.of("Afrique")),
-        new Example("apostrophe-capitalized", "PFX P Y 1\nPFX P 0 l' .\n", "1\nAfrique/P\n",
-            "L'Afrique", List.of("Afrique")),
+            "őr-folyómeder", List.of("őr-folyómeder")),
+        new Example("apostrophe-all-caps", "PFX P Y 1\nPFX P 0 d' .\n", "1\nOrient/P\n",
+            "D'ORIENT", List.of("Orient")),
+        new Example("apostrophe-capitalized", "PFX P Y 1\nPFX P 0 d' .\n", "1\nOrient/P\n",
+            "D'Orient", List.of("Orient")),
         new Example("trailing-period", PLURAL, "2\ntext/A\netc.\n", "texts.", List.of("text")),
         new Example("trailing-periods", PLURAL, "2\ntext/A\netc.\n", "texts...", List.of("text")),
         new Example("trailing-period-entry", PLURAL, "2\ntext/A\netc.\n", "etc.", List.of("etc.")),
         new Example("trailing-period-not-added", PLURAL, "2\ntext/A\netc.\n", "etc", List.of("etc")),
         new Example("numeric-flag-maximum", "FLAG num\nSFX 65535 Y 1\nSFX 65535 0 s .\n",
             "1\ndog/65535\n", "dogs", List.of("dog")),
-        // the manual's example of part stems here against the concatenated native stem
+        // the manual's example of part stems here against the concatenated Hunspell stem
         new Example("compound-part-stems", COMPOUND + PLURAL, "2\nriver/C\nboat/CA\n",
             "riverboats", List.of("river", "boat")));
   }
 
   private static final String HUNGARIAN_HYPHEN = "LANG hu\nCOMPOUNDFLAG Y\nCOMPOUNDMIN 2\n"
       + "COMPOUNDFORBIDFLAG !\nBREAK 1\nBREAK -\nSFX S Y 1\nSFX S 0 ó .\n";
-  private static final String HUNGARIAN_WORDS = "4\nforr/S\nvíz/Y\nforró/F!\ntartály/Y\n";
+  private static final String HUNGARIAN_WORDS = "4\nfoly/S\nmeder/Y\nfolyó/F!\nőr/Y\n";
+  private static final String COMPOUND_FORBID = "COMPOUNDFLAG K\nCOMPOUNDPERMITFLAG L\n"
+      + "COMPOUNDFORBIDFLAG M\nSFX T Y 2\nSFX T 0 wood/LK .\nSFX T 0 ward/LK .\n";
+  private static final String COMPOUND_FORBID_WORDS = "3\nfire/T\nhouse/K\nfireward/M\n";
+  private static final String ONLY_IN_COMPOUND = COMPOUND + "ONLYINCOMPOUND Q\n"
+      + "COMPOUNDPERMITFLAG P\nSFX D Y 1\nSFX D 0 en/QP .\n";
+  private static final String ONLY_IN_COMPOUND_WORDS = "2\nlamp/C\nglass/CD\n";
+  private static final String FORBIDDEN_AFFIXED = "FORBIDDENWORD F\nCOMPOUNDFLAG C\n"
+      + "COMPOUNDMIN 1\nSFX S Y 1\nSFX S 0 s .\n";
+  private static final String FORBIDDEN_AFFIXED_WORDS = "4\nsun/CS\nlight/C\nroom/CS\nsunlightroom/FS\n";
 
   /**
-   * Checks the Java implementation using the original fixture.
+   * Checks the Java implementation on one fixture.
    *
    * @param example The dictionary and assertion.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("examples")
@@ -294,9 +301,9 @@ class HunspellCompatibilityTest {
   }
 
   /**
-   * The stems the reference implementation returned for a fixture when the fixtures were
-   * recorded, as described in {@code dev/README-hunspell-dictionaries.md}. An empty
-   * reference result is recorded as the input itself.
+   * The stems each fixture was recorded with, from Hunspell as described in
+   * {@code dev/README-hunspell-dictionaries.md}. An empty reference result is recorded
+   * as the input itself; a fixture missing from the list fails.
    *
    * @param example The fixture.
    * @return The recorded reference stems.
@@ -317,24 +324,68 @@ class HunspellCompatibilityTest {
           "compound-only-suffix-inside" -> List.of(example.input());
       case "compound-syllable-limit" -> List.of("rayme");
       case "compound-duplicate-last-parts" -> List.of("foofoo");
-      case "compound-forbid-entry-other-suffix" -> List.of("foobar");
-      case "compound-replacement-inner" -> List.of("rootforbidden");
-      case "compound-replacement-inner-unaffected" -> List.of("root");
-      case "forbidden-affixed-other-order" -> List.of("barwordfoo");
-      case "forbidden-affixed-blocks-compound" -> List.of("foowordbar");
-      case "hidden-capital-initial-capital" -> List.of("Ipod");
+      case "compound-forbid-entry-other-suffix" -> List.of("firewood");
+      case "compound-replacement-inner" -> List.of("paperwall");
+      case "compound-replacement-inner-unaffected" -> List.of("paper");
+      case "forbidden-affixed-other-order" -> List.of("roomlightsun");
+      case "forbidden-affixed-blocks-compound" -> List.of("sunlightroom");
+      case "hidden-capital-initial-capital" -> List.of("Ebook");
       case "mixed-case-initial-capital", "mixed-case-initial-capital-entry" ->
           List.of(example.input());
       case "break-default", "break-recursive", "break-start", "break-end", "break-custom",
           "break-number-sign", "hungarian-hyphen-moving-rule", "apostrophe-all-caps",
           "apostrophe-capitalized" -> List.of(example.input());
-      default -> example.name().startsWith("compound-") && example.expected().size() > 1
-          ? List.of(String.join("", example.expected())) : example.expected();
+      case "affixed-explicit-stem", "explicit-stem" -> List.of("foot");
+      case "break-disabled" -> List.of("rivers-boats");
+      case "break-internal-only" -> List.of("-rivers");
+      case "break-unknown-part" -> List.of("rivers-absent");
+      case "complex-prefix-requires-continuation" -> List.of("unredo");
+      case "complex-prefix-single-suffix" -> List.of("walkers");
+      case "compound-duplicate-reject" -> List.of("foobarbar");
+      case "compound-forbid-entry" -> List.of("firewardhouse");
+      case "compound-more-suffixes", "compound-part-stems", "compound-pattern",
+          "compound-rule-homonyms", "compound-rule-long", "compound-rule-numeric" ->
+          List.of("riverboat");
+      case "compound-only-suffix-at-end" -> List.of("lampglassen");
+      case "compound-root-count" -> List.of("raincoatrack");
+      case "compound-rule-optional" -> List.of("stoneboat");
+      case "compound-rule-order" -> List.of("boatriver");
+      case "compound-rule-star" -> List.of("riverstoneboat");
+      case "compound-syllable-limit-reject" -> List.of("raymefa");
+      case "derivational-suffix" -> List.of("kindness");
+      case "derivation-inflectional-prefix" -> List.of("management");
+      case "derivation-surface-prefix" -> List.of("mismanagement");
+      case "flag-number-sign", "flag-number-sign-virtual-stem" -> List.of("foo");
+      case "hidden-capital-all-caps-entry", "hidden-capital-unflagged-all-caps" -> List.of("Acme");
+      case "hidden-capital-listed-form-wins" -> List.of("EBOOKS");
+      case "hidden-capital-mixed-case" -> List.of("Ebook");
+      case "hidden-capital-not-in-compound" -> List.of("EBOOKCOVER");
+      case "hungarian-hyphen-rule-first-part-only" -> List.of("őr-folyómeder");
+      case "hungarian-hyphen-rule-needs-flag" -> List.of("folymeder-őr");
+      case "hungarian-hyphen-rule-needs-hyphen" -> List.of("folyómeder");
+      case "hungarian-hyphen-rule-needs-language" -> List.of("folyómeder-őr");
+      case "ignored-affix", "ignored-input-and-dictionary" -> List.of("pearl");
+      case "input-end-anchor" -> List.of("quartz");
+      case "input-ligature" -> List.of("field");
+      case "keepcase-exact" -> List.of("card");
+      case "longest-input-match" -> List.of("ax");
+      case "mixed-case-is-not-lowercase" -> List.of("cArds");
+      case "morphology-alias" -> List.of("goose");
+      case "numeric-flag-maximum" -> List.of("dog");
+      case "output-conversion" -> List.of("bär");
+      case "surface-prefix" -> List.of("prebase");
+      case "trailing-period-entry" -> List.of("etc.");
+      case "trailing-period-not-added" -> List.of("etc");
+      case "trailing-periods", "trailing-period" -> List.of("text");
+      case "turkic-capitalized-entry" -> List.of("İnci");
+      case "turkish-case" -> List.of("ılık");
+      case "uppercase-proper-name" -> List.of("Maren");
+      default -> throw new IllegalStateException("no recorded stems for " + example.name());
     };
   }
 
   /**
-   * Whether the reference spell checker accepted a fixture input when the fixtures
+   * Whether the Hunspell spell checker accepted a fixture input when the fixtures
    * were recorded.
    *
    * @param example The fixture.
@@ -374,25 +425,25 @@ class HunspellCompatibilityTest {
    * checker rejects while its analyzer still stems them, are covered structurally.
    */
   private static final Map<String, String> STEM_DEVIATIONS = Map.ofEntries(
-      Map.entry("complex-prefixes", "the reference analyzer reverses field text under COMPLEXPREFIXES"),
-      Map.entry("sharp-s-uppercase", "the reference analyzer does not expand SS to a sharp s"),
-      Map.entry("sharp-s-keepcase", "the reference analyzer does not expand SS to a sharp s"),
-      Map.entry("compound-pattern-replacement", "the reference analyzer does not restore replaced junctions"),
-      Map.entry("compound-simplified-triple", "the reference analyzer does not restore simplified triples"),
-      Map.entry("mixed-case-initial-capital", "the reference analyzer keeps the initial capital"),
-      Map.entry("mixed-case-initial-capital-entry", "the reference analyzer keeps the initial capital"),
-      Map.entry("apostrophe-all-caps", "the reference analyzer does not undo an elided-article prefix"),
-      Map.entry("apostrophe-capitalized", "the reference analyzer does not undo an elided-article prefix"),
-      Map.entry("hidden-capital-initial-capital", "the reference analyzer ignores the capitalized input"),
-      Map.entry("break-start", "the reference analyzer does not split at BREAK separators"),
-      Map.entry("break-end", "the reference analyzer does not split at BREAK separators"));
+      Map.entry("complex-prefixes", "Hunspell's analyzer reverses field text under COMPLEXPREFIXES"),
+      Map.entry("sharp-s-uppercase", "Hunspell's analyzer does not expand SS to a sharp s"),
+      Map.entry("sharp-s-keepcase", "Hunspell's analyzer does not expand SS to a sharp s"),
+      Map.entry("compound-pattern-replacement", "Hunspell's analyzer does not restore replaced junctions"),
+      Map.entry("compound-simplified-triple", "Hunspell's analyzer does not restore simplified triples"),
+      Map.entry("mixed-case-initial-capital", "Hunspell's analyzer keeps the initial capital"),
+      Map.entry("mixed-case-initial-capital-entry", "Hunspell's analyzer keeps the initial capital"),
+      Map.entry("apostrophe-all-caps", "Hunspell's analyzer does not undo an elided-article prefix"),
+      Map.entry("apostrophe-capitalized", "Hunspell's analyzer does not undo an elided-article prefix"),
+      Map.entry("hidden-capital-initial-capital", "Hunspell's analyzer ignores the capitalized input"),
+      Map.entry("break-start", "Hunspell's analyzer does not split at BREAK separators"),
+      Map.entry("break-end", "Hunspell's analyzer does not split at BREAK separators"));
 
   /**
    * Tests recognition against the recorded reference outcome. A fixture listed in
    * {@link #RECOGNITION_DEVIATIONS} must differ, so a stale entry fails too.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "recognition {0}")
   @MethodSource("examples")

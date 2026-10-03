@@ -26,12 +26,10 @@ import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.regex.Pattern;
 
 /**
  * A base implementation of a {@link ClassPathModelFinder} for the detection of
@@ -40,7 +38,8 @@ import java.util.regex.Pattern;
  * <p>
  * This search mask can be adjusted by using the one argument
  * {@link AbstractClassPathModelFinder#AbstractClassPathModelFinder(String) constructor}.
- * Wildcard search is supported by using asterisk symbol.
+ * Wildcard search supports {@code *} for any run of characters and {@code ?} for one
+ * Unicode code point. Masks use decoded names, including spaces and non-ASCII characters.
  *
  * @see ClassPathModelFinder
  */
@@ -50,8 +49,6 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
 
   private static final String WILDCARD_MUST_NOT_BE_NULL = "wildcard must not be null";
   private static final String URL_MUST_NOT_BE_NULL = "url must not be null";
-  private static final String PATTERN_MUST_NOT_BE_NULL = "pattern must not be null";
-  private static final String DOT_ALL = "(?s)";
 
   private final String jarModelPrefix;
   private Set<ClassPathModelEntry> models;
@@ -66,9 +63,12 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
   /**
    * @param jarModelPrefix The leafnames of the jars that should be canned (e.g. "opennlp.jar").
    *                       May contain a wildcard glob ("opennlp-*.jar"). It must not be {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code jarModelPrefix} is {@code null}.
    */
   public AbstractClassPathModelFinder(String jarModelPrefix) {
-    Objects.requireNonNull(jarModelPrefix, "jarModelPrefix must not be null");
+    if (jarModelPrefix == null) {
+      throw new IllegalArgumentException("jarModelPrefix must not be null");
+    }
     this.jarModelPrefix = jarModelPrefix;
   }
 
@@ -142,15 +142,17 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
   }
 
   /**
-   * Tests whether the file part of {@code url} matches {@code wildcard} from start to end,
-   * where {@code *} stands for any run of characters, {@code ?} for exactly one character,
-   * and every other character for itself.
+   * Tests whether the decoded file part of {@code url} matches {@code wildcard} from start
+   * to end, where {@code *} stands for any run of characters, {@code ?} for exactly one
+   * Unicode code point, and every other character for itself. URI percent escapes are
+   * decoded once; literal plus signs remain plus signs. A {@code url} that is not a valid
+   * URI, such as one with an unescaped space, is matched on {@link URL#getFile()} as is.
    *
-   * @param url The {@link URL} whose {@link URL#getFile() file part} is tested.
+   * @param url The {@link URL} whose decoded file part is tested.
    *            Must not be {@code null}.
    * @param wildcard The wildcard expression. Must not be {@code null}.
    * @return {@code true} if the file part matches, {@code false} otherwise.
-   * @throws IllegalArgumentException If {@code url} or {@code wildcard} is {@code null}.
+   * @throws IllegalArgumentException Thrown if {@code url} or {@code wildcard} is {@code null}.
    */
   protected boolean matchesWildcard(URL url, String wildcard) {
     if (url == null) {
@@ -159,76 +161,15 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
     if (wildcard == null) {
       throw new IllegalArgumentException(WILDCARD_MUST_NOT_BE_NULL);
     }
-    return GlobMatcher.matches(wildcard, url.getFile());
-  }
-
-  /**
-   * Translates {@code wildcard} into a regular expression with the same meaning: {@code *}
-   * becomes {@code .*}, {@code ?} becomes {@code .}, both spanning line terminators, and
-   * every other character is quoted so that it stands for itself.
-   *
-   * @param wildcard The wildcard expression. Must not be {@code null}.
-   * @return A regular expression that accepts what {@link #matchesWildcard(URL, String)}
-   *         accepts for {@code wildcard}.
-   * @throws IllegalArgumentException If {@code wildcard} is {@code null}.
-   * @deprecated Matching no longer needs a regular expression, use
-   *     {@link #matchesWildcard(URL, String)}.
-   */
-  @Deprecated(since = "3.0.0", forRemoval = true)
-  protected String asRegex(String wildcard) {
-    if (wildcard == null) {
-      throw new IllegalArgumentException(WILDCARD_MUST_NOT_BE_NULL);
+    String filePart;
+    try {
+      final URI uri = url.toURI();
+      filePart = uri.isOpaque() ? uri.getSchemeSpecificPart()
+          : uri.getPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getQuery());
+    } catch (URISyntaxException e) {
+      filePart = url.getFile();
     }
-    final StringBuilder regex = new StringBuilder(DOT_ALL);
-    final StringBuilder literal = new StringBuilder();
-    for (int i = 0; i < wildcard.length(); ) {
-      final int cp = wildcard.codePointAt(i);
-      if (cp == '*' || cp == '?') {
-        appendQuoted(regex, literal);
-        regex.append(cp == '*' ? ".*" : ".");
-      } else {
-        literal.appendCodePoint(cp);
-      }
-      i += Character.charCount(cp);
-    }
-    appendQuoted(regex, literal);
-    return regex.toString();
-  }
-
-  /**
-   * Appends {@code literal} to {@code regex} as a quoted run and clears it.
-   *
-   * @param regex The regular expression under construction.
-   * @param literal The characters to quote; may be empty.
-   */
-  private static void appendQuoted(StringBuilder regex, StringBuilder literal) {
-    if (!literal.isEmpty()) {
-      regex.append(Pattern.quote(literal.toString()));
-      literal.setLength(0);
-    }
-  }
-
-  /**
-   * Tests whether the whole file part of {@code url} matches the regular expression
-   * {@code pattern}.
-   *
-   * @param url The {@link URL} whose {@link URL#getFile() file part} is tested.
-   *            Must not be {@code null}.
-   * @param pattern The regular expression. Must not be {@code null}.
-   * @return {@code true} if the file part matches, {@code false} otherwise.
-   * @throws IllegalArgumentException If {@code url} or {@code pattern} is {@code null}.
-   * @deprecated Matching no longer needs a regular expression, use
-   *     {@link #matchesWildcard(URL, String)}.
-   */
-  @Deprecated(since = "3.0.0", forRemoval = true)
-  protected boolean matchesPattern(URL url, Pattern pattern) {
-    if (url == null) {
-      throw new IllegalArgumentException(URL_MUST_NOT_BE_NULL);
-    }
-    if (pattern == null) {
-      throw new IllegalArgumentException(PATTERN_MUST_NOT_BE_NULL);
-    }
-    return pattern.matcher(url.getFile()).matches();
+    return WildcardMatcher.matches(wildcard, filePart);
   }
 
   /**
@@ -259,7 +200,8 @@ public abstract class AbstractClassPathModelFinder implements ClassPathModelFind
         final JarEntry entry = entries.nextElement();
         if (!entry.isDirectory()) {
           try {
-            uris.add(new URI(jarUrl + entry.getName()));
+            final String entryPath = new URI(null, null, "/" + entry.getName(), null).getRawPath();
+            uris.add(new URI(jarUrl + entryPath.substring(1)));
           } catch (URISyntaxException ignored) {
             //if we cannot convert to URI here, we ignore that entry.
           }

@@ -32,8 +32,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestReporter;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -45,10 +45,9 @@ import opennlp.tools.stemmer.hunspell.HunspellStemmer;
  * Evaluates the Hunspell stemmer with the LibreOffice English, German, and Hungarian
  * dictionaries under the {@code hunspell} directory of {@code OPENNLP_DATA_DIR}: strict
  * loading, expected inflections and compounds, concurrent use, and agreement with the
- * stems, analyses, and recognition recorded from the reference implementation as
- * described in {@code dev/README-hunspell-dictionaries.md}.
+ * stems and the recognition recorded from Hunspell as described in
+ * {@code dev/README-hunspell-dictionaries.md}.
  */
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class HunspellCompatibilityEval extends AbstractEvalTest {
 
   private static final String DATA_DIRECTORY = "hunspell";
@@ -57,7 +56,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   private static final int TIMEOUT_SECONDS = 60;
   private static final String UNKNOWN = "zyzzyvax";
 
-  private final Map<Dictionary, HunspellStemmer> stemmers = new EnumMap<>(Dictionary.class);
+  private static final Map<Dictionary, HunspellStemmer> STEMMERS = new EnumMap<>(Dictionary.class);
 
   /** The external dictionaries, their MD5 digests, and the evaluated inputs. */
   private enum Dictionary {
@@ -94,42 +93,45 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   }
 
   /**
-   * The distinct stems and analyses of one input.
+   * The outcome recorded from Hunspell for one input.
    *
-   * @param stems The stems.
-   * @param analyses The morphological analyses.
+   * @param accepted Whether the Hunspell spell checker accepted the input.
+   * @param stems The distinct stems the Hunspell stemmer returned.
    */
-  private record Result(Set<String> stems, Set<String> analyses) { }
-
-  /**
-   * The reference implementation's recorded outcome for one input.
-   *
-   * @param accepted Whether the reference spell checker accepted the input.
-   * @param stems The reference stems.
-   * @param analyses The reference analyses with separator whitespace normalized.
-   */
-  private record Recorded(boolean accepted, Set<String> stems, Set<String> analyses) {
-
-    /** {@return the recorded stems and analyses as a result} */
-    Result result() {
-      return new Result(stems, analyses);
-    }
-  }
+  private record Recorded(boolean accepted, Set<String> stems) { }
 
   /** The classification of one comparison. */
   private enum Outcome {
     EXACT, EXPECTED_DIFFERENCE, IDENTITY_FALLBACK, UNEXPECTED
   }
 
+  /**
+   * Verifies the dictionary digests and loads each dictionary once, strictly.
+   *
+   * @throws Exception If a file is missing, changed, or malformed.
+   */
+  @BeforeAll
+  static void verifyAndLoadDictionaries() throws Exception {
+    for (Dictionary dictionary : Dictionary.values()) {
+      final Path affix = file(dictionary, HunspellDictionary.AFFIX_FILE_SUFFIX);
+      final Path words = file(dictionary, HunspellDictionary.DICTIONARY_FILE_SUFFIX);
+      verifyFileChecksum(affix, dictionary.affixChecksum);
+      verifyFileChecksum(words, dictionary.dictionaryChecksum);
+      final HunspellDictionary loaded = HunspellDictionary.load(affix, words);
+      Assertions.assertTrue(loaded.getUnsupportedDirectives().isEmpty());
+      STEMMERS.put(dictionary, new HunspellStemmer(loaded));
+    }
+  }
+
   /** Checks the comparison classification on synthetic results. */
   @Test
   void comparisonValidation() {
-    final Result complete = new Result(Set.of("card"), Set.of("st:card"));
-    final Result empty = new Result(Set.of(), Set.of());
-    final Result identity = new Result(Set.of(UNKNOWN), Set.of());
-    final Recorded accepted = new Recorded(true, complete.stems(), complete.analyses());
-    final Recorded acceptedEmpty = new Recorded(true, Set.of(), Set.of());
-    final Recorded rejected = new Recorded(false, Set.of(), Set.of());
+    final Set<String> complete = Set.of("card");
+    final Set<String> empty = Set.of();
+    final Set<String> identity = Set.of(UNKNOWN);
+    final Recorded accepted = new Recorded(true, complete);
+    final Recorded acceptedEmpty = new Recorded(true, Set.of());
+    final Recorded rejected = new Recorded(false, Set.of());
     Assertions.assertAll(
         () -> Assertions.assertEquals(Outcome.EXACT, classify("card", accepted, complete, null)),
         () -> Assertions.assertEquals(Outcome.EXPECTED_DIFFERENCE,
@@ -137,22 +139,21 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
         () -> Assertions.assertEquals(Outcome.IDENTITY_FALLBACK, classify(UNKNOWN, rejected, identity, null)),
         () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", accepted, empty, null)),
         () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", acceptedEmpty, complete, null)),
-        () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", rejected, complete, null)),
+        () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", rejected, Set.of("cards"), null)),
         () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", accepted, complete, complete)),
         () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify("card", acceptedEmpty, empty, complete)),
         () -> Assertions.assertEquals(Outcome.UNEXPECTED, classify(UNKNOWN, accepted, identity, null)));
   }
 
   /**
-   * Loads each dictionary strictly and confirms that partial loading skips nothing.
+   * Confirms that partial loading of a dictionary that loads strictly skips nothing.
    *
    * @param dictionary The external dictionary.
-   * @throws Exception If a file is missing, changed, or malformed.
+   * @throws Exception If a file is missing or malformed.
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
-  void strictLoading(Dictionary dictionary) throws Exception {
-    stemmer(dictionary);
+  void partialLoadingSkipsNothing(Dictionary dictionary) throws Exception {
     final HunspellDictionary partial = HunspellDictionary.load(
         file(dictionary, HunspellDictionary.AFFIX_FILE_SUFFIX),
         file(dictionary, HunspellDictionary.DICTIONARY_FILE_SUFFIX),
@@ -164,12 +165,11 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    * Checks expected stems and compound decompositions.
    *
    * @param dictionary The external dictionary.
-   * @throws Exception If loading fails.
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
-  void expectedInflections(Dictionary dictionary) throws Exception {
-    final HunspellStemmer stemmer = stemmer(dictionary);
+  void expectedInflections(Dictionary dictionary) {
+    final HunspellStemmer stemmer = STEMMERS.get(dictionary);
     final Map<String, String> expected = switch (dictionary) {
       case ENGLISH -> Map.of("workers", "worker", "cats", "cat", "unhappiest", "unhappy",
           "quickly", "quick", "looked", "look");
@@ -179,29 +179,25 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
     expected.forEach((word, stem) -> Assertions.assertEquals(stem,
         stemmer.stem(word).toString(), word));
     Assertions.assertEquals(List.of(UNKNOWN), stemmer.stemAll(UNKNOWN));
-    Assertions.assertTrue(stemmer.analyze(UNKNOWN).isEmpty());
     if (dictionary == Dictionary.GERMAN) {
       for (String word : List.of("Haustür", "Kinderzimmer", "Abbildungsverzeichnis")) {
         Assertions.assertTrue(stemmer.stemAll(word).size() >= 2, word);
-        Assertions.assertTrue(stemmer.analyze(word).stream()
-            .anyMatch(analysis -> analysis.startsWith("pa:")), word);
       }
     }
   }
 
   /**
-   * Compares stems, analyses, and recognition with the recorded reference results and
-   * fails on any result that is neither exact, an expected difference, nor an identity
-   * fallback for an input the reference rejects.
+   * Compares stems and recognition with the recorded Hunspell results and fails on any
+   * result that is neither exact, an expected difference, nor an identity fallback for
+   * an input Hunspell rejects.
    *
    * @param dictionary The external dictionary.
    * @param reporter The test reporter for the counts.
-   * @throws Exception If loading fails.
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
-  void referenceCompatibility(Dictionary dictionary, TestReporter reporter) throws Exception {
-    final HunspellStemmer stemmer = stemmer(dictionary);
+  void referenceCompatibility(Dictionary dictionary, TestReporter reporter) {
+    final HunspellStemmer stemmer = STEMMERS.get(dictionary);
     final Map<String, Recorded> recorded = recorded(dictionary);
     int exact = 0;
     int differences = 0;
@@ -210,19 +206,17 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
     for (String word : dictionary.inputs) {
       final Recorded reference = recorded.get(word);
       Assertions.assertNotNull(reference, "no recorded reference result for " + word);
-      final Result javaResult = result(stemmer, word);
-      switch (classify(word, reference, javaResult, expectedDifference(dictionary, word))) {
+      final Set<String> stems = stems(stemmer, word);
+      switch (classify(word, reference, stems, expectedDifference(dictionary, word))) {
         case EXACT -> exact++;
         case EXPECTED_DIFFERENCE -> differences++;
         case IDENTITY_FALLBACK -> fallback++;
-        case UNEXPECTED -> failures.add(word + ": reference=" + reference + ", OpenNLP=" + javaResult);
+        case UNEXPECTED -> failures.add(word + ": reference=" + reference + ", OpenNLP=" + stems);
       }
     }
-    final String summary = "inputs=" + dictionary.inputs.size() + ", exact=" + exact
+    reporter.publishEntry(dictionary.id, "inputs=" + dictionary.inputs.size() + ", exact=" + exact
         + ", expectedDifferences=" + differences + ", identityFallback=" + fallback
-        + ", unexpected=" + failures.size();
-    reporter.publishEntry(dictionary.id, summary);
-    System.out.println(dictionary.id + ": " + summary);
+        + ", unexpected=" + failures.size());
     Assertions.assertTrue(failures.isEmpty(), () -> String.join("\n", failures));
   }
 
@@ -231,14 +225,14 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    * compares each result with the single-threaded result.
    *
    * @param dictionary The external dictionary.
-   * @throws Exception If loading fails or a task fails.
+   * @throws Exception If a task fails.
    */
   @ParameterizedTest
   @EnumSource(Dictionary.class)
-  void concurrentAnalysis(Dictionary dictionary) throws Exception {
-    final HunspellStemmer stemmer = stemmer(dictionary);
-    final Map<String, Result> expected = new LinkedHashMap<>();
-    dictionary.inputs.forEach(word -> expected.put(word, result(stemmer, word)));
+  void concurrentStemming(Dictionary dictionary) throws Exception {
+    final HunspellStemmer stemmer = STEMMERS.get(dictionary);
+    final Map<String, Set<String>> expected = new LinkedHashMap<>();
+    dictionary.inputs.forEach(word -> expected.put(word, stems(stemmer, word)));
     final List<Callable<Void>> tasks = new ArrayList<>();
     for (int thread = 0; thread < THREADS; thread++) {
       final int offset = thread;
@@ -246,7 +240,7 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
         for (int repeat = 0; repeat < REPETITIONS; repeat++) {
           for (int index = 0; index < dictionary.inputs.size(); index++) {
             final String word = dictionary.inputs.get((index + offset + repeat) % dictionary.inputs.size());
-            Assertions.assertEquals(expected.get(word), result(stemmer, word), word);
+            Assertions.assertEquals(expected.get(word), stems(stemmer, word), word);
           }
         }
         return null;
@@ -254,30 +248,10 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
     }
     try (var executor = Executors.newFixedThreadPool(THREADS)) {
       for (var future : executor.invokeAll(tasks, TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-        Assertions.assertFalse(future.isCancelled(), "concurrent analysis timed out");
+        Assertions.assertFalse(future.isCancelled(), "concurrent stemming timed out");
         future.get();
       }
     }
-  }
-
-  /**
-   * Loads a dictionary once after verifying its digests.
-   *
-   * @param dictionary The external dictionary.
-   * @return The shared stemmer.
-   * @throws Exception If a file is missing, changed, or malformed.
-   */
-  private HunspellStemmer stemmer(Dictionary dictionary) throws Exception {
-    if (!stemmers.containsKey(dictionary)) {
-      final Path affix = file(dictionary, HunspellDictionary.AFFIX_FILE_SUFFIX);
-      final Path words = file(dictionary, HunspellDictionary.DICTIONARY_FILE_SUFFIX);
-      verifyFileChecksum(affix, dictionary.affixChecksum);
-      verifyFileChecksum(words, dictionary.dictionaryChecksum);
-      final HunspellDictionary loaded = HunspellDictionary.load(affix, words);
-      Assertions.assertTrue(loaded.getUnsupportedDirectives().isEmpty());
-      stemmers.put(dictionary, new HunspellStemmer(loaded));
-    }
-    return stemmers.get(dictionary);
   }
 
   /**
@@ -288,87 +262,82 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
    * @return The file path.
    * @throws Exception If the data directory is not configured or does not exist.
    */
-  private Path file(Dictionary dictionary, String suffix) throws Exception {
+  private static Path file(Dictionary dictionary, String suffix) throws Exception {
     return new File(getOpennlpDataDir(), DATA_DIRECTORY + File.separator + dictionary.id + suffix).toPath();
   }
 
   /**
-   * Collects the distinct stems and analyses of one input.
+   * Collects the distinct stems of one input.
    *
    * @param stemmer The stemmer.
    * @param word The input.
-   * @return The result.
+   * @return The stems in result order.
    */
-  private Result result(HunspellStemmer stemmer, String word) {
-    return new Result(new LinkedHashSet<>(stemmer.stemAll(word).stream()
-        .map(CharSequence::toString).toList()), new LinkedHashSet<>(stemmer.analyze(word)));
+  private static Set<String> stems(HunspellStemmer stemmer, String word) {
+    return new LinkedHashSet<>(stemmer.stemAll(word).stream().map(CharSequence::toString).toList());
   }
 
   /**
    * Classifies one comparison. An expected difference must match the recorded
    * OpenNLP output exactly and must still differ from the reference, so a stale entry
-   * is reported.
+   * is reported. For an input Hunspell rejects, the unchanged input is the identity
+   * fallback of unknown vocabulary; the public API does not tell it apart from a
+   * listed word that is its own stem.
    *
    * @param word The input.
-   * @param reference The recorded reference outcome.
-   * @param javaResult The OpenNLP result.
-   * @param expected The recorded OpenNLP output for a known difference, or {@code null}.
+   * @param reference The recorded Hunspell outcome.
+   * @param stems The OpenNLP stems.
+   * @param expected The recorded OpenNLP stems for a known difference, or {@code null}.
    * @return The classification.
    */
-  private Outcome classify(String word, Recorded reference, Result javaResult, Result expected) {
+  private static Outcome classify(String word, Recorded reference, Set<String> stems, Set<String> expected) {
     if (expected != null) {
-      return reference.accepted() && !reference.result().equals(javaResult)
-          && expected.equals(javaResult) ? Outcome.EXPECTED_DIFFERENCE : Outcome.UNEXPECTED;
+      return reference.accepted() && !reference.stems().equals(stems) && expected.equals(stems)
+          ? Outcome.EXPECTED_DIFFERENCE : Outcome.UNEXPECTED;
     }
-    if (reference.accepted() && reference.result().equals(javaResult)) {
+    if (reference.accepted() && reference.stems().equals(stems)) {
       return Outcome.EXACT;
     }
-    if (!reference.accepted() && reference.stems().isEmpty() && reference.analyses().isEmpty()
-        && javaResult.stems().equals(Set.of(word)) && javaResult.analyses().isEmpty()) {
+    if (!reference.accepted() && reference.stems().isEmpty() && stems.equals(Set.of(word))) {
       return Outcome.IDENTITY_FALLBACK;
     }
     return Outcome.UNEXPECTED;
   }
 
   /**
-   * Specifies the OpenNLP output for inputs whose recorded reference output differs:
-   * compound and break parts against concatenated or missing reference stems, and
-   * the reference analyzer's lowercase readings of capitalized German nouns.
+   * Specifies the OpenNLP stems for inputs whose recorded Hunspell stems differ:
+   * compound and break parts against concatenated or missing Hunspell stems, and
+   * standalone readings of capitalized German nouns against Hunspell's additional
+   * lowercase compound-only readings.
    *
    * @param dictionary The external dictionary.
    * @param word The input.
-   * @return The expected OpenNLP output, or {@code null} for an exact comparison.
+   * @return The expected OpenNLP stems, or {@code null} for an exact comparison.
    */
-  private Result expectedDifference(Dictionary dictionary, String word) {
+  private static Set<String> expectedDifference(Dictionary dictionary, String word) {
     if (dictionary == Dictionary.ENGLISH && word.equals("well-known")) {
-      return new Result(Set.of("well", "known"), Set.of("pa:well st:well pa:known st:known"));
+      return Set.of("well", "known");
     }
     if (dictionary != Dictionary.GERMAN) {
       return null;
     }
     return switch (word) {
-      case "Kinder" -> new Result(Set.of("Kind"), Set.of("st:Kind fl:R"));
-      case "Häuser" -> new Result(Set.of("Haus"), Set.of("st:Haus fl:p"));
-      case "schnellsten" -> new Result(Set.of("schnell"), Set.of("st:schnell fl:C"));
-      case "Freunden" -> new Result(Set.of("freunden", "Freund"), Set.of("st:freunden", "st:Freund fl:P"));
-      case "Vorschläge" -> new Result(Set.of("Vor", "schlag"),
-          Set.of("pa:Vor st:Vor fl:j pa:schläge st:schlag fl:p"));
-      case "Haustür" -> new Result(Set.of("Haus", "tür"), Set.of("pa:Haus st:Haus fl:j pa:tür"));
-      case "Kinderzimmer" -> new Result(Set.of("Kinder", "zimmer"),
-          Set.of("pa:Kinder st:Kinder fl:j pa:zimmer"));
-      case "Abbildungsverzeichnis" -> new Result(Set.of("Abbildungs", "verzeichnis"),
-          Set.of("pa:Abbildungs st:Abbildungs fl:j pa:verzeichnis"));
-      case "Haus" -> new Result(Set.of("Haus"), Set.of("st:Haus"));
-      case "Baum" -> new Result(Set.of("Baum"), Set.of("st:Baum"));
-      case "Buch" -> new Result(Set.of("Buch"), Set.of("st:Buch"));
-      case "schnell" -> new Result(Set.of("schnell"), Set.of("st:schnell"));
+      case "Kinder" -> Set.of("Kind");
+      case "Häuser" -> Set.of("Haus");
+      case "Freunden" -> Set.of("freunden", "Freund");
+      case "Vorschläge" -> Set.of("Vor", "schlag");
+      case "Haustür" -> Set.of("Haus", "tür");
+      case "Kinderzimmer" -> Set.of("Kinder", "zimmer");
+      case "Abbildungsverzeichnis" -> Set.of("Abbildungs", "verzeichnis");
+      case "Haus" -> Set.of("Haus");
+      case "Baum" -> Set.of("Baum");
+      case "Buch" -> Set.of("Buch");
       default -> null;
     };
   }
 
   /**
-   * The results recorded from the reference implementation for the evaluated inputs,
-   * keyed by input.
+   * The results recorded from Hunspell for the evaluated inputs, keyed by input.
    *
    * @param dictionary The external dictionary.
    * @return The recorded outcomes.
@@ -376,155 +345,57 @@ public class HunspellCompatibilityEval extends AbstractEvalTest {
   private static Map<String, Recorded> recorded(Dictionary dictionary) {
     return switch (dictionary) {
       case ENGLISH -> Map.ofEntries(
-          Map.entry("workers", new Recorded(true,
-              Set.of("worker"),
-              Set.of("st:worker fl:S"))),
-          Map.entry("cats", new Recorded(true,
-              Set.of("cat"),
-              Set.of("st:cat fl:S"))),
-          Map.entry("unhappiest", new Recorded(true,
-              Set.of("unhappy"),
-              Set.of("st:unhappy fl:T"))),
-          Map.entry("quickly", new Recorded(true,
-              Set.of("quick"),
-              Set.of("st:quick fl:Y"))),
-          Map.entry("looked", new Recorded(true,
-              Set.of("look"),
-              Set.of("st:look fl:D"))),
-          Map.entry("reading", new Recorded(true,
-              Set.of("reading", "read"),
-              Set.of("st:reading", "st:read fl:G"))),
-          Map.entry("dogs", new Recorded(true,
-              Set.of("dog"),
-              Set.of("st:dog fl:S"))),
-          Map.entry("books", new Recorded(true,
-              Set.of("book"),
-              Set.of("st:book fl:S"))),
-          Map.entry("walked", new Recorded(true,
-              Set.of("walk"),
-              Set.of("st:walk fl:D"))),
-          Map.entry("walking", new Recorded(true,
-              Set.of("walking", "walk"),
-              Set.of("st:walking", "st:walk fl:G"))),
-          Map.entry("talked", new Recorded(true,
-              Set.of("talk"),
-              Set.of("st:talk fl:D"))),
-          Map.entry("talking", new Recorded(true,
-              Set.of("talk"),
-              Set.of("st:talk fl:G"))),
-          Map.entry("played", new Recorded(true,
-              Set.of("play"),
-              Set.of("st:play fl:D"))),
-          Map.entry("playing", new Recorded(true,
-              Set.of("play"),
-              Set.of("st:play fl:G"))),
-          Map.entry("helped", new Recorded(true,
-              Set.of("help"),
-              Set.of("st:help fl:D"))),
-          Map.entry("helping", new Recorded(true,
-              Set.of("helping", "help"),
-              Set.of("st:helping", "st:help fl:G"))),
-          Map.entry("houses", new Recorded(true,
-              Set.of("house"),
-              Set.of("st:house fl:S"))),
-          Map.entry("children", new Recorded(true,
-              Set.of("children"),
-              Set.of("st:children"))),
-          Map.entry("feet", new Recorded(true,
-              Set.of("feet"),
-              Set.of("st:feet"))),
-          Map.entry("better", new Recorded(true,
-              Set.of("better"),
-              Set.of("st:better"))),
-          Map.entry("Workers", new Recorded(true,
-              Set.of("worker"),
-              Set.of("st:worker fl:S"))),
-          Map.entry("WORKERS", new Recorded(true,
-              Set.of("worker"),
-              Set.of("st:worker fl:S"))),
-          Map.entry("cAtS", new Recorded(false,
-              Set.of(),
-              Set.of())),
-          Map.entry("worker's", new Recorded(true,
-              Set.of("worker"),
-              Set.of("st:worker fl:M"))),
-          Map.entry("well-known", new Recorded(true,
-              Set.of(),
-              Set.of())),
-          Map.entry("unhappy", new Recorded(true,
-              Set.of("unhappy", "happy"),
-              Set.of("st:unhappy", "un st:happy fl:U"))),
-          Map.entry("undone", new Recorded(true,
-              Set.of("done"),
-              Set.of("un st:done fl:U"))),
-          Map.entry("zyzzyvax", new Recorded(false,
-              Set.of(),
-              Set.of())));
+          Map.entry("workers", new Recorded(true, Set.of("worker"))),
+          Map.entry("cats", new Recorded(true, Set.of("cat"))),
+          Map.entry("unhappiest", new Recorded(true, Set.of("unhappy"))),
+          Map.entry("quickly", new Recorded(true, Set.of("quick"))),
+          Map.entry("looked", new Recorded(true, Set.of("look"))),
+          Map.entry("reading", new Recorded(true, Set.of("reading", "read"))),
+          Map.entry("dogs", new Recorded(true, Set.of("dog"))),
+          Map.entry("books", new Recorded(true, Set.of("book"))),
+          Map.entry("walked", new Recorded(true, Set.of("walk"))),
+          Map.entry("walking", new Recorded(true, Set.of("walking", "walk"))),
+          Map.entry("talked", new Recorded(true, Set.of("talk"))),
+          Map.entry("talking", new Recorded(true, Set.of("talk"))),
+          Map.entry("played", new Recorded(true, Set.of("play"))),
+          Map.entry("playing", new Recorded(true, Set.of("play"))),
+          Map.entry("helped", new Recorded(true, Set.of("help"))),
+          Map.entry("helping", new Recorded(true, Set.of("helping", "help"))),
+          Map.entry("houses", new Recorded(true, Set.of("house"))),
+          Map.entry("children", new Recorded(true, Set.of("children"))),
+          Map.entry("feet", new Recorded(true, Set.of("feet"))),
+          Map.entry("better", new Recorded(true, Set.of("better"))),
+          Map.entry("Workers", new Recorded(true, Set.of("worker"))),
+          Map.entry("WORKERS", new Recorded(true, Set.of("worker"))),
+          Map.entry("cAtS", new Recorded(false, Set.of())),
+          Map.entry("worker's", new Recorded(true, Set.of("worker"))),
+          Map.entry("well-known", new Recorded(true, Set.of())),
+          Map.entry("unhappy", new Recorded(true, Set.of("unhappy", "happy"))),
+          Map.entry("undone", new Recorded(true, Set.of("done"))),
+          Map.entry(UNKNOWN, new Recorded(false, Set.of())));
       case GERMAN -> Map.ofEntries(
-          Map.entry("gegangen", new Recorded(true,
-              Set.of("gegangen"),
-              Set.of("st:gegangen"))),
-          Map.entry("Kinder", new Recorded(true,
-              Set.of("kinder", "kind", "Kind"),
-              Set.of("st:kinder fl:k", "st:kind fl:R", "st:Kind fl:R"))),
-          Map.entry("Häuser", new Recorded(true,
-              Set.of("häuser", "haus", "Haus"),
-              Set.of("st:häuser fl:k", "st:haus fl:p", "st:Haus fl:p"))),
-          Map.entry("schnellsten", new Recorded(true,
-              Set.of("schnell"),
-              Set.of("fl:k st:schnell fl:C", "st:schnell fl:C"))),
-          Map.entry("Freunden", new Recorded(true,
-              Set.of("freunden", "freund", "Freund"),
-              Set.of("st:freunden", "st:freund fl:P", "st:Freund fl:P"))),
-          Map.entry("Vorschläge", new Recorded(true,
-              Set.of(),
-              Set.of())),
-          Map.entry("Haustür", new Recorded(true,
-              Set.of(),
-              Set.of("pa:tür"))),
-          Map.entry("Kinderzimmer", new Recorded(true,
-              Set.of(),
-              Set.of("pa:zimmer"))),
-          Map.entry("Abbildungsverzeichnis", new Recorded(true,
-              Set.of(),
-              Set.of("pa:verzeichnis"))),
-          Map.entry("Haus", new Recorded(true,
-              Set.of("haus", "Haus"),
-              Set.of("st:haus fl:k", "st:Haus"))),
-          Map.entry("Baum", new Recorded(true,
-              Set.of("baum", "Baum"),
-              Set.of("st:baum fl:k", "st:Baum"))),
-          Map.entry("Buch", new Recorded(true,
-              Set.of("buch", "Buch"),
-              Set.of("st:buch fl:k", "st:Buch"))),
-          Map.entry("schnell", new Recorded(true,
-              Set.of("schnell"),
-              Set.of("st:schnell", "st:schnell fl:k"))),
-          Map.entry("zyzzyvax", new Recorded(false,
-              Set.of(),
-              Set.of())));
+          Map.entry("gegangen", new Recorded(true, Set.of("gegangen"))),
+          Map.entry("Kinder", new Recorded(true, Set.of("kinder", "kind", "Kind"))),
+          Map.entry("Häuser", new Recorded(true, Set.of("häuser", "haus", "Haus"))),
+          Map.entry("schnellsten", new Recorded(true, Set.of("schnell"))),
+          Map.entry("Freunden", new Recorded(true, Set.of("freunden", "freund", "Freund"))),
+          Map.entry("Vorschläge", new Recorded(true, Set.of())),
+          Map.entry("Haustür", new Recorded(true, Set.of())),
+          Map.entry("Kinderzimmer", new Recorded(true, Set.of())),
+          Map.entry("Abbildungsverzeichnis", new Recorded(true, Set.of())),
+          Map.entry("Haus", new Recorded(true, Set.of("haus", "Haus"))),
+          Map.entry("Baum", new Recorded(true, Set.of("baum", "Baum"))),
+          Map.entry("Buch", new Recorded(true, Set.of("buch", "Buch"))),
+          Map.entry("schnell", new Recorded(true, Set.of("schnell"))),
+          Map.entry(UNKNOWN, new Recorded(false, Set.of())));
       case HUNGARIAN -> Map.ofEntries(
-          Map.entry("kutyák", new Recorded(true,
-              Set.of("kutya"),
-              Set.of("st:kutya po:noun ts:NOM is:PLUR is:NOM"))),
-          Map.entry("asztalon", new Recorded(true,
-              Set.of("asztal"),
-              Set.of("st:asztal po:noun ts:NOM is:SUE"))),
-          Map.entry("könyveket", new Recorded(true,
-              Set.of("könyv"),
-              Set.of("st:könyv po:noun ts:NOM is:PLUR is:ACC"))),
-          Map.entry("házak", new Recorded(true,
-              Set.of("ház"),
-              Set.of("st:ház po:noun ts:PLUR ts:NOM"))),
-          Map.entry("emberek", new Recorded(true,
-              Set.of("ember"),
-              Set.of("st:ember po:noun ts:NOM is:PLUR is:NOM"))),
-          Map.entry("kutyáknak", new Recorded(true,
-              Set.of("kutya"),
-              Set.of("st:kutya po:noun ts:NOM is:PLUR is:DAT"))),
-          Map.entry("zyzzyvax", new Recorded(false,
-              Set.of(),
-              Set.of())));
+          Map.entry("kutyák", new Recorded(true, Set.of("kutya"))),
+          Map.entry("asztalon", new Recorded(true, Set.of("asztal"))),
+          Map.entry("könyveket", new Recorded(true, Set.of("könyv"))),
+          Map.entry("házak", new Recorded(true, Set.of("ház"))),
+          Map.entry("emberek", new Recorded(true, Set.of("ember"))),
+          Map.entry("kutyáknak", new Recorded(true, Set.of("kutya"))),
+          Map.entry(UNKNOWN, new Recorded(false, Set.of())));
     };
   }
 }

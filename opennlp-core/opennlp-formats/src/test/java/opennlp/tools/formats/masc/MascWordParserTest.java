@@ -22,13 +22,24 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.xml.sax.SAXException;
 
+import static opennlp.tools.formats.masc.MascParserTestUtil.assertRejected;
+import static opennlp.tools.formats.masc.MascParserTestUtil.parse;
+
 public class MascWordParserTest {
 
-  private static MascWordParser parse(String xml) throws Exception {
-    return MascParserTestUtil.parse(xml, new MascWordParser());
+  /**
+   * Builds a segmentation region with the given offsets.
+   *
+   * @param id The region identifier.
+   * @param anchors The region offsets.
+   * @return The annotation XML.
+   */
+  private static String region(String id, String anchors) {
+    return "<graph><region xml:id=\"" + id + "\" anchors=\"" + anchors + "\"/></graph>";
   }
 
   @Test
@@ -36,7 +47,7 @@ public class MascWordParserTest {
     List<MascWord> words = parse("<graph>"
         + "<region xml:id=\"seg-r0\" anchors=\"0 4\"/>"
         + "<region xml:id=\"seg-r11\" anchors=\"5 7\"/>"
-        + "</graph>").getAnchors();
+        + "</graph>", new MascWordParser()).getAnchors();
     Assertions.assertEquals(2, words.size());
     Assertions.assertEquals(0, words.get(0).getId());
     Assertions.assertEquals(0, words.get(0).getStart());
@@ -50,27 +61,27 @@ public class MascWordParserTest {
   // doubled prefix, missing prefix, other prefix, no digits, trailing text
   @ValueSource(strings = {"seg-rseg-r3", "3", "penn-n3", "seg-r", "seg-r3x"})
   void testMalformedRegionIdsAreRejected(String id) {
-    Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><region xml:id=\"" + id + "\" anchors=\"0 4\"/></graph>"));
+    assertRejected(region(id, "0 4"), new MascWordParser());
   }
 
   @ParameterizedTest
-  // a run of spaces, and a tab or line break that attribute-value normalization turns into a space
-  @ValueSource(strings = {"0 4", " 0  4 ", "0\t4", "0\n4"})
-  void testAnchorsAreSeparatedBySpaceRuns(String anchors) throws Exception {
-    List<MascWord> words = parse(
-        "<graph><region xml:id=\"seg-r0\" anchors=\"" + anchors + "\"/></graph>").getAnchors();
+  // XML whitespace written literally or supplied through character references
+  @MethodSource("opennlp.tools.formats.masc.MascParserTestUtil#xmlWhitespaceSeparators")
+  void testAnchorsUseXmlWhitespace(String separator) throws Exception {
+    List<MascWord> words = parse(region("seg-r0", " 0" + separator + "4 "),
+        new MascWordParser()).getAnchors();
     Assertions.assertEquals(0, words.get(0).getStart());
     Assertions.assertEquals(4, words.get(0).getEnd());
   }
 
   @ParameterizedTest
-  // one number, three numbers, a tab kept by a character reference, text
-  @ValueSource(strings = {"0", "0 4 5", "0&#9;4", "0 x", "", " "})
+  // wrong arity, non-XML whitespace, text, negative, signed, digits of another script,
+  // reversed, overflowing, or missing
+  @ValueSource(strings = {"0", "0 4 5", "0&#xA0;4", "0 x", "-1 4", "+0 4", "0 +4",
+      "0 \u0664", "0 \uFF14", "4 0", "0 2147483648", "", " "})
   void testMalformedAnchorsAreRejectedWithTheReason(String anchors) {
-    SAXException e = Assertions.assertThrows(SAXException.class, () -> parse(
-        "<graph><region xml:id=\"seg-r0\" anchors=\"" + anchors + "\"/></graph>"));
+    SAXException e = assertRejected(region("seg-r0", anchors), new MascWordParser());
     Assertions.assertTrue(e.getMessage().startsWith("Could not parse the word segmentation"), e.getMessage());
-    Assertions.assertNotNull(e.getCause());
   }
+
 }

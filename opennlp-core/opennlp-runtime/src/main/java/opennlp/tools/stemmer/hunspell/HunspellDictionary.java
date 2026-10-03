@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import opennlp.tools.commons.ThreadSafe;
@@ -61,9 +62,8 @@ import opennlp.tools.util.StringUtil;
  * directives and reports them through {@link #getUnsupportedDirectives()}.
  * Morphological stems use {@code st:}, {@code sp:}, and {@code ds:} fields.
  * {@code SYLLABLENUM} supports Hungarian compound syllable adjustments.
- * {@code LEMMA_PRESENT} is accepted but has no effect, consistent with the
- * reference version. Strict loading validates declarations, not equivalence of
- * all results with native Hunspell.</p>
+ * {@code LEMMA_PRESENT} is accepted and has no effect. Strict loading validates
+ * declarations; it does not establish that every result matches Hunspell.</p>
  *
  * <p>Instances are immutable and safe to share between threads.</p>
  *
@@ -110,7 +110,7 @@ public final class HunspellDictionary {
      * @param directive The nonblank directive name.
      * @param source The nonblank source description.
      * @param lineNumber The positive source line number.
-     * @throws IllegalArgumentException If a name is null or blank, or the line
+     * @throws IllegalArgumentException Thrown if a name is null or blank, or the line
      *     number is not positive.
      */
     public UnsupportedDirective {
@@ -163,6 +163,36 @@ public final class HunspellDictionary {
     }
   }
 
+  /**
+   * One {@code BREAK} declaration: a separator and the anchors that bind it to the start
+   * or end of the word.
+   *
+   * @param separator The separator text without anchors. Never empty.
+   * @param atStart Whether the separator must begin the word.
+   * @param atEnd Whether the separator must end the word.
+   */
+  record WordBreak(String separator, boolean atStart, boolean atEnd) {
+
+    /**
+     * Parses a declaration such as {@code -}, {@code ^-}, or {@code -$}.
+     *
+     * @param declaration The declared separator with optional anchors.
+     * @param line The one-based source line, for diagnostics.
+     * @return The parsed declaration.
+     * @throws IOException Thrown if the declaration consists of anchors only.
+     */
+    static WordBreak parse(String declaration, int line) throws IOException {
+      final boolean atStart = declaration.startsWith(BREAK_START_ANCHOR);
+      final boolean atEnd = declaration.endsWith(BREAK_END_ANCHOR);
+      final String separator = declaration.substring(atStart ? 1 : 0,
+          declaration.length() - (atEnd ? 1 : 0));
+      if (separator.isEmpty()) {
+        throw new IOException("invalid BREAK at line " + line);
+      }
+      return new WordBreak(separator, atStart, atEnd);
+    }
+  }
+
   /** The place a part takes in a compound, deciding which positional flag admits it. */
   enum CompoundPosition {
     /** The first part. */
@@ -208,14 +238,41 @@ public final class HunspellDictionary {
   private static final String SYLLABLE_NUMBER_TAG = "SYLLABLENUM";
   private static final String LEMMA_PRESENT_TAG = "LEMMA_PRESENT";
   private static final String COMPOUND_SYLLABLE_TAG = "COMPOUNDSYLLABLE";
-  private static final String REPLACEMENT_TAG = "REP";
+  private static final String CHECK_COMPOUND_REP_TAG = "CHECKCOMPOUNDREP";
+  /** The suggestion table whose replacements {@code CHECKCOMPOUNDREP} applies to compounds. */
+  static final String REPLACEMENT_TAG = "REP";
+
+  /** The word-list field that lists a misspelling of its entry. */
+  static final String PHONETIC_FIELD = "ph:";
+  /** Field prefix of a compound part in an analysis. */
+  static final String COMPOUND_PART_FIELD = "pa:";
+  /** The sharp s, which {@code CHECKSHARPS} relates to a double s. */
+  static final String SHARP_S = "ß";
+  /** The lowercase double s that a sharp s expands to. */
+  static final String DOUBLE_S = "ss";
+  /** The uppercase double s that an all-uppercase sharp s entry is written with. */
+  static final String DOUBLE_CAPITAL_S = "SS";
+
+  /** The {@code BREAK} anchor that binds a separator to the start of the word. */
+  static final String BREAK_START_ANCHOR = "^";
+
+  /** The {@code BREAK} anchor that binds a separator to the end of the word. */
+  static final String BREAK_END_ANCHOR = "$";
+
+  /** The dotted capital I, the uppercase of {@code i} in the Turkic languages. */
+  static final String DOTTED_CAPITAL_I = "İ";
   private static final String STEM_FIELD = "st:";
   private static final String SURFACE_PREFIX_FIELD = "sp:";
   private static final String DERIVATIONAL_SUFFIX_FIELD = "ds:";
   private static final String FLAG_FIELD = "fl:";
 
-  private static final List<String> DEFAULT_WORD_BREAKS = List.of("-", "^-", "-$");
-
+  /**
+   * The separators used when the affix file declares no {@code BREAK} table: a hyphen
+   * inside the word, at its start, and at its end.
+   */
+  private static final List<WordBreak> DEFAULT_WORD_BREAKS = List.of(
+      new WordBreak("-", false, false), new WordBreak("-", true, false),
+      new WordBreak("-", false, true));
 
   /** Prefix used by comment lines. */
   private static final String COMMENT_PREFIX = "#";
@@ -230,19 +287,19 @@ public final class HunspellDictionary {
   private static final String SET_TAB_PREFIX = SET_TAG + "\t";
 
   /** The affix format's marker for absent strip or affix material. */
-  private static final String NO_MATERIAL = "0";
+  static final String NO_MATERIAL = "0";
 
   /**
-   * Largest flag value permitted by {@code FLAG num}. The
-   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/man/hunspell.5#L133-L139">
-   * Hunspell format manual</a> names 65000, while the reference parser accepts the
-   * full unsigned 16-bit range and published dictionaries use values above 65000.
+   * Largest flag value permitted by {@code FLAG num}: the full unsigned 16-bit range.
+   * The <a href="https://github.com/hunspell/hunspell/blob/master/man/hunspell.5">format
+   * manual</a> names 65000, but published dictionaries use values above it and Hunspell
+   * loads them.
    */
   private static final int MAX_NUMERIC_FLAG = 65_535;
 
   /**
-   * The flags the reference implementation hardwires for Hungarian: an entry carrying
-   * one of them may open a compound written before a hyphen.
+   * The flags Hungarian dictionaries reserve for the hyphen rule: an entry carrying one
+   * of them may open a compound written before a hyphen.
    */
   private static final int[] HUNGARIAN_HYPHEN_FLAGS = {'F', 'G', 'H'};
 
@@ -251,9 +308,9 @@ public final class HunspellDictionary {
 
   private final Map<String, List<int[]>> entries;
   /**
-   * The capitalized forms of mixed-case and flagged all-uppercase entries, which the
-   * reference implementation adds as hidden homonyms so that all-uppercase input
-   * matches them. Keyed like {@link #entries}, sharing the entry flag arrays.
+   * The capitalized forms of mixed-case and flagged all-uppercase entries, kept as
+   * hidden homonyms so that all-uppercase input matches them. Keyed like
+   * {@link #entries}, sharing the entry flag arrays.
    */
   private final Map<String, List<int[]>> hiddenEntries;
   private final BoundaryIndex suffixesByLast;
@@ -298,8 +355,9 @@ public final class HunspellDictionary {
   private final HunspellConversion replacements;
   private final int maxCompoundSyllables;
   private final String compoundVowels;
-  private final List<String> wordBreaks;
+  private final List<WordBreak> wordBreaks;
   private final List<UnsupportedDirective> unsupportedDirectives;
+  private final int longestSpacedForm;
 
   /**
    * Initializes the dictionary from the two parsed files.
@@ -352,9 +410,11 @@ public final class HunspellDictionary {
         || affix.language.equals("crh") || affix.language.startsWith("crh_");
     this.hungarian = affix.language.equals("hu") || affix.language.startsWith("hu_");
     this.syllableNumber = affix.syllableNumber;
-    this.entries = entries;
-    this.hiddenEntries = hiddenCapitalizedEntries(entries);
+    this.entries = immutableFlagSets(entries);
+    this.hiddenEntries = immutableFlagSets(hiddenCapitalizedEntries(entries));
     this.unsupportedDirectives = List.copyOf(unsupportedDirectives);
+    this.longestSpacedForm = longestSpacedForm(this.entries.keySet(), affix.prefixes,
+        affix.suffixes);
     // A material-bearing rule can only be undone from a word whose boundary
     // character matches its affix material, so bucketing by that character
     // narrows each scan to one bucket plus the strip-only rules.
@@ -364,6 +424,54 @@ public final class HunspellDictionary {
     final List<Affix> prefixesWithout = new ArrayList<>();
     this.prefixesByFirst = bucketByBoundary(affix.prefixes, false, prefixesWithout);
     this.prefixesWithoutMaterial = List.copyOf(prefixesWithout);
+  }
+
+  /**
+   * Bounds the length of a word containing a space that can have a reading. Such a
+   * reading needs an entry or affix material with a space, and it is found by undoing
+   * at most two prefixes and two suffixes, each adding at most the longest affix
+   * material; a case variant is at least half as long as its surface form, because
+   * the sharp s variant replaces two letters with one.
+   *
+   * @param words The listed spellings.
+   * @param prefixes The prefix rules.
+   * @param suffixes The suffix rules.
+   * @return The longest possible UTF-16 length, or -1 when no spaced form has a reading.
+   */
+  private static int longestSpacedForm(Set<String> words, List<Affix> prefixes,
+      List<Affix> suffixes) {
+    boolean spacedAffix = false;
+    int prefixMaterial = 0;
+    for (Affix prefix : prefixes) {
+      prefixMaterial = Math.max(prefixMaterial, prefix.affix().length());
+      spacedAffix |= prefix.affix().indexOf(' ') >= 0;
+    }
+    int suffixMaterial = 0;
+    for (Affix suffix : suffixes) {
+      suffixMaterial = Math.max(suffixMaterial, suffix.affix().length());
+      spacedAffix |= suffix.affix().indexOf(' ') >= 0;
+    }
+    int longestWord = -1;
+    for (String word : words) {
+      if (spacedAffix || word.indexOf(' ') >= 0) {
+        longestWord = Math.max(longestWord, word.length());
+      }
+    }
+    if (longestWord < 0) {
+      return -1;
+    }
+    return 2 * (longestWord + 2 * prefixMaterial + 2 * suffixMaterial);
+  }
+
+  /**
+   * Tests whether a word containing a space can have a reading, so that the compound
+   * word-pair check can skip texts no reading can match.
+   *
+   * @param length The UTF-16 length of the spaced word.
+   * @return {@code false} if no word of this length containing a space has a reading.
+   */
+  boolean mayReadSpacedForm(int length) {
+    return length <= longestSpacedForm;
   }
 
   /**
@@ -453,13 +561,14 @@ public final class HunspellDictionary {
   /**
    * Loads affix and dictionary files with the selected directive policy.
    *
-   * @param affixFile The non-null {@code .aff} affix file.
-   * @param dictionaryFile The non-null {@code .dic} word list.
-   * @param mode The non-null loading policy.
-   * @return The loaded dictionary.
-   * @throws IOException If reading fails, a stream exceeds {@link #MAX_STREAM_BYTES},
-   *     content is malformed, or strict loading encounters an unsupported directive.
-   * @throws IllegalArgumentException If a parameter is null.
+   * @param affixFile The {@code .aff} affix file. Must not be {@code null}.
+   * @param dictionaryFile The {@code .dic} word list. Must not be {@code null}.
+   * @param mode The loading policy. Must not be {@code null}.
+   * @return The loaded dictionary. Never {@code null}.
+   * @throws IOException Thrown if reading fails, a file exceeds
+   *     {@link #MAX_STREAM_BYTES}, a file is malformed, or {@link LoadMode#STRICT}
+   *     encounters an unsupported affix directive.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
   public static HunspellDictionary load(Path affixFile, Path dictionaryFile,
       LoadMode mode) throws IOException {
@@ -500,15 +609,20 @@ public final class HunspellDictionary {
 
   /**
    * Loads affix and dictionary streams with the selected directive policy.
-   * The streams are not closed.
+   * Each stream is buffered up to {@link #MAX_STREAM_BYTES} bytes.
    *
-   * @param affixStream The non-null {@code .aff} affix content.
-   * @param dictionaryStream The non-null {@code .dic} word-list content.
-   * @param mode The non-null loading policy.
-   * @return The loaded dictionary, with diagnostics for skipped unsupported directives.
-   * @throws IOException If reading fails, a stream exceeds {@link #MAX_STREAM_BYTES},
-   *     content is malformed, or strict loading encounters an unsupported directive.
-   * @throws IllegalArgumentException If a parameter is null.
+   * @param affixStream The {@code .aff} affix content. Must not be {@code null}. Not
+   *                    closed.
+   * @param dictionaryStream The {@code .dic} word list content. Must not be
+   *                         {@code null}. Not closed.
+   * @param mode The loading policy. Must not be {@code null}.
+   * @return The loaded dictionary. Never {@code null}. Under
+   *     {@link LoadMode#ALLOW_PARTIAL} it reports skipped directives through
+   *     {@link #getUnsupportedDirectives()}.
+   * @throws IOException Thrown if reading fails, a stream exceeds
+   *     {@link #MAX_STREAM_BYTES}, the content is malformed, or
+   *     {@link LoadMode#STRICT} encounters an unsupported affix directive.
+   * @throws IllegalArgumentException Thrown if a parameter is {@code null}.
    */
   public static HunspellDictionary load(InputStream affixStream,
       InputStream dictionaryStream, LoadMode mode) throws IOException {
@@ -542,7 +656,7 @@ public final class HunspellDictionary {
    * @param mode The directive policy.
    * @param source The affix source used in unsupported-directive diagnostics.
    * @return The parsed dictionary.
-   * @throws IOException If reading, validation, or parsing fails.
+   * @throws IOException Thrown if reading, validation, or parsing fails.
    */
   private static HunspellDictionary loadStreams(InputStream affixStream,
       InputStream dictionaryStream, LoadMode mode, String source) throws IOException {
@@ -575,21 +689,17 @@ public final class HunspellDictionary {
    * @param mode The directive policy applied before masking.
    * @param source The affix source description.
    * @return Unsupported directives skipped in partial mode, in encounter order.
-   * @throws IOException If strict loading encounters an unsupported directive.
+   * @throws IOException Thrown if strict loading encounters an unsupported directive.
    */
   private static List<UnsupportedDirective> maskIgnoredAffixLines(byte[] bytes,
       LoadMode mode, String source) throws IOException {
     final Map<String, UnsupportedDirective> unsupported = new LinkedHashMap<>();
-    final boolean useReplacements = hasAffixDirective(bytes, "CHECKCOMPOUNDREP");
+    final boolean useReplacements = hasAffixDirective(bytes, CHECK_COMPOUND_REP_TAG);
     int lineStart = 0;
     int lineNumber = 1;
     for (int i = 0; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
-        int fieldStart = lineStart;
-        if (lineStart == 0 && i >= 3 && bytes[0] == (byte) 0xef
-            && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf) {
-          fieldStart = 3;
-        }
+        int fieldStart = lineStart == 0 ? Math.min(byteOrderMarkLength(bytes), i) : lineStart;
         while (fieldStart < i && isAsciiFieldSpace(bytes[fieldStart])) {
           fieldStart++;
         }
@@ -631,6 +741,18 @@ public final class HunspellDictionary {
   }
 
   /**
+   * Measures a leading UTF-8 byte order mark, which the byte-level scans skip so that
+   * the first line's directive is read without it.
+   *
+   * @param bytes The affix content.
+   * @return 3 when the content starts with a UTF-8 byte order mark, otherwise 0.
+   */
+  private static int byteOrderMarkLength(byte[] bytes) {
+    return bytes.length >= 3 && bytes[0] == (byte) 0xef
+        && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
+  }
+
+  /**
    * Finds a directive before metadata is removed or decoded.
    *
    * @param bytes The affix content.
@@ -640,8 +762,7 @@ public final class HunspellDictionary {
   private static boolean hasAffixDirective(byte[] bytes, String directive) {
     final int[] starts = new int[1];
     final int[] ends = new int[1];
-    int from = bytes.length >= 3 && bytes[0] == (byte) 0xef
-        && bytes[1] == (byte) 0xbb && bytes[2] == (byte) 0xbf ? 3 : 0;
+    int from = byteOrderMarkLength(bytes);
     for (int to = from; to <= bytes.length; to++) {
       if (to == bytes.length || bytes[to] == '\r' || bytes[to] == '\n') {
         if (findAsciiFields(bytes, from, to, starts, ends) > 0
@@ -660,13 +781,13 @@ public final class HunspellDictionary {
    *
    * @param directive The affix directive name.
    * @return Whether the directive can be ignored by the affix stemmer.
-   * @see <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/man/hunspell.5">Hunspell format</a>
    */
   private static boolean isIgnoredAffixDirective(String directive) {
     return switch (directive) {
       case "NAME", "HOME", "VERSION", "KEY", "TRY", REPLACEMENT_TAG, "MAP", "PHONE",
           "NOSUGGEST", "MAXCPDSUGS", "MAXNGRAMSUGS", "MAXDIFF", "ONLYMAXDIFF",
-          "NOSPLITSUGS", "SUGSWITHDOTS", "SUBSTANDARD", "WORDCHARS",
+          "NOSPLITSUGS", "SUGSWITHDOTS", "SUBSTANDARD", "WORDCHARS", "NONGRAMSUGGEST",
+          "CHECKNUM",
           "COMPOUNDFIRST", "COMPOUNDLAST", "ONLYROOT", "HU_KOTOHANGZO", "GENERATE" -> true;
       default -> false;
     };
@@ -685,8 +806,8 @@ public final class HunspellDictionary {
   /**
    * Replaces a trailing comment with spaces. A number sign starts a comment only in a
    * field the directive does not consume, because the format allows {@code #} as a
-   * flag, a separator, affix material, and conversion text. The reference
-   * implementation ignores the fields after the ones it reads.
+   * flag, a separator, affix material, and conversion text. The fields after the
+   * ones a directive reads are not interpreted.
    *
    * @param bytes The mutable file content.
    * @param from The first byte of the directive.
@@ -772,7 +893,7 @@ public final class HunspellDictionary {
           IGNORE_TAG, MORPHOLOGY_ALIAS_TAG, COMPLEX_PREFIXES_TAG, KEEP_CASE_TAG, WARNING_TAG,
           FORBID_WARNING_TAG, LANGUAGE_TAG, CHECK_SHARPS_TAG,
           COMPOUND_RULE_TAG, COMPOUND_ROOT_TAG, FORCE_UPPER_CASE_TAG, COMPOUND_MORE_SUFFIXES_TAG,
-          SIMPLIFIED_TRIPLE_TAG, "CHECKCOMPOUNDREP", COMPOUND_PATTERN_TAG,
+          SIMPLIFIED_TRIPLE_TAG, CHECK_COMPOUND_REP_TAG, COMPOUND_PATTERN_TAG,
           COMPOUND_SYLLABLE_TAG, SYLLABLE_NUMBER_TAG, LEMMA_PRESENT_TAG, REPLACEMENT_TAG, BREAK_TAG -> true;
       default -> false;
     };
@@ -794,8 +915,10 @@ public final class HunspellDictionary {
       return bytes;
     }
     final ByteArrayOutputStream normalized = new ByteArrayOutputStream(bytes.length);
-    int lineStart = 0;
-    for (int i = 0; i <= bytes.length; i++) {
+    // the byte order mark is copied as it is, so the first line's fields start after it
+    int lineStart = byteOrderMarkLength(bytes);
+    normalized.write(bytes, 0, lineStart);
+    for (int i = lineStart; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
         writeNormalizedFlagLine(normalized, bytes, lineStart, i);
         if (i < bytes.length) {
@@ -816,8 +939,8 @@ public final class HunspellDictionary {
   private static boolean usesUnicodeOrNumericFlags(byte[] bytes) {
     final int[] starts = new int[5];
     final int[] fieldEnds = new int[5];
-    int lineStart = 0;
-    for (int i = 0; i <= bytes.length; i++) {
+    int lineStart = byteOrderMarkLength(bytes);
+    for (int i = lineStart; i <= bytes.length; i++) {
       if (i == bytes.length || bytes[i] == '\n' || bytes[i] == '\r') {
         final int count = findAsciiFields(bytes, lineStart, i, starts, fieldEnds);
         if (count >= 2 && FLAG_TAG.equals(
@@ -1066,41 +1189,46 @@ public final class HunspellDictionary {
 
   /**
    * Looks up a word's flag sets, optionally including the hidden capitalized forms
-   * that all-uppercase input may match.
+   * that all-uppercase input outside compounds may match. The stored lists are
+   * immutable and are returned as they are; a list is built only when a word has
+   * both listed and hidden entries. Callers do not modify the flag arrays.
    *
    * @param word The word exactly as listed or in hidden capitalized form.
-   * @param includeHidden Whether hidden capitalized forms count, which the reference
-   *                      implementation allows for all-uppercase input outside compounds.
+   * @param includeHidden Whether hidden capitalized forms count.
    * @return The flag sets of all matching entries, or {@code null} when absent.
    */
   List<int[]> lookup(String word, boolean includeHidden) {
     final List<int[]> found = entries.get(word);
     final List<int[]> hidden = includeHidden ? hiddenEntries.get(word) : null;
-    if (found == null && hidden == null) {
-      return null;
+    if (hidden == null) {
+      return found;
     }
-    final List<int[]> copy = new ArrayList<>();
-    copyFlags(found, copy);
-    copyFlags(hidden, copy);
-    return copy;
+    if (found == null) {
+      return hidden;
+    }
+    final List<int[]> both = new ArrayList<>(found.size() + hidden.size());
+    both.addAll(found);
+    both.addAll(hidden);
+    return both;
   }
 
   /**
-   * Appends defensive copies of flag sets.
+   * Replaces every flag-set list with an immutable copy so that lookups can return
+   * the stored lists directly.
    *
-   * @param source The flag sets to copy, or {@code null}.
-   * @param target The destination.
+   * @param flagSets The words mapped to mutable flag-set lists.
+   * @return The same words mapped to immutable lists.
    */
-  private static void copyFlags(List<int[]> source, List<int[]> target) {
-    if (source != null) {
-      for (final int[] flags : source) {
-        target.add(flags.clone());
-      }
+  private static Map<String, List<int[]>> immutableFlagSets(Map<String, List<int[]>> flagSets) {
+    final Map<String, List<int[]>> frozen = new HashMap<>(flagSets.size() * 2);
+    for (final Map.Entry<String, List<int[]>> entry : flagSets.entrySet()) {
+      frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
     }
+    return frozen;
   }
 
   /**
-   * The capitalization classes of the reference implementation.
+   * The capitalization classes of a word.
    */
   enum CaseType {
     /** No uppercase letter. */
@@ -1116,8 +1244,7 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Classifies a word's capitalization as the reference implementation does, judging
-   * the initial by the first character.
+   * Classifies a word's capitalization, judging the initial by the first character.
    *
    * @param word The word to classify.
    * @return The capitalization class.
@@ -1150,10 +1277,10 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Derives the hidden capitalized forms the reference implementation adds for
-   * mixed-case entries and for all-uppercase entries carrying flags, so that
-   * all-uppercase input such as {@code IPOD} or {@code UNICEF'S} matches them. A form
-   * that is itself listed is not added, and forbidden entries contribute none.
+   * Derives the hidden capitalized forms of mixed-case entries and of all-uppercase
+   * entries carrying flags, so that all-uppercase input such as {@code EBOOKS} for
+   * {@code eBook} or {@code ACME'S} for {@code ACME} matches them. A form that is
+   * itself listed is not added, and forbidden entries contribute none.
    *
    * @param listed The words mapped to the flag sets of their entries.
    * @return The capitalized forms mapped to the flag sets they share with their entries.
@@ -1248,8 +1375,8 @@ public final class HunspellDictionary {
     return compoundMoreSuffixes;
   }
 
-  /** {@return the word separators, with optional start and end anchors} */
-  List<String> wordBreaks() {
+  /** {@return the word separators with their start and end anchors} */
+  List<WordBreak> wordBreaks() {
     return wordBreaks;
   }
 
@@ -1352,11 +1479,10 @@ public final class HunspellDictionary {
   }
 
   /**
-   * {@return whether the Hungarian moving rule applies} The reference implementation
-   * checks the part of a Hungarian word before a hyphen as a compound with relaxed
-   * rules: the opening part may qualify through the hardwired flags {@code F},
-   * {@code G}, and {@code H}, a compound-forbidden opening entry is allowed, and the
-   * size limits do not apply.
+   * {@return whether the Hungarian moving rule applies} The part of a Hungarian word
+   * before a hyphen is checked as a compound with relaxed rules: the opening part may
+   * qualify through the reserved flags {@code F}, {@code G}, and {@code H}, a
+   * compound-forbidden opening entry is allowed, and the size limits do not apply.
    */
   boolean hyphenMovingRule() {
     return hungarian;
@@ -1590,8 +1716,8 @@ public final class HunspellDictionary {
     }
     // CHECKSHARPS lets a case-preserving entry with a sharp s be written all-uppercase
     // with SS, or capitalized; an all-uppercase form with a capital sharp s stays rejected
-    return checkSharps && variant.indexOf('ß') >= 0
-        && (surface.contains("SS") || (caseType(surface) != CaseType.ALLCAP
+    return checkSharps && variant.contains(SHARP_S)
+        && (surface.contains(DOUBLE_CAPITAL_S) || (caseType(surface) != CaseType.ALLCAP
             && Character.isUpperCase(surface.codePointAt(0))));
   }
 
@@ -1614,8 +1740,8 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Returns morphological fields for matching dictionary entries and applied rules, in
-   * the reference implementation's field order. A prefix without morphological fields
+   * Returns morphological fields for matching dictionary entries and applied rules:
+   * prefix fields, then entry fields, then suffix fields. A prefix without morphological fields
    * contributes its affix text when no suffix follows and its {@code fl:} flag field
    * otherwise; after the entry fields, an entry without fields contributes that prefix's
    * {@code fl:} field. A bare closing compound part without entry fields contributes
@@ -1689,9 +1815,9 @@ public final class HunspellDictionary {
     if (hasField(fields, DERIVATIONAL_SUFFIX_FIELD)) {
       result = root;
     }
-    // A derivational suffix makes the derived form the stem. The reference
-    // implementation generates that form from the entry and its suffixes alone; prefix
-    // material appears in the stem only through a surface prefix field.
+    // A derivational suffix makes the derived form the stem. That form is built from
+    // the entry and its suffixes alone; prefix material appears in the stem only
+    // through a surface prefix field.
     String derived = root;
     final StringBuilder surfacePrefix = new StringBuilder(fieldValue(fields, SURFACE_PREFIX_FIELD, ""));
     for (Affix affix : affixes) {
@@ -1782,15 +1908,25 @@ public final class HunspellDictionary {
    * @return {@code true} if the word may stand at the position.
    */
   boolean mayStand(List<int[]> flagSets, CompoundPosition position) {
-    final int positional = positionalFlag(position);
     for (final int[] flags : flagSets) {
-      if ((contains(flags, compoundFlag) || contains(flags, positional))
-          && !contains(flags, forbiddenWord) && !contains(flags, needAffix)
-          && !forbiddenAtCompoundPosition(flags, position)) {
+      if (mayStand(flags, position)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Checks whether one homonym may stand as a bare compound part at a position.
+   *
+   * @param flags One entry's flag set.
+   * @param position The part's place in the compound.
+   * @return {@code true} if the entry may stand at the position.
+   */
+  boolean mayStand(int[] flags, CompoundPosition position) {
+    return (contains(flags, compoundFlag) || contains(flags, positionalFlag(position)))
+        && !contains(flags, forbiddenWord) && !contains(flags, needAffix)
+        && !forbiddenAtCompoundPosition(flags, position);
   }
 
   /**
@@ -1807,16 +1943,30 @@ public final class HunspellDictionary {
    */
   boolean supportsPart(List<int[]> flagSets, int affixFlag, CompoundPosition position,
       boolean affixAdmits) {
-    final int positional = positionalFlag(position);
     for (final int[] flags : flagSets) {
-      if (contains(flags, affixFlag) && !contains(flags, forbiddenWord)
-          && !forbiddenAtCompoundPosition(flags, position)
-          && (affixAdmits || contains(flags, compoundFlag)
-              || contains(flags, positional))) {
+      if (supportsPart(flags, affixFlag, position, affixAdmits)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Checks whether one homonym supports an affixed compound part, under the conditions
+   * of {@link #supportsPart(List, int, CompoundPosition, boolean)}.
+   *
+   * @param flags One entry's flag set.
+   * @param affixFlag The removed affix's flag.
+   * @param position The part's place in the compound.
+   * @param affixAdmits Whether the affix's continuation classes admit the position.
+   * @return {@code true} if the entry permits the affixed form at the position.
+   */
+  boolean supportsPart(int[] flags, int affixFlag, CompoundPosition position,
+      boolean affixAdmits) {
+    return contains(flags, affixFlag) && !contains(flags, forbiddenWord)
+        && !forbiddenAtCompoundPosition(flags, position)
+        && (affixAdmits || contains(flags, compoundFlag)
+            || contains(flags, positionalFlag(position)));
   }
 
   /**
@@ -1861,12 +2011,7 @@ public final class HunspellDictionary {
 
   /**
    * Checks whether an entry marked with {@code COMPOUNDFORBIDFLAG} is barred from
-   * this compound position. Hunspell permits such an entry only as the last part, as
-   * specified by the
-   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/man/hunspell.5#L502-L506">
-   * format manual</a> and the
-   * <a href="https://github.com/hunspell/hunspell/blob/e184e22c51fe213f4490e9b36998f0ad3e5e606b/tests/compoundforbid.aff">
-   * regression fixture</a>.
+   * this compound position. Such an entry may stand only as the last part.
    *
    * @param flags One entry's flag set.
    * @param position The part's place in the compound.
@@ -1878,8 +2023,8 @@ public final class HunspellDictionary {
 
   /**
    * Checks whether a spelling is forbidden as a whole. Only the first listed homonym
-   * decides, as in the reference implementation, so a dictionary can list a valid word
-   * first and a forbidden compound-only homonym after it.
+   * decides, so a dictionary can list a valid word first and a forbidden
+   * compound-only homonym after it.
    *
    * @param flagSets The word's flag sets from {@link #lookup(String)}, in list order.
    * @return {@code true} if the first homonym carries the forbidden-word flag.
@@ -1898,7 +2043,7 @@ public final class HunspellDictionary {
    */
   boolean forbidsAffixed(List<int[]> flagSets, int flag) {
     for (final int[] flags : flagSets) {
-      if (contains(flags, flag) && contains(flags, forbiddenWord)) {
+      if (forbidsAffixed(flags, flag)) {
         return true;
       }
     }
@@ -1906,10 +2051,20 @@ public final class HunspellDictionary {
   }
 
   /**
+   * Checks whether one homonym carries both an affix flag and the forbidden flag.
+   *
+   * @param flags One entry's flag set.
+   * @param flag The removed affix's flag.
+   * @return {@code true} if the entry forbids the affixed spelling.
+   */
+  boolean forbidsAffixed(int[] flags, int flag) {
+    return contains(flags, flag) && contains(flags, forbiddenWord);
+  }
+
+  /**
    * Checks whether a spelling may not open a compound part sequence: its first listed
-   * homonym carries {@code COMPOUNDFORBIDFLAG}, which the reference implementation
-   * applies to every part but the last, overriding affixed readings of the same
-   * spelling.
+   * homonym carries {@code COMPOUNDFORBIDFLAG}, which applies to every part but the
+   * last and overrides affixed readings of the same spelling.
    *
    * @param flagSets The part's flag sets from {@link #lookup(String)}, in list order.
    * @return {@code true} if the spelling is barred from non-final compound positions.
@@ -1927,7 +2082,7 @@ public final class HunspellDictionary {
   String upperCaseInitial(String word) {
     final int first = word.codePointAt(0);
     final String initial = word.substring(0, Character.charCount(first));
-    final String upper = turkicCase && first == 'i' ? "İ"
+    final String upper = turkicCase && first == 'i' ? DOTTED_CAPITAL_I
         : turkicCase && first == 'ı' ? "I" : StringUtil.toUpperCase(initial);
     return upper + word.substring(initial.length());
   }
@@ -1992,12 +2147,23 @@ public final class HunspellDictionary {
    */
   boolean validStandalone(List<int[]> flagSets) {
     for (final int[] flags : flagSets) {
-      if (!contains(flags, needAffix) && !contains(flags, onlyInCompound)
-          && !contains(flags, forbiddenWord)) {
+      if (validStandalone(flags)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Checks whether one homonym stands on its own: its flag set carries none of the
+   * blocking flags named in {@link #validStandalone(List)}.
+   *
+   * @param flags One entry's flag set.
+   * @return {@code true} if the entry is a word by itself.
+   */
+  boolean validStandalone(int[] flags) {
+    return !contains(flags, needAffix) && !contains(flags, onlyInCompound)
+        && !contains(flags, forbiddenWord);
   }
 
   /**
@@ -2012,12 +2178,24 @@ public final class HunspellDictionary {
    */
   boolean supports(List<int[]> flagSets, int flag) {
     for (final int[] flags : flagSets) {
-      if (contains(flags, flag) && !contains(flags, onlyInCompound)
-          && !contains(flags, forbiddenWord)) {
+      if (supports(flags, flag)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Checks whether one homonym supports an affix analysis, under the conditions of
+   * {@link #supports(List, int)}.
+   *
+   * @param flags One entry's flag set.
+   * @param flag The removed affix's flag.
+   * @return {@code true} if the entry carries the flag and may stand affixed.
+   */
+  boolean supports(int[] flags, int flag) {
+    return contains(flags, flag) && !contains(flags, onlyInCompound)
+        && !contains(flags, forbiddenWord);
   }
 
   /**
@@ -2032,12 +2210,25 @@ public final class HunspellDictionary {
    */
   boolean supportsCrossProduct(List<int[]> flagSets, Affix prefix, Affix suffix) {
     for (final int[] flags : flagSets) {
-      if (licensesCrossProduct(flags, prefix, suffix) && !contains(flags, onlyInCompound)
-          && !contains(flags, forbiddenWord)) {
+      if (supportsCrossProduct(flags, prefix, suffix)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Checks whether one homonym supports a cross-product analysis, under the conditions
+   * of {@link #supportsCrossProduct(List, Affix, Affix)}.
+   *
+   * @param flags One entry's flag set.
+   * @param prefix The removed prefix.
+   * @param suffix The removed suffix.
+   * @return {@code true} if the entry licenses both affixes and may stand affixed.
+   */
+  boolean supportsCrossProduct(int[] flags, Affix prefix, Affix suffix) {
+    return licensesCrossProduct(flags, prefix, suffix) && !contains(flags, onlyInCompound)
+        && !contains(flags, forbiddenWord);
   }
 
   /**
@@ -2122,7 +2313,9 @@ public final class HunspellDictionary {
    * @throws IOException Thrown if the declared encoding name is not supported.
    */
   private static Charset declaredCharset(byte[] affixBytes) throws IOException {
-    final String ascii = new String(affixBytes, StandardCharsets.US_ASCII);
+    final int start = byteOrderMarkLength(affixBytes);
+    final String ascii = new String(affixBytes, start, affixBytes.length - start,
+        StandardCharsets.US_ASCII);
     for (final String line : splitLines(ascii)) {
       final String trimmed = trim(line);
       if (trimmed.startsWith(SET_PREFIX) || trimmed.startsWith(SET_TAB_PREFIX)) {
@@ -2196,7 +2389,7 @@ public final class HunspellDictionary {
     private HunspellConversion replacements = HunspellConversion.NONE;
     private int maxCompoundSyllables;
     private String compoundVowels = "";
-    private List<String> wordBreaks = DEFAULT_WORD_BREAKS;
+    private List<WordBreak> wordBreaks = DEFAULT_WORD_BREAKS;
   }
 
   /**
@@ -2239,151 +2432,145 @@ public final class HunspellDictionary {
       final String[] fields = fieldsByLine[i];
       if (fields.length == 0 || fields[0].startsWith(COMMENT_PREFIX)) {
         i++;
-        continue;
-      }
-      switch (fields[0]) {
-        case FLAG_TAG:
-          // The file-wide declaration was parsed before any rule fields.
-          i++;
-          break;
-        case "COMPOUNDFLAG":
-        case "COMPOUNDBEGIN":
-        case "COMPOUNDMIDDLE":
-        case "COMPOUNDEND":
-        case "COMPOUNDPERMITFLAG":
-        case "COMPOUNDFORBIDFLAG":
-        case "NEEDAFFIX":
-        case "PSEUDOROOT":
-        case "ONLYINCOMPOUND":
-        case "FORBIDDENWORD":
-        case "CIRCUMFIX":
-        case KEEP_CASE_TAG:
-        case WARNING_TAG:
-        case COMPOUND_ROOT_TAG:
-        case FORCE_UPPER_CASE_TAG:
-        case LEMMA_PRESENT_TAG:
-          if (fields.length < 2) {
-            throw new IOException(fields[0] + " line without a flag at line " + (i + 1));
-          }
-          final int declared = parseFlag(fields[1], result.flagMode, i + 1);
-          switch (fields[0]) {
-            case "COMPOUNDFLAG" -> result.compoundFlag = declared;
-            case "COMPOUNDBEGIN" -> result.compoundBegin = declared;
-            case "COMPOUNDMIDDLE" -> result.compoundMiddle = declared;
-            case "COMPOUNDEND" -> result.compoundEnd = declared;
-            case "COMPOUNDPERMITFLAG" -> result.compoundPermit = declared;
-            case "COMPOUNDFORBIDFLAG" -> result.compoundForbid = declared;
-            // PSEUDOROOT is the directive's name before hunspell renamed it
-            case "NEEDAFFIX", "PSEUDOROOT" -> result.needAffix = declared;
-            case "ONLYINCOMPOUND" -> result.onlyInCompound = declared;
-            case "CIRCUMFIX" -> result.circumfix = declared;
-            case "FORBIDDENWORD" -> result.forbiddenWord = declared;
-            case KEEP_CASE_TAG -> result.keepCase = declared;
-            case WARNING_TAG -> result.warningFlag = declared;
-            case COMPOUND_ROOT_TAG -> result.compoundRoot = declared;
-            case FORCE_UPPER_CASE_TAG -> result.forceUpperCase = declared;
-            case LEMMA_PRESENT_TAG -> { }
-            default -> throw new IOException(
-                "unhandled flag directive " + fields[0] + " at line " + (i + 1));
-          }
-          i++;
-          break;
-        case "COMPOUNDMIN":
-          final int compoundMin = parseValue(fields, i + 1);
-          if (compoundMin < 0) {
-            throw new IOException("negative COMPOUNDMIN at line " + (i + 1));
-          }
-          if (compoundMin > MAX_COMPOUND_MIN) {
-            throw new IOException("COMPOUNDMIN exceeds " + MAX_COMPOUND_MIN
-                + " at line " + (i + 1));
-          }
-          result.compoundMin = Math.max(1, compoundMin);
-          i++;
-          break;
-        case "COMPOUNDWORDMAX":
-          final int compoundWordMax = parseValue(fields, i + 1);
-          if (compoundWordMax < 0) {
-            throw new IOException("negative COMPOUNDWORDMAX at line " + (i + 1));
-          }
-          result.compoundWordMax = compoundWordMax;
-          i++;
-          break;
-        case "CHECKCOMPOUNDDUP":
-          result.checkCompoundDup = true;
-          i++;
-          break;
-        case "CHECKCOMPOUNDCASE":
-          result.checkCompoundCase = true;
-          i++;
-          break;
-        case "CHECKCOMPOUNDTRIPLE":
-          result.checkCompoundTriple = true;
-          i++;
-          break;
-        case "FULLSTRIP":
-          result.fullStrip = true;
-          i++;
-          break;
-        case COMPLEX_PREFIXES_TAG:
-          result.complexPrefixes = true;
-          i++;
-          break;
-        case COMPOUND_MORE_SUFFIXES_TAG:
-          result.compoundMoreSuffixes = true;
-          i++;
-          break;
-        case SIMPLIFIED_TRIPLE_TAG:
-          result.simplifiedTriple = true;
-          i++;
-          break;
-        case "CHECKCOMPOUNDREP":
-          result.checkCompoundRep = true;
-          i++;
-          break;
-        case COMPOUND_SYLLABLE_TAG:
-          result.maxCompoundSyllables = parseValue(fields, i + 1);
-          if (fields.length != 3 || result.maxCompoundSyllables < 0) {
-            throw new IOException("invalid COMPOUNDSYLLABLE at line " + (i + 1));
-          }
-          result.compoundVowels = fields[2];
-          i++;
-          break;
-        case FORBID_WARNING_TAG:
-          result.forbidWarn = true;
-          i++;
-          break;
-        case CHECK_SHARPS_TAG:
-          result.checkSharps = true;
-          i++;
-          break;
-        case LANGUAGE_TAG:
-          if (fields.length != 2) {
-            throw new IOException("invalid LANG at line " + (i + 1));
-          }
-          result.language = fields[1];
-          i++;
-          break;
-        case SYLLABLE_NUMBER_TAG:
-          if (fields.length != 2) {
-            throw new IOException("invalid SYLLABLENUM at line " + (i + 1));
-          }
-          result.syllableNumber = true;
-          i++;
-          break;
-        case ALIAS_TAG:
-          // The file-wide table was parsed before continuation and entry flags.
-          i++;
-          break;
-        case PREFIX_TAG:
-        case SUFFIX_TAG:
-          i = parseAffixBlock(fieldsByLine, i, fields, result);
-          break;
-        default:
-          i++;
-          break;
+      } else if (PREFIX_TAG.equals(fields[0]) || SUFFIX_TAG.equals(fields[0])) {
+        i = parseAffixBlock(fieldsByLine, i, fields, result);
+      } else {
+        // FLAG, AF, and the tables were read before this pass; every other directive
+        // is a flag declaration, a compound setting, a general setting, or ignored
+        final int line = i + 1;
+        if (!readFlagDeclaration(fields, line, result)
+            && !readCompoundSetting(fields, line, result)) {
+          readGeneralSetting(fields, line, result);
+        }
+        i++;
       }
     }
     return result;
+  }
+
+  /**
+   * Reads a directive that declares one flag, such as {@code COMPOUNDFLAG} or
+   * {@code NEEDAFFIX}.
+   *
+   * @param fields The line's fields.
+   * @param line The one-based source line.
+   * @param result The affix file under construction.
+   * @return {@code true} if the line was a flag declaration.
+   * @throws IOException Thrown if the declaration has no flag or the flag is malformed.
+   */
+  private static boolean readFlagDeclaration(String[] fields, int line, AffixFile result)
+      throws IOException {
+    if (!isSingleFlagDirective(fields[0])) {
+      return false;
+    }
+    if (fields.length < 2) {
+      throw new IOException(fields[0] + " line without a flag at line " + line);
+    }
+    final int declared = parseFlag(fields[1], result.flagMode, line);
+    switch (fields[0]) {
+      case "COMPOUNDFLAG" -> result.compoundFlag = declared;
+      case "COMPOUNDBEGIN" -> result.compoundBegin = declared;
+      case "COMPOUNDMIDDLE" -> result.compoundMiddle = declared;
+      case "COMPOUNDEND" -> result.compoundEnd = declared;
+      case "COMPOUNDPERMITFLAG" -> result.compoundPermit = declared;
+      case "COMPOUNDFORBIDFLAG" -> result.compoundForbid = declared;
+      // PSEUDOROOT is the directive's name before hunspell renamed it
+      case "NEEDAFFIX", "PSEUDOROOT" -> result.needAffix = declared;
+      case "ONLYINCOMPOUND" -> result.onlyInCompound = declared;
+      case "CIRCUMFIX" -> result.circumfix = declared;
+      case "FORBIDDENWORD" -> result.forbiddenWord = declared;
+      case KEEP_CASE_TAG -> result.keepCase = declared;
+      case WARNING_TAG -> result.warningFlag = declared;
+      case COMPOUND_ROOT_TAG -> result.compoundRoot = declared;
+      case FORCE_UPPER_CASE_TAG -> result.forceUpperCase = declared;
+      case LEMMA_PRESENT_TAG -> { }
+      default -> throw new IOException(
+          "unhandled flag directive " + fields[0] + " at line " + line);
+    }
+    return true;
+  }
+
+  /**
+   * Reads a compound setting: the size limits, the boundary checks, the syllable
+   * rules, and the compound switches.
+   *
+   * @param fields The line's fields.
+   * @param line The one-based source line.
+   * @param result The affix file under construction.
+   * @return {@code true} if the line was a compound setting.
+   * @throws IOException Thrown if a value is missing, negative, or out of range.
+   */
+  private static boolean readCompoundSetting(String[] fields, int line, AffixFile result)
+      throws IOException {
+    switch (fields[0]) {
+      case "COMPOUNDMIN" -> {
+        final int compoundMin = parseValue(fields, line);
+        if (compoundMin < 0) {
+          throw new IOException("negative COMPOUNDMIN at line " + line);
+        }
+        if (compoundMin > MAX_COMPOUND_MIN) {
+          throw new IOException("COMPOUNDMIN exceeds " + MAX_COMPOUND_MIN + " at line " + line);
+        }
+        result.compoundMin = Math.max(1, compoundMin);
+      }
+      case "COMPOUNDWORDMAX" -> {
+        final int compoundWordMax = parseValue(fields, line);
+        if (compoundWordMax < 0) {
+          throw new IOException("negative COMPOUNDWORDMAX at line " + line);
+        }
+        result.compoundWordMax = compoundWordMax;
+      }
+      case COMPOUND_SYLLABLE_TAG -> {
+        result.maxCompoundSyllables = parseValue(fields, line);
+        if (fields.length != 3 || result.maxCompoundSyllables < 0) {
+          throw new IOException("invalid COMPOUNDSYLLABLE at line " + line);
+        }
+        result.compoundVowels = fields[2];
+      }
+      case SYLLABLE_NUMBER_TAG -> {
+        if (fields.length != 2) {
+          throw new IOException("invalid SYLLABLENUM at line " + line);
+        }
+        result.syllableNumber = true;
+      }
+      case "CHECKCOMPOUNDDUP" -> result.checkCompoundDup = true;
+      case "CHECKCOMPOUNDCASE" -> result.checkCompoundCase = true;
+      case "CHECKCOMPOUNDTRIPLE" -> result.checkCompoundTriple = true;
+      case CHECK_COMPOUND_REP_TAG -> result.checkCompoundRep = true;
+      case COMPOUND_MORE_SUFFIXES_TAG -> result.compoundMoreSuffixes = true;
+      case SIMPLIFIED_TRIPLE_TAG -> result.simplifiedTriple = true;
+      default -> {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Reads a general setting outside compounding: the affix switches, the sharp-s and
+   * warning rules, and the language. Directives read before this pass and ignored
+   * directives are left alone.
+   *
+   * @param fields The line's fields.
+   * @param line The one-based source line.
+   * @param result The affix file under construction.
+   * @throws IOException Thrown if the language declaration is malformed.
+   */
+  private static void readGeneralSetting(String[] fields, int line, AffixFile result)
+      throws IOException {
+    switch (fields[0]) {
+      case "FULLSTRIP" -> result.fullStrip = true;
+      case COMPLEX_PREFIXES_TAG -> result.complexPrefixes = true;
+      case FORBID_WARNING_TAG -> result.forbidWarn = true;
+      case CHECK_SHARPS_TAG -> result.checkSharps = true;
+      case LANGUAGE_TAG -> {
+        if (fields.length != 2) {
+          throw new IOException("invalid LANG at line " + line);
+        }
+        result.language = fields[1];
+      }
+      default -> { }
+    }
   }
 
   /**
@@ -2621,7 +2808,7 @@ public final class HunspellDictionary {
    *
    * @param lines The affix fields indexed by source line.
    * @return The aliases in reference order.
-   * @throws IOException If a count or table entry is malformed.
+   * @throws IOException Thrown if a count or table entry is malformed.
    */
   private static List<List<String>> readMorphologyAliases(String[][] lines) throws IOException {
     final List<List<String>> aliases = new ArrayList<>();
@@ -2642,7 +2829,7 @@ public final class HunspellDictionary {
    * @param lines The affix fields indexed by line.
    * @param mode The flag encoding.
    * @return The parsed patterns.
-   * @throws IOException If a count, pattern, or flag is malformed.
+   * @throws IOException Thrown if a count, pattern, or flag is malformed.
    */
   private static List<HunspellCompoundRule> readCompoundRules(String[][] lines, FlagMode mode)
       throws IOException {
@@ -2663,7 +2850,7 @@ public final class HunspellDictionary {
    * @param lines The affix fields.
    * @param mode The flag encoding.
    * @return The boundary patterns.
-   * @throws IOException If a declaration is malformed.
+   * @throws IOException Thrown if a declaration is malformed.
    */
   private static List<CompoundPattern> readCompoundPatterns(String[][] lines, FlagMode mode)
       throws IOException {
@@ -2679,10 +2866,10 @@ public final class HunspellDictionary {
       final int rightSlash = fields[2].indexOf('/');
       final String left = leftSlash < 0 ? fields[1] : fields[1].substring(0, leftSlash);
       final String right = rightSlash < 0 ? fields[2] : fields[2].substring(0, rightSlash);
-      patterns.add(new CompoundPattern("0".equals(left) ? "" : left,
+      patterns.add(new CompoundPattern(NO_MATERIAL.equals(left) ? "" : left,
           leftSlash < 0 ? 0 : parseFlag(fields[1].substring(leftSlash + 1), mode, entry.line()),
           right, rightSlash < 0 ? 0 : parseFlag(fields[2].substring(rightSlash + 1), mode, entry.line()),
-          "0".equals(left), fields.length == 4 ? fields[3] : null));
+          NO_MATERIAL.equals(left), fields.length == 4 ? fields[3] : null));
     }
     return patterns;
   }
@@ -2692,20 +2879,16 @@ public final class HunspellDictionary {
    *
    * @param lines The affix fields.
    * @return The separators and anchors.
-   * @throws IOException If the table or a separator is malformed.
+   * @throws IOException Thrown if the table or a separator is malformed.
    */
-  private static List<String> readWordBreaks(String[][] lines) throws IOException {
+  private static List<WordBreak> readWordBreaks(String[][] lines) throws IOException {
     final List<HunspellAffixTable.Entry> entries = HunspellAffixTable.read(lines, BREAK_TAG, 2, 2);
     if (entries == null) {
       return DEFAULT_WORD_BREAKS;
     }
-    final List<String> result = new ArrayList<>();
+    final List<WordBreak> result = new ArrayList<>();
     for (HunspellAffixTable.Entry entry : entries) {
-      final String separator = entry.fields()[1];
-      if ("^".equals(separator) || "$".equals(separator) || "^$".equals(separator)) {
-        throw new IOException("invalid BREAK at line " + entry.line());
-      }
-      result.add(separator);
+      result.add(WordBreak.parse(entry.fields()[1], entry.line()));
     }
     return result;
   }
@@ -2717,7 +2900,7 @@ public final class HunspellDictionary {
    * @param aliases The AM table.
    * @param line The source line.
    * @return The expanded immutable fields.
-   * @throws IOException If an alias reference is invalid.
+   * @throws IOException Thrown if an alias reference is invalid.
    */
   private static List<String> parseMorphology(String[] fields, List<List<String>> aliases,
       int line) throws IOException {
@@ -2824,9 +3007,9 @@ public final class HunspellDictionary {
    * a tabulator, the older separator, or written as a two-letter tag followed by
    * {@code :} and preceded by a separator, such as {@code po:verb}. A separator that
    * is not followed by such a tag belongs to the word, because a word-list entry may
-   * name several words. The separators are the space and the tabulator, exactly the
-   * two characters the reference implementation's {@code hashmgr.cxx} splits on; they
-   * are format delimiters of the word-list grammar, not a whitespace judgment, so
+   * name several words. The separators are the space and the tabulator, the two
+   * characters the word-list format splits on; they are format delimiters of the
+   * word-list grammar, not a whitespace judgment, so
    * wider whitespace such as a no-break space stays part of the word by design.
    *
    * @param line The trimmed word-list line to scan.
@@ -2855,8 +3038,7 @@ public final class HunspellDictionary {
 
   /**
    * Checks one character against the word-list format's field separators, space and
-   * tabulator, the exact set the reference implementation splits morphological fields
-   * on.
+   * tabulator.
    *
    * @param c The character to test.
    * @return {@code true} if {@code c} separates fields in the word-list format.
@@ -2970,7 +3152,9 @@ public final class HunspellDictionary {
   }
 
   /**
-   * Splits text into lines with a single character scan, tolerating CRLF endings.
+   * Splits text into lines with a single character scan. A line ends at a line feed, a
+   * carriage return, or a carriage return followed by a line feed, as in the directive
+   * masking, so line numbers agree.
    *
    * @param content The text to split.
    * @return The lines without their terminators. Never {@code null}.
@@ -2979,12 +3163,12 @@ public final class HunspellDictionary {
     final List<String> lines = new ArrayList<>();
     int start = 0;
     for (int i = 0; i <= content.length(); i++) {
-      if (i == content.length() || content.charAt(i) == '\n') {
-        int end = i;
-        if (end > start && content.charAt(end - 1) == '\r') {
-          end--;
+      if (i == content.length() || content.charAt(i) == '\n' || content.charAt(i) == '\r') {
+        lines.add(content.substring(start, i));
+        if (i + 1 < content.length() && content.charAt(i) == '\r'
+            && content.charAt(i + 1) == '\n') {
+          i++;
         }
-        lines.add(content.substring(start, end));
         start = i + 1;
       }
     }

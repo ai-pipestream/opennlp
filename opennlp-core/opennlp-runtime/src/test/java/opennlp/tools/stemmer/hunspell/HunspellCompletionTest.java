@@ -36,12 +36,18 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.util.StringUtil;
 
-/** Original compound and morphology fixtures. */
+/**
+ * Compound and morphology fixtures written for this test, with the recognition and
+ * analyses recorded from Hunspell as described in {@code dev/README-hunspell-dictionaries.md}.
+ */
 class HunspellCompletionTest {
 
   private static final String COMPOUND = "COMPOUNDFLAG C\nCOMPOUNDMIN 1\n";
   private static final String HUNGARIAN = COMPOUND + "LANG hu\nCOMPOUNDWORDMAX 2\n";
   private static final String THREE_WORDS = "3\nray/C\nme/C\nfa/C";
+  private static final String NEEDS_AFFIX_ZERO_RULES = "NEEDAFFIX N\n"
+      + "SFX P Y 1\nSFX P 0 0 . is:bare\nSFX Q Y 1\nSFX Q 0 0 . is:plain\n"
+      + "SFX R Y 2\nSFX R 0 0/NPQ . dp:none\nSFX R 0 ix/NPQ . dp:ix\n";
 
   /**
    * An original dictionary with expected recognition and stems.
@@ -51,7 +57,7 @@ class HunspellCompletionTest {
    * @param words The dictionary entries.
    * @param input The text to analyze.
    * @param stems The expected stems.
-   * @param accepted The native recognition expectation.
+   * @param accepted Whether Hunspell recognized the input.
    */
   private record Example(String name, String affix, String words, String input,
                          List<String> stems, boolean accepted) {
@@ -62,7 +68,7 @@ class HunspellCompletionTest {
     }
   }
 
-  /** {@return compound and morphology cases with independently written data} */
+  /** {@return the compound and morphology cases} */
   private static Stream<Example> examples() {
     return Stream.of(
         new Example("legacy-lemma", "LEMMA_PRESENT L\nSFX A Y 1\nSFX A 0 s .\n",
@@ -117,10 +123,12 @@ class HunspellCompletionTest {
             "1\ncard/A\n", "cards", List.of("card"), true),
         new Example("compound-word-with-space", COMPOUND,
             "3\nriver/C\nboat/C\nriver boat\n", "riverboat", List.of("riverboat"), false),
+        new Example("compound-affixed-word-with-space", COMPOUND + "SFX A Y 1\nSFX A 0 s .\n",
+            "3\nriver/C\nboat/CA\nriver boat/A\n", "riverboats", List.of("riverboats"), false),
         new Example("compound-affixed-duplicate", COMPOUND + "CHECKCOMPOUNDDUP\n"
             + "COMPOUNDPERMITFLAG P\nSFX A Y 1\nSFX A 0 s/P .\n",
             "1\nriver/CA\n", "riversriver", List.of("riversriver"), false),
-        // the reference spell checker rejects these forms while its analyzer stems them
+        // the Hunspell spell checker rejects these forms while its analyzer stems them
         new Example("turkish-capitalized-name", "LANG tr_TR\n", "1\nİpek\n",
             "İPEK", List.of("İpek"), false),
         new Example("azerbaijani-capitalized-name", "LANG az_AZ\n", "1\nİpek\n",
@@ -152,18 +160,18 @@ class HunspellCompletionTest {
             "unreriversboat", List.of("river", "boat"), true),
         // deviations listed in the manual: Unicode case mapping, the suggester-based
         // rejection of multi-part compounds, and numeric tokens
-        new Example("dotted-capital-i", "", "1\nimply\n", "İmply", List.of("imply"), false),
-        new Example("dotted-capital-i-all-caps", "", "1\nİzmir\n", "İZMİR", List.of("İzmir"), true),
+        new Example("dotted-capital-i", "", "1\ninvite\n", "İnvite", List.of("invite"), false),
+        new Example("dotted-capital-i-all-caps", "", "1\nİnci\n", "İNCİ", List.of("İnci"), true),
         // KEEPCASE with CHECKSHARPS admits the SS spelling of an all-uppercase form only
-        new Example("keepcase-sharp-s-double-s", "CHECKSHARPS\nKEEPCASE k\n", "1\nmüßig/k\n",
-            "MÜSSIG", List.of("müßig"), true),
-        new Example("keepcase-capital-sharp-s", "CHECKSHARPS\nKEEPCASE k\n", "1\nmüßig/k\n",
-            "MÜẞIG", List.of("MÜẞIG"), false),
-        new Example("keepcase-sharp-s-capitalized", "CHECKSHARPS\nKEEPCASE k\n", "1\nmüßig/k\n",
-            "Müßig", List.of("müßig"), true),
-        new Example("multi-part-compound-near-listed-word", "TRY esianrtolcdugmphbyfvkwz\n"
-            + "COMPOUNDFLAG x\n", "5\nfoo/x\nbar/x\nbaz/x\ngoobar\ngoobarbaz\n",
-            "foobarbaz", List.of("foo", "bar", "baz"), false),
+        new Example("keepcase-sharp-s-double-s", "CHECKSHARPS\nKEEPCASE k\n", "1\nfleiß/k\n",
+            "FLEISS", List.of("fleiß"), true),
+        new Example("keepcase-capital-sharp-s", "CHECKSHARPS\nKEEPCASE k\n", "1\nfleiß/k\n",
+            "FLEIẞ", List.of("FLEIẞ"), false),
+        new Example("keepcase-sharp-s-capitalized", "CHECKSHARPS\nKEEPCASE k\n", "1\nfleiß/k\n",
+            "Fleiß", List.of("fleiß"), true),
+        new Example("multi-part-compound-near-listed-word", "TRY abcdefghijklmnopqrstuvwxyz\n"
+            + "COMPOUNDFLAG x\n", "5\nsun/x\nset/x\nlamp/x\nbunset\nbunsetlamp\n",
+            "sunsetlamp", List.of("sun", "set", "lamp"), false),
         new Example("numeric-token", "", "1\nfoo\n", "1.5", List.of("1.5"), true));
   }
 
@@ -171,7 +179,7 @@ class HunspellCompletionTest {
    * Tests Java stems under strict loading.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("examples")
@@ -194,12 +202,12 @@ class HunspellCompletionTest {
       "numeric-token", "numbers are accepted natively before any lookup");
 
   /**
-   * Tests recognition against the outcome recorded from the reference spell checker.
+   * Tests recognition against the outcome recorded from the Hunspell spell checker.
    * A fixture listed in {@link #RECOGNITION_DEVIATIONS} must differ, so a stale entry
    * fails too.
    *
    * @param example The fixture.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest(name = "recognition {0}")
   @MethodSource("examples")
@@ -214,9 +222,10 @@ class HunspellCompletionTest {
   }
 
   /**
-   * Requires a public analysis operation preserving entry and affix fields.
+   * Checks the package-private analysis operation, which preserves entry and affix
+   * fields and answers an immutable list.
    *
-   * @throws Exception If reflection, loading, or analysis fails.
+   * @throws Exception Thrown if loading or analysis fails.
    */
   @Test
   void testMorphologicalAnalysis() throws Exception {
@@ -236,7 +245,7 @@ class HunspellCompletionTest {
   /**
    * Checks the documented maximum number of CHECKSHARPS case variants.
    *
-   * @throws IOException If fixture loading fails.
+   * @throws IOException Thrown if fixture loading fails.
    */
   @Test
   void testSharpVariantLimit() throws IOException {
@@ -256,17 +265,19 @@ class HunspellCompletionTest {
   }
 
   /**
-   * Checks shared use and protection of dictionary flags returned for inspection.
+   * Checks that the flag-set lists a lookup answers are immutable and shared across
+   * concurrent stemming.
    *
-   * @throws Exception If fixture loading or a worker fails.
+   * @throws Exception Thrown if fixture loading or a worker fails.
    */
   @Test
   void testSharedMorphologyAndImmutableFlags() throws Exception {
     final HunspellDictionary dictionary = HunspellDictionary.load(
         new ByteArrayInputStream("SFX A Y 1\nSFX A 0 s . is:plural\n".getBytes(StandardCharsets.UTF_8)),
         new ByteArrayInputStream("2\ncard/A po:noun\ncard/A po:verb\n".getBytes(StandardCharsets.UTF_8)));
-    dictionary.lookup("card").getFirst()[0] = 'Z';
-    dictionary.lookup("card").clear();
+    Assertions.assertThrows(UnsupportedOperationException.class, () -> dictionary.lookup("card").clear());
+    Assertions.assertThrows(UnsupportedOperationException.class,
+        () -> dictionary.lookup("card", true).add(new int[0]));
     final HunspellStemmer stemmer = new HunspellStemmer(dictionary);
     final List<String> expected = List.of("st:card po:noun is:plural", "st:card po:verb is:plural");
     try (var executor = Executors.newFixedThreadPool(4)) {
@@ -285,7 +296,7 @@ class HunspellCompletionTest {
   }
 
   /**
-   * Supplies morphology expected from the native reference.
+   * Supplies morphology recorded from Hunspell.
    *
    * @return Affix content, dictionary content, input, and expected analysis.
    */
@@ -317,18 +328,9 @@ class HunspellCompletionTest {
             "pa:foo st:foo pa:bar st:bar id:2 pa:baz"},
         new String[] {COMPOUND + "SFX A Y 1\nSFX A 0 s .\n", "2\nfoo/C id:1\nbar/CA\n", "foobars",
             "pa:foo st:foo id:1 pa:bars st:bar fl:A"},
-        new String[] {"SFX A Y 1\nSFX A 0 s .\n", "1\niPod/A po:noun\n", "IPODS", "st:Ipod po:noun fl:A"});
+        new String[] {"SFX A Y 1\nSFX A 0 s .\n", "1\neBook/A po:noun\n", "EBOOKS", "st:Ebook po:noun fl:A"});
   }
 
-  /**
-   * Compares morphological fields with native output on original fixtures.
-   *
-   * @param affix The affix content.
-   * @param words The entry content.
-   * @param input The input word.
-   * @param expected The expected analysis.
-   * @throws Exception If parsing or reference execution fails.
-   */
   /**
    * Analyses that include a rule adding and removing no material, in reference order.
    *
@@ -340,11 +342,11 @@ class HunspellCompletionTest {
             List.of("st:bar", "st:bar is:zero")),
         Arguments.of("PFX A Y 1\nPFX A 0 0 . dp:zero\n", "1\nbar/A\n", "bar",
             List.of("st:bar", "dp:zero st:bar fl:A")),
-        Arguments.of("NEEDAFFIX X\nSFX A Y 1\nSFX A 0 0 . >\nSFX B Y 1\nSFX B 0 0 . <ZERO>>\n"
-            + "SFX C Y 2\nSFX C 0 0/XAB . <ZERODERIV>\nSFX C 0 baz/XAB . <DERIV>\n",
-            "1\nbar/XABC\t<BAR\n", "bar",
-            List.of("st:bar <BAR >", "st:bar <BAR <ZERO>>", "st:bar <BAR <ZERODERIV> >",
-                "st:bar <BAR <ZERODERIV> <ZERO>>")));
+        Arguments.of(NEEDS_AFFIX_ZERO_RULES, "1\nlumen/NPQR po:noun\n", "lumen",
+            List.of("st:lumen po:noun is:bare", "st:lumen po:noun is:plain",
+                "st:lumen po:noun dp:none is:bare", "st:lumen po:noun dp:none is:plain")),
+        Arguments.of(NEEDS_AFFIX_ZERO_RULES, "1\nlumen/NPQR po:noun\n", "lumenix",
+            List.of("st:lumen po:noun dp:ix is:bare", "st:lumen po:noun dp:ix is:plain")));
   }
 
   /**
@@ -353,8 +355,8 @@ class HunspellCompletionTest {
    * @param affix The affix content.
    * @param words The word list.
    * @param input The analyzed word.
-   * @param expected The distinct analyses, as recorded from the reference analyzer.
-   * @throws IOException If loading fails.
+   * @param expected The distinct analyses, as recorded from Hunspell's analyzer.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("zeroAffixAnalyses")
@@ -368,34 +370,34 @@ class HunspellCompletionTest {
 
   /**
    * Tests that only the first listed homonym decides whether a spelling is forbidden.
-   * The reference spell checker accepts {@code foo} with the valid homonym listed first
+   * The Hunspell spell checker accepts {@code reed} with the valid homonym listed first
    * and rejects it with the forbidden homonym listed first.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testForbiddenFirstHomonym() throws IOException {
-    final String affix = "FORBIDDENWORD X\nCOMPOUNDFLAG Y\nCOMPOUNDMIN 1\n";
+    final String affix = "FORBIDDENWORD F\nCOMPOUNDFLAG K\nCOMPOUNDMIN 1\n";
     final HunspellStemmer allowed = new HunspellStemmer(HunspellDictionary.load(
         new ByteArrayInputStream(affix.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("2\nfoo/S\nfoo/YX\n".getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertEquals(List.of("st:foo"), allowed.analyze("foo"));
-    Assertions.assertEquals(List.of(), allowed.analyze("foofoo"));
+        new ByteArrayInputStream("2\nreed/T\nreed/KF\n".getBytes(StandardCharsets.UTF_8))));
+    Assertions.assertEquals(List.of("st:reed"), allowed.analyze("reed"));
+    Assertions.assertEquals(List.of(), allowed.analyze("reedreed"));
     final HunspellStemmer forbidden = new HunspellStemmer(HunspellDictionary.load(
         new ByteArrayInputStream(affix.getBytes(StandardCharsets.UTF_8)),
-        new ByteArrayInputStream("2\nfoo/YX\nfoo/S\n".getBytes(StandardCharsets.UTF_8))));
-    Assertions.assertEquals(List.of(), forbidden.analyze("foo"));
+        new ByteArrayInputStream("2\nreed/KF\nreed/T\n".getBytes(StandardCharsets.UTF_8))));
+    Assertions.assertEquals(List.of(), forbidden.analyze("reed"));
   }
 
   /**
-   * Tests analyses against the field text recorded from the reference analyzer, with
+   * Tests analyses against the field text recorded from Hunspell's analyzer, with
    * separator whitespace normalized to single spaces.
    *
    * @param affix The affix content.
    * @param words The word list.
    * @param input The analyzed word.
    * @param expected The recorded analysis.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("morphology")

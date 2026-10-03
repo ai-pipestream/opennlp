@@ -24,6 +24,8 @@ import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
+import opennlp.tools.util.Span;
+
 /**
  * Class to parse the word ("quark") segmentation stand-off annotation.
  */
@@ -44,17 +46,8 @@ class MascWordParser extends DefaultHandler {
       if (qName.equalsIgnoreCase("region")) {
         int id = MascIdentifiers.parseId(
             attributes.getValue("xml:id"), MascIdentifiers.REGION_ID_PREFIX);
-        String[] anchors = MascIdentifiers.splitOnSpaces(attributes.getValue("anchors"));
-        if (anchors.length != 2) {
-          throw new IllegalArgumentException(
-              "MASC region anchors must be two space separated numbers: "
-                  + attributes.getValue("anchors"));
-        }
-
-        int left = Integer.parseInt(anchors[0]);
-        int right = Integer.parseInt(anchors[1]);
-
-        wordAnchors.add(new MascWord(left, right, id));
+        Span anchors = MascIdentifiers.parseAnchors(attributes.getValue("anchors"));
+        wordAnchors.add(new MascWord(anchors.getStart(), anchors.getEnd(), id));
       }
 
     } catch (Exception e) {

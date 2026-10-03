@@ -83,6 +83,37 @@ class HunspellDictionaryLoadTest {
     Assertions.assertTrue(error.getMessage().contains("line 3"));
   }
 
+  /**
+   * Reads the affix file and the word list with each supported line separator, so a
+   * file with carriage return line endings loads like one with line feeds.
+   *
+   * @param separator A supported line separator.
+   * @throws IOException Thrown if loading fails.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"\n", "\r\n", "\r"})
+  void testLineSeparatorsInAffixAndWordList(String separator) throws IOException {
+    final String affix = String.join(separator, "SFX A Y 1", "SFX A 0 s .", "");
+    final String words = String.join(separator, "1", "dog/A", "");
+    final HunspellDictionary dictionary = HunspellDictionary.load(stream(affix), stream(words));
+    Assertions.assertEquals("dog", new HunspellStemmer(dictionary).stem("dogs").toString());
+  }
+
+  /**
+   * Reports the line of a malformed supported directive with each line separator.
+   *
+   * @param separator A supported line separator.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"\n", "\r\n", "\r"})
+  void testMalformedDirectiveLineNumber(String separator) {
+    final String affix = String.join(separator, "# comment", "", "IGNORE", "");
+    final IOException error = Assertions.assertThrows(IOException.class,
+        () -> HunspellDictionary.load(stream(affix), stream(WORDS)));
+    Assertions.assertTrue(error.getMessage().contains("IGNORE"), error.getMessage());
+    Assertions.assertTrue(error.getMessage().contains("line 3"), error.getMessage());
+  }
+
   /** Rejects an unsupported directive immediately after a UTF-8 byte-order mark. */
   @Test
   void testByteOrderMarkDoesNotHideUnsupportedDirective() {
@@ -95,7 +126,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Identifies the source file when path-based loading rejects a directive.
    *
-   * @throws IOException If writing a fixture fails.
+   * @throws IOException Thrown if writing a fixture fails.
    */
   @Test
   void testPathErrorIdentifiesAffixFile() throws IOException {
@@ -113,7 +144,7 @@ class HunspellDictionaryLoadTest {
    * Loads settings outside the stemmer's operations without a diagnostic.
    *
    * @param setting A metadata or suggestion setting.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -121,7 +152,7 @@ class HunspellDictionaryLoadTest {
       "TRY abc", "REP 1\nREP ph f", "MAP 1\nMAP aá", "PHONE 1\nPHONE ph f",
       "NOSUGGEST N", "MAXCPDSUGS 0", "MAXNGRAMSUGS 0", "MAXDIFF 5",
       "ONLYMAXDIFF", "NOSPLITSUGS", "SUGSWITHDOTS", "WARN W",
-      "SUBSTANDARD S", "WORDCHARS -"
+      "SUBSTANDARD S", "WORDCHARS -", "NONGRAMSUGGEST N", "CHECKNUM"
   })
   void testSettingsOutsideStemmingDoNotPreventStrictLoading(String setting)
       throws IOException {
@@ -132,13 +163,42 @@ class HunspellDictionaryLoadTest {
   }
 
   /**
-   * Keeps a number sign that is a directive value, which the reference format allows
+   * Accepts under strict loading every directive name Hunspell's affix and dictionary
+   * parsers read, as a stemming setting or as one the stemmer ignores. The value is a
+   * placeholder, so a directive may still fail on its value, but never as unsupported.
+   *
+   * @param directive A directive name Hunspell reads.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "AF", "AM", "BREAK", "CHECKCOMPOUNDCASE", "CHECKCOMPOUNDDUP", "CHECKCOMPOUNDPATTERN",
+      "CHECKCOMPOUNDREP", "CHECKCOMPOUNDTRIPLE", "CHECKNUM", "CHECKSHARPS", "CIRCUMFIX",
+      "COMPLEXPREFIXES", "COMPOUNDBEGIN", "COMPOUNDEND", "COMPOUNDFLAG", "COMPOUNDFORBIDFLAG",
+      "COMPOUNDMIDDLE", "COMPOUNDMIN", "COMPOUNDMORESUFFIXES", "COMPOUNDPERMITFLAG",
+      "COMPOUNDROOT", "COMPOUNDRULE", "COMPOUNDSYLLABLE", "COMPOUNDWORDMAX", "FLAG",
+      "FORBIDDENWORD", "FORBIDWARN", "FORCEUCASE", "FULLSTRIP", "ICONV", "IGNORE", "KEEPCASE",
+      "KEY", "LANG", "LEMMA_PRESENT", "MAP", "MAXCPDSUGS", "MAXDIFF", "MAXNGRAMSUGS",
+      "NEEDAFFIX", "NONGRAMSUGGEST", "NOSPLITSUGS", "NOSUGGEST", "OCONV", "ONLYINCOMPOUND",
+      "ONLYMAXDIFF", "PHONE", "PSEUDOROOT", "REP", "SET", "SIMPLIFIEDTRIPLE", "SUBSTANDARD",
+      "SUGSWITHDOTS", "SYLLABLENUM", "TRY", "VERSION", "WARN", "WORDCHARS"
+  })
+  void testHunspellDirectivesAreNotUnsupported(String directive) {
+    try {
+      HunspellDictionary.load(stream(directive + " X\n" + RULES), stream(WORDS));
+    } catch (IOException e) {
+      Assertions.assertFalse(e.getMessage().contains("unsupported affix directive"),
+          e.getMessage());
+    }
+  }
+
+  /**
+   * Keeps a number sign that is a directive value, which the Hunspell format allows
    * for flags, separators, and affix material.
    *
    * @param affix Affix content in which {@code #} is a value.
    * @param input The stemmed word.
    * @param expected The stem.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @MethodSource("numberSignValues")
@@ -167,7 +227,7 @@ class HunspellDictionaryLoadTest {
    * implementation ignores those fields.
    *
    * @param affix Affix content with a trailing comment.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {
@@ -186,7 +246,7 @@ class HunspellDictionaryLoadTest {
    * Reports the first location for each skipped directive in source order.
    *
    * @param separator A supported line separator.
-   * @throws IOException If partial loading fails.
+   * @throws IOException Thrown if partial loading fails.
    */
   @ParameterizedTest
   @ValueSource(strings = {"\n", "\r\n", "\r"})
@@ -207,7 +267,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Includes the affix path in partial-loading diagnostics.
    *
-   * @throws IOException If writing or loading fixtures fails.
+   * @throws IOException Thrown if writing or loading fixtures fails.
    */
   @Test
   void testPartialLoadingReportsFilePath() throws IOException {
@@ -284,7 +344,7 @@ class HunspellDictionaryLoadTest {
   /**
    * Accepts legacy bytes in recognized metadata without decoding them as rules.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testLegacyMetadataBytesAreIgnored() throws IOException {
@@ -299,7 +359,7 @@ class HunspellDictionaryLoadTest {
    * Preserves raw flag bytes in compound-boundary conditions without changing word text.
    *
    * @param matchingFlag Whether the left entry has the boundary flag.
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @ParameterizedTest
   @ValueSource(booleans = {true, false})
@@ -322,13 +382,49 @@ class HunspellDictionaryLoadTest {
   /**
    * Loads supported affix rules after a UTF-8 byte-order mark.
    *
-   * @throws IOException If loading fails.
+   * @throws IOException Thrown if loading fails.
    */
   @Test
   void testByteOrderMarkDoesNotHideSupportedDirective() throws IOException {
     final HunspellDictionary dictionary = HunspellDictionary.load(
         stream("\uFEFF" + RULES), stream(WORDS));
     Assertions.assertEquals("dog", new HunspellStemmer(dictionary).stem("dogs").toString());
+  }
+
+  /**
+   * Reads the flag declaration on the first line after a UTF-8 byte-order mark, so
+   * the declared flag mode, not the raw-byte default, applies to the rules.
+   *
+   * @param affix The affix content following the byte-order mark.
+   * @param words The word list.
+   * @throws IOException Thrown if loading fails.
+   */
+  @ParameterizedTest
+  @MethodSource("flagDeclarationsAfterByteOrderMark")
+  void testByteOrderMarkDoesNotHideFlagDeclaration(byte[] affix, byte[] words)
+      throws IOException {
+    final byte[] marked = new byte[affix.length + 3];
+    marked[0] = (byte) 0xef;
+    marked[1] = (byte) 0xbb;
+    marked[2] = (byte) 0xbf;
+    System.arraycopy(affix, 0, marked, 3, affix.length);
+    final HunspellDictionary dictionary = HunspellDictionary.load(
+        new ByteArrayInputStream(marked), new ByteArrayInputStream(words));
+    Assertions.assertEquals("card", new HunspellStemmer(dictionary).stem("cards").toString());
+  }
+
+  /** {@return affix content with a flag declaration or a raw byte flag on the first line} */
+  private static Stream<Arguments> flagDeclarationsAfterByteOrderMark() {
+    return Stream.of(
+        Arguments.of("FLAG UTF-8\nSFX \u00e4 Y 1\nSFX \u00e4 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/\u00e4\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of("FLAG long\nSFX Qz Y 1\nSFX Qz 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/Qz\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of("FLAG num\nSFX 312 Y 1\nSFX 312 0 s .\n".getBytes(StandardCharsets.UTF_8),
+            "1\ncard/312\n".getBytes(StandardCharsets.UTF_8)),
+        Arguments.of(new byte[] {'S', 'F', 'X', ' ', (byte) 0xe4, ' ', 'Y', ' ', '1', '\n',
+            'S', 'F', 'X', ' ', (byte) 0xe4, ' ', '0', ' ', 's', ' ', '.', '\n'},
+            new byte[] {'1', '\n', 'c', 'a', 'r', 'd', '/', (byte) 0xe4, '\n'}));
   }
 
   /**
@@ -364,7 +460,7 @@ class HunspellDictionaryLoadTest {
    * Preserves ownership of input streams on success and failure.
    *
    * @param mode The loading policy.
-   * @throws IOException If valid content fails to load.
+   * @throws IOException Thrown if valid content fails to load.
    */
   @ParameterizedTest
   @EnumSource(LoadMode.class)

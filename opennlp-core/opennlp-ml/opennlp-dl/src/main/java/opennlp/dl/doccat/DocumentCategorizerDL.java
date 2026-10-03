@@ -453,13 +453,28 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
     final Map<Integer, String> categories = new HashMap<>();
     try {
       for (Map.Entry<String, String> label : DocumentCategorizerConfig.fromJson(json).id2label().entrySet()) {
-        categories.put(Integer.valueOf(label.getKey()), label.getValue());
+        categories.put(parseIndex(label.getKey()), label.getValue());
       }
     } catch (IllegalArgumentException e) {
       throw new InvalidFormatException(
           "Configuration file " + config.getName() + ": " + e.getMessage(), e);
     }
     return categories;
+  }
+
+  /**
+   * Parses an {@code id2label} key as an output index.
+   *
+   * @param key The key to parse.
+   * @return The output index.
+   * @throws IllegalArgumentException Thrown if {@code key} is not an integer.
+   */
+  private static int parseIndex(String key) {
+    try {
+      return Integer.parseInt(key);
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException("id2label key must be an integer: " + key, e);
+    }
   }
 
 }
