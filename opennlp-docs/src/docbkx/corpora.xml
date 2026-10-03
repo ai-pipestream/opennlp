@@ -389,6 +389,27 @@ Execution time: 1,955 seconds]]>
 		</para>
 		</section>
 	</section>
+	<section xml:id="tools.corpora.conll.u">
+		<title>CoNLL-U</title>
+		<para>
+		The <link xlink:href="https://universaldependencies.org/format.html">CoNLL-U</link> format of the
+		Universal Dependencies treebanks can be used directly by the tokenizer, sentence detector, POS tagger,
+		and lemmatizer trainers through the <code>conllu</code> format name, for example
+		<code>opennlp TokenizerTrainer.conllu</code>, and converted with the matching converter tools.
+		</para>
+		<para>
+		The reader interprets the format as follows. A multiword token line has a range id such
+		as <code>3-4</code>; the range must be two runs of ASCII digits without a leading zero, joined by
+		a single hyphen, and its end must not be smaller than its start. Since 3.0.0 an id that does not
+		follow this form, such as <code>3-</code>, <code>-4</code>, <code>3--4</code>, <code>1-2-3</code>, or
+		<code>4-3</code>, stops the read with an <code>InvalidFormatException</code> that names the id.
+		Earlier releases failed with an <code>ArrayIndexOutOfBoundsException</code> or a
+		<code>NumberFormatException</code> on the first three shapes and read the last two without an error.
+		The language of a sentence is taken from <code>text_xx</code> and
+		<code>text_xxx</code> comment keys, where the code consists of two or three lowercase ASCII letters;
+		when three letters follow, all three form the code.
+		</para>
+	</section>
 	</section>
 	<section xml:id="tools.corpora.conllu.range.lines">
 		<title>CoNLL-U multiword token lines</title>
@@ -878,5 +899,32 @@ Organization: precision:   85.11%;  recall:   79.38%; F1:   82.14%. [target: 130
 				</screen>
 			</para>
 		</section>
+	</section>
+	<section xml:id="tools.corpora.masc">
+		<title>MASC</title>
+		<para>
+		The <link xlink:href="https://anc.org/data/masc/">Manually Annotated Sub-Corpus</link>
+		(MASC) of the Open American National Corpus is about 500,000 words of American English
+		with hand-validated annotations. Each document is a text file and a header file
+		(<code>.hdr</code>) that names its standoff annotation files in the GrAF XML format:
+		sentences, word segmentation, Penn Treebank tokens with part-of-speech tags, and named
+		entities. OpenNLP reads them through the <code>masc</code> format of the sentence
+		detector, tokenizer, POS tagger and name finder tools. The reader looks for header
+		files in the given directory, recursively when requested, reads only the files with the
+		filter string in their name, and logs and skips a document it cannot read.
+		</para>
+		<para>
+		For example, to train a sentence detector on the written part of the corpus:
+		<screen>
+<![CDATA[$ opennlp SentenceDetectorTrainer.masc -lang en -model en-sent-masc.bin \
+-data masc/data/written -recurrentSearch true -fileFilter "" -sentencesPerSample 1]]>
+		</screen>
+		</para>
+		<para>
+		An identifier is the prefix <code>seg-r</code>, <code>penn-n</code> or <code>ne-n</code>
+		followed by ASCII digits, and a region has two nonnegative offsets in order. Lists of
+		identifiers and offsets are separated by space, tab, carriage return or line feed. A
+		document with another value in an annotation is skipped, and the log names the value.
+		</para>
 	</section>
 </chapter>
