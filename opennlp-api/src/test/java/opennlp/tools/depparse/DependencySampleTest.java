@@ -136,9 +136,9 @@ public class DependencySampleTest {
    */
   static Stream<Arguments> rejectedTokensAndTags() {
     return Stream.of(
-        Arguments.of(null, null, "tokens and tags must not be null"),
-        Arguments.of(null, TAGS, "tokens and tags must not be null"),
-        Arguments.of(TOKENS, null, "tokens and tags must not be null"),
+        Arguments.of(null, null, "tokens must not be null"),
+        Arguments.of(null, TAGS, "tokens must not be null"),
+        Arguments.of(TOKENS, null, "tags must not be null"),
         Arguments.of(new String[0], new String[0], "tokens must not be empty"),
         Arguments.of(new String[0], TAGS, "tokens must not be empty"),
         Arguments.of(new String[] {"one"}, TAGS, "tokens and tags must have the same length: 1 != 3"),

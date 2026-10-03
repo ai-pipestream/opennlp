@@ -18,6 +18,7 @@
 package opennlp.tools.depparse;
 
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.ArgumentChecks;
 
 /**
  * Generates the classification features for one arc-standard configuration: words and
@@ -180,9 +181,7 @@ class DependencyContextGenerator {
    *         not match the state.
    */
   String[] getContext(ArcStandardState state, String[] tokens, String[] tags) {
-    if (state == null) {
-      throw new IllegalArgumentException("state must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(state, "state");
     // Sentence contents are validated once at the parser or sample boundary.
     if (tokens == null || tags == null || tokens.length != state.tokenCount()
         || tags.length != state.tokenCount()) {

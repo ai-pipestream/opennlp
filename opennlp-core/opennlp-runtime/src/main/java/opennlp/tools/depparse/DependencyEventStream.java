@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import opennlp.tools.ml.model.Event;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.ObjectStream;
 
 /**
@@ -55,12 +56,8 @@ class DependencyEventStream implements ObjectStream<Event> {
    */
   DependencyEventStream(ObjectStream<DependencySample> samples,
       DependencyContextGenerator contextGenerator) {
-    if (samples == null) {
-      throw new IllegalArgumentException("samples must not be null");
-    }
-    if (contextGenerator == null) {
-      throw new IllegalArgumentException("contextGenerator must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(samples, "samples");
+    ArgumentChecks.requireNonNullArg(contextGenerator, "contextGenerator");
     this.samples = samples;
     this.contextGenerator = contextGenerator;
   }

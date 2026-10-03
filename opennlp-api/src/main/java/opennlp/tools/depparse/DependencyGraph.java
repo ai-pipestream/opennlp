@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.List;
 
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -84,9 +85,8 @@ public final class DependencyGraph implements Serializable {
    * @throws IllegalArgumentException Thrown if any of the above constraints is violated.
    */
   public static DependencyGraph of(int[] heads, String[] relations) {
-    if (heads == null || relations == null) {
-      throw new IllegalArgumentException("heads and relations must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(heads, "heads");
+    ArgumentChecks.requireNonNullArg(relations, "relations");
     if (heads.length == 0) {
       throw new IllegalArgumentException("a dependency graph needs at least one token");
     }

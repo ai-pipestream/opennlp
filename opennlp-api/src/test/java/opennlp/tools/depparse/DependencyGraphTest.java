@@ -113,10 +113,10 @@ public class DependencyGraphTest {
 
   @Test
   void testNullArraysThrow() {
-    assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(null, new String[] {"root"}));
-    assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-1}, null));
+    assertEquals("heads must not be null", assertThrows(IllegalArgumentException.class,
+        () -> DependencyGraph.of(null, new String[] {"root"})).getMessage());
+    assertEquals("relations must not be null", assertThrows(IllegalArgumentException.class,
+        () -> DependencyGraph.of(new int[] {-1}, null)).getMessage());
   }
 
   @Test

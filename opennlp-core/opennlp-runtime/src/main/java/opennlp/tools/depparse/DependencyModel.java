@@ -26,6 +26,7 @@ import java.util.Map;
 
 import opennlp.tools.ml.model.AbstractModel;
 import opennlp.tools.ml.model.MaxentModel;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.model.BaseModel;
 
@@ -60,10 +61,9 @@ public class DependencyModel extends BaseModel {
    */
   public DependencyModel(String languageCode, MaxentModel parserModel,
       Map<String, String> manifestInfoEntries) {
-    super(COMPONENT_NAME, notNull(languageCode, "languageCode"), manifestInfoEntries);
-    if (parserModel == null) {
-      throw new IllegalArgumentException("parserModel must not be null");
-    }
+    super(COMPONENT_NAME, ArgumentChecks.requireNonNullArg(languageCode, "languageCode"),
+        manifestInfoEntries);
+    ArgumentChecks.requireNonNullArg(parserModel, "parserModel");
     artifactMap.put(PARSER_MODEL_ENTRY_NAME, parserModel);
     checkArtifactMap();
   }
@@ -76,7 +76,7 @@ public class DependencyModel extends BaseModel {
    * @throws IllegalArgumentException Thrown if {@code in} is {@code null}.
    */
   public DependencyModel(InputStream in) throws IOException {
-    super(COMPONENT_NAME, notNull(in, "in"));
+    super(COMPONENT_NAME, ArgumentChecks.requireNonNullArg(in, "in"));
   }
 
   /**
@@ -87,7 +87,7 @@ public class DependencyModel extends BaseModel {
    * @throws IllegalArgumentException Thrown if {@code modelFile} is {@code null}.
    */
   public DependencyModel(File modelFile) throws IOException {
-    super(COMPONENT_NAME, notNull(modelFile, "modelFile"));
+    super(COMPONENT_NAME, ArgumentChecks.requireNonNullArg(modelFile, "modelFile"));
   }
 
   /**
@@ -98,23 +98,7 @@ public class DependencyModel extends BaseModel {
    * @throws IllegalArgumentException Thrown if {@code modelPath} is {@code null}.
    */
   public DependencyModel(Path modelPath) throws IOException {
-    super(COMPONENT_NAME, notNull(modelPath, "modelPath"));
-  }
-
-  /**
-   * Rejects a {@code null} constructor argument before it reaches the superclass.
-   *
-   * @param value The argument to check.
-   * @param name The parameter name for the error message.
-   * @param <T> The argument type.
-   * @return {@code value}, unchanged.
-   * @throws IllegalArgumentException Thrown if {@code value} is {@code null}.
-   */
-  private static <T> T notNull(T value, String name) {
-    if (value == null) {
-      throw new IllegalArgumentException(name + " must not be null");
-    }
-    return value;
+    super(COMPONENT_NAME, ArgumentChecks.requireNonNullArg(modelPath, "modelPath"));
   }
 
   /**
