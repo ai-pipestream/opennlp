@@ -71,9 +71,6 @@ public abstract class AbstractDL implements AutoCloseable {
   private static final String WORDPIECE_SUBWORD_PREFIX = "##";
   /** The start of the message for a {@code tokenizer.json} the WordPiece encoder cannot use. */
   private static final String UNSUPPORTED_TOKENIZER = "Unsupported tokenizer.json: ";
-  /** The start of the message for a JSON vocabulary that has neither accepted layout. */
-  private static final String EXPECTED_LAYOUTS = "Expected one object mapping tokens to integer"
-      + " ids, as in vocab.json, or a tokenizer.json of a WordPiece model: ";
 
   protected final OrtEnvironment env;
   protected final OrtSession session;
@@ -660,7 +657,8 @@ public abstract class AbstractDL implements AutoCloseable {
       try {
         vocab.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
       } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException(EXPECTED_LAYOUTS + e.getMessage(), e);
+        throw new IllegalArgumentException("Expected one object mapping tokens to integer ids,"
+            + " as in vocab.json, or a tokenizer.json of a WordPiece model: " + e.getMessage(), e);
       }
     }
     return new Vocabulary(vocab, null);
