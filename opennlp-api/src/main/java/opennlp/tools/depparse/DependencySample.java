@@ -23,6 +23,7 @@ import java.util.Objects;
 
 import opennlp.tools.commons.Sample;
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.ArgumentChecks;
 
 /**
  * One dependency-annotated sentence: tokens, their part-of-speech tags, and the gold
@@ -58,9 +59,7 @@ public final class DependencySample implements Sample {
    *         {@code null} entry, or the lengths of tokens, tags and graph disagree.
    */
   public DependencySample(String[] tokens, String[] tags, DependencyGraph graph) {
-    if (graph == null) {
-      throw new IllegalArgumentException("graph must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(graph, "graph");
     checkTokensAndTags(tokens, tags);
     if (tokens.length != graph.size()) {
       throw new IllegalArgumentException("tokens, tags and graph must agree in length: "
@@ -84,9 +83,8 @@ public final class DependencySample implements Sample {
    *         is empty, the lengths do not match, or an entry is {@code null}.
    */
   public static void checkTokensAndTags(String[] tokens, String[] tags) {
-    if (tokens == null || tags == null) {
-      throw new IllegalArgumentException("tokens and tags must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(tokens, "tokens");
+    ArgumentChecks.requireNonNullArg(tags, "tags");
     if (tokens.length == 0) {
       throw new IllegalArgumentException("tokens must not be empty");
     }

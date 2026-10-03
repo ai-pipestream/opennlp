@@ -29,6 +29,7 @@ import opennlp.tools.ml.TrainerFactory;
 import opennlp.tools.ml.TrainerFactory.TrainerType;
 import opennlp.tools.ml.model.Event;
 import opennlp.tools.ml.model.MaxentModel;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.TrainingParameters;
 
@@ -58,9 +59,7 @@ public class DependencyParserME implements DependencyParser {
    *         outcome inventory is invalid or cannot parse a sentence.
    */
   public DependencyParserME(DependencyModel model) {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(model, "model");
     this.model = model.getParserModel();
     this.contextGenerator = new DependencyContextGenerator();
     this.transitions = decodeOutcomes(this.model);
@@ -176,10 +175,9 @@ public class DependencyParserME implements DependencyParser {
   public static DependencyModel train(String languageCode,
       ObjectStream<DependencySample> samples, TrainingParameters parameters)
       throws IOException {
-    if (languageCode == null || samples == null || parameters == null) {
-      throw new IllegalArgumentException(
-          "languageCode, samples and parameters must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(languageCode, "languageCode");
+    ArgumentChecks.requireNonNullArg(samples, "samples");
+    ArgumentChecks.requireNonNullArg(parameters, "parameters");
     final TrainerType trainerType = TrainerFactory.getTrainerType(parameters);
     if (!TrainerType.EVENT_MODEL_TRAINER.equals(trainerType)) {
       throw new IllegalArgumentException("Trainer type is not supported: " + trainerType);

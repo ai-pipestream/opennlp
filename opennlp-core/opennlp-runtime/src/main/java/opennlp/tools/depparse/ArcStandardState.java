@@ -19,6 +19,8 @@ package opennlp.tools.depparse;
 
 import java.util.Arrays;
 
+import opennlp.tools.util.ArgumentChecks;
+
 /**
  * The mutable configuration of an arc-standard parse: a stack, a buffer of remaining
  * tokens, and the arcs assigned so far. The arc-standard transition system is described
@@ -94,9 +96,7 @@ final class ArcStandardState {
    * @throws IllegalArgumentException Thrown if {@code transition} is {@code null}.
    */
   boolean canApply(Transition transition) {
-    if (transition == null) {
-      throw new IllegalArgumentException("transition must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(transition, "transition");
     return switch (transition.type()) {
       case SHIFT -> bufferFront < tokenCount;
       case LEFT_ARC -> top >= 2;

@@ -20,6 +20,8 @@ package opennlp.tools.depparse;
 import java.util.ArrayList;
 import java.util.List;
 
+import opennlp.tools.util.ArgumentChecks;
+
 /**
  * The static oracle for the arc-standard system: derives the transition sequence that
  * reproduces a gold {@link DependencyGraph}.
@@ -48,9 +50,7 @@ final class ArcStandardOracle {
    *         projective.
    */
   static List<Transition> transitions(DependencyGraph gold) {
-    if (gold == null) {
-      throw new IllegalArgumentException("gold must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(gold, "gold");
     final int n = gold.size();
     final int[] goldDependents = new int[n];
     for (int i = 0; i < n; i++) {
@@ -117,9 +117,7 @@ final class ArcStandardOracle {
    * @throws IllegalArgumentException Thrown if {@code gold} is {@code null}.
    */
   static boolean isProjective(DependencyGraph gold) {
-    if (gold == null) {
-      throw new IllegalArgumentException("gold must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(gold, "gold");
     for (int first = 0; first < gold.size(); first++) {
       final int firstLow = Math.min(first, gold.headOf(first));
       final int firstHigh = Math.max(first, gold.headOf(first));

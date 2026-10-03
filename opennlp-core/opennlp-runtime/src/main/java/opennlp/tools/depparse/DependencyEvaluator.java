@@ -19,6 +19,7 @@ package opennlp.tools.depparse;
 
 import java.util.function.Predicate;
 
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.eval.Evaluator;
 
 /**
@@ -75,12 +76,8 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
   public DependencyEvaluator(DependencyParser parser, Predicate<String> punctuationTag,
       DependencyEvaluationMonitor... listeners) {
     super(listeners);
-    if (parser == null) {
-      throw new IllegalArgumentException("parser must not be null");
-    }
-    if (punctuationTag == null) {
-      throw new IllegalArgumentException("punctuationTag must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(parser, "parser");
+    ArgumentChecks.requireNonNullArg(punctuationTag, "punctuationTag");
     this.parser = parser;
     this.punctuationTag = punctuationTag;
   }
