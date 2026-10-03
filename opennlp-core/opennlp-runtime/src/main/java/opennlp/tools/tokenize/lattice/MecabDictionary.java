@@ -112,6 +112,9 @@ public final class MecabDictionary {
   /** The {@code char.def} field value that turns a category flag off. */
   private static final String FLAG_OFF = "0";
 
+  /** The message prefix for a lexicon line that cannot be read, followed by the file. */
+  private static final String MALFORMED_ENTRY = "malformed entry at ";
+
   /**
    * One lexicon or unknown-word entry.
    *
@@ -372,22 +375,22 @@ public final class MecabDictionary {
         }
         final List<String> fields = splitCsv(line, file, lineNumber);
         if (fields.size() < 4) {
-          throw new IOException("malformed entry at " + file + " line " + lineNumber);
+          throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber);
         }
         final String surface = fields.get(0);
         if (surface.isEmpty()) {
-          throw new IOException("malformed entry at " + file + " line " + lineNumber
+          throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber
               + ": surface must not be empty");
         }
         final int leftId = parseInt(fields.get(1), file.toString(), lineNumber);
         final int rightId = parseInt(fields.get(2), file.toString(), lineNumber);
         if (leftId < 0 || leftId >= rightSize) {
-          throw new IOException("malformed entry at " + file + " line " + lineNumber
+          throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber
               + ": left context id " + leftId + " is outside the " + MATRIX_DEF
               + " dimensions " + leftSize + " " + rightSize);
         }
         if (rightId < 0 || rightId >= leftSize) {
-          throw new IOException("malformed entry at " + file + " line " + lineNumber
+          throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber
               + ": right context id " + rightId + " is outside the " + MATRIX_DEF
               + " dimensions " + leftSize + " " + rightSize);
         }
@@ -398,7 +401,7 @@ public final class MecabDictionary {
         entryCount[0]++;
         final int cost = parseInt(fields.get(3), file.toString(), lineNumber);
         if (cost < Short.MIN_VALUE || cost > Short.MAX_VALUE) {
-          throw new IOException("malformed entry at " + file + " line " + lineNumber
+          throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber
               + ": word cost " + cost
               + " is outside the 16-bit range the format defines");
         }
@@ -607,7 +610,7 @@ public final class MecabDictionary {
       }
     }
     if (inQuotes) {
-      throw new IOException("malformed entry at " + file + " line " + lineNumber
+      throw new IOException(MALFORMED_ENTRY + file + " line " + lineNumber
           + ": unterminated quoted field");
     }
     fields.add(field.toString());
