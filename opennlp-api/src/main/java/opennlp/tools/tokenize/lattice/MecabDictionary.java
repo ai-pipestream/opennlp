@@ -236,7 +236,7 @@ public final class MecabDictionary {
       if (headerLine.isEmpty()) {
         throw new IOException("empty " + MATRIX_DEF + " under " + directory);
       }
-      final String[] header = StringUtil.splitOnWhitespace(headerLine);
+      final String[] header = StringUtil.splitOnUnicodeWhitespace(headerLine);
       if (header.length != 2) {
         throw new IOException("malformed " + MATRIX_DEF + " header: " + headerLine);
       }
@@ -273,7 +273,7 @@ public final class MecabDictionary {
         if (line.isEmpty()) {
           continue;
         }
-        final String[] fields = StringUtil.splitOnWhitespace(line);
+        final String[] fields = StringUtil.splitOnUnicodeWhitespace(line);
         if (fields.length != 3) {
           throw new IOException("malformed " + MATRIX_DEF + " line " + lineNumber);
         }
@@ -437,7 +437,7 @@ public final class MecabDictionary {
         if (line.isEmpty()) {
           continue;
         }
-        final String[] fields = StringUtil.splitOnWhitespace(line);
+        final String[] fields = StringUtil.splitOnUnicodeWhitespace(line);
         if (fields[0].regionMatches(true, 0, HEX_PREFIX, 0, HEX_PREFIX.length())) {
           final int rangeSeparator = fields[0].indexOf(RANGE_SEPARATOR);
           final int from;
