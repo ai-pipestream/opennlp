@@ -29,6 +29,7 @@ import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.ObjectStream;
 
 /**
@@ -208,12 +209,8 @@ public final class FeedforwardDependencyTrainer {
   public static FeedforwardDependencyModel train(ObjectStream<DependencySample> samples,
       Settings settings, Function<String, float[]> pretrained)
       throws IOException {
-    if (samples == null) {
-      throw new IllegalArgumentException("samples must not be null");
-    }
-    if (settings == null) {
-      throw new IllegalArgumentException("settings must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(samples, "samples");
+    ArgumentChecks.requireNonNullArg(settings, "settings");
     final List<DependencySample> corpus = readAll(samples);
     final FeedforwardDependencyModel model = initialize(corpus, settings);
     if (pretrained != null) {
@@ -258,15 +255,9 @@ public final class FeedforwardDependencyTrainer {
   public static FeedforwardDependencyModel refine(FeedforwardDependencyModel model,
       ObjectStream<DependencySample> samples, Settings settings, int beamSize)
       throws IOException {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
-    if (samples == null) {
-      throw new IllegalArgumentException("samples must not be null");
-    }
-    if (settings == null) {
-      throw new IllegalArgumentException("settings must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(model, "model");
+    ArgumentChecks.requireNonNullArg(samples, "samples");
+    ArgumentChecks.requireNonNullArg(settings, "settings");
     if (beamSize < 2) {
       throw new IllegalArgumentException("beamSize must be at least 2: " + beamSize);
     }

@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.ArgumentChecks;
 
 /**
  * The pure-Java neural {@link DependencyParser}: an arc-standard decoder over the
@@ -74,9 +75,7 @@ public class FeedforwardDependencyParser implements DependencyParser {
    *         decode to a transition.
    */
   public FeedforwardDependencyParser(FeedforwardDependencyModel model, int beamSize) {
-    if (model == null) {
-      throw new IllegalArgumentException("model must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(model, "model");
     if (beamSize < GREEDY_BEAM_SIZE) {
       throw new IllegalArgumentException("beamSize must be positive: " + beamSize);
     }
