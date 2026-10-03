@@ -48,7 +48,12 @@ under the License.
 					<tbody>
 						<row>
 							<entry>EmojiCharSequenceNormalizer</entry>
-							<entry>Replaces emojis by blank space</entry>
+							<entry>Replaces each run of complete emoji (single emoji, emoji with U+FE0F,
+								flags, keycaps, skin tone modifier sequences, ZWJ sequences and tag
+								sequences) with one space, so <code>go&#x1F600;&#x2764;&#xFE0F;now</code>
+								becomes <code>go now</code>. Text symbols, letters and ideographs from
+								other planes, and an emoji with a stray joiner, modifier or tag next to it
+								are kept as they are.</entry>
 						</row>
 						<row>
 							<entry>UrlCharSequenceNormalizer</entry>
@@ -75,6 +80,12 @@ under the License.
 					</tbody>
 				</tgroup>
 			</table>
+		</para>
+		<para>
+			Since 3.0.0, EmojiCharSequenceNormalizer removes complete emoji only. Models trained with an earlier
+			release saw every hyphen, every character from U+E000 to U+FFFF and nearly every supplementary
+			character removed, emoji or not. They get that output again under
+			<code>-Dopennlp.compat.mode=LEGACY</code> until they are retrained.
 		</para>
 	</section>
 	
@@ -177,9 +188,11 @@ lav     Egija Tri-Active procedūru īpaši iesaka izmantot siltākajos gadalaik
 			</para>
 			<para>
 				This corpora is specially good to train Language Detector and a converter is provided. First, you need to
-				download the files that compose the Leipzig Corpora collection to a folder. Apache OpenNLP Language
-				Detector supports training, evaluation and cross validation using the Leipzig Corpora. For example,
-				the following command shows how to train a model.
+				download the files that compose the Leipzig Corpora collection to a folder. The language of each file
+				is taken from the first three characters of its name, the ISO 639-3 code in lower case, as in
+				<code>eng_news_2005_10K-sentences.txt</code>. Apache OpenNLP Language Detector supports training,
+				evaluation and cross validation using the Leipzig Corpora. For example, the following command shows
+				how to train a model.
 
 				<screen>
 <![CDATA[$ bin/opennlp LanguageDetectorTrainer.leipzig -model modelFile [-params paramsFile] [-factory factoryName] \
