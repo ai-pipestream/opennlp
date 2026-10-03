@@ -36,10 +36,7 @@ final class MascIdentifiers {
   static final String REGION_ID_PREFIX = "seg-r";
 
   /** The characters of <a href="https://www.w3.org/TR/xml/#NT-S">XML whitespace</a>. */
-  private static final char SPACE = ' ';
-  private static final char TAB = '\t';
-  private static final char CARRIAGE_RETURN = '\r';
-  private static final char LINE_FEED = '\n';
+  private static final char[] XML_WHITESPACE = {' ', '\t', '\r', '\n'};
 
   private MascIdentifiers() {
   }
@@ -96,7 +93,7 @@ final class MascIdentifiers {
     if (ids == null) {
       throw new IllegalArgumentException("MASC identifier list must not be null");
     }
-    String[] items = StringUtil.splitNonEmpty(ids, SPACE, TAB, CARRIAGE_RETURN, LINE_FEED);
+    String[] items = StringUtil.splitNonEmpty(ids, XML_WHITESPACE);
     if (items.length == 0) {
       throw new IllegalArgumentException("MASC identifier list must name at least one identifier");
     }
@@ -120,7 +117,7 @@ final class MascIdentifiers {
     if (anchors == null) {
       throw new IllegalArgumentException("MASC region anchors must not be null");
     }
-    String[] items = StringUtil.splitNonEmpty(anchors, SPACE, TAB, CARRIAGE_RETURN, LINE_FEED);
+    String[] items = StringUtil.splitNonEmpty(anchors, XML_WHITESPACE);
     if (items.length != 2) {
       throw new IllegalArgumentException("MASC region anchors must contain exactly two offsets: " + anchors);
     }
@@ -149,5 +146,4 @@ final class MascIdentifiers {
     }
     return Integer.parseInt(text, from, end, 10);
   }
-
 }

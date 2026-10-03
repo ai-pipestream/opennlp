@@ -33,11 +33,8 @@ final class EventFields {
   /** Message prefix for a blank line; the quoted line follows. */
   static final String MISSING_OUTCOME = "An event line must start with an outcome: \"";
 
-  private static final char SPACE = ' ';
-  private static final char TAB = '\t';
-  private static final char CARRIAGE_RETURN = '\r';
-  private static final char LINE_FEED = '\n';
-  private static final char FORM_FEED = '\f';
+  /** Space, tab, carriage return, line feed and form feed. */
+  private static final char[] SEPARATORS = {' ', '\t', '\r', '\n', '\f'};
 
   private EventFields() {
   }
@@ -50,6 +47,6 @@ final class EventFields {
    * @return The fields in order.
    */
   static String[] split(String text) {
-    return StringUtil.splitNonEmpty(text, SPACE, TAB, CARRIAGE_RETURN, LINE_FEED, FORM_FEED);
+    return StringUtil.splitNonEmpty(text, SEPARATORS);
   }
 }
