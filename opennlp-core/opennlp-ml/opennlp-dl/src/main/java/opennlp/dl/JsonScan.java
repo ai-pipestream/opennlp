@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import opennlp.tools.commons.Internal;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -73,9 +74,6 @@ public final class JsonScan {
   /** The number of characters quoted in the message for malformed text. */
   private static final int MESSAGE_CONTEXT_LENGTH = 20;
 
-  private static final String TEXT_MUST_NOT_BE_NULL = "text must not be null";
-  private static final String KEY_MUST_NOT_BE_NULL = "key must not be null";
-
   private JsonScan() {
   }
 
@@ -92,9 +90,7 @@ public final class JsonScan {
   record Member(String key, int valueStart, int valueEnd) {
 
     Member {
-      if (key == null) {
-        throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
-      }
+      ArgumentChecks.requireNonNullArg(key, "key");
       if (valueStart < 0 || valueEnd < valueStart) {
         throw new IllegalArgumentException(
             "value range must be non-negative and ordered: " + valueStart + ".." + valueEnd);
@@ -117,10 +113,8 @@ public final class JsonScan {
    *     is not an object whose values are all strings. The message names the offset or the key.
    */
   public static Map<String, String> stringObject(String text, String key) {
-    requireText(text);
-    if (key == null) {
-      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
-    }
+    ArgumentChecks.requireNonNullArg(text, "text");
+    ArgumentChecks.requireNonNullArg(key, "key");
     final Map<String, String> entries = new HashMap<>();
     if (isBlank(text)) {
       return entries;
@@ -148,7 +142,7 @@ public final class JsonScan {
    *     consist of one object, or is malformed at any position.
    */
   static List<Member> document(String text) {
-    requireText(text);
+    ArgumentChecks.requireNonNullArg(text, "text");
     final int start = skipWhitespace(text, afterByteOrderMark(text));
     expect(text, start, OBJECT_OPEN);
     final List<Member> members = new ArrayList<>();
@@ -170,7 +164,7 @@ public final class JsonScan {
    *     not the offset of an opening brace inside the text, or the object is malformed.
    */
   static List<Member> members(String text, int brace) {
-    requireText(text);
+    ArgumentChecks.requireNonNullArg(text, "text");
     if (brace < 0 || brace >= text.length()) {
       throw new IllegalArgumentException(
           "brace must be an offset inside the text, not " + brace);
@@ -193,7 +187,7 @@ public final class JsonScan {
    *     not the offset of an opening bracket inside the text, or the array is malformed.
    */
   static List<Member> elements(String text, int bracket) {
-    requireText(text);
+    ArgumentChecks.requireNonNullArg(text, "text");
     if (bracket < 0 || bracket >= text.length()) {
       throw new IllegalArgumentException(
           "bracket must be an offset inside the text, not " + bracket);
@@ -214,12 +208,8 @@ public final class JsonScan {
    * @throws IllegalArgumentException Thrown if {@code members} or {@code key} is {@code null}.
    */
   static Member member(List<Member> members, String key) {
-    if (members == null) {
-      throw new IllegalArgumentException("members must not be null");
-    }
-    if (key == null) {
-      throw new IllegalArgumentException(KEY_MUST_NOT_BE_NULL);
-    }
+    ArgumentChecks.requireNonNullArg(members, "members");
+    ArgumentChecks.requireNonNullArg(key, "key");
     Member found = null;
     for (Member m : members) {
       if (m.key().equals(key)) {
@@ -696,18 +686,6 @@ public final class JsonScan {
   }
 
   /**
-   * Checks the text argument.
-   *
-   * @param text The JSON text.
-   * @throws IllegalArgumentException Thrown if it is {@code null}.
-   */
-  private static void requireText(String text) {
-    if (text == null) {
-      throw new IllegalArgumentException(TEXT_MUST_NOT_BE_NULL);
-    }
-  }
-
-  /**
    * Checks a member against the text it must lie in.
    *
    * @param text The JSON text.
@@ -716,10 +694,8 @@ public final class JsonScan {
    *     range reaches beyond the text.
    */
   private static void requireMember(String text, Member member) {
-    requireText(text);
-    if (member == null) {
-      throw new IllegalArgumentException("member must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(text, "text");
+    ArgumentChecks.requireNonNullArg(member, "member");
     if (member.valueEnd() > text.length() || member.valueStart() >= text.length()) {
       throw new IllegalArgumentException("member must lie inside the text: " + member);
     }
