@@ -47,6 +47,7 @@ import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.LanguageCodeValidator;
 import opennlp.tools.util.Version;
 import opennlp.tools.util.ext.ExtensionLoader;
+import opennlp.tools.util.jvm.NativeImage;
 
 /**
  * This is a common base model which can be used by the components' specific
@@ -743,9 +744,16 @@ public abstract class BaseModel implements ArtifactProvider, Serializable {
    * @throws IOException Thrown if IO errors occurred, including a rejection by
    *                      the allowlist filter.
    * @throws ClassNotFoundException Thrown if required classes are not found.
+   * @throws UnsupportedOperationException Thrown in a GraalVM native image, which has no
+   *                      serialization metadata for models. Use the {@code InputStream}
+   *                      constructor of the model class there.
    */
   public static <T extends BaseModel> T deserialize(Class<T> modelClass, InputStream in)
       throws IOException, ClassNotFoundException {
+    if (NativeImage.inImageRuntime()) {
+      throw new UnsupportedOperationException("Java serialization of models is not supported in a "
+          + "native image. Load the model from its own format via the InputStream constructor.");
+    }
     try (ObjectInputStream ois = FilteredObjectInputStream.open(in)) {
       return modelClass.cast(ois.readObject());
     }
