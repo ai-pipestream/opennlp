@@ -143,10 +143,19 @@ public abstract class AbstractDL implements AutoCloseable {
    * Builds ONNX session options from the given {@link InferenceOptions}, enabling the CUDA
    * execution provider on the configured device when GPU inference is requested.
    *
+   * <p>The ONNX Runtime environment is created before the execution provider is added, although
+   * the session is created later. Loading a shared execution provider library goes through ONNX
+   * Runtime's default logger, which only exists once an {@link OrtEnvironment} has been created,
+   * so in a JVM where nothing has touched ONNX Runtime yet {@code addCUDA} otherwise fails with
+   * "Attempt to use DefaultLogger but none has been registered". The environment is a
+   * process-wide singleton that the constructors fetch anyway, so the CPU path is unchanged.</p>
+   *
    * @param inferenceOptions The inference options to read the GPU configuration from.
    * @return The configured session options.
    *
-   * @throws OrtException Thrown if the CUDA execution provider cannot be added.
+   * @throws OrtException Thrown if the CUDA execution provider cannot be added: the ONNX Runtime
+   *     on the classpath has no CUDA support, its CUDA libraries cannot be loaded, or no device
+   *     answers to the configured device id. ONNX Runtime does not fall back to the CPU.
    */
   protected static OrtSession.SessionOptions sessionOptions(final InferenceOptions inferenceOptions)
       throws OrtException {
@@ -154,6 +163,7 @@ public abstract class AbstractDL implements AutoCloseable {
     validateSplitOptions(inferenceOptions);
     final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
     if (inferenceOptions.isGpu()) {
+      OrtEnvironment.getEnvironment();
       sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
     }
     return sessionOptions;
