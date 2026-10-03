@@ -128,7 +128,7 @@ public class DownloadUtilCacheIntegrityTest {
 
     copyResource(SUBSTITUTE_MODEL, downloadHome.resolve(MODEL_FILENAME));
 
-    final IOException e = assertThrows(IOException.class,
+    final IllegalStateException e = assertThrows(IllegalStateException.class,
         () -> DownloadUtil.downloadModel(modelUrl, ChunkerModel.class),
         "A cached model that no longer matches its published checksum must be rejected");
     assertTrue(e.getMessage().contains("SHA512"),
@@ -152,6 +152,22 @@ public class DownloadUtilCacheIntegrityTest {
   }
 
   /**
+   * A blank checksum sidecar verifies no hash, so the cached model is rejected.
+   */
+  @Test
+  void testBlankSidecarRejectsCachedModel() throws IOException {
+    assertNotNull(DownloadUtil.downloadModel(modelUrl, ChunkerModel.class));
+    Files.writeString(downloadHome.resolve(MODEL_FILENAME + ".sha512"), " \n",
+        StandardCharsets.UTF_8);
+
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> DownloadUtil.downloadModel(modelUrl, ChunkerModel.class),
+        "A cached model with a blank checksum file must be rejected");
+    assertTrue(e.getMessage().contains("blank"),
+        "Expected a blank checksum failure, but got: " + e.getMessage());
+  }
+
+  /**
    * A cache populated by an older OpenNLP release has no checksum sidecar. When the published
    * checksum is still reachable it must be used, so that pre-existing caches are covered too.
    */
@@ -160,7 +176,7 @@ public class DownloadUtilCacheIntegrityTest {
     Files.createDirectories(downloadHome);
     copyResource(SUBSTITUTE_MODEL, downloadHome.resolve(MODEL_FILENAME));
 
-    final IOException e = assertThrows(IOException.class,
+    final IllegalStateException e = assertThrows(IllegalStateException.class,
         () -> DownloadUtil.downloadModel(modelUrl, ChunkerModel.class),
         "A legacy cached model must be verified against the published checksum");
     assertTrue(e.getMessage().contains("SHA512"),
@@ -193,7 +209,7 @@ public class DownloadUtilCacheIntegrityTest {
     }
   }
 
-  private static String sha512(Path file) throws IOException {
+  private String sha512(Path file) throws IOException {
     try {
       final MessageDigest digest = MessageDigest.getInstance("SHA-512");
       return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(file)));
