@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import opennlp.tools.commons.ThreadSafe;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.InvalidFormatException;
 import opennlp.tools.util.StringUtil;
 
@@ -162,9 +163,7 @@ public class FeedforwardDependencyModel {
    * @throws IllegalStateException If the model produces a non-finite transition score.
    */
   double[] score(int[] features) {
-    if (features == null) {
-      throw new IllegalArgumentException("features must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(features, "features");
     if (features.length != FeedforwardContext.FEATURE_COUNT) {
       throw new IllegalArgumentException("features must contain "
           + FeedforwardContext.FEATURE_COUNT + " embedding indices");
@@ -330,9 +329,7 @@ public class FeedforwardDependencyModel {
    *         not have the required length.
    */
   int[] featureIds(String[] symbols) {
-    if (symbols == null) {
-      throw new IllegalArgumentException("symbols must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(symbols, "symbols");
     if (symbols.length != FeedforwardContext.FEATURE_COUNT) {
       throw new IllegalArgumentException("symbols must contain "
           + FeedforwardContext.FEATURE_COUNT + " features");
@@ -508,9 +505,7 @@ public class FeedforwardDependencyModel {
    * @throws IOException Thrown if writing fails.
    */
   public void serialize(OutputStream out) throws IOException {
-    if (out == null) {
-      throw new IllegalArgumentException("out must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(out, "out");
     final DataOutputStream data = new DataOutputStream(new BufferedOutputStream(out));
     data.writeUTF(MAGIC);
     writeVocabulary(data, wordIds);
@@ -538,9 +533,7 @@ public class FeedforwardDependencyModel {
    * @throws InvalidFormatException Thrown if the content is not a valid model.
    */
   public static FeedforwardDependencyModel load(InputStream in) throws IOException {
-    if (in == null) {
-      throw new IllegalArgumentException("in must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(in, "in");
     final DataInputStream data = new DataInputStream(new BufferedInputStream(in));
     final String magic = data.readUTF();
     if (!MAGIC.equals(magic)) {
@@ -603,9 +596,7 @@ public class FeedforwardDependencyModel {
    * @throws InvalidFormatException Thrown if the content is not a valid model.
    */
   public static FeedforwardDependencyModel load(Path path) throws IOException {
-    if (path == null) {
-      throw new IllegalArgumentException("path must not be null");
-    }
+    ArgumentChecks.requireNonNullArg(path, "path");
     try (InputStream in = Files.newInputStream(path)) {
       return load(in);
     }
