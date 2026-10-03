@@ -143,7 +143,8 @@ public class TokenizerCharacterPolicyTest {
 
   @Test
   void testRejectsNullInput() {
-    assertThrows(IllegalArgumentException.class, () -> TokenizerCharacterPolicy.ascii().test(null));
+    assertEquals("input must not be null", assertThrows(IllegalArgumentException.class,
+        () -> TokenizerCharacterPolicy.ascii().test(null)).getMessage());
   }
 
   @Test
@@ -161,20 +162,21 @@ public class TokenizerCharacterPolicyTest {
   /**
    * Supplies a null value for each category in turn.
    *
-   * @return Category sets with one null argument.
+   * @return Category sets with one null argument, and the expected message.
    */
   static Stream<Arguments> nullSets() {
     return Stream.of(
-        Arguments.of(null, EMPTY, EMPTY),
-        Arguments.of(A, null, EMPTY),
-        Arguments.of(A, EMPTY, null));
+        Arguments.of(null, EMPTY, EMPTY, "letters must not be null"),
+        Arguments.of(A, null, EMPTY, "digits must not be null"),
+        Arguments.of(A, EMPTY, null, "marks must not be null"));
   }
 
   @ParameterizedTest
   @MethodSource("nullSets")
-  void testFactoryRejectsNullSets(CodePointSet letters, CodePointSet digits, CodePointSet marks) {
-    assertThrows(IllegalArgumentException.class,
-        () -> TokenizerCharacterPolicy.of(letters, digits, marks));
+  void testFactoryRejectsNullSets(CodePointSet letters, CodePointSet digits, CodePointSet marks,
+                                  String message) {
+    assertEquals(message, assertThrows(IllegalArgumentException.class,
+        () -> TokenizerCharacterPolicy.of(letters, digits, marks)).getMessage());
   }
 
   @Test
