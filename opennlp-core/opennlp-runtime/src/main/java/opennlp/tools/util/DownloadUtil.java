@@ -40,8 +40,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,8 +71,10 @@ public class DownloadUtil {
    * @param language  The ISO language code of the requested model.
    * @param modelType The {@link ModelType type} of model.
    * @return {@code true} if a model exists locally, {@code false} otherwise.
-   * @throws IOException Thrown if IO errors occurred or the computed hash sum
-   *                     of an associated, local model file was incorrect.
+   * @throws IOException Thrown if IO errors occurred.
+   * @throws IllegalArgumentException Thrown if the checksum file of the local model is blank.
+   * @throws IllegalStateException Thrown if the computed hash sum of the local model file
+   *                               does not match the expected one.
    */
   static boolean existsModel(String language, ModelType modelType) throws IOException {
     Map<ModelType, URL> modelsByLanguage = getAvailableModels().get(language);
@@ -111,6 +111,9 @@ public class DownloadUtil {
    * @param <T>       The generic type which is a subclass of {@link BaseModel}.
    * @return A model instance of type {@link T}.
    * @throws IOException Thrown if IO errors occurred or the model is invalid.
+   * @throws IllegalArgumentException Thrown if the checksum file of the model is blank.
+   * @throws IllegalStateException Thrown if the computed hash sum of the model file
+   *                               does not match the expected one.
    */
   public static <T extends BaseModel> T downloadModel(String language, ModelType modelType,
                                                       Class<T> type) throws IOException {
@@ -139,6 +142,9 @@ public class DownloadUtil {
    * @param <T>  The generic type which is a subclass of {@link BaseModel}.
    * @return A model instance of type {@link T}.
    * @throws IOException Thrown if the model cannot be downloaded.
+   * @throws IllegalArgumentException Thrown if the checksum file of the model is blank.
+   * @throws IllegalStateException Thrown if the computed hash sum of the model file
+   *                               does not match the expected one.
    */
   public static <T extends BaseModel> T downloadModel(URL url, Class<T> type) throws IOException {
 
@@ -194,7 +200,9 @@ public class DownloadUtil {
    *
    * @param sha512          the url to get the sha512 hash
    * @param downloadedModel the model file to check
-   * @throws IOException thrown if the checksum could not be computed or did not match
+   * @throws IOException thrown if the checksum could not be retrieved or computed
+   * @throws IllegalArgumentException thrown if the checksum file is blank
+   * @throws IllegalStateException thrown if the checksum did not match
    */
   private static void validateModel(String sha512, Path downloadedModel) throws IOException {
     final String checksumFile = downloadChecksumFile(sha512, downloadedModel);
@@ -213,7 +221,9 @@ public class DownloadUtil {
    *
    * @param sha512      the url to get the sha512 hash
    * @param cachedModel the cached model file to check
-   * @throws IOException thrown if the checksum could not be computed or did not match
+   * @throws IOException thrown if the checksum could not be retrieved or computed
+   * @throws IllegalArgumentException thrown if the checksum file is blank
+   * @throws IllegalStateException thrown if the checksum did not match
    */
   private static void validateCachedModel(String sha512, Path cachedModel) throws IOException {
     final Path checksumFile = checksumPathFor(cachedModel);
@@ -255,20 +265,37 @@ public class DownloadUtil {
 
   /**
    * Extracts the hash from the content of a checksum file, which holds the hash followed by the
-   * name of the file it applies to.
+   * name of the file it applies to. The hash is the first run of characters that are not Unicode
+   * {@code White_Space}, see {@link StringUtil#splitOnUnicodeWhitespace(CharSequence)}, so the
+   * result does not depend on the whitespace mode.
+   *
+   * @param checksumFileContent The file content.
+   * @return The hash, or {@code null} if the content is {@code null} or blank.
    */
-  private static String parseChecksum(String checksumFileContent) {
+  static String parseChecksum(String checksumFileContent) {
     if (checksumFileContent == null) {
       return null;
     }
-    final String trimmed = checksumFileContent.trim();
-    return trimmed.isEmpty() ? null : trimmed.split("\\s")[0];
+    final String[] fields = StringUtil.splitOnUnicodeWhitespace(checksumFileContent);
+    return fields.length == 0 ? null : fields[0];
   }
 
+  /**
+   * Compares the SHA-512 hash of a model file with the expected one.
+   *
+   * @param model The model file.
+   * @param expectedChecksum The expected hash, or {@code null} if the checksum file is blank.
+   * @throws IllegalArgumentException If the checksum file is blank.
+   * @throws IOException If the hash cannot be computed.
+   * @throws IllegalStateException If the hashes differ.
+   */
   private static void verifyChecksum(Path model, String expectedChecksum) throws IOException {
+    if (expectedChecksum == null) {
+      throw new IllegalArgumentException("The checksum file for " + model.getFileName() + " is blank");
+    }
     final String actualChecksum = calculateSHA512(model);
     if (!actualChecksum.equalsIgnoreCase(expectedChecksum)) {
-      throw new IOException("SHA512 checksum validation failed for " + model.getFileName() +
+      throw new IllegalStateException("SHA512 checksum validation failed for " + model.getFileName() +
           ". Expected: " + expectedChecksum + ", but got: " + actualChecksum);
     }
   }
@@ -324,7 +351,10 @@ public class DownloadUtil {
   @Internal
   static class DownloadParser {
 
-    private static final Pattern LINK_PATTERN = Pattern.compile("<a href=\\\"(.*?)\\\">(.*?)</a>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final String ANCHOR_START = "<a href=";
+    private static final String ANCHOR_END = "</a>";
+    private static final char TAG_END = '>';
+
     private final URL indexUrl;
 
     DownloadParser(URL indexUrl) {
@@ -334,14 +364,79 @@ public class DownloadUtil {
 
     Map<String, Map<ModelType, URL>> getAvailableModels()
         throws MalformedURLException, URISyntaxException {
-      final Matcher matcher = LINK_PATTERN.matcher(fetchPageIndex());
+      return toMap(extractLinks(fetchPageIndex()));
+    }
 
+    /**
+     * Collects the href values of the anchor elements in an index page. The tag name and
+     * attribute are matched ignoring case, the value is quoted with double or single quotes,
+     * a value ends at its closing quote followed by {@code >}, a link ends at the first
+     * {@code </a>}, and both may span lines. An anchor whose value is not quoted, or whose
+     * value or tag is not closed, is skipped.
+     *
+     * @param page The page content.
+     * @return The href values in order.
+     */
+    List<String> extractLinks(String page) {
       final List<String> links = new ArrayList<>();
-      while (matcher.find()) {
-        links.add(matcher.group(1));
+      int from = 0;
+      while ((from = indexOfIgnoreCase(page, ANCHOR_START, from)) != -1) {
+        final int quoteAt = from + ANCHOR_START.length();
+        from = quoteAt;
+        if (quoteAt >= page.length()) {
+          break;
+        }
+        final char quote = page.charAt(quoteAt);
+        if (quote != '"' && quote != '\'') {
+          continue;
+        }
+        final int valueStart = quoteAt + 1;
+        final int valueEnd = closingQuote(page, quote, valueStart);
+        if (valueEnd == -1) {
+          continue;
+        }
+        final int close = indexOfIgnoreCase(page, ANCHOR_END, valueEnd + 2);
+        if (close == -1) {
+          break;
+        }
+        links.add(page.substring(valueStart, valueEnd));
+        from = close + ANCHOR_END.length();
       }
+      return links;
+    }
 
-      return toMap(links);
+    /**
+     * Finds the quote that closes an attribute value and is followed by the end of the tag.
+     *
+     * @param page The page content.
+     * @param quote The quote character that opened the value.
+     * @param from The first offset of the value.
+     * @return The offset of the closing quote, or {@code -1}.
+     */
+    private int closingQuote(String page, char quote, int from) {
+      for (int at = page.indexOf(quote, from); at != -1; at = page.indexOf(quote, at + 1)) {
+        if (at + 1 < page.length() && page.charAt(at + 1) == TAG_END) {
+          return at;
+        }
+      }
+      return -1;
+    }
+
+    /**
+     * Finds a literal in the text, ignoring case.
+     *
+     * @param text The text.
+     * @param literal The literal.
+     * @param from The start offset.
+     * @return The first match offset, or {@code -1}.
+     */
+    private int indexOfIgnoreCase(String text, String literal, int from) {
+      for (int i = from; i + literal.length() <= text.length(); i++) {
+        if (text.regionMatches(true, i, literal, 0, literal.length())) {
+          return i;
+        }
+      }
+      return -1;
     }
 
     private Map<String, Map<ModelType, URL>> toMap(List<String> links)
