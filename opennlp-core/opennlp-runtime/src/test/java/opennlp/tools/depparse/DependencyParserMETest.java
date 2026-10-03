@@ -145,15 +145,16 @@ public class DependencyParserMETest {
 
   @Test
   void testTrainValidatesArguments() {
-    assertThrows(IllegalArgumentException.class,
-        () -> DependencyParserME.train(LANGUAGE, null, TrainingParameters.defaultParams()));
-    assertThrows(IllegalArgumentException.class,
+    assertEquals("samples must not be null", assertThrows(IllegalArgumentException.class,
+        () -> DependencyParserME.train(LANGUAGE, null, TrainingParameters.defaultParams()))
+        .getMessage());
+    assertEquals("parameters must not be null", assertThrows(IllegalArgumentException.class,
         () -> DependencyParserME.train(LANGUAGE,
-            ObjectStreamUtils.createObjectStream(corpus()), null));
-    assertThrows(IllegalArgumentException.class,
+            ObjectStreamUtils.createObjectStream(corpus()), null)).getMessage());
+    assertEquals("languageCode must not be null", assertThrows(IllegalArgumentException.class,
         () -> DependencyParserME.train(null,
             ObjectStreamUtils.createObjectStream(corpus()),
-            TrainingParameters.defaultParams()));
+            TrainingParameters.defaultParams())).getMessage());
   }
 
   @Test
