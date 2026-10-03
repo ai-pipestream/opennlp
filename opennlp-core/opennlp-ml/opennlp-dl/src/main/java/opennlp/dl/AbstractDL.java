@@ -34,6 +34,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
+import opennlp.tools.commons.Internal;
 import opennlp.tools.tokenize.SubwordPiece;
 import opennlp.tools.tokenize.SubwordTokenizer;
 import opennlp.tools.tokenize.WordpieceEncoder;
@@ -62,6 +63,13 @@ public abstract class AbstractDL implements AutoCloseable {
 
   private final AtomicBoolean closed = new AtomicBoolean();
 
+  /**
+   * A half-open range of token indices covered by one chunk.
+   *
+   * @param start The inclusive index of the first token of the chunk.
+   * @param end   The exclusive index after the last token of the chunk.
+   */
+  @Internal(since = "3.0.0")
   protected record ChunkRange(int start, int end) {
   }
 
@@ -73,6 +81,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param start The inclusive character offset of the chunk in the source text.
    * @param end   The exclusive character offset of the chunk in the source text.
    */
+  @Internal(since = "3.0.0")
   protected record TextChunk(String text, int start, int end) {
   }
 
@@ -373,12 +382,13 @@ public abstract class AbstractDL implements AutoCloseable {
 
   /**
    * Unicode-aware whitespace. Input is tokenized on the full Unicode {@code White_Space} set
-   * rather than the six ASCII characters Java's {@code \s} recognizes, and the same class is
-   * reused by subclasses that need to match against whitespace in the source text.
+   * rather than the six ASCII characters Java's {@code \s} recognizes.
    */
+  @Internal(since = "3.0.0")
   protected static final CharClass WHITESPACE = CharClass.whitespace();
 
   /** Unicode dashes (excluding the mathematical minus signs), used for optional input folding. */
+  @Internal(since = "3.0.0")
   protected static final CharClass DASHES = CharClass.dashes();
 
   /**
@@ -394,6 +404,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param normalizeDashes Whether to fold dashes to the ASCII hyphen.
    * @return The optionally normalized text.
    */
+  @Internal(since = "3.0.0")
   protected static String normalizeInput(final String text, final boolean normalizeWhitespace,
                                          final boolean normalizeDashes) {
     String result = text;
@@ -417,6 +428,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param normalizeDashes Whether to fold dashes to the ASCII hyphen.
    * @return The optionally normalized text paired with its alignment back to {@code text}.
    */
+  @Internal(since = "3.0.0")
   protected static AlignedText normalizeInputAligned(final String text,
       final boolean normalizeWhitespace, final boolean normalizeDashes) {
     // Compose each enabled fold's alignment with the running alignment so the returned mapping is
@@ -427,19 +439,12 @@ public abstract class AbstractDL implements AutoCloseable {
     // if that ever changes.
     AlignedText result = identityAligned(text, text);
     if (normalizeWhitespace) {
-      result = compose(result, WHITESPACE.normalizeAligned(result.normalized()));
+      result = result.andThen(WHITESPACE.normalizeAligned(result.normalized()));
     }
     if (normalizeDashes) {
-      result = compose(result, DASHES.normalizeAligned(result.normalized()));
+      result = result.andThen(DASHES.normalizeAligned(result.normalized()));
     }
     return result;
-  }
-
-  // Threads a fold stage onto the running alignment: accumulated maps original -> current and next
-  // maps current -> next.normalized(), so the composition maps original -> next.normalized().
-  private static AlignedText compose(final AlignedText accumulated, final AlignedText next) {
-    return new AlignedText(accumulated.original(), next.normalized(),
-        accumulated.alignment().andThen(next.alignment()));
   }
 
   // An AlignedText whose alignment is the identity, for the case where no length-changing fold was
@@ -462,6 +467,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param splitOverlapSize The number of tokens shared between consecutive chunks.
    * @return The chunk strings, in order.
    */
+  @Internal(since = "3.0.0")
   protected static List<String> whitespaceChunks(final String text, final int documentSplitSize,
                                                  final int splitOverlapSize) {
     final List<TextChunk> chunks = whitespaceChunkSpans(text, documentSplitSize, splitOverlapSize);
@@ -482,6 +488,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @param splitOverlapSize The number of tokens shared between consecutive chunks.
    * @return The chunks, in order, each with its character span in {@code text}.
    */
+  @Internal(since = "3.0.0")
   protected static List<TextChunk> whitespaceChunkSpans(final String text,
       final int documentSplitSize, final int splitOverlapSize) {
     final List<Span> tokenSpans = WHITESPACE.splitSpans(text);
@@ -512,6 +519,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @throws IllegalArgumentException Thrown if the token count is negative or the split settings
    *     cannot make progress.
    */
+  @Internal(since = "3.0.0")
   protected static List<ChunkRange> chunkRanges(final int tokenCount, final int documentSplitSize,
                                                 final int splitOverlapSize) {
     if (tokenCount < 0) {
