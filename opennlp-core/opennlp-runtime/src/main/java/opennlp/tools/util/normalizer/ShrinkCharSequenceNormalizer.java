@@ -16,6 +16,7 @@
  */
 package opennlp.tools.util.normalizer;
 
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.StringUtil;
 
 /**
@@ -48,9 +49,7 @@ public class ShrinkCharSequenceNormalizer implements CharSequenceNormalizer {
    */
   @Override
   public CharSequence normalize(CharSequence text) {
-    if (text == null) {
-      throw new IllegalArgumentException("The text must not be null.");
-    }
+    ArgumentChecks.requireNonNullArg(text, "text");
     final CharSequence shrunk = shrinkRepeatedCodePoints(shrinkWhitespace(text));
     // Drops every leading and trailing char at or below U+0020, without copying when nothing
     // changed anywhere in the pipeline.

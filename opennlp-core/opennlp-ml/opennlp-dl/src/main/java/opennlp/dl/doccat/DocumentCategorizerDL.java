@@ -43,6 +43,7 @@ import opennlp.dl.Tokens;
 import opennlp.dl.doccat.scoring.ClassificationScoringStrategy;
 import opennlp.tools.commons.ThreadSafe;
 import opennlp.tools.doccat.DocumentCategorizer;
+import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.InvalidFormatException;
 
 
@@ -185,9 +186,9 @@ public class DocumentCategorizerDL extends AbstractDL implements DocumentCategor
   private static InferenceOptions validateConstructorArguments(
       final InferenceOptions inferenceOptions, final Object categoriesOrConfig,
       final ClassificationScoringStrategy classificationScoringStrategy) {
-    requireNonNullArg(inferenceOptions, "inferenceOptions");
-    requireNonNullArg(categoriesOrConfig, "categoriesOrConfig");
-    requireNonNullArg(classificationScoringStrategy, "classificationScoringStrategy");
+    ArgumentChecks.requireNonNullArg(inferenceOptions, "inferenceOptions");
+    ArgumentChecks.requireNonNullArg(categoriesOrConfig, "categoriesOrConfig");
+    ArgumentChecks.requireNonNullArg(classificationScoringStrategy, "classificationScoringStrategy");
     return inferenceOptions;
   }
 

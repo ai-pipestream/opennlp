@@ -129,7 +129,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static String[] splitOnUnicodeWhitespace(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     return splitNonEmpty(input, StringUtil::isUnicodeWhitespace);
   }
 
@@ -144,7 +144,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static String[] splitOnWhitespace(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     return splitNonEmpty(input, StringUtil::isWhitespace);
   }
 
@@ -193,7 +193,7 @@ public class StringUtil {
    *     {@code separator} is a surrogate.
    */
   public static String[] split(CharSequence input, char separator, int limit) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     if (Character.isSurrogate(separator)) {
       throw new IllegalArgumentException("separator must not be a surrogate");
     }
@@ -235,7 +235,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static boolean startsWithByteOrderMark(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     return !input.isEmpty() && input.charAt(0) == BYTE_ORDER_MARK;
   }
 
@@ -268,8 +268,8 @@ public class StringUtil {
    *     {@code separators} is empty, or a separator is a surrogate.
    */
   public static String[] splitNonEmpty(CharSequence input, char... separators) {
-    requireNonNullArg(input, "input");
-    requireNonNullArg(separators, "separators");
+    ArgumentChecks.requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(separators, "separators");
     if (separators.length == 0) {
       throw new IllegalArgumentException("separators must not be empty");
     }
@@ -328,7 +328,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static boolean containsAsciiUpperCase(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     for (int i = 0; i < input.length(); i++) {
       if (isAsciiUpperCase(input.charAt(i))) {
         return true;
@@ -346,7 +346,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static boolean containsAsciiDigit(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     for (int i = 0; i < input.length(); i++) {
       if (isAsciiDigit(input.charAt(i))) {
         return true;
@@ -471,7 +471,7 @@ public class StringUtil {
    *         range.
    */
   private static void requireOffset(CharSequence text, int from) {
-    requireNonNullArg(text, "text");
+    ArgumentChecks.requireNonNullArg(text, "text");
     if (from < 0 || from > text.length()) {
       throw new IllegalArgumentException("from must be between 0 and " + text.length());
     }
@@ -486,7 +486,7 @@ public class StringUtil {
    * @throws IllegalArgumentException If {@code input} is {@code null}.
    */
   public static String trimUnicodeWhitespace(CharSequence input) {
-    requireNonNullArg(input, "input");
+    ArgumentChecks.requireNonNullArg(input, "input");
     int start = 0;
     int end = input.length();
     while (start < end) {
@@ -846,18 +846,5 @@ public class StringUtil {
       ses = "O";
     }
     return ses;
-  }
-
-  /**
-   * Throws if an argument is {@code null}.
-   *
-   * @param value The argument to check.
-   * @param name The name of the argument, used in the message.
-   * @throws IllegalArgumentException If {@code value} is {@code null}.
-   */
-  private static void requireNonNullArg(Object value, String name) {
-    if (value == null) {
-      throw new IllegalArgumentException(name + " must not be null");
-    }
   }
 }
