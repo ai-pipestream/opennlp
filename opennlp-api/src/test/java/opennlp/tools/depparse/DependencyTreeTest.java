@@ -19,10 +19,9 @@ package opennlp.tools.depparse;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.util.Base64;
+import java.io.ObjectStreamClass;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -32,56 +31,48 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests the invariants and accessors of {@link DependencyGraph} and {@link DependencyArc}.
+ * Tests the invariants and accessors of {@link DependencyTree} and {@link DependencyArc}.
  */
-public class DependencyGraphTest {
+public class DependencyTreeTest {
 
-  /** Serialized heads [1, -1] and relations [nsubj, root], without a cached root field. */
-  private static final String GRAPH_WITHOUT_CACHED_ROOT =
-      "rO0ABXNyACZvcGVubmxwLnRvb2xzLmRlcHBhcnNlLkRlcGVuZGVuY3lHcmFwaKMmtL0nhVuPAgAC"
-          + "WwAFaGVhZHN0AAJbSVsACXJlbGF0aW9uc3QAE1tMamF2YS9sYW5nL1N0cmluZzt4cHVyAAJbSU26"
-          + "YCZ26rKlAgAAeHAAAAACAAAAAf////91cgATW0xqYXZhLmxhbmcuU3RyaW5nO63SVufpHXtHAgAA"
-          + "eHAAAAACdAAFbnN1Ymp0AARyb290";
-
-  /** The three-token graph shared by the accessor tests. */
-  private static DependencyGraph sample() {
-    return DependencyGraph.of(new int[] {1, 2, -1},
+  /** The three-token tree shared by the accessor tests. */
+  private static DependencyTree sample() {
+    return DependencyTree.of(new int[] {1, 2, -1},
         new String[] {"det", "nsubj", "root"});
   }
 
   @Test
   void testAccessors() {
-    final DependencyGraph graph = sample();
-    assertEquals(3, graph.size());
-    assertEquals(1, graph.headOf(0));
-    assertEquals(2, graph.headOf(1));
-    assertEquals(DependencyArc.ROOT_HEAD, graph.headOf(2));
-    assertEquals("nsubj", graph.relationOf(1));
-    assertEquals(2, graph.root());
+    final DependencyTree tree = sample();
+    assertEquals(3, tree.size());
+    assertEquals(1, tree.headOf(0));
+    assertEquals(2, tree.headOf(1));
+    assertEquals(DependencyArc.ROOT_HEAD, tree.headOf(2));
+    assertEquals("nsubj", tree.relationOf(1));
+    assertEquals(2, tree.root());
   }
 
   @Test
   void testSerializationPreservesRoot() throws Exception {
-    final DependencyGraph graph = sample();
+    final DependencyTree tree = sample();
     final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
-      out.writeObject(graph);
+      out.writeObject(tree);
     }
     try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
-      final DependencyGraph restored = (DependencyGraph) in.readObject();
-      assertEquals(graph, restored);
-      assertEquals(graph.hashCode(), restored.hashCode());
-      assertEquals(graph.root(), restored.root());
+      final DependencyTree restored = (DependencyTree) in.readObject();
+      assertEquals(tree, restored);
+      assertEquals(tree.hashCode(), restored.hashCode());
+      assertEquals(tree.root(), restored.root());
       assertEquals(DependencyArc.ROOT_HEAD, restored.headOf(restored.root()));
     }
   }
 
+  /** The stream class carries the declared serial version UID, so the field is picked up. */
   @Test
-  void testSerializedGraphWithoutCachedRootIsRejected() throws Exception {
-    final byte[] bytes = Base64.getDecoder().decode(GRAPH_WITHOUT_CACHED_ROOT);
-    try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
-      assertThrows(InvalidClassException.class, in::readObject);
-    }
+  void testSerialVersionUid() {
+    assertEquals(-3305194579961339787L,
+        ObjectStreamClass.lookup(DependencyTree.class).getSerialVersionUID());
   }
 
   @Test
@@ -97,7 +88,7 @@ public class DependencyGraphTest {
   void testEqualsAndHashCode() {
     assertEquals(sample(), sample());
     assertEquals(sample().hashCode(), sample().hashCode());
-    assertNotEquals(sample(), DependencyGraph.of(new int[] {1, 2, -1},
+    assertNotEquals(sample(), DependencyTree.of(new int[] {1, 2, -1},
         new String[] {"amod", "nsubj", "root"}));
   }
 
@@ -105,80 +96,80 @@ public class DependencyGraphTest {
   void testInputArraysAreCopied() {
     final int[] heads = {1, -1};
     final String[] relations = {"nsubj", "root"};
-    final DependencyGraph graph = DependencyGraph.of(heads, relations);
+    final DependencyTree tree = DependencyTree.of(heads, relations);
     heads[0] = 0;
     relations[0] = "det";
-    assertEquals(1, graph.headOf(0));
-    assertEquals("nsubj", graph.relationOf(0));
+    assertEquals(1, tree.headOf(0));
+    assertEquals("nsubj", tree.relationOf(0));
   }
 
   @Test
   void testNullArraysThrow() {
     assertEquals("heads must not be null", assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(null, new String[] {"root"})).getMessage());
+        () -> DependencyTree.of(null, new String[] {"root"})).getMessage());
     assertEquals("relations must not be null", assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-1}, null)).getMessage());
+        () -> DependencyTree.of(new int[] {-1}, null)).getMessage());
   }
 
   @Test
-  void testEmptyGraphThrows() {
+  void testEmptyTreeThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[0], new String[0]));
+        () -> DependencyTree.of(new int[0], new String[0]));
   }
 
   @Test
   void testLengthMismatchThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-1}, new String[] {"root", "nsubj"}));
+        () -> DependencyTree.of(new int[] {-1}, new String[] {"root", "nsubj"}));
   }
 
   @Test
   void testRootCountIsEnforced() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {1, 0}, new String[] {"a", "b"}));
+        () -> DependencyTree.of(new int[] {1, 0}, new String[] {"a", "b"}));
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-1, -1}, new String[] {"root", "root"}));
+        () -> DependencyTree.of(new int[] {-1, -1}, new String[] {"root", "root"}));
   }
 
   @Test
   void testDisconnectedCycleThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-1, 2, 1},
+        () -> DependencyTree.of(new int[] {-1, 2, 1},
             new String[] {"root", "dep", "dep"}));
   }
 
   @Test
   void testSelfHeadThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {0, -1}, new String[] {"a", "root"}));
+        () -> DependencyTree.of(new int[] {0, -1}, new String[] {"a", "root"}));
   }
 
   @Test
   void testOutOfRangeHeadThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {2, -1}, new String[] {"a", "root"}));
+        () -> DependencyTree.of(new int[] {2, -1}, new String[] {"a", "root"}));
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {-3, -1}, new String[] {"a", "root"}));
+        () -> DependencyTree.of(new int[] {-3, -1}, new String[] {"a", "root"}));
   }
 
   @Test
   void testBlankRelationThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {1, -1}, new String[] {" ", "root"}));
+        () -> DependencyTree.of(new int[] {1, -1}, new String[] {" ", "root"}));
     // blankness follows the toolkit whitespace definition, which covers the no-break
     // space U+00A0 that the JDK predicate leaves out
     assertThrows(IllegalArgumentException.class,
-        () -> DependencyGraph.of(new int[] {1, -1}, new String[] {"\u00A0", "root"}));
+        () -> DependencyTree.of(new int[] {1, -1}, new String[] {"\u00A0", "root"}));
     // and a label that only looks unusual is still content
-    assertEquals("nmod:poss", DependencyGraph.of(new int[] {1, -1},
+    assertEquals("nmod:poss", DependencyTree.of(new int[] {1, -1},
         new String[] {"nmod:poss", "root"}).relationOf(0));
   }
 
   @Test
   void testIndexBoundsThrow() {
-    final DependencyGraph graph = sample();
-    assertThrows(IllegalArgumentException.class, () -> graph.headOf(-1));
-    assertThrows(IllegalArgumentException.class, () -> graph.relationOf(3));
+    final DependencyTree tree = sample();
+    assertThrows(IllegalArgumentException.class, () -> tree.headOf(-1));
+    assertThrows(IllegalArgumentException.class, () -> tree.relationOf(3));
   }
 
   @Test

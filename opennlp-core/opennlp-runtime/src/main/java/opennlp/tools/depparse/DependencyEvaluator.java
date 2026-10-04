@@ -85,16 +85,16 @@ public class DependencyEvaluator extends Evaluator<DependencySample> {
   /**
    * {@inheritDoc}
    *
-   * <p>The returned sample carries the predicted graph over the reference tokens, and
+   * <p>The returned sample carries the predicted tree over the reference tokens, and
    * every token of the reference contributes to both scores. Listeners are told whether
-   * the predicted graph equals the gold graph.</p>
+   * the predicted tree equals the gold tree.</p>
    */
   @Override
   protected DependencySample processSample(DependencySample reference) {
-    final DependencyGraph gold = reference.getGraph();
+    final DependencyTree gold = reference.getTree();
     final String[] tokens = reference.getTokens();
     final String[] tags = reference.getTags();
-    final DependencyGraph predicted = parser.parse(tokens, tags);
+    final DependencyTree predicted = parser.parse(tokens, tags);
     for (int i = 0; i < gold.size(); i++) {
       final boolean headMatches = gold.headOf(i) == predicted.headOf(i);
       final boolean labelMatches =

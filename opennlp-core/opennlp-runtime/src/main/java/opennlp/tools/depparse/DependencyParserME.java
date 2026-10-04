@@ -108,13 +108,13 @@ public class DependencyParserME implements DependencyParser {
    *         its outcomes or are not finite.
    */
   @Override
-  public DependencyGraph parse(String[] tokens, String[] tags) {
+  public DependencyTree parse(String[] tokens, String[] tags) {
     checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));
     }
-    return state.toGraph();
+    return state.toTree();
   }
 
   /**

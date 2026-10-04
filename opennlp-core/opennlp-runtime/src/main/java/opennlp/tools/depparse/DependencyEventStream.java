@@ -34,7 +34,7 @@ import opennlp.tools.util.ObjectStream;
  * sample the {@link ArcStandardOracle} derives the gold transitions, and every transition
  * becomes one event pairing the configuration features with the encoded transition.
  *
- * <p>Samples whose graph has no arc-standard derivation, that is non-projective trees,
+ * <p>Samples whose tree has no arc-standard derivation, that is non-projective trees,
  * are skipped and counted; the count is logged once the stream is exhausted.</p>
  */
 class DependencyEventStream implements ObjectStream<Event> {
@@ -82,12 +82,12 @@ class DependencyEventStream implements ObjectStream<Event> {
         }
         return null;
       }
-      if (!ArcStandardOracle.isProjective(sample.getGraph())) {
+      if (!ArcStandardOracle.isProjective(sample.getTree())) {
         skipped++;
         continue;
       }
-      final List<Transition> transitions = ArcStandardOracle.transitions(sample.getGraph());
-      final ArcStandardState state = new ArcStandardState(sample.getGraph().size());
+      final List<Transition> transitions = ArcStandardOracle.transitions(sample.getTree());
+      final ArcStandardState state = new ArcStandardState(sample.getTree().size());
       final String[] tokens = sample.getTokens();
       final String[] tags = sample.getTags();
       for (final Transition transition : transitions) {

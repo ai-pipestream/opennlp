@@ -47,15 +47,15 @@ public class DependencySampleTest {
   private static final String[] TOKENS = {"the", "dog", "barks"};
   private static final String[] TAGS = {"DT", "NN", "VBZ"};
 
-  /** The graph matching {@link #TOKENS} and {@link #TAGS}. */
-  private static DependencyGraph graph() {
-    return DependencyGraph.of(new int[] {1, 2, -1},
+  /** The tree matching {@link #TOKENS} and {@link #TAGS}. */
+  private static DependencyTree tree() {
+    return DependencyTree.of(new int[] {1, 2, -1},
         new String[] {"det", "nsubj", "root"});
   }
 
   @Test
   void testSampleContractAndSerialization() throws Exception {
-    final DependencySample sample = new DependencySample(TOKENS, TAGS, graph());
+    final DependencySample sample = new DependencySample(TOKENS, TAGS, tree());
     assertInstanceOf(Sample.class, sample);
     final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
@@ -68,24 +68,24 @@ public class DependencySampleTest {
 
   @Test
   void testAccessors() {
-    final DependencySample sample = new DependencySample(TOKENS, TAGS, graph());
+    final DependencySample sample = new DependencySample(TOKENS, TAGS, tree());
     assertArrayEquals(TOKENS, sample.getTokens());
     assertArrayEquals(TAGS, sample.getTags());
-    assertEquals(graph(), sample.getGraph());
+    assertEquals(tree(), sample.getTree());
   }
 
   @Test
   void testEquals() {
-    assertEquals(new DependencySample(TOKENS, TAGS, graph()),
-        new DependencySample(TOKENS, TAGS, graph()));
+    assertEquals(new DependencySample(TOKENS, TAGS, tree()),
+        new DependencySample(TOKENS, TAGS, tree()));
   }
 
   @Test
   void testNullArgumentsThrow() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(null, TAGS, graph()));
+        () -> new DependencySample(null, TAGS, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(TOKENS, null, graph()));
+        () -> new DependencySample(TOKENS, null, tree()));
     assertThrows(IllegalArgumentException.class,
         () -> new DependencySample(TOKENS, TAGS, null));
   }
@@ -93,35 +93,35 @@ public class DependencySampleTest {
   @Test
   void testNullTokenOrTagThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(new String[] {"the", null, "barks"}, TAGS, graph()));
+        () -> new DependencySample(new String[] {"the", null, "barks"}, TAGS, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(TOKENS, new String[] {"DT", null, "VBZ"}, graph()));
+        () -> new DependencySample(TOKENS, new String[] {"DT", null, "VBZ"}, tree()));
   }
 
   @Test
   void testLengthMismatchThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(new String[] {"one"}, TAGS, graph()));
+        () -> new DependencySample(new String[] {"one"}, TAGS, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(TOKENS, new String[] {"DT"}, graph()));
+        () -> new DependencySample(TOKENS, new String[] {"DT"}, tree()));
   }
 
   @Test
   void testEmptySampleThrows() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(new String[0], new String[0], graph()));
+        () -> new DependencySample(new String[0], new String[0], tree()));
   }
 
   @Test
   void testNullEntriesThrow() {
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(null, TAGS, graph()));
+        () -> new DependencySample(null, TAGS, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(TOKENS, null, graph()));
+        () -> new DependencySample(TOKENS, null, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(new String[] {"the", null, "barks"}, TAGS, graph()));
+        () -> new DependencySample(new String[] {"the", null, "barks"}, TAGS, tree()));
     assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(TOKENS, new String[] {"DT", null, "VBZ"}, graph()));
+        () -> new DependencySample(TOKENS, new String[] {"DT", null, "VBZ"}, tree()));
   }
 
   /**
@@ -151,7 +151,7 @@ public class DependencySampleTest {
   @MethodSource("rejectedTokensAndTags")
   void testCheckTokensAndTagsMessages(String[] tokens, String[] tags, String message) {
     final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(tokens, tags, graph()));
+        () -> new DependencySample(tokens, tags, tree()));
     assertEquals(message, exception.getMessage());
   }
 
@@ -161,7 +161,7 @@ public class DependencySampleTest {
   void testCheckTokensAndTagsAcceptsAnyNonNullString(String value) {
     final String[] tokens = {value, "dog", value};
     final String[] tags = {value, value, "VBZ"};
-    final DependencySample sample = new DependencySample(tokens, tags, graph());
+    final DependencySample sample = new DependencySample(tokens, tags, tree());
     assertArrayEquals(tokens, sample.getTokens());
     assertArrayEquals(tags, sample.getTags());
   }
@@ -170,7 +170,7 @@ public class DependencySampleTest {
   @Test
   void testSingleTokenSample() {
     final DependencySample sample = new DependencySample(new String[] {"Run"},
-        new String[] {"VB"}, DependencyGraph.of(new int[] {-1}, new String[] {"root"}));
+        new String[] {"VB"}, DependencyTree.of(new int[] {-1}, new String[] {"root"}));
     assertEquals(1, sample.getTokens().length);
     assertEquals("1\tRun\tVB\t0\troot" + System.lineSeparator(), sample.toString());
   }
@@ -191,25 +191,25 @@ public class DependencySampleTest {
     }
     heads[0] = DependencyArc.ROOT_HEAD;
     relations[0] = "root";
-    final DependencyGraph graph = DependencyGraph.of(heads, relations);
-    assertEquals(length, new DependencySample(tokens, tags, graph).getTokens().length);
+    final DependencyTree tree = DependencyTree.of(heads, relations);
+    assertEquals(length, new DependencySample(tokens, tags, tree).getTokens().length);
     tags[length - 1] = null;
     final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(tokens, tags, graph));
+        () -> new DependencySample(tokens, tags, tree));
     assertEquals("tag must not be null at index " + (length - 1), exception.getMessage());
   }
 
   /** The stream class carries the declared serial version UID, so the field is picked up. */
   @Test
   void testSerialVersionUid() {
-    assertEquals(3275082718569167442L,
+    assertEquals(3889986411217462795L,
         ObjectStreamClass.lookup(DependencySample.class).getSerialVersionUID());
   }
 
   /** A deserialized sample keeps the hash code and the array contents of the original. */
   @Test
   void testDeserializedSampleKeepsHashCodeAndContents() throws Exception {
-    final DependencySample sample = new DependencySample(TOKENS, TAGS, graph());
+    final DependencySample sample = new DependencySample(TOKENS, TAGS, tree());
     final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
       out.writeObject(sample);
@@ -221,7 +221,7 @@ public class DependencySampleTest {
     assertEquals(sample.hashCode(), copy.hashCode());
     assertArrayEquals(TOKENS, copy.getTokens());
     assertArrayEquals(TAGS, copy.getTags());
-    assertEquals(graph(), copy.getGraph());
+    assertEquals(tree(), copy.getTree());
     assertEquals(sample.toString(), copy.toString());
   }
 
@@ -232,21 +232,21 @@ public class DependencySampleTest {
    */
   static Stream<Arguments> differentSamples() {
     return Stream.of(
-        Arguments.of("tokens", new DependencySample(new String[] {"a", "dog", "barks"}, TAGS, graph())),
-        Arguments.of("tags", new DependencySample(TOKENS, new String[] {"DT", "NNS", "VBZ"}, graph())),
+        Arguments.of("tokens", new DependencySample(new String[] {"a", "dog", "barks"}, TAGS, tree())),
+        Arguments.of("tags", new DependencySample(TOKENS, new String[] {"DT", "NNS", "VBZ"}, tree())),
         Arguments.of("relation", new DependencySample(TOKENS, TAGS,
-            DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "obj", "root"}))),
+            DependencyTree.of(new int[] {1, 2, -1}, new String[] {"det", "obj", "root"}))),
         Arguments.of("head", new DependencySample(TOKENS, TAGS,
-            DependencyGraph.of(new int[] {2, 2, -1}, new String[] {"det", "nsubj", "root"}))));
+            DependencyTree.of(new int[] {2, 2, -1}, new String[] {"det", "nsubj", "root"}))));
   }
 
   /** The equals and hashCode contract: equal samples share a hash code, changed parts differ. */
   @ParameterizedTest(name = "different {0}")
   @MethodSource("differentSamples")
   void testEqualsAndHashCodeContract(String part, DependencySample other) {
-    final DependencySample sample = new DependencySample(TOKENS, TAGS, graph());
+    final DependencySample sample = new DependencySample(TOKENS, TAGS, tree());
     assertEquals(sample, sample);
-    assertEquals(sample.hashCode(), new DependencySample(TOKENS, TAGS, graph()).hashCode());
+    assertEquals(sample.hashCode(), new DependencySample(TOKENS, TAGS, tree()).hashCode());
     assertNotEquals(sample, other);
     assertNotEquals(sample, null);
     assertNotEquals(sample, TOKENS);
@@ -255,7 +255,7 @@ public class DependencySampleTest {
   @Test
   void testInputArraysAreCopied() {
     final String[] tokens = TOKENS.clone();
-    final DependencySample sample = new DependencySample(tokens, TAGS, graph());
+    final DependencySample sample = new DependencySample(tokens, TAGS, tree());
     tokens[0] = "a";
     assertEquals("the", sample.getTokens()[0]);
   }

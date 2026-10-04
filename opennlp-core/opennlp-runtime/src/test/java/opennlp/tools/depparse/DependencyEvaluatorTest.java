@@ -40,11 +40,11 @@ public class DependencyEvaluatorTest {
   private static final String[] UNIVERSAL_TAGS = {"NOUN", "VERB", "ADV", "PUNCT"};
   private static final String[] PENN_TAGS = {"NNS", "VBP", "RB", "."};
 
-  private static final DependencyGraph GOLD = DependencyGraph.of(
+  private static final DependencyTree GOLD = DependencyTree.of(
       new int[] {1, -1, 1, 1}, new String[] {"nsubj", "root", "advmod", "punct"});
 
   /** Right heads throughout, but a wrong label on the adverb and a wrong head on the period. */
-  private static final DependencyGraph PREDICTED = DependencyGraph.of(
+  private static final DependencyTree PREDICTED = DependencyTree.of(
       new int[] {1, -1, 1, 2}, new String[] {"nsubj", "root", "obl", "punct"});
 
   /**
@@ -212,7 +212,7 @@ public class DependencyEvaluatorTest {
   /** A one-token sentence parsed as the root scores one correct token. */
   @Test
   void testSingleTokenSentence() throws IOException {
-    final DependencyGraph root = DependencyGraph.of(new int[] {-1}, new String[] {"root"});
+    final DependencyTree root = DependencyTree.of(new int[] {-1}, new String[] {"root"});
     final RecordingMonitor monitor = new RecordingMonitor();
     final DependencyEvaluator evaluator = new DependencyEvaluator((tokens, tags) -> root, monitor);
     final DependencySample sample = new DependencySample(new String[] {"Run"}, new String[] {"VERB"}, root);
@@ -226,7 +226,7 @@ public class DependencyEvaluatorTest {
   /** A prediction that differs from the gold tree only in a label is misparsed for the listeners. */
   @Test
   void testLabelOnlyDifferenceIsMisparsed() throws IOException {
-    final DependencyGraph relabeled = DependencyGraph.of(
+    final DependencyTree relabeled = DependencyTree.of(
         new int[] {1, -1, 1, 1}, new String[] {"nsubj", "root", "obl", "punct"});
     final RecordingMonitor monitor = new RecordingMonitor();
     final DependencyEvaluator evaluator =

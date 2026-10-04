@@ -23,28 +23,28 @@ package opennlp.tools.depparse;
  *
  * <p>Dependency parsing complements the constituency {@link opennlp.tools.parser.Parser}:
  * where a constituency parse groups tokens into nested phrases, a dependency parse links
- * each token directly to the token it modifies. The result is a {@link DependencyGraph}
+ * each token directly to the token it modifies. The result is a {@link DependencyTree}
  * whose indices refer back to the input token array, so spans computed for those tokens
  * remain valid for the parse.</p>
  *
  * <p>Thread safety is implementation specific.</p>
  *
- * @see DependencyGraph
+ * @see DependencyTree
  * @since 3.0.0
  */
 public interface DependencyParser {
 
   /**
-   * Parses a sentence into a {@link DependencyGraph}.
+   * Parses a sentence into a {@link DependencyTree}.
    *
    * @param tokens The input tokens. Must not be {@code null}, must contain
    *               at least one token, and must not contain {@code null} entries.
    * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
    *             {@code null}, must have the same length as {@code tokens}, and must not
    *             contain {@code null} entries.
-   * @return A {@link DependencyGraph} over the given tokens. Never {@code null}.
+   * @return A {@link DependencyTree} over the given tokens. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code tokens} or {@code tags} is
    *         {@code null}, empty, of mismatched length, or contains a {@code null} entry.
    */
-  DependencyGraph parse(String[] tokens, String[] tags);
+  DependencyTree parse(String[] tokens, String[] tags);
 }

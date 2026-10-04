@@ -22,7 +22,7 @@
 		<para>
 			Dependency parsing assigns each token a syntactic head and a relation label.
 			<code>DependencyParserME</code> accepts tokens with aligned part-of-speech tags
-			and returns a <code>DependencyGraph</code>. A classifier picks the next
+			and returns a <code>DependencyTree</code>. A classifier picks the next
 			arc-standard transition for each parser state.
 		</para>
 	</section>
@@ -95,13 +95,13 @@ opennlp DependencyParserME en-depparse.bin < tagged-sentences.txt]]>
 
 		<title>Parsing and evaluation</title>
 		<para>
-			Graph indices refer to the input token array:
+			Tree indices refer to the input token array:
 			<programlisting language="java">
 <![CDATA[String[] tokens = {"Alice", "sent", "Bob", "a", "message", "."};
 String[] tags = {"PROPN", "VERB", "PROPN", "DET", "NOUN", "PUNCT"};
-DependencyGraph graph = parser.parse(tokens, tags);
+DependencyTree tree = parser.parse(tokens, tags);
 
-for (DependencyArc arc : graph.arcs()) {
+for (DependencyArc arc : tree.arcs()) {
   String dependent = tokens[arc.dependent()];
   String head = arc.head() == DependencyArc.ROOT_HEAD
       ? "ROOT" : tokens[arc.head()];

@@ -31,12 +31,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_GRAPH;
 import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TAGS;
 import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TOKENS;
-import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_GRAPH;
+import static opennlp.tools.depparse.DependencyTestSamples.SHE_EATS_FISH_TREE;
 import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TAGS;
 import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TOKENS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TREE;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
 import static opennlp.tools.depparse.DependencyTestSamples.sample;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -109,9 +109,9 @@ public class DependencyParserEdgeCaseTest {
   void testSingleTokenSentenceAttachesToTheRoot() {
     // A single token permits only the derivation shift then right-arc, so the head is
     // forced to the artificial root and the model only chooses the relation label.
-    final DependencyGraph parsed =
+    final DependencyTree parsed =
         parser.parse(new String[] {"Run"}, new String[] {"VB"});
-    assertEquals(DependencyGraph.of(new int[] {-1}, new String[] {"root"}), parsed);
+    assertEquals(DependencyTree.of(new int[] {-1}, new String[] {"root"}), parsed);
   }
 
   @Test
@@ -122,9 +122,9 @@ public class DependencyParserEdgeCaseTest {
     mixed.add(nonProjectiveSample());
     final DependencyParserME mixedParser =
         new DependencyParserME(DependencyTestSamples.train(mixed));
-    assertEquals(THE_DOG_BARKS_GRAPH,
+    assertEquals(THE_DOG_BARKS_TREE,
         mixedParser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
-    assertEquals(SHE_EATS_FISH_GRAPH,
+    assertEquals(SHE_EATS_FISH_TREE,
         mixedParser.parse(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS));
   }
 
@@ -133,8 +133,8 @@ public class DependencyParserEdgeCaseTest {
     // The parser can only emit arc-standard derivations, so for a sentence whose gold
     // tree is non-projective the prediction is necessarily a different, projective tree.
     final DependencySample gold = nonProjectiveSample();
-    final DependencyGraph parsed = parser.parse(gold.getTokens(), gold.getTags());
-    assertNotEquals(gold.getGraph(), parsed);
+    final DependencyTree parsed = parser.parse(gold.getTokens(), gold.getTags());
+    assertNotEquals(gold.getTree(), parsed);
     assertTrue(ArcStandardOracle.isProjective(parsed), parsed.toString());
   }
 
@@ -149,7 +149,7 @@ public class DependencyParserEdgeCaseTest {
           reloaded.parse(sample.getTokens(), sample.getTags()),
           Arrays.toString(sample.getTokens()));
     }
-    assertEquals(THE_DOG_BARKS_GRAPH, reloaded.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
+    assertEquals(THE_DOG_BARKS_TREE, reloaded.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
   }
 
   @Test
@@ -158,7 +158,7 @@ public class DependencyParserEdgeCaseTest {
     for (int task = 0; task < THREADS; task++) {
       tasks.add(() -> {
         for (int iteration = 0; iteration < ITERATIONS_PER_THREAD; iteration++) {
-          assertEquals(THE_DOG_BARKS_GRAPH,
+          assertEquals(THE_DOG_BARKS_TREE,
               parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
         }
         return null;

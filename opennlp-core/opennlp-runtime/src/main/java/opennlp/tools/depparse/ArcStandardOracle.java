@@ -50,16 +50,16 @@ final class ArcStandardOracle {
   }
 
   /**
-   * Derives the gold transition sequence for a graph.
+   * Derives the gold transition sequence for a tree.
    *
-   * @param gold The gold dependency graph. Must not be {@code null} and must be
+   * @param gold The gold dependency tree. Must not be {@code null} and must be
    *             projective.
    * @return The transitions that rebuild {@code gold} from the start configuration, in
    *         order. Never {@code null}.
    * @throws IllegalArgumentException Thrown if {@code gold} is {@code null} or not
    *         projective.
    */
-  static List<Transition> transitions(DependencyGraph gold) {
+  static List<Transition> transitions(DependencyTree gold) {
     ArgumentChecks.requireNonNullArg(gold, "gold");
     final int n = gold.size();
     final int[] goldDependents = new int[n];
@@ -76,7 +76,7 @@ final class ArcStandardOracle {
       final Transition next = nextTransition(gold, goldDependents, state);
       if (next == null) {
         throw new IllegalArgumentException(
-            "gold graph has no arc-standard derivation (non-projective): " + gold);
+            "gold tree has no arc-standard derivation (non-projective): " + gold);
       }
       state.apply(next);
       transitions.add(next);
@@ -87,13 +87,13 @@ final class ArcStandardOracle {
   /**
    * Picks the gold transition for the current configuration.
    *
-   * @param gold The gold graph being derived.
+   * @param gold The gold tree being derived.
    * @param goldDependents The gold dependent count per token, indexed by head.
    * @param state The current configuration.
    * @return The next gold transition, or {@code null} when the configuration is stuck,
    *         which only happens for non-projective input.
    */
-  private static Transition nextTransition(DependencyGraph gold, int[] goldDependents,
+  private static Transition nextTransition(DependencyTree gold, int[] goldDependents,
       ArcStandardState state) {
     final int s0 = state.stack(0);
     final int s1 = state.stack(1);
@@ -117,16 +117,16 @@ final class ArcStandardOracle {
   }
 
   /**
-   * Tests whether a gold graph is projective: no pair of arcs crosses when the arcs are
-   * placed above the token sequence. The projective graphs are the ones with an
+   * Tests whether a gold tree is projective: no pair of arcs crosses when the arcs are
+   * placed above the token sequence. The projective trees are the ones with an
    * arc-standard derivation, so callers apply this test before requesting
    * {@link #transitions}.
    *
-   * @param gold The gold graph. Must not be {@code null}.
+   * @param gold The gold tree. Must not be {@code null}.
    * @return {@code true} if no pair of arcs crosses.
    * @throws IllegalArgumentException Thrown if {@code gold} is {@code null}.
    */
-  static boolean isProjective(DependencyGraph gold) {
+  static boolean isProjective(DependencyTree gold) {
     ArgumentChecks.requireNonNullArg(gold, "gold");
     for (int first = 0; first < gold.size(); first++) {
       final int firstLow = Math.min(first, gold.headOf(first));

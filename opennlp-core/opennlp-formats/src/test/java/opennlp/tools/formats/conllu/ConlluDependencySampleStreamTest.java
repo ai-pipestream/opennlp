@@ -90,18 +90,18 @@ public class ConlluDependencySampleStreamTest {
       assertNotNull(first);
       assertArrayEquals(new String[] {"He", "bought", "the", "bonds"}, first.getTokens());
       assertArrayEquals(new String[] {"PRON", "VERB", "DET", "NOUN"}, first.getTags());
-      assertEquals(1, first.getGraph().headOf(0));
-      assertEquals(DependencyArc.ROOT_HEAD, first.getGraph().headOf(1));
-      assertEquals(3, first.getGraph().headOf(2));
-      assertEquals("obj", first.getGraph().relationOf(3));
+      assertEquals(1, first.getTree().headOf(0));
+      assertEquals(DependencyArc.ROOT_HEAD, first.getTree().headOf(1));
+      assertEquals(3, first.getTree().headOf(2));
+      assertEquals("obj", first.getTree().relationOf(3));
 
       // the underscore-head sentence is skipped; the contraction sentence is kept,
       // with the range line dropped and its syntactic words intact
       final DependencySample second = samples.read();
       assertNotNull(second);
       assertArrayEquals(new String[] {"in", "Haus"}, second.getTokens());
-      assertEquals(1, second.getGraph().headOf(0));
-      assertEquals("case", second.getGraph().relationOf(0));
+      assertEquals(1, second.getTree().headOf(0));
+      assertEquals("case", second.getTree().relationOf(0));
 
       final DependencySample third = samples.read();
       assertNotNull(third);
@@ -183,7 +183,7 @@ public class ConlluDependencySampleStreamTest {
       final DependencySample onlyValid = samples.read();
       assertNotNull(onlyValid);
       assertArrayEquals(new String[] {"Fine"}, onlyValid.getTokens());
-      assertEquals(DependencyArc.ROOT_HEAD, onlyValid.getGraph().headOf(0));
+      assertEquals(DependencyArc.ROOT_HEAD, onlyValid.getTree().headOf(0));
       assertNull(samples.read());
     }
   }
@@ -280,8 +280,8 @@ public class ConlluDependencySampleStreamTest {
         new ConlluDependencySampleStream(in, ConlluTagset.U)) {
       final DependencySample sample = samples.read();
       assertNotNull(sample);
-      assertEquals(DependencyArc.ROOT_HEAD, sample.getGraph().headOf(9));
-      assertEquals(9, sample.getGraph().headOf(0));
+      assertEquals(DependencyArc.ROOT_HEAD, sample.getTree().headOf(9));
+      assertEquals(9, sample.getTree().headOf(0));
       assertNull(samples.read());
     }
   }
@@ -352,7 +352,7 @@ public class ConlluDependencySampleStreamTest {
       final DependencySample sample = samples.read();
       assertNotNull(sample);
       assertArrayEquals(new String[] {"Cats", "purr"}, sample.getTokens());
-      assertEquals("nsubj", sample.getGraph().relationOf(0));
+      assertEquals("nsubj", sample.getTree().relationOf(0));
       assertNull(samples.read());
     }
   }
@@ -389,8 +389,8 @@ public class ConlluDependencySampleStreamTest {
       final DependencySample sample = samples.read();
       assertNotNull(sample);
       assertArrayEquals(new String[] {"Dogs", "bark"}, sample.getTokens());
-      assertEquals(1, sample.getGraph().headOf(0));
-      assertEquals(DependencyArc.ROOT_HEAD, sample.getGraph().headOf(1));
+      assertEquals(1, sample.getTree().headOf(0));
+      assertEquals(DependencyArc.ROOT_HEAD, sample.getTree().headOf(1));
       assertNull(samples.read());
     }
   }

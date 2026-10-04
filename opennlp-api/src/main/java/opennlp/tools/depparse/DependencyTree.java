@@ -33,17 +33,17 @@ import opennlp.tools.util.StringUtil;
  * An immutable dependency tree over one sentence: for every token, the index of its head
  * and the label of the relation to that head.
  *
- * <p>Token indices are zero-based positions in the sentence the graph was built for.
+ * <p>Token indices are zero-based positions in the sentence the tree was built for.
  * Exactly one token carries the head value {@link DependencyArc#ROOT_HEAD}, marking it as
  * the sentence root. Instances are immutable and safe to share between threads.</p>
  *
  * @since 3.0.0
  */
 @ThreadSafe
-public final class DependencyGraph implements Serializable {
+public final class DependencyTree implements Serializable {
 
   @Serial
-  private static final long serialVersionUID = -5364291948961456841L;
+  private static final long serialVersionUID = -3305194579961339787L;
 
   /** Traversal state of a token whose head chain has not been followed yet. */
   private static final byte UNVISITED = 0;
@@ -66,7 +66,7 @@ public final class DependencyGraph implements Serializable {
    * @param relations The validated relation array, owned by the new instance.
    * @param root The index of the single token whose head is {@link DependencyArc#ROOT_HEAD}.
    */
-  private DependencyGraph(int[] heads, String[] relations, int root) {
+  private DependencyTree(int[] heads, String[] relations, int root) {
     this.heads = heads;
     this.relations = relations;
     this.root = root;
@@ -74,7 +74,7 @@ public final class DependencyGraph implements Serializable {
   }
 
   /**
-   * Creates a {@link DependencyGraph} from parallel head and relation arrays.
+   * Creates a {@link DependencyTree} from parallel head and relation arrays.
    *
    * @param heads For each token, the zero-based index of its head token, or
    *              {@link DependencyArc#ROOT_HEAD} for the sentence root. Must not be
@@ -84,14 +84,14 @@ public final class DependencyGraph implements Serializable {
    * @param relations For each token, the label of the relation to its head. Must not be
    *                  {@code null}, must have the same length as {@code heads}, and no
    *                  entry may be {@code null} or blank.
-   * @return A validated {@link DependencyGraph}. Never {@code null}.
+   * @return A validated {@link DependencyTree}. Never {@code null}.
    * @throws IllegalArgumentException Thrown if any of the above constraints is violated.
    */
-  public static DependencyGraph of(int[] heads, String[] relations) {
+  public static DependencyTree of(int[] heads, String[] relations) {
     ArgumentChecks.requireNonNullArg(heads, "heads");
     ArgumentChecks.requireNonNullArg(relations, "relations");
     if (heads.length == 0) {
-      throw new IllegalArgumentException("a dependency graph needs at least one token");
+      throw new IllegalArgumentException("a dependency tree needs at least one token");
     }
     if (heads.length != relations.length) {
       throw new IllegalArgumentException("heads and relations must have the same length: "
@@ -117,7 +117,7 @@ public final class DependencyGraph implements Serializable {
       throw new IllegalArgumentException("expected exactly one root, found " + roots);
     }
     checkAcyclic(heads);
-    return new DependencyGraph(heads.clone(), relations.clone(), root);
+    return new DependencyTree(heads.clone(), relations.clone(), root);
   }
 
   /**
@@ -138,7 +138,7 @@ public final class DependencyGraph implements Serializable {
       }
       if (current != DependencyArc.ROOT_HEAD && states[current] == VISITING) {
         throw new IllegalArgumentException(
-            "dependency graph contains a cycle at token " + current);
+            "dependency tree contains a cycle at token " + current);
       }
       current = start;
       while (current != DependencyArc.ROOT_HEAD && states[current] == VISITING) {
@@ -149,7 +149,7 @@ public final class DependencyGraph implements Serializable {
   }
 
   /**
-   * @return The number of tokens the graph spans.
+   * @return The number of tokens the tree spans.
    */
   public int size() {
     return heads.length;
@@ -188,7 +188,7 @@ public final class DependencyGraph implements Serializable {
   }
 
   /**
-   * @return All arcs of the graph in token order, one per token, as a new unmodifiable
+   * @return All arcs of the tree in token order, one per token, as a new unmodifiable
    *     list allocated on every call. Never {@code null}.
    */
   public List<DependencyArc> arcs() {
@@ -220,7 +220,7 @@ public final class DependencyGraph implements Serializable {
     if (this == obj) {
       return true;
     }
-    if (!(obj instanceof DependencyGraph other)) {
+    if (!(obj instanceof DependencyTree other)) {
       return false;
     }
     return hash == other.hash && Arrays.equals(heads, other.heads)
@@ -239,8 +239,8 @@ public final class DependencyGraph implements Serializable {
    * Replaces a deserialized instance by a validated one, so the arrays and the cached hash
    * read from a stream pass the same checks as {@link #of(int[], String[])}.
    *
-   * @return A validated graph with the same heads and relations.
-   * @throws InvalidObjectException Thrown if the stream does not hold a valid graph.
+   * @return A validated tree with the same heads and relations.
+   * @throws InvalidObjectException Thrown if the stream does not hold a valid tree.
    */
   @Serial
   private Object readResolve() throws InvalidObjectException {

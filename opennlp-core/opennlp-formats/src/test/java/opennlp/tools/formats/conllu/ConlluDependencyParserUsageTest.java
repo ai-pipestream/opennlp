@@ -30,10 +30,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import opennlp.tools.depparse.DependencyArc;
 import opennlp.tools.depparse.DependencyEvaluator;
-import opennlp.tools.depparse.DependencyGraph;
 import opennlp.tools.depparse.DependencyModel;
 import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
+import opennlp.tools.depparse.DependencyTree;
 import opennlp.tools.util.InputStreamFactory;
 import opennlp.tools.util.ObjectStreamUtils;
 import opennlp.tools.util.Parameters;
@@ -45,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Demonstrates the full dependency parsing workflow on a self-contained fixture: read
  * gold sentences from CoNLL-U content, train a {@link DependencyParserME}, parse a
- * sentence, inspect the resulting {@link DependencyGraph}, and persist the model.
+ * sentence, inspect the resulting {@link DependencyTree}, and persist the model.
  *
  * <p>The fixture contains four sentences and needs no external data. Repetition makes
  * the expected training results deterministic.</p>
@@ -55,7 +55,7 @@ public class ConlluDependencyParserUsageTest {
   /**
    * The training fixture: four gold sentences in CoNLL-U form. The {@code HEAD} column
    * is one-based with {@code 0} marking the root; the reader converts it to the
-   * zero-based convention of {@link DependencyGraph}.
+   * zero-based convention of {@link DependencyTree}.
    */
   private static final String CONLLU = String.join("\n",
       "# text = the dog barks",
@@ -89,7 +89,7 @@ public class ConlluDependencyParserUsageTest {
 
   private static final String[] ALICE_TOKENS = {"Alice", "sent", "Bob", "a", "message", "."};
   private static final String[] ALICE_TAGS = {"PROPN", "VERB", "PROPN", "DET", "NOUN", "PUNCT"};
-  private static final DependencyGraph ALICE_GRAPH = DependencyGraph.of(
+  private static final DependencyTree ALICE_TREE = DependencyTree.of(
       new int[] {1, -1, 1, 4, 1, 1},
       new String[] {"nsubj", "root", "iobj", "det", "obj", "punct"});
 
@@ -141,8 +141,8 @@ public class ConlluDependencyParserUsageTest {
     final List<DependencySample> fixture = readFixture();
     assertEquals(4, fixture.size());
     final DependencySample first = fixture.get(0);
-    assertEquals(DependencyGraph.of(new int[] {1, 2, -1},
-        new String[] {"det", "nsubj", "root"}), first.getGraph());
+    assertEquals(DependencyTree.of(new int[] {1, 2, -1},
+        new String[] {"det", "nsubj", "root"}), first.getTree());
     assertEquals("NOUN", first.getTags()[1]);
   }
 
@@ -150,7 +150,7 @@ public class ConlluDependencyParserUsageTest {
   void testParseAssignsHeadsAndRelations() {
     // Parsing takes the tokens and their part-of-speech tags; the result names, for
     // every token, its head token and the relation between the two.
-    final DependencyGraph parse = parser.parse(
+    final DependencyTree parse = parser.parse(
         new String[] {"the", "dog", "barks"}, new String[] {"DET", "NOUN", "VERB"});
     assertEquals(1, parse.headOf(0));
     assertEquals("det", parse.relationOf(0));
@@ -163,7 +163,7 @@ public class ConlluDependencyParserUsageTest {
 
   @Test
   void testParseAliceSentence() {
-    assertEquals(ALICE_GRAPH, parser.parse(ALICE_TOKENS, ALICE_TAGS));
+    assertEquals(ALICE_TREE, parser.parse(ALICE_TOKENS, ALICE_TAGS));
   }
 
   @Test
@@ -171,9 +171,9 @@ public class ConlluDependencyParserUsageTest {
     // The manual's loop over the arcs of a parse, collecting instead of printing.
     final String[] tokens = ALICE_TOKENS;
     final String[] tags = ALICE_TAGS;
-    final DependencyGraph graph = parser.parse(tokens, tags);
+    final DependencyTree tree = parser.parse(tokens, tags);
     final List<String> lines = new ArrayList<>();
-    for (DependencyArc arc : graph.arcs()) {
+    for (DependencyArc arc : tree.arcs()) {
       final String dependent = tokens[arc.dependent()];
       final String head = arc.head() == DependencyArc.ROOT_HEAD
           ? "ROOT" : tokens[arc.head()];
@@ -206,7 +206,7 @@ public class ConlluDependencyParserUsageTest {
     final Path file = dir.resolve("en-depparse.bin");
     model.serialize(file);
     final DependencyParserME reloaded = new DependencyParserME(new DependencyModel(file));
-    assertEquals(DependencyGraph.of(new int[] {1, -1, 1},
+    assertEquals(DependencyTree.of(new int[] {1, -1, 1},
             new String[] {"nsubj", "root", "obj"}),
         reloaded.parse(new String[] {"she", "eats", "fish"},
             new String[] {"PRON", "VERB", "NOUN"}));

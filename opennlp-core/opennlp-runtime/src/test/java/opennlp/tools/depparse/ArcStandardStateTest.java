@@ -65,8 +65,8 @@ public class ArcStandardStateTest {
 
     state.apply(Transition.rightArc("root"));
     assertTrue(state.isTerminal());
-    assertEquals(DependencyGraph.of(new int[] {-1}, new String[] {"root"}),
-        state.toGraph());
+    assertEquals(DependencyTree.of(new int[] {-1}, new String[] {"root"}),
+        state.toTree());
   }
 
   @Test
@@ -92,8 +92,8 @@ public class ArcStandardStateTest {
 
     state.apply(Transition.rightArc("root"));
     assertTrue(state.isTerminal());
-    assertEquals(DependencyGraph.of(new int[] {1, 2, -1},
-        new String[] {"det", "nsubj", "root"}), state.toGraph());
+    assertEquals(DependencyTree.of(new int[] {1, 2, -1},
+        new String[] {"det", "nsubj", "root"}), state.toTree());
   }
 
   @Test
@@ -108,11 +108,11 @@ public class ArcStandardStateTest {
   }
 
   @Test
-  void testToGraphBeforeTerminalIsRejected() {
+  void testToTreeBeforeTerminalIsRejected() {
     final ArcStandardState state = new ArcStandardState(2);
-    assertThrows(IllegalStateException.class, state::toGraph);
+    assertThrows(IllegalStateException.class, state::toTree);
     state.apply(Transition.SHIFT);
-    assertThrows(IllegalStateException.class, state::toGraph);
+    assertThrows(IllegalStateException.class, state::toTree);
   }
 
   @Test

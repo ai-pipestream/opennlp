@@ -28,8 +28,8 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import opennlp.tools.depparse.DependencyGraph;
 import opennlp.tools.depparse.DependencySample;
+import opennlp.tools.depparse.DependencyTree;
 import opennlp.tools.util.ArgumentChecks;
 import opennlp.tools.util.InputStreamFactory;
 import opennlp.tools.util.InvalidFormatException;
@@ -252,7 +252,7 @@ public class ConlluDependencySampleStream implements ObjectStream<DependencySamp
       heads[i] = head - 1;
     }
     try {
-      return new DependencySample(tokens, tags, DependencyGraph.of(heads, relations));
+      return new DependencySample(tokens, tags, DependencyTree.of(heads, relations));
     } catch (IllegalArgumentException e) {
       return null;
     }

@@ -20,10 +20,10 @@ package opennlp.tools.depparse;
 import opennlp.tools.util.StringUtil;
 
 /**
- * One labeled edge of a {@link DependencyGraph}: the token at {@code dependent} is governed
+ * One labeled edge of a {@link DependencyTree}: the token at {@code dependent} is governed
  * by the token at {@code head} under the given {@code relation}.
  *
- * <p>Indices are zero-based positions in the token array the graph was built over. A
+ * <p>Indices are zero-based positions in the token array the tree was built over. A
  * {@code head} of {@link #ROOT_HEAD} marks the dependent as the sentence root, which is
  * attached to the artificial root node rather than to another token.</p>
  *

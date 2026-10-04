@@ -40,9 +40,9 @@ import opennlp.tools.util.TrainingParameters;
 
 import static opennlp.tools.depparse.DependencyTestSamples.CORPUS_WORDS;
 import static opennlp.tools.depparse.DependencyTestSamples.LANGUAGE;
-import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_GRAPH;
 import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TAGS;
 import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TOKENS;
+import static opennlp.tools.depparse.DependencyTestSamples.THE_DOG_BARKS_TREE;
 import static opennlp.tools.depparse.DependencyTestSamples.corpus;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -87,14 +87,14 @@ public class DependencyParserMETest {
 
   @Test
   void testMemorizesTrainingSentences() {
-    final DependencyGraph parsed = parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS);
-    assertEquals(THE_DOG_BARKS_GRAPH, parsed);
+    final DependencyTree parsed = parser.parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS);
+    assertEquals(THE_DOG_BARKS_TREE, parsed);
   }
 
   @Test
   void testParseAlwaysYieldsASingleRootedTree() {
-    // an unseen sentence must still decode to a valid graph, whatever its quality
-    final DependencyGraph parsed = parser.parse(new String[] {"cats", "sleep"},
+    // an unseen sentence must still decode to a valid tree, whatever its quality
+    final DependencyTree parsed = parser.parse(new String[] {"cats", "sleep"},
         new String[] {"NNS", "VBP"});
     assertEquals(2, parsed.size());
     int roots = 0;
@@ -153,7 +153,7 @@ public class DependencyParserMETest {
         () -> parser.parse(tokens, tags));
     assertEquals(message, exception.getMessage());
     assertEquals(message, assertThrows(IllegalArgumentException.class,
-        () -> new DependencySample(tokens, tags, THE_DOG_BARKS_GRAPH)).getMessage());
+        () -> new DependencySample(tokens, tags, THE_DOG_BARKS_TREE)).getMessage());
   }
 
   @Test
@@ -195,9 +195,9 @@ public class DependencyParserMETest {
     model.serialize(out);
     final DependencyModel reloaded = new DependencyModel(
         new ByteArrayInputStream(out.toByteArray()));
-    final DependencyGraph parsed = new DependencyParserME(reloaded)
+    final DependencyTree parsed = new DependencyParserME(reloaded)
         .parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS);
-    assertEquals(THE_DOG_BARKS_GRAPH, parsed);
+    assertEquals(THE_DOG_BARKS_TREE, parsed);
     assertEquals(LANGUAGE, reloaded.getLanguage());
   }
 
@@ -212,7 +212,7 @@ public class DependencyParserMETest {
     assertEquals(MANIFEST_VALUE, reloaded.getManifestProperty(MANIFEST_ENTRY));
     // no tool factory is recorded, so loading needs no extension class
     assertNull(reloaded.getManifestProperty(FACTORY_MANIFEST_ENTRY));
-    assertEquals(THE_DOG_BARKS_GRAPH,
+    assertEquals(THE_DOG_BARKS_TREE,
         new DependencyParserME(reloaded).parse(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS));
   }
 

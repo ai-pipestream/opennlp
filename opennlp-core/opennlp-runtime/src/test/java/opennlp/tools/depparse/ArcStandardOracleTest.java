@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that {@link ArcStandardOracle} derivations replay to the gold graph through
+ * Tests that {@link ArcStandardOracle} derivations replay to the gold tree through
  * {@link ArcStandardState}, and that non-projective input is rejected.
  */
 public class ArcStandardOracleTest {
@@ -37,10 +37,10 @@ public class ArcStandardOracleTest {
   /**
    * Derives the oracle transitions for {@code gold} and replays them on a fresh state.
    *
-   * @param gold The gold graph to derive from.
-   * @return The graph the replayed derivation builds. Never {@code null}.
+   * @param gold The gold tree to derive from.
+   * @return The tree the replayed derivation builds. Never {@code null}.
    */
-  private static DependencyGraph replay(DependencyGraph gold) {
+  private static DependencyTree replay(DependencyTree gold) {
     final List<Transition> transitions = ArcStandardOracle.transitions(gold);
     // every token is shifted once and attached once
     assertEquals(2 * gold.size(), transitions.size());
@@ -49,43 +49,43 @@ public class ArcStandardOracleTest {
       assertTrue(state.canApply(transition));
       state.apply(transition);
     }
-    return state.toGraph();
+    return state.toTree();
   }
 
   @Test
   void testRoundTripSimpleSentence() {
-    final DependencyGraph gold = DependencyGraph.of(new int[] {1, 2, -1},
+    final DependencyTree gold = DependencyTree.of(new int[] {1, 2, -1},
         new String[] {"det", "nsubj", "root"});
     assertEquals(gold, replay(gold));
   }
 
   @Test
   void testRoundTripSingleToken() {
-    final DependencyGraph gold = DependencyGraph.of(new int[] {-1}, new String[] {"root"});
+    final DependencyTree gold = DependencyTree.of(new int[] {-1}, new String[] {"root"});
     assertEquals(gold, replay(gold));
   }
 
   @Test
   void testRoundTripRightBranching() {
     // "eat fresh fish now": root with a right dependent that has its own left dependent
-    final DependencyGraph gold = DependencyGraph.of(new int[] {-1, 2, 0, 0},
+    final DependencyTree gold = DependencyTree.of(new int[] {-1, 2, 0, 0},
         new String[] {"root", "amod", "obj", "advmod"});
     assertEquals(gold, replay(gold));
   }
 
   @Test
   void testRoundTripDeepChain() {
-    final DependencyGraph gold = DependencyGraph.of(new int[] {1, 2, 3, -1},
+    final DependencyTree gold = DependencyTree.of(new int[] {1, 2, 3, -1},
         new String[] {"a", "b", "c", "root"});
     assertEquals(gold, replay(gold));
   }
 
-  /** Checks the projectivity test on a graph with crossed arcs, a chain, and a null. */
+  /** Checks the projectivity test on a tree with crossed arcs, a chain, and a null. */
   @Test
   void testIsProjective() {
-    assertFalse(ArcStandardOracle.isProjective(DependencyGraph.of(new int[] {2, 3, -1, 2},
+    assertFalse(ArcStandardOracle.isProjective(DependencyTree.of(new int[] {2, 3, -1, 2},
         new String[] {"a", "b", "root", "c"})));
-    assertTrue(ArcStandardOracle.isProjective(DependencyGraph.of(new int[] {1, -1, 1},
+    assertTrue(ArcStandardOracle.isProjective(DependencyTree.of(new int[] {1, -1, 1},
         new String[] {"nsubj", "root", "obj"})));
     assertThrows(IllegalArgumentException.class, () -> ArcStandardOracle.isProjective(null));
   }
@@ -93,7 +93,7 @@ public class ArcStandardOracleTest {
   @Test
   void testNonProjectiveThrows() {
     // arcs (2,0) and (3,1) cross, so there is no arc-standard derivation
-    final DependencyGraph nonProjective = DependencyGraph.of(new int[] {2, 3, -1, 2},
+    final DependencyTree nonProjective = DependencyTree.of(new int[] {2, 3, -1, 2},
         new String[] {"a", "b", "root", "c"});
     assertThrows(IllegalArgumentException.class,
         () -> ArcStandardOracle.transitions(nonProjective));
@@ -126,19 +126,19 @@ public class ArcStandardOracleTest {
     for (int i = 0; i < relations.length; i++) {
       relations[i] = heads[i] == DependencyArc.ROOT_HEAD ? "root" : "dep";
     }
-    final DependencyGraph graph;
+    final DependencyTree tree;
     try {
-      graph = DependencyGraph.of(heads, relations);
+      tree = DependencyTree.of(heads, relations);
     } catch (IllegalArgumentException e) {
       return;
     }
 
-    assertEquals(isProjective(graph), ArcStandardOracle.isProjective(graph), graph.toString());
-    if (isProjective(graph)) {
-      assertEquals(graph, replay(graph), graph.toString());
+    assertEquals(isProjective(tree), ArcStandardOracle.isProjective(tree), tree.toString());
+    if (isProjective(tree)) {
+      assertEquals(tree, replay(tree), tree.toString());
     } else {
       assertThrows(IllegalArgumentException.class,
-          () -> ArcStandardOracle.transitions(graph), graph.toString());
+          () -> ArcStandardOracle.transitions(tree), tree.toString());
     }
   }
 
@@ -148,16 +148,16 @@ public class ArcStandardOracleTest {
    * {@link ArcStandardOracle#isProjective} implements because the artificial root sits
    * to the left of the sentence.
    *
-   * @param graph The graph to inspect.
+   * @param tree The tree to inspect.
    * @return {@code true} if every subtree is a contiguous span.
    */
-  private static boolean isProjective(DependencyGraph graph) {
-    for (int token = 0; token < graph.size(); token++) {
+  private static boolean isProjective(DependencyTree tree) {
+    for (int token = 0; token < tree.size(); token++) {
       int first = token;
       int last = token;
       int covered = 0;
-      for (int other = 0; other < graph.size(); other++) {
-        if (dominates(graph, token, other)) {
+      for (int other = 0; other < tree.size(); other++) {
+        if (dominates(tree, token, other)) {
           first = Math.min(first, other);
           last = Math.max(last, other);
           covered++;
@@ -173,14 +173,14 @@ public class ArcStandardOracleTest {
   /**
    * Tests whether a token is another token or one of its ancestors.
    *
-   * @param graph The graph to inspect.
+   * @param tree The tree to inspect.
    * @param ancestor The candidate ancestor.
    * @param token The token whose head chain is followed.
    * @return {@code true} if {@code ancestor} is on the head chain from {@code token}.
    */
-  private static boolean dominates(DependencyGraph graph, int ancestor, int token) {
+  private static boolean dominates(DependencyTree tree, int ancestor, int token) {
     for (int current = token; current != DependencyArc.ROOT_HEAD;
-        current = graph.headOf(current)) {
+        current = tree.headOf(current)) {
       if (current == ancestor) {
         return true;
       }
@@ -189,7 +189,7 @@ public class ArcStandardOracleTest {
   }
 
   @Test
-  void testNullGraphThrows() {
+  void testNullTreeThrows() {
     assertThrows(IllegalArgumentException.class, () -> ArcStandardOracle.transitions(null));
   }
 }

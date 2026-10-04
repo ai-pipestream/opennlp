@@ -27,7 +27,7 @@ import opennlp.tools.util.ArgumentChecks;
 
 /**
  * One dependency-annotated sentence: tokens, their part-of-speech tags, and the gold
- * {@link DependencyGraph} over them. Used for training and evaluating a
+ * {@link DependencyTree} over them. Used for training and evaluating a
  * {@link DependencyParser}.
  *
  * <p>Instances are immutable and safe to share between threads.</p>
@@ -38,11 +38,11 @@ import opennlp.tools.util.ArgumentChecks;
 public final class DependencySample implements Sample {
 
   @Serial
-  private static final long serialVersionUID = 3275082718569167442L;
+  private static final long serialVersionUID = 3889986411217462795L;
 
   private final String[] tokens;
   private final String[] tags;
-  private final DependencyGraph graph;
+  private final DependencyTree tree;
 
   /**
    * Initializes a {@link DependencySample}.
@@ -52,22 +52,22 @@ public final class DependencySample implements Sample {
    * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
    *             {@code null}, must have the same length as {@code tokens}, and must not
    *             contain {@code null} entries.
-   * @param graph The dependency graph over the tokens. Must not be {@code null} and its
-   *              {@link DependencyGraph#size()} must equal the number of tokens.
+   * @param tree The dependency tree over the tokens. Must not be {@code null} and its
+   *              {@link DependencyTree#size()} must equal the number of tokens.
    * @throws IllegalArgumentException Thrown if any parameter is {@code null},
    *         {@code tokens} is empty, {@code tokens} or {@code tags} contains a
-   *         {@code null} entry, or the lengths of tokens, tags and graph disagree.
+   *         {@code null} entry, or the lengths of tokens, tags and tree disagree.
    */
-  public DependencySample(String[] tokens, String[] tags, DependencyGraph graph) {
-    ArgumentChecks.requireNonNullArg(graph, "graph");
+  public DependencySample(String[] tokens, String[] tags, DependencyTree tree) {
+    ArgumentChecks.requireNonNullArg(tree, "tree");
     checkTokensAndTags(tokens, tags);
-    if (tokens.length != graph.size()) {
-      throw new IllegalArgumentException("tokens, tags and graph must agree in length: "
-          + tokens.length + ", " + tags.length + ", " + graph.size());
+    if (tokens.length != tree.size()) {
+      throw new IllegalArgumentException("tokens, tags and tree must agree in length: "
+          + tokens.length + ", " + tags.length + ", " + tree.size());
     }
     this.tokens = tokens.clone();
     this.tags = tags.clone();
-    this.graph = graph;
+    this.tree = tree;
   }
 
   /**
@@ -116,10 +116,10 @@ public final class DependencySample implements Sample {
   }
 
   /**
-   * @return The dependency graph over the tokens. Never {@code null}.
+   * @return The dependency tree over the tokens. Never {@code null}.
    */
-  public DependencyGraph getGraph() {
-    return graph;
+  public DependencyTree getTree() {
+    return tree;
   }
 
   /**
@@ -134,7 +134,7 @@ public final class DependencySample implements Sample {
       return false;
     }
     return Arrays.equals(tokens, other.tokens) && Arrays.equals(tags, other.tags)
-        && graph.equals(other.graph);
+        && tree.equals(other.tree);
   }
 
   /**
@@ -142,7 +142,7 @@ public final class DependencySample implements Sample {
    */
   @Override
   public int hashCode() {
-    return Objects.hash(Arrays.hashCode(tokens), Arrays.hashCode(tags), graph);
+    return Objects.hash(Arrays.hashCode(tokens), Arrays.hashCode(tags), tree);
   }
 
   /**
@@ -153,7 +153,7 @@ public final class DependencySample implements Sample {
     final StringBuilder sb = new StringBuilder();
     for (int i = 0; i < tokens.length; i++) {
       sb.append(i + 1).append('\t').append(tokens[i]).append('\t').append(tags[i])
-          .append('\t').append(graph.headOf(i) + 1).append('\t').append(graph.relationOf(i))
+          .append('\t').append(tree.headOf(i) + 1).append('\t').append(tree.relationOf(i))
           .append(System.lineSeparator());
     }
     return sb.toString();

@@ -26,8 +26,8 @@ import opennlp.tools.cmdline.CLI;
 import opennlp.tools.cmdline.CmdLineUtil;
 import opennlp.tools.cmdline.SystemInputStreamFactory;
 import opennlp.tools.cmdline.TerminateToolException;
-import opennlp.tools.depparse.DependencyGraph;
 import opennlp.tools.depparse.DependencyParserME;
+import opennlp.tools.depparse.DependencyTree;
 import opennlp.tools.postag.POSSample;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.PlainTextByLineStream;
@@ -72,12 +72,12 @@ public class DependencyParserMETool extends BasicCmdLineTool {
         POSSample sample = POSSample.parse(line);
         String[] tokens = sample.getSentence();
         String[] tags = sample.getTags();
-        DependencyGraph graph = parser.parse(tokens, tags);
+        DependencyTree tree = parser.parse(tokens, tags);
         for (int i = 0; i < tokens.length; i++) {
           // Input tags may be UPOS or XPOS; retain them in XPOS without guessing a mapping.
           out.println(String.join(FIELD_SEPARATOR, Integer.toString(i + 1), tokens[i],
               EMPTY_FIELD, EMPTY_FIELD, tags[i], EMPTY_FIELD,
-              Integer.toString(graph.headOf(i) + 1), graph.relationOf(i),
+              Integer.toString(tree.headOf(i) + 1), tree.relationOf(i),
               EMPTY_FIELD, EMPTY_FIELD));
         }
         out.println();

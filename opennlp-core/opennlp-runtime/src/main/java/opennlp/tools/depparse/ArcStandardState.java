@@ -277,16 +277,16 @@ final class ArcStandardState {
   }
 
   /**
-   * Builds the {@link DependencyGraph} of a completed parse.
+   * Builds the {@link DependencyTree} of a completed parse.
    *
-   * @return The parsed graph. Never {@code null}.
+   * @return The parsed tree. Never {@code null}.
    * @throws IllegalStateException Thrown if the parse is not yet terminal.
    */
-  DependencyGraph toGraph() {
+  DependencyTree toTree() {
     if (!isTerminal()) {
       throw new IllegalStateException("parse is not terminal: " + this);
     }
-    return DependencyGraph.of(heads, relations);
+    return DependencyTree.of(heads, relations);
   }
 
   @Override

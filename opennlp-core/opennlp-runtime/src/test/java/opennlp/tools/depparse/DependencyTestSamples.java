@@ -39,9 +39,9 @@ final class DependencyTestSamples {
   /** The tags of the first corpus sentence. */
   static final String[] THE_DOG_BARKS_TAGS = {"DT", "NN", "VBZ"};
 
-  /** The gold graph of the first corpus sentence. */
-  static final DependencyGraph THE_DOG_BARKS_GRAPH =
-      DependencyGraph.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
+  /** The gold tree of the first corpus sentence. */
+  static final DependencyTree THE_DOG_BARKS_TREE =
+      DependencyTree.of(new int[] {1, 2, -1}, new String[] {"det", "nsubj", "root"});
 
   /** The tokens of the third corpus sentence. */
   static final String[] SHE_EATS_FISH_TOKENS = {"she", "eats", "fish"};
@@ -49,9 +49,9 @@ final class DependencyTestSamples {
   /** The tags of the third corpus sentence. */
   static final String[] SHE_EATS_FISH_TAGS = {"PRP", "VBZ", "NN"};
 
-  /** The gold graph of the third corpus sentence. */
-  static final DependencyGraph SHE_EATS_FISH_GRAPH =
-      DependencyGraph.of(new int[] {1, -1, 1}, new String[] {"nsubj", "root", "obj"});
+  /** The gold tree of the third corpus sentence. */
+  static final DependencyTree SHE_EATS_FISH_TREE =
+      DependencyTree.of(new int[] {1, -1, 1}, new String[] {"nsubj", "root", "obj"});
 
   /** How often the distinct sentences are repeated in {@link #corpus()}. */
   private static final int REPETITIONS = 40;
@@ -77,7 +77,7 @@ final class DependencyTestSamples {
    */
   static DependencySample sample(String[] tokens, String[] tags, int[] heads,
       String[] relations) {
-    return new DependencySample(tokens, tags, DependencyGraph.of(heads, relations));
+    return new DependencySample(tokens, tags, DependencyTree.of(heads, relations));
   }
 
   /**
@@ -87,10 +87,10 @@ final class DependencyTestSamples {
    */
   static List<DependencySample> sentences() {
     return List.of(
-        new DependencySample(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS, THE_DOG_BARKS_GRAPH),
+        new DependencySample(THE_DOG_BARKS_TOKENS, THE_DOG_BARKS_TAGS, THE_DOG_BARKS_TREE),
         sample(new String[] {"dogs", "bark"}, new String[] {"NNS", "VBP"},
             new int[] {1, -1}, new String[] {"nsubj", "root"}),
-        new DependencySample(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS, SHE_EATS_FISH_GRAPH));
+        new DependencySample(SHE_EATS_FISH_TOKENS, SHE_EATS_FISH_TAGS, SHE_EATS_FISH_TREE));
   }
 
   /**

@@ -42,10 +42,10 @@ import org.slf4j.LoggerFactory;
 import opennlp.tools.cmdline.CLI;
 import opennlp.tools.cmdline.StreamFactoryRegistry;
 import opennlp.tools.cmdline.TerminateToolException;
-import opennlp.tools.depparse.DependencyGraph;
 import opennlp.tools.depparse.DependencyModel;
 import opennlp.tools.depparse.DependencyParserME;
 import opennlp.tools.depparse.DependencySample;
+import opennlp.tools.depparse.DependencyTree;
 import opennlp.tools.util.ObjectStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -65,9 +65,9 @@ public class DependencyParserToolsTest {
   /** How often {@link #SENTENCE} is repeated in the training data. */
   private static final int REPETITIONS = 20;
 
-  /** The gold graph of {@link #SENTENCE}. */
-  private static final DependencyGraph GOLD =
-      DependencyGraph.of(new int[] {1, -1}, new String[] {"nsubj", "root"});
+  /** The gold tree of {@link #SENTENCE}. */
+  private static final DependencyTree GOLD =
+      DependencyTree.of(new int[] {1, -1}, new String[] {"nsubj", "root"});
 
   /** The sentence with the heads swapped, which a parser trained on {@link #SENTENCE} misparses. */
   private static final String REVERSED_SENTENCE = """
@@ -76,9 +76,9 @@ public class DependencyParserToolsTest {
 
       """;
 
-  /** The gold graph of {@link #REVERSED_SENTENCE}. */
-  private static final DependencyGraph REVERSED =
-      DependencyGraph.of(new int[] {-1, 0}, new String[] {"root", "obj"});
+  /** The gold tree of {@link #REVERSED_SENTENCE}. */
+  private static final DependencyTree REVERSED =
+      DependencyTree.of(new int[] {-1, 0}, new String[] {"root", "obj"});
 
   /** The expected block the error listener prints for {@link #REVERSED_SENTENCE}. */
   private static final String EXPECTED_REVERSED = "Expected: {\n"
