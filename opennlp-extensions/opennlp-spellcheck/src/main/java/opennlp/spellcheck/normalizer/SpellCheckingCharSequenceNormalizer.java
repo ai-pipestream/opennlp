@@ -305,6 +305,7 @@ public class SpellCheckingCharSequenceNormalizer implements CharSequenceNormaliz
     if (skipNumbers && isNumberLike(core)) {
       return false;
     }
+    // A token with no letters at all (pure symbols) cannot be a spelling error.
     for (int k = 0; k < core.length();) {
       final int codePoint = core.codePointAt(k);
       if (Character.isLetter(codePoint)) {
