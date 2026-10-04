@@ -58,28 +58,31 @@ public class MorfologikTagDictionaryConcurrencyTest extends AbstractMorfologikTe
 
     final Queue<String> problems = new ConcurrentLinkedQueue<>();
     final CountDownLatch start = new CountDownLatch(1);
+    final Runnable lookups = () -> {
+      try {
+        start.await();
+        for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
+          final String[] casa = dictionary.getTags("casa");
+          final String[] carro = dictionary.getTags("carro");
+          if (!Arrays.equals(referenceCasa, casa)) {
+            problems.add("casa tags drifted under contention");
+          }
+          if (!Arrays.equals(referenceCarro, carro)) {
+            problems.add("carro tags drifted under contention");
+          }
+        }
+      } catch (Exception e) {
+        problems.add("Unexpected exception: " + e);
+      }
+    };
     final ExecutorService executor = Executors.newFixedThreadPool(THREADS);
     try {
       for (int t = 0; t < THREADS; t++) {
-        executor.submit(() -> {
-          try {
-            start.await();
-            for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
-              final String[] casa = dictionary.getTags("casa");
-              final String[] carro = dictionary.getTags("carro");
-              if (!Arrays.equals(referenceCasa, casa)) {
-                problems.add("casa tags drifted under contention");
-              }
-              if (!Arrays.equals(referenceCarro, carro)) {
-                problems.add("carro tags drifted under contention");
-              }
-            }
-          } catch (Exception e) {
-            problems.add("Unexpected exception: " + e);
-          }
-        });
+        executor.submit(lookups);
       }
       start.countDown();
+      // the thread that created the dictionary looks up alongside the workers
+      lookups.run();
       executor.shutdown();
       Assertions.assertTrue(executor.awaitTermination(2, TimeUnit.MINUTES),
           "Concurrent workers did not finish in time");

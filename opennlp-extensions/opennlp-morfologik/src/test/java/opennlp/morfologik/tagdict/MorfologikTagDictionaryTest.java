@@ -93,6 +93,30 @@ public class MorfologikTagDictionaryTest extends AbstractMorfologikTest {
     Assertions.assertNull(tags);
   }
 
+  /**
+   * Verifies that a thread can release its lookup and keeps getting the same tags afterwards,
+   * on the thread that created the dictionary and on another one.
+   */
+  @Test
+  public void testClearThreadLocalStateKeepsLookupsWorking() throws Exception {
+    final MorfologikTagDictionary dict = createDictionary(false);
+    final String[] expected = dict.getTags("casa");
+
+    dict.clearThreadLocalState();
+    Assertions.assertArrayEquals(expected, dict.getTags("casa"));
+
+    final String[][] fromWorker = new String[2][];
+    final Thread worker = new Thread(() -> {
+      fromWorker[0] = dict.getTags("casa");
+      dict.clearThreadLocalState();
+      fromWorker[1] = dict.getTags("casa");
+    });
+    worker.start();
+    worker.join();
+    Assertions.assertArrayEquals(expected, fromWorker[0]);
+    Assertions.assertArrayEquals(expected, fromWorker[1]);
+  }
+
   private MorfologikTagDictionary createDictionary(boolean caseSensitive)
       throws Exception {
     return this.createDictionary(caseSensitive, null);

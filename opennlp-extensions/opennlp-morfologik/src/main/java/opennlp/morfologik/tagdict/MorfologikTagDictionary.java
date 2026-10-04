@@ -26,18 +26,19 @@ import morfologik.stemming.DictionaryLookup;
 import morfologik.stemming.WordData;
 
 import opennlp.tools.postag.TagDictionary;
+import opennlp.tools.util.OwnerOrPerThreadState;
 
 /**
  * A {@link TagDictionary} implementation based on Morfologik binary
  * dictionaries.
  * <p>
  * This implementation is thread-safe: the immutable {@link Dictionary} is shared
- * and a {@link DictionaryLookup} is created per {@link #getTags(String)} call, as
+ * and each thread looks words up through its own {@link DictionaryLookup}, as
  * {@link DictionaryLookup} instances are stateful and must not be used concurrently.
  */
 public class MorfologikTagDictionary implements TagDictionary {
 
-  private final Dictionary dictionary;
+  private final OwnerOrPerThreadState<DictionaryLookup> lookups;
   private final boolean isCaseSensitive;
 
   /**
@@ -61,9 +62,8 @@ public class MorfologikTagDictionary implements TagDictionary {
    */
   public MorfologikTagDictionary(Dictionary dict, boolean caseSensitive)
       throws IllegalArgumentException {
-    // Validates eagerly that a lookup can be constructed from the dictionary.
-    new DictionaryLookup(dict);
-    this.dictionary = dict;
+    // Creates the first lookup now, so an unusable dictionary fails here.
+    this.lookups = new OwnerOrPerThreadState<>(() -> new DictionaryLookup(dict), lookup -> { });
     this.isCaseSensitive = caseSensitive;
   }
 
@@ -73,7 +73,7 @@ public class MorfologikTagDictionary implements TagDictionary {
       word = word.toLowerCase(Locale.ROOT);
     }
 
-    List<WordData> data = new DictionaryLookup(dictionary).lookup(word);
+    List<WordData> data = lookups.get().lookup(word);
     if (data != null && !data.isEmpty()) {
       List<String> tags = new ArrayList<>(data.size());
       for (WordData aData : data) {
@@ -92,5 +92,13 @@ public class MorfologikTagDictionary implements TagDictionary {
   @Override
   public boolean isCaseSensitive() {
     return isCaseSensitive;
+  }
+
+  /**
+   * Removes thread-local state to prevent classloader leaks in container environments.
+   * Call when the thread is returned to a pool or the dictionary is no longer needed.
+   */
+  public void clearThreadLocalState() {
+    lookups.clearForCurrentThread();
   }
 }
