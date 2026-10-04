@@ -24,9 +24,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import opennlp.tools.ml.model.AbstractModel;
 import opennlp.tools.ml.model.Context;
@@ -122,6 +126,34 @@ public class DependencyParserMETest {
         () -> parser.parse(new String[0], new String[0]));
     assertThrows(IllegalArgumentException.class,
         () -> parser.parse(new String[] {"the"}, new String[] {"DT", "NN"}));
+  }
+
+  /**
+   * The input checks of {@link DependencyParserME#parse(String[], String[])}, with the
+   * messages {@link DependencySample} uses for the same violations.
+   *
+   * @return Token and tag arrays with the expected message.
+   */
+  static Stream<Arguments> rejectedParseInput() {
+    final String[] tags = {"DT", "NN", "VBZ"};
+    return Stream.of(
+        Arguments.of(null, tags, "tokens must not be null"),
+        Arguments.of(THE_DOG_BARKS_TOKENS, null, "tags must not be null"),
+        Arguments.of(new String[0], new String[0], "tokens must not be empty"),
+        Arguments.of(new String[] {"the"}, tags, "tokens and tags must have the same length: 1 != 3"),
+        Arguments.of(new String[] {"the", null, "barks"}, tags, "token must not be null at index 1"),
+        Arguments.of(THE_DOG_BARKS_TOKENS, new String[] {"DT", "NN", null},
+            "tag must not be null at index 2"));
+  }
+
+  @ParameterizedTest(name = "{2}")
+  @MethodSource("rejectedParseInput")
+  void testParseMessagesMatchDependencySample(String[] tokens, String[] tags, String message) {
+    final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        () -> parser.parse(tokens, tags));
+    assertEquals(message, exception.getMessage());
+    assertEquals(message, assertThrows(IllegalArgumentException.class,
+        () -> new DependencySample(tokens, tags, THE_DOG_BARKS_GRAPH)).getMessage());
   }
 
   @Test

@@ -70,6 +70,7 @@ public class DependencyGraphTest {
     try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
       final DependencyGraph restored = (DependencyGraph) in.readObject();
       assertEquals(graph, restored);
+      assertEquals(graph.hashCode(), restored.hashCode());
       assertEquals(graph.root(), restored.root());
       assertEquals(DependencyArc.ROOT_HEAD, restored.headOf(restored.root()));
     }

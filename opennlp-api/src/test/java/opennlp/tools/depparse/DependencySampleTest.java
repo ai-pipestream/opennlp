@@ -113,24 +113,19 @@ public class DependencySampleTest {
   }
 
   @Test
-  void testSharedValidationMatchesTheConstructor() {
-    DependencySample.checkTokensAndTags(TOKENS, TAGS);
+  void testNullEntriesThrow() {
     assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(null, TAGS));
+        () -> new DependencySample(null, TAGS, graph()));
     assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(TOKENS, null));
+        () -> new DependencySample(TOKENS, null, graph()));
     assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(new String[0], new String[0]));
+        () -> new DependencySample(new String[] {"the", null, "barks"}, TAGS, graph()));
     assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(new String[] {"one"}, TAGS));
-    assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(new String[] {"the", null, "barks"}, TAGS));
-    assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(TOKENS, new String[] {"DT", null, "VBZ"}));
+        () -> new DependencySample(TOKENS, new String[] {"DT", null, "VBZ"}, graph()));
   }
 
   /**
-   * Pins the message of every rejection of {@link DependencySample#checkTokensAndTags}.
+   * Pins the message of every token and tag rejection of the constructor.
    *
    * @return Token and tag arrays with the expected message.
    */
@@ -156,7 +151,7 @@ public class DependencySampleTest {
   @MethodSource("rejectedTokensAndTags")
   void testCheckTokensAndTagsMessages(String[] tokens, String[] tags, String message) {
     final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(tokens, tags));
+        () -> new DependencySample(tokens, tags, graph()));
     assertEquals(message, exception.getMessage());
   }
 
@@ -166,7 +161,6 @@ public class DependencySampleTest {
   void testCheckTokensAndTagsAcceptsAnyNonNullString(String value) {
     final String[] tokens = {value, "dog", value};
     final String[] tags = {value, value, "VBZ"};
-    DependencySample.checkTokensAndTags(tokens, tags);
     final DependencySample sample = new DependencySample(tokens, tags, graph());
     assertArrayEquals(tokens, sample.getTokens());
     assertArrayEquals(tags, sample.getTags());
@@ -189,17 +183,26 @@ public class DependencySampleTest {
     final String[] tags = new String[length];
     Arrays.fill(tokens, "w");
     Arrays.fill(tags, "T");
-    DependencySample.checkTokensAndTags(tokens, tags);
+    final int[] heads = new int[length];
+    final String[] relations = new String[length];
+    Arrays.fill(relations, "dep");
+    for (int i = 1; i < length; i++) {
+      heads[i] = i - 1;
+    }
+    heads[0] = DependencyArc.ROOT_HEAD;
+    relations[0] = "root";
+    final DependencyGraph graph = DependencyGraph.of(heads, relations);
+    assertEquals(length, new DependencySample(tokens, tags, graph).getTokens().length);
     tags[length - 1] = null;
     final IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-        () -> DependencySample.checkTokensAndTags(tokens, tags));
+        () -> new DependencySample(tokens, tags, graph));
     assertEquals("tag must not be null at index " + (length - 1), exception.getMessage());
   }
 
   /** The stream class carries the declared serial version UID, so the field is picked up. */
   @Test
   void testSerialVersionUid() {
-    assertEquals(3074843369898695370L,
+    assertEquals(3275082718569167442L,
         ObjectStreamClass.lookup(DependencySample.class).getSerialVersionUID());
   }
 

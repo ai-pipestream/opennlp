@@ -17,6 +17,7 @@
 
 package opennlp.tools.depparse;
 
+import java.io.InvalidObjectException;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -42,7 +43,7 @@ import opennlp.tools.util.StringUtil;
 public final class DependencyGraph implements Serializable {
 
   @Serial
-  private static final long serialVersionUID = 5144949884365294061L;
+  private static final long serialVersionUID = -5364291948961456841L;
 
   /** Traversal state of a token whose head chain has not been followed yet. */
   private static final byte UNVISITED = 0;
@@ -56,6 +57,7 @@ public final class DependencyGraph implements Serializable {
   private final int[] heads;
   private final String[] relations;
   private final int root;
+  private final int hash;
 
   /**
    * Wraps already validated arrays; instances are created through {@link #of}.
@@ -68,6 +70,7 @@ public final class DependencyGraph implements Serializable {
     this.heads = heads;
     this.relations = relations;
     this.root = root;
+    this.hash = 31 * Arrays.hashCode(heads) + Arrays.hashCode(relations);
   }
 
   /**
@@ -185,7 +188,8 @@ public final class DependencyGraph implements Serializable {
   }
 
   /**
-   * @return All arcs of the graph in token order, one per token. Never {@code null}.
+   * @return All arcs of the graph in token order, one per token, as a new unmodifiable
+   *     list allocated on every call. Never {@code null}.
    */
   public List<DependencyArc> arcs() {
     final List<DependencyArc> arcs = new ArrayList<>(heads.length);
@@ -208,6 +212,9 @@ public final class DependencyGraph implements Serializable {
     }
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public boolean equals(Object obj) {
     if (this == obj) {
@@ -216,14 +223,39 @@ public final class DependencyGraph implements Serializable {
     if (!(obj instanceof DependencyGraph other)) {
       return false;
     }
-    return Arrays.equals(heads, other.heads) && Arrays.equals(relations, other.relations);
+    return hash == other.hash && Arrays.equals(heads, other.heads)
+        && Arrays.equals(relations, other.relations);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int hashCode() {
-    return 31 * Arrays.hashCode(heads) + Arrays.hashCode(relations);
+    return hash;
   }
 
+  /**
+   * Replaces a deserialized instance by a validated one, so the arrays and the cached hash
+   * read from a stream pass the same checks as {@link #of(int[], String[])}.
+   *
+   * @return A validated graph with the same heads and relations.
+   * @throws InvalidObjectException Thrown if the stream does not hold a valid graph.
+   */
+  @Serial
+  private Object readResolve() throws InvalidObjectException {
+    try {
+      return of(heads, relations);
+    } catch (IllegalArgumentException e) {
+      final InvalidObjectException invalid = new InvalidObjectException(e.getMessage());
+      invalid.initCause(e);
+      throw invalid;
+    }
+  }
+
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     final StringBuilder sb = new StringBuilder();

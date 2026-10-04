@@ -22,14 +22,16 @@ import java.util.Arrays;
 import opennlp.tools.util.ArgumentChecks;
 
 /**
- * The mutable configuration of an arc-standard parse: a stack, a buffer of remaining
- * tokens, and the arcs assigned so far. The arc-standard transition system is described
- * in <a href="https://aclanthology.org/W04-0308/">Nivre (2004)</a>.
+ * The working state of one arc-standard parse: the stack of tokens being processed, the
+ * buffer of tokens not read yet, and the arcs assigned so far. Every transition the parser
+ * applies moves one token from the buffer to the stack or attaches one token to its head,
+ * until the buffer is empty and only the root is left on the stack. The transition system
+ * is described in <a href="https://aclanthology.org/W04-0308/">Nivre (2004)</a>.
  *
- * <p>The stack bottom holds the artificial root, exposed as {@link #ROOT}. Positions that
- * do not exist, such as the second stack element in the initial configuration, are exposed
- * as {@link #NONE}. A right arc from the artificial root is only applicable once the buffer
- * is empty and the root is the only other stack element, which guarantees every completed
+ * <p>The bottom of the stack holds an artificial root token, exposed as {@link #ROOT}.
+ * Positions that do not exist, such as the second stack element at the start of a parse,
+ * are exposed as {@link #NONE}. A right arc from the artificial root is only allowed once
+ * the buffer is empty and the root is the only other token on the stack, so every finished
  * parse has exactly one sentence root.</p>
  *
  * <p>Instances are confined to a single parse and must not be shared between threads.</p>

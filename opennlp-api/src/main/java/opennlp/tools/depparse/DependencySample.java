@@ -38,7 +38,7 @@ import opennlp.tools.util.ArgumentChecks;
 public final class DependencySample implements Sample {
 
   @Serial
-  private static final long serialVersionUID = 3074843369898695370L;
+  private static final long serialVersionUID = 3275082718569167442L;
 
   private final String[] tokens;
   private final String[] tags;
@@ -71,8 +71,7 @@ public final class DependencySample implements Sample {
   }
 
   /**
-   * Validates token and tag arrays for this sample and
-   * {@link DependencyParser#parse(String[], String[])}.
+   * Validates the token and tag arrays of this sample.
    *
    * @param tokens The token array. Must not be {@code null} or empty and must not
    *               contain {@code null} entries.
@@ -82,7 +81,7 @@ public final class DependencySample implements Sample {
    * @throws IllegalArgumentException Thrown if an array is {@code null}, {@code tokens}
    *         is empty, the lengths do not match, or an entry is {@code null}.
    */
-  public static void checkTokensAndTags(String[] tokens, String[] tags) {
+  private void checkTokensAndTags(String[] tokens, String[] tags) {
     ArgumentChecks.requireNonNullArg(tokens, "tokens");
     ArgumentChecks.requireNonNullArg(tags, "tags");
     if (tokens.length == 0) {
@@ -123,6 +122,9 @@ public final class DependencySample implements Sample {
     return graph;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public boolean equals(Object obj) {
     if (this == obj) {
@@ -135,11 +137,17 @@ public final class DependencySample implements Sample {
         && graph.equals(other.graph);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int hashCode() {
     return Objects.hash(Arrays.hashCode(tokens), Arrays.hashCode(tags), graph);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     final StringBuilder sb = new StringBuilder();

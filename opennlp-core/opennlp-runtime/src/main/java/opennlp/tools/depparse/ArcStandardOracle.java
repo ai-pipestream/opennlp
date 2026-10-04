@@ -23,13 +23,23 @@ import java.util.List;
 import opennlp.tools.util.ArgumentChecks;
 
 /**
- * The static oracle for the arc-standard system: derives the transition sequence that
- * reproduces a gold {@link DependencyGraph}.
+ * Turns a known correct dependency tree into the sequence of arc-standard parser actions
+ * that rebuilds it. Those actions are the answers the parser is trained on.
+ *
+ * <p>The parser keeps a stack of tokens being processed and a buffer of tokens not read
+ * yet. For each step the oracle picks one of three actions, using the annotated tree to
+ * decide the head and the relation label:</p>
+ * <ul>
+ * <li>{@code SHIFT}: move the next token from the buffer onto the stack.</li>
+ * <li>{@code LEFT_ARC(label)}: make the top token the head of the token below it, and
+ * remove that dependent from the stack.</li>
+ * <li>{@code RIGHT_ARC(label)}: make the second token the head of the top token, and
+ * remove that dependent from the stack.</li>
+ * </ul>
  *
  * <p>An arc is only created once all dependents of the token being attached have been
- * collected, which is the arc-standard correctness condition. The oracle is defined for
- * projective trees only; a non-projective gold graph has no arc-standard derivation and
- * is rejected.</p>
+ * collected. The oracle is defined for projective trees only; a non-projective tree has
+ * no arc-standard derivation and is rejected.</p>
  *
  * @since 3.0.0
  */

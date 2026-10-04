@@ -74,7 +74,7 @@ public class DependencyParserME implements DependencyParser {
    * @throws IllegalArgumentException Thrown if an outcome does not decode to a
    *         transition, which means the model is not a dependency parser model.
    */
-  private static Transition[] decodeOutcomes(MaxentModel model) {
+  private Transition[] decodeOutcomes(MaxentModel model) {
     final Transition[] decoded = new Transition[model.getNumOutcomes()];
     final Set<Transition> seen = new HashSet<>();
     boolean hasShift = false;
@@ -109,12 +109,44 @@ public class DependencyParserME implements DependencyParser {
    */
   @Override
   public DependencyGraph parse(String[] tokens, String[] tags) {
-    DependencySample.checkTokensAndTags(tokens, tags);
+    checkTokensAndTags(tokens, tags);
     final ArcStandardState state = new ArcStandardState(tokens.length);
     while (!state.isTerminal()) {
       state.apply(bestApplicable(state, tokens, tags));
     }
     return state.toGraph();
+  }
+
+  /**
+   * Validates the input of {@link #parse(String[], String[])}, with the same rules and
+   * messages as {@link DependencySample}.
+   *
+   * @param tokens The token array. Must not be {@code null} or empty and must not
+   *               contain {@code null} entries.
+   * @param tags The part-of-speech tags aligned with {@code tokens}. Must not be
+   *             {@code null}, must have the same length as {@code tokens}, and must not
+   *             contain {@code null} entries.
+   * @throws IllegalArgumentException Thrown if an array is {@code null}, {@code tokens}
+   *         is empty, the lengths do not match, or an entry is {@code null}.
+   */
+  private void checkTokensAndTags(String[] tokens, String[] tags) {
+    ArgumentChecks.requireNonNullArg(tokens, "tokens");
+    ArgumentChecks.requireNonNullArg(tags, "tags");
+    if (tokens.length == 0) {
+      throw new IllegalArgumentException("tokens must not be empty");
+    }
+    if (tokens.length != tags.length) {
+      throw new IllegalArgumentException("tokens and tags must have the same length: "
+          + tokens.length + " != " + tags.length);
+    }
+    for (int i = 0; i < tokens.length; i++) {
+      if (tokens[i] == null) {
+        throw new IllegalArgumentException("token must not be null at index " + i);
+      }
+      if (tags[i] == null) {
+        throw new IllegalArgumentException("tag must not be null at index " + i);
+      }
+    }
   }
 
   /**
