@@ -408,13 +408,26 @@ public abstract class AbstractDL implements AutoCloseable {
   }
 
   /**
-   * The classification, separator and unknown tokens a tokenizer adds or emits.
+   * {@return the padding token for a vocabulary} {@code <pad>} for a RoBERTa vocabulary,
+   * {@code [PAD]} otherwise. The vocabulary need not contain it.
+   *
+   * @param vocab The vocabulary map.
+   * @throws IllegalArgumentException Thrown if the vocabulary has the RoBERTa classification
+   *     and separator tokens but no unknown token.
+   */
+  protected static String padToken(final Map<String, Integer> vocab) {
+    return specialTokens(vocab).pad();
+  }
+
+  /**
+   * The classification, separator, unknown and padding tokens of a vocabulary.
    *
    * @param cls The classification token.
    * @param sep The separator token.
    * @param unk The unknown token.
+   * @param pad The padding token.
    */
-  private record SpecialTokens(String cls, String sep, String unk) {
+  private record SpecialTokens(String cls, String sep, String unk, String pad) {
   }
 
   /**
@@ -430,10 +443,10 @@ public abstract class AbstractDL implements AutoCloseable {
     if (vocab.containsKey(WordpieceTokenizer.ROBERTA_CLS_TOKEN)
         && vocab.containsKey(WordpieceTokenizer.ROBERTA_SEP_TOKEN)) {
       return new SpecialTokens(WordpieceTokenizer.ROBERTA_CLS_TOKEN,
-          WordpieceTokenizer.ROBERTA_SEP_TOKEN, resolveUnknownToken(vocab));
+          WordpieceTokenizer.ROBERTA_SEP_TOKEN, resolveUnknownToken(vocab), "<pad>");
     }
     return new SpecialTokens(WordpieceTokenizer.BERT_CLS_TOKEN,
-        WordpieceTokenizer.BERT_SEP_TOKEN, WordpieceTokenizer.BERT_UNK_TOKEN);
+        WordpieceTokenizer.BERT_SEP_TOKEN, WordpieceTokenizer.BERT_UNK_TOKEN, "[PAD]");
   }
 
   /**

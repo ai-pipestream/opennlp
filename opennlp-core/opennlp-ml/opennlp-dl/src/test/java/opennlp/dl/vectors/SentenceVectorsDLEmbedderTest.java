@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -31,7 +32,10 @@ import java.util.Objects;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
+import opennlp.dl.InferenceOptions;
 import opennlp.dl.Tokens;
 import opennlp.tools.embeddings.TextEmbedder;
 import opennlp.tools.embeddings.TextEmbedderProvider;
@@ -42,6 +46,7 @@ import opennlp.tools.util.ext.Providers;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.LOWER_CASE_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.MAX_LENGTH_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.NORMALIZE_OPTION;
+import static opennlp.dl.vectors.OnnxTextEmbedderProvider.PADDING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.POOLING_OPTION;
 import static opennlp.dl.vectors.OnnxTextEmbedderProvider.VOCABULARY_OPTION;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -119,6 +124,20 @@ class SentenceVectorsDLEmbedderTest {
     return new SentenceVectorsDL(model(dir), vocab(dir), true, Pooling.MEAN, false, maxLength);
   }
 
+  private static SentenceVectorsDL meanVectors(final Path dir, final int maxLength,
+      final PaddingStrategy padding) throws Exception {
+    return new SentenceVectorsDL(model(dir), vocab(dir), true, Pooling.MEAN, false, maxLength,
+        padding, new InferenceOptions());
+  }
+
+  // [PAD] at id 6 instead of 0; the other ids are those of vocab().
+  private static File vocabPad6(final Path dir) throws IOException {
+    final Path file = dir.resolve("vocab-pad6.txt");
+    Files.write(file, List.of("unused0", "unused1", "[UNK]", "[SEP]", "hello", "world",
+        "[PAD]", "[CLS]"));
+    return file.toFile();
+  }
+
   @Test
   void testSelectedProviderPreservesInference(@TempDir final Path dir) throws Exception {
     final Path graph = model(dir).toPath();
@@ -139,6 +158,13 @@ class SentenceVectorsDLEmbedderTest {
     try (TextEmbedder cls = provider.create(clsSpec)) {
       assertArrayEquals(CLS_VECTOR, cls.embed("hello world"), DELTA);
     }
+    for (final String padding : List.of("exact_length", "longest", "max_length")) {
+      try (TextEmbedder padded = provider.create(ProviderSpec.of(graph,
+          Map.of(VOCABULARY_OPTION, "vocab.txt", PADDING_OPTION, padding)))) {
+        assertArrayEquals(UNIT_VECTOR, padded.embedAll(List.of("hello world", "hello"))[1],
+            DELTA, padding);
+      }
+    }
     assertThrows(IllegalArgumentException.class, () -> provider.create(null));
     assertThrows(IllegalArgumentException.class,
         () -> provider.create(ProviderSpec.of(dir, options)), "a directory");
@@ -150,7 +176,8 @@ class SentenceVectorsDLEmbedderTest {
     for (final Map.Entry<String, String> invalid : List.of(Map.entry(LOWER_CASE_OPTION, "invalid"),
         Map.entry(NORMALIZE_OPTION, "yes"), Map.entry(POOLING_OPTION, "max"),
         Map.entry(POOLING_OPTION, "MEAN"), Map.entry(MAX_LENGTH_OPTION, "1"),
-        Map.entry(MAX_LENGTH_OPTION, "many"), Map.entry("typo", "true"))) {
+        Map.entry(MAX_LENGTH_OPTION, "many"), Map.entry(PADDING_OPTION, "none"),
+        Map.entry(PADDING_OPTION, "LONGEST"), Map.entry("typo", "true"))) {
       assertThrows(IllegalArgumentException.class, () -> provider.create(ProviderSpec.of(graph,
           Map.of(VOCABULARY_OPTION, "vocab.txt", invalid.getKey(), invalid.getValue()))),
           invalid.toString());
@@ -287,7 +314,7 @@ class SentenceVectorsDLEmbedderTest {
     try (SentenceVectorsDL vectors = meanVectors(dir, SentenceVectorsDL.DEFAULT_MAX_LENGTH)) {
       final List<String> texts = Collections.nCopies(5000, "hello world");
       final List<List<Integer>> batches =
-          SentenceVectorsDL.batches(Collections.nCopies(5000, tokens(4)).toArray(new Tokens[0]));
+          vectors.batches(Collections.nCopies(5000, tokens(4)).toArray(new Tokens[0]));
       assertEquals(2, batches.size());
       assertEquals(4096, batches.get(0).size());
       assertEquals(904, batches.get(1).size());
@@ -304,19 +331,22 @@ class SentenceVectorsDLEmbedderTest {
    * each length first appears in the call.
    */
   @Test
-  void testEmbedAllGroupsByLengthInCallOrder() {
-    assertEquals(List.of(List.of(0, 3), List.of(1, 2, 4)), SentenceVectorsDL.batches(
-        new Tokens[] {tokens(4), tokens(3), tokens(3), tokens(4), tokens(3)}));
+  void testEmbedAllGroupsByLengthInCallOrder(@TempDir final Path dir) throws Exception {
+    try (SentenceVectorsDL vectors = meanVectors(dir, SentenceVectorsDL.DEFAULT_MAX_LENGTH)) {
+      assertEquals(List.of(List.of(0, 3), List.of(1, 2, 4)), vectors.batches(
+          new Tokens[] {tokens(4), tokens(3), tokens(3), tokens(4), tokens(3)}));
+    }
   }
 
   /**
    * Asserts that an input wider than the cap on its own still runs, as a batch of one.
    */
   @Test
-  void testEmbedAllRunsAnInputWiderThanTheCapAlone() {
+  void testEmbedAllRunsAnInputWiderThanTheCapAlone(@TempDir final Path dir) throws Exception {
     final Tokens wide = tokens(SentenceVectorsDL.MAX_BATCH_TOKEN_POSITIONS + 1);
-    assertEquals(List.of(List.of(0), List.of(1)),
-        SentenceVectorsDL.batches(new Tokens[] {wide, wide}));
+    try (SentenceVectorsDL vectors = meanVectors(dir, SentenceVectorsDL.DEFAULT_MAX_LENGTH)) {
+      assertEquals(List.of(List.of(0), List.of(1)), vectors.batches(new Tokens[] {wide, wide}));
+    }
   }
 
   /**
@@ -326,6 +356,135 @@ class SentenceVectorsDLEmbedderTest {
    */
   private static Tokens tokens(final int length) {
     return new Tokens(new String[length], new long[length], new long[length], new long[length]);
+  }
+
+  /**
+   * {@return the number of rows of each batch}
+   *
+   * @param batches The batches.
+   */
+  private static List<Integer> sizes(final List<List<Integer>> batches) {
+    return batches.stream().map(List::size).toList();
+  }
+
+  /**
+   * Asserts that every padding strategy returns, for each input of a mixed-length call, the
+   * vector that input gets on its own: padded positions are masked out of the pooling.
+   */
+  @ParameterizedTest
+  @EnumSource(PaddingStrategy.class)
+  void testPaddingKeepsSingleInputVectors(final PaddingStrategy padding, @TempDir final Path dir)
+      throws Exception {
+    try (SentenceVectorsDL vectors = meanVectors(dir, 6, padding)) {
+      final List<String> texts = List.of("hello world", "hello", "world", "hello world",
+          "hello", "");
+      final float[][] batch = vectors.embedAll(texts);
+      for (int i = 0; i < texts.size(); i++) {
+        assertArrayEquals(vectors.embed(texts.get(i)), batch[i], DELTA, texts.get(i));
+      }
+      assertArrayEquals(HELLO_WORLD_MEAN, batch[0], DELTA);
+      assertArrayEquals(HELLO_MEAN, batch[1], DELTA);
+      // "world" = [CLS]=7 world=5 [SEP]=3, mean 5.
+      assertArrayEquals(scale(5), batch[2], DELTA);
+      assertArrayEquals(HELLO_WORLD_MEAN, batch[3], DELTA);
+      assertArrayEquals(HELLO_MEAN, batch[4], DELTA);
+      // "" = [CLS]=7 [SEP]=3, mean 5.
+      assertArrayEquals(scale(5), batch[5], DELTA);
+    }
+  }
+
+  /**
+   * Asserts the batches of each strategy for one mixed-length call: one per length without
+   * padding, otherwise one holding every row, ordered by length under LONGEST.
+   */
+  @Test
+  void testPaddingBatches(@TempDir final Path dir) throws Exception {
+    final Tokens[] rows = {tokens(4), tokens(3), tokens(3), tokens(4), tokens(3)};
+    try (SentenceVectorsDL exact = meanVectors(dir, 6, PaddingStrategy.EXACT_LENGTH);
+         SentenceVectorsDL longest = meanVectors(dir, 6, PaddingStrategy.LONGEST);
+         SentenceVectorsDL fixed = meanVectors(dir, 6, PaddingStrategy.MAX_LENGTH)) {
+      assertEquals(List.of(List.of(0, 3), List.of(1, 2, 4)), exact.batches(rows));
+      assertEquals(List.of(List.of(1, 2, 4, 0, 3)), longest.batches(rows));
+      assertEquals(List.of(List.of(0, 1, 2, 3, 4)), fixed.batches(rows));
+    }
+  }
+
+  /**
+   * Asserts that padded batches also respect the token position cap. LONGEST orders the inputs
+   * by length, so the one short input shares the first batch with the long ones.
+   */
+  @Test
+  void testPaddedBatchesRespectTheCap(@TempDir final Path dir) throws Exception {
+    final List<String> texts = new ArrayList<>(Collections.nCopies(5000,
+        "hello world"));
+    texts.add("hello");
+    final List<Tokens> encoded = new ArrayList<>(Collections.nCopies(5000, tokens(4)));
+    encoded.add(tokens(3));
+    final Tokens[] rows = encoded.toArray(new Tokens[0]);
+    try (SentenceVectorsDL longest = meanVectors(dir, 8, PaddingStrategy.LONGEST);
+         SentenceVectorsDL fixed = meanVectors(dir, 8, PaddingStrategy.MAX_LENGTH)) {
+      final List<List<Integer>> longestBatches = longest.batches(rows);
+      assertEquals(List.of(4096, 905), sizes(longestBatches));
+      assertEquals(5000, longestBatches.get(0).get(0));
+      assertEquals(List.of(2048, 2048, 905), sizes(fixed.batches(rows)));
+      final float[][] batch = longest.embedAll(texts);
+      assertArrayEquals(HELLO_WORLD_MEAN, batch[4999], DELTA);
+      assertArrayEquals(HELLO_MEAN, batch[5000], DELTA);
+    }
+  }
+
+  /**
+   * Asserts that the padding id comes from the vocabulary. {@code tiny-pooled.onnx} sums the ids
+   * of every position without reading the mask, so a padded row shows the id that was placed.
+   */
+  @Test
+  void testPaddingIdIsReadFromTheVocabulary(@TempDir final Path dir) throws Exception {
+    try (SentenceVectorsDL vectors = new SentenceVectorsDL(model(dir, "tiny-pooled.onnx"),
+        vocabPad6(dir), true, Pooling.MEAN, false, 8, PaddingStrategy.LONGEST,
+        new InferenceOptions())) {
+      final float[][] batch = vectors.embedAll(List.of("hello world", "hello"));
+      assertArrayEquals(HELLO_WORLD_SUM, batch[0], DELTA);
+      assertArrayEquals(scale(14 + 6), batch[1], DELTA);
+    }
+  }
+
+  /**
+   * Asserts that padded positions are {@code 0} in the attention mask. {@code tiny-masked.onnx}
+   * sums the ids times the mask, so a padded row gives the sum of its own ids only; a mask of
+   * {@code 1} at the padded position would add the padding id {@code 6}.
+   */
+  @ParameterizedTest
+  @EnumSource(value = PaddingStrategy.class, names = {"LONGEST", "MAX_LENGTH"})
+  void testPaddedPositionsAreMaskedOut(final PaddingStrategy padding, @TempDir final Path dir)
+      throws Exception {
+    try (SentenceVectorsDL vectors = new SentenceVectorsDL(model(dir, "tiny-masked.onnx"),
+        vocabPad6(dir), true, Pooling.MEAN, false, 8, padding, new InferenceOptions())) {
+      final float[][] batch = vectors.embedAll(List.of("hello world", "hello"));
+      assertArrayEquals(HELLO_WORLD_SUM, batch[0], DELTA);
+      assertArrayEquals(scale(14), batch[1], DELTA);
+    }
+  }
+
+  /**
+   * Asserts that a padding strategy needs a padding token, and that no padding does not.
+   */
+  @Test
+  void testPaddingRequiresAPaddingToken(@TempDir final Path dir) throws Exception {
+    final Path vocabulary = dir.resolve("vocab-nopad.txt");
+    Files.write(vocabulary, List.of("unused0", "unused1", "[UNK]", "[SEP]", "hello", "world",
+        "unused2", "[CLS]"));
+    for (final PaddingStrategy padding : List.of(PaddingStrategy.LONGEST,
+        PaddingStrategy.MAX_LENGTH)) {
+      assertThrows(IllegalArgumentException.class, () -> new SentenceVectorsDL(model(dir),
+          vocabulary.toFile(), true, Pooling.MEAN, false, 8, padding, new InferenceOptions()),
+          padding.name());
+    }
+    try (SentenceVectorsDL exact = new SentenceVectorsDL(model(dir), vocabulary.toFile(), true,
+        Pooling.MEAN, false, 8, PaddingStrategy.EXACT_LENGTH, new InferenceOptions())) {
+      assertArrayEquals(HELLO_MEAN, exact.embed("hello"), DELTA);
+    }
+    assertEquals("padding must not be null", assertThrows(IllegalArgumentException.class,
+        () -> meanVectors(dir, 8, null)).getMessage());
   }
 
   /**

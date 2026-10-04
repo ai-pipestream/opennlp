@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,9 +76,10 @@ import opennlp.tools.util.ParamChecks;
  * This thread-safety guarantee applies until {@link #close()} is called; callers must not race
  * {@code close()} with inference methods.</p>
  *
- * <p>{@link #embedAll(List)} runs one batched session per distinct tokenized length, so a batch
- * of same-length inputs costs one inference instead of one per input. A group larger than
- * {@value #MAX_BATCH_TOKEN_POSITIONS} token positions is split into several inferences.</p>
+ * <p>{@link #embedAll(List)} batches its texts as the configured {@link PaddingStrategy} says. By
+ * default it pads nothing and runs one inference per distinct tokenized length;
+ * {@link PaddingStrategy#LONGEST} runs texts of mixed lengths together. No inference exceeds
+ * {@value #MAX_BATCH_TOKEN_POSITIONS} token positions.</p>
  */
 @ThreadSafe
 public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
@@ -92,6 +95,9 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    */
   static final int MAX_BATCH_TOKEN_POSITIONS = 16384;
 
+  /** The {@link PaddingStrategy} used if none is given. */
+  public static final PaddingStrategy DEFAULT_PADDING = PaddingStrategy.EXACT_LENGTH;
+
   private static final String SENTENCE_EMBEDDING = "sentence_embedding";
   private static final int POOLED_RANK = 2;
   private static final int TOKEN_RANK = 3;
@@ -103,6 +109,8 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   private final String outputName;
   private final boolean pooledOutput;
   private final int dimension;
+  private final PaddingStrategy padding;
+  private final long padTokenId;
 
   /**
    * Instantiates a {@link SentenceVectorsDL sentence vector generator} for an
@@ -209,16 +217,61 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
       final InferenceOptions inferenceOptions)
       throws OrtException, IOException {
 
+    this(model, vocabulary, lowerCase, pooling, normalize, maxLength, DEFAULT_PADDING,
+        inferenceOptions);
+
+  }
+
+  /**
+   * Instantiates a {@link SentenceVectorsDL sentence vector generator} using ONNX models, with
+   * the {@link PaddingStrategy} that {@link #embedAll(List)} batches by and the
+   * {@link InferenceOptions} the session is built from.
+   *
+   * @param model The file name of a sentence vectors ONNX model.
+   * @param vocabulary The file name of the vocabulary file for the model.
+   * @param lowerCase {@code true} for uncased models (lower casing and accent
+   *     stripping during tokenization), {@code false} for cased models. A lower case setting in
+   *     {@code inferenceOptions} takes precedence.
+   * @param pooling How token vectors are pooled. Not used for a model with a
+   *     {@code sentence_embedding} output. Must not be {@code null}.
+   * @param normalize {@code true} to scale every vector to unit length.
+   * @param maxLength The maximum number of tokens per input, {@code [CLS]} and {@code [SEP]}
+   *     included; longer input is truncated. Must be at least {@code 2}.
+   * @param padding How {@link #embedAll(List)} batches texts of different lengths. Must not be
+   *     {@code null}. Every strategy but {@link PaddingStrategy#EXACT_LENGTH} needs a
+   *     {@code [PAD]} token in the vocabulary, or {@code <pad>} for a RoBERTa vocabulary.
+   * @param inferenceOptions The {@link InferenceOptions}, of which the GPU settings and the lower
+   *     case setting are used. Must not be {@code null}.
+   *
+   * @throws IllegalArgumentException Thrown if {@code pooling}, {@code padding} or
+   *     {@code inferenceOptions} is {@code null}, if {@code inferenceOptions} holds invalid split
+   *     options, if {@code maxLength} is less than {@code 2}, if the model has no output of shape
+   *     {@code [batch, hidden]} or {@code [batch, tokens, hidden]}, or if {@code padding} pads
+   *     and the vocabulary has no padding token.
+   * @throws OrtException Thrown if the {@code model} cannot be loaded, or if a GPU was requested
+   *     and ONNX Runtime cannot provide it. ONNX Runtime does not fall back to the CPU.
+   * @throws IOException Thrown if errors occurred loading the {@code model} or {@code vocabulary}.
+   *
+   * @since 3.0.0
+   */
+  public SentenceVectorsDL(final File model, final File vocabulary, final boolean lowerCase,
+      final Pooling pooling, final boolean normalize, final int maxLength,
+      final PaddingStrategy padding, final InferenceOptions inferenceOptions)
+      throws OrtException, IOException {
+
     super(model, vocabulary, sessionOptions(inferenceOptions),
         resolveLowerCase(inferenceOptions, lowerCase));
     try {
       ParamChecks.requireNonNullArg(pooling, "pooling");
+      ParamChecks.requireNonNullArg(padding, "padding");
       if (maxLength < MIN_LENGTH) {
         throw new IllegalArgumentException("maxLength must be at least " + MIN_LENGTH);
       }
       this.pooling = pooling;
       this.normalize = normalize;
       this.maxLength = maxLength;
+      this.padding = padding;
+      this.padTokenId = padding == PaddingStrategy.EXACT_LENGTH ? 0 : padTokenId(vocab);
       final Map<String, NodeInfo> outputs = session.getOutputInfo();
       this.outputName = selectOutput(outputs);
       final long[] shape = ((TensorInfo) outputs.get(outputName).getInfo()).getShape();
@@ -272,10 +325,12 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   /**
    * {@inheritDoc}
    *
-   * <p>The inputs are tokenized up front, grouped by tokenized length, and each group runs
-   * through the session with shape {@code [rows, length]}, split so that no inference exceeds
-   * {@value #MAX_BATCH_TOKEN_POSITIONS} token positions. A batch never pads, so every row is
-   * computed from the tensors its single-input call would have used.</p>
+   * <p>The inputs are tokenized up front and batched as the configured {@link PaddingStrategy}
+   * says, so that no inference exceeds {@value #MAX_BATCH_TOKEN_POSITIONS} token positions. A
+   * padded position is {@code 0} in the attention mask, so vector {@code i} matches what
+   * {@link #embed(CharSequence)} returns for input {@code i} up to floating-point rounding,
+   * provided the model honors the attention mask. A {@code sentence_embedding} output that
+   * ignores the mask changes with padding.</p>
    */
   @Override
   public float[][] embedAll(final List<? extends CharSequence> texts) {
@@ -310,27 +365,67 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   }
 
   /**
-   * Splits the indices of a call into the batches that run as single inferences. A batch holds
-   * indices of one tokenized length, in call order, and no more rows than fit in
-   * {@value #MAX_BATCH_TOKEN_POSITIONS} token positions, but always at least one.
+   * Splits the indices of a call into the batches that run as single inferences. No batch
+   * exceeds {@value #MAX_BATCH_TOKEN_POSITIONS} token positions, but each holds at least one row.
+   *
+   * <p>Under {@link PaddingStrategy#EXACT_LENGTH} a batch holds indices of one tokenized length,
+   * in call order. Under {@link PaddingStrategy#MAX_LENGTH} every row is the maximum length wide,
+   * so batches are consecutive indices in call order. Under {@link PaddingStrategy#LONGEST} the
+   * indices are ordered by tokenized length and cut where the next row would exceed the cap.</p>
    *
    * @param encoded The encodings of the call, in call order.
    * @return The batches, each a list of indices into {@code encoded}.
    */
-  static List<List<Integer>> batches(final Tokens[] encoded) {
-    final Map<Integer, List<Integer>> byLength = new LinkedHashMap<>();
-    for (int i = 0; i < encoded.length; i++) {
-      byLength.computeIfAbsent(encoded[i].ids().length, length -> new ArrayList<>()).add(i);
-    }
+  List<List<Integer>> batches(final Tokens[] encoded) {
     final List<List<Integer>> batches = new ArrayList<>();
-    for (final Map.Entry<Integer, List<Integer>> group : byLength.entrySet()) {
-      final int rows = Math.max(1, MAX_BATCH_TOKEN_POSITIONS / group.getKey());
-      final List<Integer> indices = group.getValue();
-      for (int from = 0; from < indices.size(); from += rows) {
-        batches.add(indices.subList(from, Math.min(from + rows, indices.size())));
+    if (padding == PaddingStrategy.EXACT_LENGTH) {
+      final Map<Integer, List<Integer>> byLength = new LinkedHashMap<>();
+      for (int i = 0; i < encoded.length; i++) {
+        byLength.computeIfAbsent(encoded[i].ids().length, length -> new ArrayList<>()).add(i);
+      }
+      for (final Map.Entry<Integer, List<Integer>> group : byLength.entrySet()) {
+        addCapped(batches, group.getValue(), group.getKey());
+      }
+      return batches;
+    }
+    final List<Integer> order = new ArrayList<>(encoded.length);
+    for (int i = 0; i < encoded.length; i++) {
+      order.add(i);
+    }
+    if (padding == PaddingStrategy.MAX_LENGTH) {
+      addCapped(batches, order, maxLength);
+      return batches;
+    }
+    order.sort(Comparator.comparingInt(i -> encoded[i].ids().length));
+    int from = 0;
+    for (int i = 0; i < order.size(); i++) {
+      // Sorted ascending, so the row being added is the longest of its batch.
+      final long width = encoded[order.get(i)].ids().length;
+      if (i > from && (i - from + 1) * width > MAX_BATCH_TOKEN_POSITIONS) {
+        batches.add(order.subList(from, i));
+        from = i;
       }
     }
+    if (from < order.size()) {
+      batches.add(order.subList(from, order.size()));
+    }
     return batches;
+  }
+
+  /**
+   * Adds indices that all run at one row width as consecutive batches of at most
+   * {@value #MAX_BATCH_TOKEN_POSITIONS} token positions, and at least one row.
+   *
+   * @param batches The batches to add to.
+   * @param indices The indices to split, in the order they run.
+   * @param width The row width they run at.
+   */
+  private static void addCapped(final List<List<Integer>> batches, final List<Integer> indices,
+      final int width) {
+    final int rows = Math.max(1, MAX_BATCH_TOKEN_POSITIONS / width);
+    for (int from = 0; from < indices.size(); from += rows) {
+      batches.add(indices.subList(from, Math.min(from + rows, indices.size())));
+    }
   }
 
   /**
@@ -383,23 +478,27 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   }
 
   /**
-   * Runs one inference over encodings of the same length and returns one sentence vector per
-   * encoding, in order.
+   * Runs one inference over a batch of encodings and returns one sentence vector per encoding, in
+   * order. Rows shorter than the batch width are padded: {@code input_ids} with the padding
+   * token id, {@code attention_mask} and {@code token_type_ids} with {@code 0}.
    *
-   * @param batch The encodings, all of the same length.
+   * @param batch The encodings, of any lengths.
    * @return The sentence vectors.
    * @throws OrtException Thrown if an error occurs during inference.
    */
   private float[][] run(final Tokens[] batch) throws OrtException {
 
-    final int length = batch[0].ids().length;
+    final int length = width(batch);
     final long[] ids = new long[batch.length * length];
     final long[] mask = new long[batch.length * length];
     final long[] types = new long[batch.length * length];
     for (int b = 0; b < batch.length; b++) {
-      System.arraycopy(batch[b].ids(), 0, ids, b * length, length);
-      System.arraycopy(batch[b].mask(), 0, mask, b * length, length);
-      System.arraycopy(batch[b].types(), 0, types, b * length, length);
+      final int rowLength = batch[b].ids().length;
+      System.arraycopy(batch[b].ids(), 0, ids, b * length, rowLength);
+      System.arraycopy(batch[b].mask(), 0, mask, b * length, rowLength);
+      System.arraycopy(batch[b].types(), 0, types, b * length, rowLength);
+      // mask and types stay 0 past the row; only the ids need the padding token id.
+      Arrays.fill(ids, b * length + rowLength, (b + 1) * length, padTokenId);
     }
 
     final Map<String, OnnxTensor> inputs = new HashMap<>();
@@ -434,10 +533,29 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
   }
 
   /**
-   * Pools the token vectors of one input into its sentence vector.
+   * {@return the row width of one inference} It is the maximum length under
+   * {@link PaddingStrategy#MAX_LENGTH}, otherwise the longest row of the batch.
    *
-   * @param tokenVectors The vectors of the input's tokens.
-   * @param mask The attention mask of the input.
+   * @param batch The encodings of one inference, at least one.
+   */
+  private int width(final Tokens[] batch) {
+    if (padding == PaddingStrategy.MAX_LENGTH) {
+      return maxLength;
+    }
+    int longest = 0;
+    for (final Tokens row : batch) {
+      longest = Math.max(longest, row.ids().length);
+    }
+    return longest;
+  }
+
+  /**
+   * Pools the token vectors of one input into its sentence vector. Only the first
+   * {@code mask.length} positions are read, so padding after the row is ignored.
+   *
+   * @param tokenVectors The vectors of the input's tokens, at least as many as {@code mask} is
+   *     long.
+   * @param mask The attention mask of the input, without padding.
    * @return A new array holding the sentence vector.
    */
   private float[] pool(final float[][] tokenVectors, final long[] mask) {
@@ -446,7 +564,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
     }
     final float[] sum = new float[tokenVectors[0].length];
     int count = 0;
-    for (int t = 0; t < tokenVectors.length; t++) {
+    for (int t = 0; t < mask.length; t++) {
       if (mask[t] != 0) {
         for (int d = 0; d < sum.length; d++) {
           sum[d] += tokenVectors[t][d];
@@ -476,6 +594,23 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
         vector[d] = (float) (vector[d] / norm);
       }
     }
+  }
+
+  /**
+   * {@return the vocabulary id of the padding token} A RoBERTa vocabulary uses {@code <pad>};
+   * any other uses {@code [PAD]}.
+   *
+   * @param vocab The vocabulary.
+   * @throws IllegalArgumentException Thrown if the vocabulary has no padding token.
+   */
+  private static long padTokenId(final Map<String, Integer> vocab) {
+    final String padToken = padToken(vocab);
+    final Integer id = vocab.get(padToken);
+    if (id == null) {
+      throw new IllegalArgumentException("Padding needs a " + padToken
+          + " token, but the vocabulary has none.");
+    }
+    return id;
   }
 
   /**
