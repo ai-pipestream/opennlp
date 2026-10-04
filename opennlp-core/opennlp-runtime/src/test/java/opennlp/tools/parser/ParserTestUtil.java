@@ -31,6 +31,7 @@ import opennlp.tools.chunker.Chunker;
 import opennlp.tools.formats.ResourceAsStreamFactory;
 import opennlp.tools.parser.lang.en.HeadRules;
 import opennlp.tools.postag.POSTagger;
+import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.InputStreamFactory;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.PlainTextByLineStream;
@@ -38,6 +39,30 @@ import opennlp.tools.util.Sequence;
 import opennlp.tools.util.Span;
 
 public class ParserTestUtil {
+
+  private static final String TEST_SENTENCE = "Eric is testing.";
+
+  /**
+   * @return A fresh, unparsed {@link Parse} over the tokens of a short English test sentence.
+   */
+  public static Parse createTestSentence() {
+    return Parse.createFromTokens(WhitespaceTokenizer.INSTANCE.tokenize(TEST_SENTENCE));
+  }
+
+  /**
+   * Asserts that {@code actual} holds the same bracketings with the same probabilities
+   * as {@code expected}, in the same order.
+   *
+   * @param expected The reference parses.
+   * @param actual The parses under test.
+   */
+  public static void assertSameParses(Parse[] expected, Parse[] actual) {
+    Assertions.assertEquals(expected.length, actual.length);
+    for (int i = 0; i < expected.length; i++) {
+      Assertions.assertEquals(expected[i].toStringPennTreebank(), actual[i].toStringPennTreebank());
+      Assertions.assertEquals(expected[i].getProb(), actual[i].getProb());
+    }
+  }
 
   public static HeadRules createTestHeadRules() throws IOException {
     try (InputStream headRulesIn = ParserTestUtil.class.getResourceAsStream(

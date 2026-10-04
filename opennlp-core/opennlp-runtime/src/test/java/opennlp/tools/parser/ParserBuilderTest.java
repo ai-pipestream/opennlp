@@ -33,12 +33,9 @@ import opennlp.tools.chunker.ChunkerME;
 import opennlp.tools.parser.ParserTestUtil.CountingChunker;
 import opennlp.tools.parser.ParserTestUtil.CountingTagger;
 import opennlp.tools.postag.POSTaggerME;
-import opennlp.tools.tokenize.WhitespaceTokenizer;
 import opennlp.tools.util.TrainingParameters;
 
 public class ParserBuilderTest {
-
-  private static final String SENTENCE = "Eric is testing.";
 
   /* Trained dynamically before test */
   private static ParserModel chunkingModel;
@@ -61,23 +58,15 @@ public class ParserBuilderTest {
         Arguments.of(treeInsertModel, opennlp.tools.parser.treeinsert.Parser.class));
   }
 
-  private static Parse sentence() {
-    return Parse.createFromTokens(WhitespaceTokenizer.INSTANCE.tokenize(SENTENCE));
-  }
-
   @ParameterizedTest(name = "{1}")
   @MethodSource("provideModels")
   void testBuildWithDefaultsMatchesFactory(ParserModel model, Class<?> expectedType) {
     Parser parser = ParserFactory.builder(model).build();
     Assertions.assertInstanceOf(expectedType, parser);
 
-    Parse[] parses = parser.parse(sentence(), 2);
-    Parse[] reference = ParserFactory.create(model).parse(sentence(), 2);
-    Assertions.assertEquals(reference.length, parses.length);
-    for (int i = 0; i < reference.length; i++) {
-      Assertions.assertEquals(reference[i].toStringPennTreebank(), parses[i].toStringPennTreebank());
-      Assertions.assertEquals(reference[i].getProb(), parses[i].getProb());
-    }
+    Parse[] parses = parser.parse(ParserTestUtil.createTestSentence(), 2);
+    Parse[] reference = ParserFactory.create(model).parse(ParserTestUtil.createTestSentence(), 2);
+    ParserTestUtil.assertSameParses(reference, parses);
   }
 
   @ParameterizedTest(name = "{1}")
@@ -91,11 +80,11 @@ public class ParserBuilderTest {
         .chunker(chunker)
         .build();
     Assertions.assertInstanceOf(expectedType, parser);
-    Parse parsed = parser.parse(sentence());
+    Parse parsed = parser.parse(ParserTestUtil.createTestSentence());
 
     Assertions.assertTrue(tagger.calls() > 0, "the supplied tagger was not used");
     Assertions.assertTrue(chunker.calls() > 0, "the supplied chunker was not used");
-    Parse reference = ParserFactory.create(model).parse(sentence());
+    Parse reference = ParserFactory.create(model).parse(ParserTestUtil.createTestSentence());
     Assertions.assertEquals(reference.toStringPennTreebank(), parsed.toStringPennTreebank());
   }
 
@@ -105,9 +94,9 @@ public class ParserBuilderTest {
     Parser parser = ParserFactory.builder(model).beamSize(1).advancePercentage(1.0).build();
     Assertions.assertInstanceOf(expectedType, parser);
 
-    Parse[] parses = parser.parse(sentence(), 3);
-    Parse[] reference = ParserFactory.create(model, 1, 1.0).parse(sentence(), 3);
-    Parse[] wide = ParserFactory.create(model).parse(sentence(), 3);
+    Parse[] parses = parser.parse(ParserTestUtil.createTestSentence(), 3);
+    Parse[] reference = ParserFactory.create(model, 1, 1.0).parse(ParserTestUtil.createTestSentence(), 3);
+    Parse[] wide = ParserFactory.create(model).parse(ParserTestUtil.createTestSentence(), 3);
     Assertions.assertEquals(reference.length, parses.length);
     Assertions.assertTrue(parses.length < wide.length, "a beam of one must prune parses");
   }

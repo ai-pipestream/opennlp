@@ -62,12 +62,6 @@ public abstract class AbstractParserModelTest {
   protected abstract Parser createParser(ParserModel model, POSTagger tagger, Chunker chunker,
                                          int beamSize, double advancePercentage);
 
-  private static final String SENTENCE = "Eric is testing.";
-
-  private static Parse sentence() {
-    return Parse.createFromTokens(WhitespaceTokenizer.INSTANCE.tokenize(SENTENCE));
-  }
-
   /**
    * Verifies that a caller-supplied tagger and chunker drive the parse and that the
    * model's own tagger and chunker are never constructed.
@@ -80,11 +74,11 @@ public abstract class AbstractParserModelTest {
 
     Parser parser = createParser(guarded, tagger, chunker,
         AbstractBottomUpParser.defaultBeamSize, AbstractBottomUpParser.defaultAdvancePercentage);
-    Parse parsed = parser.parse(sentence());
+    Parse parsed = parser.parse(ParserTestUtil.createTestSentence());
 
     Assertions.assertTrue(tagger.calls() > 0, "the supplied tagger was not used");
     Assertions.assertTrue(chunker.calls() > 0, "the supplied chunker was not used");
-    Parse reference = ParserFactory.create(getModel()).parse(sentence());
+    Parse reference = ParserFactory.create(getModel()).parse(ParserTestUtil.createTestSentence());
     Assertions.assertEquals(reference.toStringPennTreebank(), parsed.toStringPennTreebank());
   }
 
@@ -97,14 +91,9 @@ public abstract class AbstractParserModelTest {
     Parser parser = createParser(getModel(), new POSTaggerME(getModel().getParserTaggerModel()),
         new ChunkerME(getModel().getParserChunkerModel()),
         AbstractBottomUpParser.defaultBeamSize, AbstractBottomUpParser.defaultAdvancePercentage);
-    Parse[] parses = parser.parse(sentence(), 2);
-    Parse[] reference = ParserFactory.create(getModel()).parse(sentence(), 2);
-
-    Assertions.assertEquals(reference.length, parses.length);
-    for (int i = 0; i < reference.length; i++) {
-      Assertions.assertEquals(reference[i].toStringPennTreebank(), parses[i].toStringPennTreebank());
-      Assertions.assertEquals(reference[i].getProb(), parses[i].getProb());
-    }
+    Parse[] parses = parser.parse(ParserTestUtil.createTestSentence(), 2);
+    Parse[] reference = ParserFactory.create(getModel()).parse(ParserTestUtil.createTestSentence(), 2);
+    ParserTestUtil.assertSameParses(reference, parses);
   }
 
   @Test
