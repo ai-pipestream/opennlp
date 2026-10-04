@@ -69,11 +69,8 @@ public abstract class AbstractDL implements AutoCloseable {
   private static final String WORDPIECE_MODEL_TYPE = "WordPiece";
   /** The continuing subword prefix the WordPiece encoder assumes. */
   private static final String WORDPIECE_SUBWORD_PREFIX = "##";
-  /** The start of the message for a {@code tokenizer.json} the WordPiece encoder cannot use. */
-  private static final String UNSUPPORTED_TOKENIZER = "Unsupported tokenizer.json: ";
-  /** The start of the message for a JSON vocabulary that has neither accepted layout. */
-  private static final String EXPECTED_LAYOUTS = "Expected one object mapping tokens to integer"
-      + " ids, as in vocab.json, or a tokenizer.json of a WordPiece model: ";
+  /** The first non-whitespace character of a vocabulary file that is read as JSON. */
+  private static final String JSON_OBJECT_START = "{";
 
   protected final OrtEnvironment env;
   protected final OrtSession session;
@@ -214,21 +211,6 @@ public abstract class AbstractDL implements AutoCloseable {
   public Map<String, Integer> loadVocab(
       final File vocabFile) throws IOException {
 
-    return loadVocabFile(vocabFile);
-  }
-
-  /**
-   * Loads a vocabulary file as {@link #loadVocab(File)} does.
-   *
-   * @param vocabFile The vocabulary file.
-   * @return A map of vocabulary words to IDs.
-   * @throws IOException Thrown if the vocabulary file cannot be opened or read.
-   * @throws InvalidFormatException Thrown if a JSON vocabulary is malformed, has a layout that
-   *     is not supported, or contains a value that is not a non-negative integer.
-   */
-  static Map<String, Integer> loadVocabFile(
-      final File vocabFile) throws IOException {
-
     return readVocabFile(vocabFile).ids();
   }
 
@@ -252,13 +234,12 @@ public abstract class AbstractDL implements AutoCloseable {
    * @throws InvalidFormatException Thrown if a JSON vocabulary is malformed, has a layout that
    *     is not supported, or contains a value that is not a non-negative integer.
    */
-  static Vocabulary readVocabFile(final File vocabFile) throws IOException {
+  Vocabulary readVocabFile(final File vocabFile) throws IOException {
     final String read = Files.readString(Path.of(vocabFile.getPath()), StandardCharsets.UTF_8);
     final String content = StringUtil.stripByteOrderMark(read);
     final String trimmed = content.trim();
 
-    // Detect JSON format by leading brace
-    if (trimmed.startsWith("{")) {
+    if (trimmed.startsWith(JSON_OBJECT_START)) {
       try {
         return readJsonVocab(trimmed);
       } catch (IllegalArgumentException e) {
@@ -293,12 +274,12 @@ public abstract class AbstractDL implements AutoCloseable {
    * @throws InvalidFormatException Thrown if the file sets {@code normalizer.lowercase} to the
    *     other value.
    */
-  static void requireLowerCase(final File vocabFile, final Vocabulary vocabulary,
+  void requireLowerCase(final File vocabFile, final Vocabulary vocabulary,
       final boolean lowerCase) throws InvalidFormatException {
     final Boolean lowercase = vocabulary.lowercase();
     if (lowercase != null && lowercase != lowerCase) {
-      throw new InvalidFormatException("Vocabulary file " + vocabFile.getName() + " sets "
-          + TOKENIZER_NORMALIZER_KEY + "." + TOKENIZER_LOWERCASE_KEY + " to " + lowercase
+      throw new InvalidFormatException("Vocabulary file " + vocabFile.getName()
+          + " sets normalizer.lowercase to " + lowercase
           + ", but the component is configured with lowerCase " + lowerCase);
     }
   }
@@ -622,7 +603,8 @@ public abstract class AbstractDL implements AutoCloseable {
    * overwrites an earlier one.
    *
    * @param json The JSON text of the vocabulary.
-   * @return A map of vocabulary tokens to IDs.
+   * @return The vocabulary, with the {@code normalizer.lowercase} setting of a
+   *     {@code tokenizer.json}.
    * @throws IllegalArgumentException Thrown if the text is not a single well-formed JSON object,
    *     if a value of the vocabulary object is not a non-negative integer that fits into an
    *     {@code int}, if a {@code tokenizer.json} is not that of a WordPiece model with the
@@ -630,19 +612,7 @@ public abstract class AbstractDL implements AutoCloseable {
    *     token is malformed or conflicts with another token or id. The message names the offset,
    *     the token, or the unsupported member.
    */
-  static Map<String, Integer> loadJsonVocab(final String json) {
-    return readJsonVocab(json).ids();
-  }
-
-  /**
-   * Reads a JSON vocabulary as {@link #loadJsonVocab(String)} does, keeping the
-   * {@code normalizer.lowercase} setting of a {@code tokenizer.json}.
-   *
-   * @param json The JSON text of the vocabulary.
-   * @return The vocabulary.
-   * @throws IllegalArgumentException Thrown as by {@link #loadJsonVocab(String)}.
-   */
-  static Vocabulary readJsonVocab(final String json) {
+  Vocabulary readJsonVocab(final String json) {
     final List<JsonScan.Member> document = JsonScan.document(json);
     final JsonScan.Member model = JsonScan.member(document, TOKENIZER_MODEL_KEY);
     if (model != null && JsonScan.isObject(json, model)) {
@@ -657,11 +627,7 @@ public abstract class AbstractDL implements AutoCloseable {
     }
     final Map<String, Integer> vocab = new HashMap<>();
     for (JsonScan.Member member : document) {
-      try {
-        vocab.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
-      } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException(EXPECTED_LAYOUTS + e.getMessage(), e);
-      }
+      vocab.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
     }
     return new Vocabulary(vocab, null);
   }
@@ -678,40 +644,32 @@ public abstract class AbstractDL implements AutoCloseable {
    *     {@code model.vocab} is missing or not an object, or if a value of it is not a
    *     non-negative integer that fits into an {@code int}.
    */
-  private static Map<String, Integer> tokenizerVocab(final String json,
+  private Map<String, Integer> tokenizerVocab(final String json,
       final List<JsonScan.Member> model, final String type) {
     if (!WORDPIECE_MODEL_TYPE.equals(type)) {
-      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + "only " + WORDPIECE_MODEL_TYPE
-          + " models are supported, found " + TOKENIZER_MODEL_KEY + "." + TOKENIZER_TYPE_KEY
-          + " \"" + type + "\"");
+      throw new IllegalArgumentException("Unsupported tokenizer.json: only WordPiece models"
+          + " are supported, found model.type \"" + type + "\"");
     }
     final JsonScan.Member prefix = JsonScan.member(model, TOKENIZER_SUBWORD_PREFIX_KEY);
     if (prefix != null) {
       final String found = JsonScan.isString(json, prefix) ? JsonScan.stringValue(json, prefix)
           : json.substring(prefix.valueStart(), prefix.valueEnd());
       if (!WORDPIECE_SUBWORD_PREFIX.equals(found)) {
-        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_MODEL_KEY + "."
-            + TOKENIZER_SUBWORD_PREFIX_KEY + " must be \"" + WORDPIECE_SUBWORD_PREFIX + "\", found "
-            + found);
+        throw new IllegalArgumentException("Unsupported tokenizer.json:"
+            + " model.continuing_subword_prefix must be \"##\", found " + found);
       }
     }
     final JsonScan.Member vocab = JsonScan.member(model, TOKENIZER_VOCAB_KEY);
     if (vocab == null) {
-      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_MODEL_KEY + "."
-          + TOKENIZER_VOCAB_KEY + " is missing");
+      throw new IllegalArgumentException("Unsupported tokenizer.json: model.vocab is missing");
     }
     if (!JsonScan.isObject(json, vocab)) {
-      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_MODEL_KEY + "."
-          + TOKENIZER_VOCAB_KEY + " must be an object that maps tokens to ids");
+      throw new IllegalArgumentException(
+          "Unsupported tokenizer.json: model.vocab must be an object that maps tokens to ids");
     }
     final Map<String, Integer> ids = new HashMap<>();
     for (JsonScan.Member member : JsonScan.members(json, vocab.valueStart())) {
-      try {
-        ids.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
-      } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException(TOKENIZER_MODEL_KEY + "." + TOKENIZER_VOCAB_KEY + ": "
-            + e.getMessage(), e);
-      }
+      ids.put(member.key(), JsonScan.nonNegativeIntValue(json, member));
     }
     return ids;
   }
@@ -726,7 +684,7 @@ public abstract class AbstractDL implements AutoCloseable {
    * @throws IllegalArgumentException Thrown if the setting is neither {@code true} nor
    *     {@code false}.
    */
-  private static Boolean lowercaseSetting(final String json,
+  private Boolean lowercaseSetting(final String json,
       final List<JsonScan.Member> document) {
     final JsonScan.Member normalizer = JsonScan.member(document, TOKENIZER_NORMALIZER_KEY);
     if (normalizer == null || !JsonScan.isObject(json, normalizer)) {
@@ -737,12 +695,7 @@ public abstract class AbstractDL implements AutoCloseable {
     if (lowercase == null) {
       return null;
     }
-    try {
-      return JsonScan.booleanValue(json, lowercase);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_NORMALIZER_KEY + ": "
-          + e.getMessage(), e);
-    }
+    return JsonScan.booleanValue(json, lowercase);
   }
 
   /**
@@ -758,41 +711,35 @@ public abstract class AbstractDL implements AutoCloseable {
    *     {@code id}, or if an entry conflicts with the vocabulary: its token has another id
    *     there, or its id belongs to another token.
    */
-  private static void addTokens(final String json, final List<JsonScan.Member> document,
+  private void addTokens(final String json, final List<JsonScan.Member> document,
       final Map<String, Integer> vocab) {
     final JsonScan.Member addedTokens = JsonScan.member(document, TOKENIZER_ADDED_TOKENS_KEY);
     if (addedTokens == null) {
       return;
     }
     if (!JsonScan.isArray(json, addedTokens)) {
-      throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + TOKENIZER_ADDED_TOKENS_KEY
-          + " must be a list");
+      throw new IllegalArgumentException("Unsupported tokenizer.json: added_tokens must be a list");
     }
     Map<Integer, String> tokensById = null;
     for (JsonScan.Member entry : JsonScan.elements(json, addedTokens.valueStart())) {
-      final String where = TOKENIZER_ADDED_TOKENS_KEY + "[" + entry.key() + "]";
+      final String where = "added_tokens[" + entry.key() + "]";
       if (!JsonScan.isObject(json, entry)) {
-        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + " must be an object");
+        throw new IllegalArgumentException(
+            "Unsupported tokenizer.json: " + where + " must be an object");
       }
       final List<JsonScan.Member> fields = JsonScan.members(json, entry.valueStart());
       final JsonScan.Member content = JsonScan.member(fields, TOKENIZER_CONTENT_KEY);
       final JsonScan.Member id = JsonScan.member(fields, TOKENIZER_ID_KEY);
       if (content == null || id == null) {
-        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + " must have \""
-            + TOKENIZER_CONTENT_KEY + "\" and \"" + TOKENIZER_ID_KEY + "\"");
+        throw new IllegalArgumentException("Unsupported tokenizer.json: " + where
+            + " must have \"content\" and \"id\"");
       }
-      final String token;
-      final int tokenId;
-      try {
-        token = JsonScan.stringValue(json, content);
-        tokenId = JsonScan.nonNegativeIntValue(json, id);
-      } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + where + ": " + e.getMessage(), e);
-      }
+      final String token = JsonScan.stringValue(json, content);
+      final int tokenId = JsonScan.nonNegativeIntValue(json, id);
       final Integer known = vocab.get(token);
       if (known != null) {
         if (known != tokenId) {
-          throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + "added token \"" + token
+          throw new IllegalArgumentException("Unsupported tokenizer.json: added token \"" + token
               + "\" has id " + tokenId + " but the vocabulary maps it to " + known);
         }
         continue;
@@ -805,7 +752,7 @@ public abstract class AbstractDL implements AutoCloseable {
       }
       final String holder = tokensById.putIfAbsent(tokenId, token);
       if (holder != null) {
-        throw new IllegalArgumentException(UNSUPPORTED_TOKENIZER + "added token \"" + token
+        throw new IllegalArgumentException("Unsupported tokenizer.json: added token \"" + token
             + "\" has id " + tokenId + " but the vocabulary maps \"" + holder + "\" to it");
       }
       vocab.put(token, tokenId);

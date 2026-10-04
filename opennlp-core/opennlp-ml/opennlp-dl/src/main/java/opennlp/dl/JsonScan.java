@@ -273,8 +273,7 @@ public final class JsonScan {
   static String stringValue(String text, Member member) {
     requireMember(text, member);
     if (text.charAt(member.valueStart()) != QUOTE) {
-      throw new IllegalArgumentException("Value of \"" + member.key() + "\" must be a string: "
-          + text.substring(member.valueStart(), member.valueEnd()));
+      throw badValue(text, member, "a string");
     }
     return unescape(text, member.valueStart() + 1, member.valueEnd() - 1);
   }
@@ -298,8 +297,7 @@ public final class JsonScan {
     if (text.startsWith(FALSE, start) && end - start == FALSE.length()) {
       return false;
     }
-    throw new IllegalArgumentException("Value of \"" + member.key() + "\" must be " + TRUE
-        + " or " + FALSE + ": " + text.substring(start, end));
+    throw badValue(text, member, TRUE + " or " + FALSE);
   }
 
   /**
@@ -317,15 +315,29 @@ public final class JsonScan {
     final int start = member.valueStart();
     final int end = member.valueEnd();
     if (StringUtil.endOfAsciiDigits(text, start) != end) {
-      throw new IllegalArgumentException("Value of \"" + member.key()
-          + "\" must be a non-negative integer: " + text.substring(start, end));
+      throw badValue(text, member, "a non-negative integer");
     }
     try {
       return Integer.parseInt(text, start, end, 10);
     } catch (NumberFormatException e) {
-      throw new IllegalArgumentException("Value of \"" + member.key()
-          + "\" does not fit into an int: " + text.substring(start, end), e);
+      throw new IllegalArgumentException("Value of \"" + member.key() + "\" at offset " + start
+          + " does not fit into an int: " + text.substring(start, end), e);
     }
+  }
+
+  /**
+   * Builds the exception for a member whose value has the wrong type. The message names the
+   * key, the offset of the value, and the value, so the entry can be found in a large file.
+   *
+   * @param text The JSON text.
+   * @param member The member, inside the text.
+   * @param expected What the value must be.
+   * @return The exception to throw.
+   */
+  private static IllegalArgumentException badValue(String text, Member member, String expected) {
+    return new IllegalArgumentException("Value of \"" + member.key() + "\" at offset "
+        + member.valueStart() + " must be " + expected + ": "
+        + text.substring(member.valueStart(), member.valueEnd()));
   }
 
   /**
