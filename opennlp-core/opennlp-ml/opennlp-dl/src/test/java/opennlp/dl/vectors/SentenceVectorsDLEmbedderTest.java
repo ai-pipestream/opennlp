@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,6 +32,7 @@ import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import opennlp.dl.Tokens;
 import opennlp.tools.embeddings.TextEmbedder;
 import opennlp.tools.embeddings.TextEmbedderProvider;
 import opennlp.tools.util.InvalidFormatException;
@@ -272,6 +274,58 @@ class SentenceVectorsDLEmbedderTest {
         assertArrayEquals(vectors.embed(texts.get(i)), batch[i]);
       }
     }
+  }
+
+  /**
+   * Asserts that {@code embedAll} splits a large group of same-length inputs into inferences of
+   * at most {@value SentenceVectorsDL#MAX_BATCH_TOKEN_POSITIONS} token positions, and that every
+   * row still equals its single-input vector. "hello world" encodes to 4 tokens, so one
+   * inference holds at most 4096 rows.
+   */
+  @Test
+  void testEmbedAllCapsTokenPositionsPerInference(@TempDir final Path dir) throws Exception {
+    try (SentenceVectorsDL vectors = meanVectors(dir, SentenceVectorsDL.DEFAULT_MAX_LENGTH)) {
+      final List<String> texts = Collections.nCopies(5000, "hello world");
+      final List<List<Integer>> batches =
+          SentenceVectorsDL.batches(Collections.nCopies(5000, tokens(4)).toArray(new Tokens[0]));
+      assertEquals(2, batches.size());
+      assertEquals(4096, batches.get(0).size());
+      assertEquals(904, batches.get(1).size());
+      final float[][] batch = vectors.embedAll(texts);
+      assertEquals(texts.size(), batch.length);
+      for (final float[] row : batch) {
+        assertArrayEquals(HELLO_WORLD_MEAN, row, DELTA);
+      }
+    }
+  }
+
+  /**
+   * Asserts that inputs of different lengths still run one inference per length, in the order
+   * each length first appears in the call.
+   */
+  @Test
+  void testEmbedAllGroupsByLengthInCallOrder() {
+    assertEquals(List.of(List.of(0, 3), List.of(1, 2, 4)), SentenceVectorsDL.batches(
+        new Tokens[] {tokens(4), tokens(3), tokens(3), tokens(4), tokens(3)}));
+  }
+
+  /**
+   * Asserts that an input wider than the cap on its own still runs, as a batch of one.
+   */
+  @Test
+  void testEmbedAllRunsAnInputWiderThanTheCapAlone() {
+    final Tokens wide = tokens(SentenceVectorsDL.MAX_BATCH_TOKEN_POSITIONS + 1);
+    assertEquals(List.of(List.of(0), List.of(1)),
+        SentenceVectorsDL.batches(new Tokens[] {wide, wide}));
+  }
+
+  /**
+   * {@return an encoding of {@code length} tokens; only its length matters for batching}
+   *
+   * @param length The number of tokens.
+   */
+  private static Tokens tokens(final int length) {
+    return new Tokens(new String[length], new long[length], new long[length], new long[length]);
   }
 
   /**
