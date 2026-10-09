@@ -54,6 +54,6 @@ public class ADTokenSampleStreamFactory extends
     ObjectStream<NameSample> samples = StreamFactoryRegistry.getFactory(
         NameSample.class, "ad").create(
             ArgumentParser.filter(args, ADNameSampleStreamFactory.Parameters.class));
-    return new NameToTokenSampleStream(createDetokenizer(params), samples);
+    return new NameToTokenSampleStream(new ADDetokenizer(createDetokenizer(params)), samples);
   }
 }

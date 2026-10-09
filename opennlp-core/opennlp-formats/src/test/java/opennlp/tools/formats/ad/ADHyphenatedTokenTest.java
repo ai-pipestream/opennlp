@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -32,6 +33,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.namefind.NameSample;
+import opennlp.tools.tokenize.DetokenizationDictionary;
+import opennlp.tools.tokenize.DetokenizationDictionary.Operation;
+import opennlp.tools.tokenize.DictionaryDetokenizer;
 import opennlp.tools.tokenize.TokenSample;
 import opennlp.tools.util.ObjectStream;
 import opennlp.tools.util.ObjectStreamUtils;
@@ -132,6 +136,59 @@ class ADHyphenatedTokenTest {
       assertArrayEquals(expected, Span.spansToStrings(sample.getTokenSpans(), sample.getText()));
       assertNull(stream.read());
     }
+  }
+
+  /** Markers separate annotated tokens, never a word from its own trailing hyphen. */
+  @Test
+  void testDetokenizationMarkers() {
+    ADDetokenizer detokenizer = new ADDetokenizer(new DictionaryDetokenizer(
+        new DetokenizationDictionary(new String[] {"-"}, new Operation[] {Operation.MOVE_BOTH})));
+    String[] tokens = {"ofereceu-", "me", "x-caf\u00E9"};
+    assertEquals("ofereceu-me x-caf\u00E9", detokenizer.detokenize(tokens, null));
+    assertEquals("ofereceu-|me x-caf\u00E9", detokenizer.detokenize(tokens, "|"));
+    assertEquals("ofereceu-", detokenizer.detokenize(new String[] {"ofereceu-"}, "|"));
+    assertEquals("", detokenizer.detokenize(new String[0], "|"));
+  }
+
+  /**
+   * The corpus also leaves a trailing hyphen on names and codes whose second part is annotated
+   * on the next line, where the character before the hyphen is a digit or another hyphen.
+   * Every such token in FlorestaVirgem joins to the right, as the clitics do.
+   */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("corpusTrailingHyphens")
+  void testCorpusTrailingHyphensJoinRight(String left, String right, String expected) {
+    ADDetokenizer detokenizer = new ADDetokenizer(new DictionaryDetokenizer(
+        new DetokenizationDictionary(new String[] {"-"}, new Operation[] {Operation.MOVE_BOTH})));
+    assertEquals(expected, detokenizer.detokenize(new String[] {left, right}, null));
+  }
+
+  private static Stream<Arguments> corpusTrailingHyphens() {
+    return Stream.of(
+        // a clitic verb
+        Arguments.of("ofereceu-", "me", "ofereceu-me"),
+        // a postal code, so the character before the hyphen is a digit
+        Arguments.of("CEP_01290-", "900", "CEP_01290-900"),
+        // a name the corpus writes with two hyphens
+        Arguments.of("Projeto_Baleia--", "Jubarte", "Projeto_Baleia--Jubarte"),
+        Arguments.of("Boutros_Boutros--", "Ghali", "Boutros_Boutros--Ghali"));
+  }
+
+  /** A hyphen of its own stays a token and follows the dictionary, not the trailing-hyphen rule. */
+  @Test
+  void testBareHyphenFollowsTheDictionary() {
+    ADDetokenizer detokenizer = new ADDetokenizer(new DictionaryDetokenizer(
+        new DetokenizationDictionary(new String[] {"-"}, new Operation[] {Operation.MOVE_BOTH})));
+    assertEquals("a-b", detokenizer.detokenize(new String[] {"a", "-", "b"}, null));
+    assertEquals("a|-|b", detokenizer.detokenize(new String[] {"a", "-", "b"}, "|"));
+  }
+
+  /** A custom dictionary still controls whether a hyphen joins to the following token. */
+  @Test
+  void testDetokenizationHonorsDictionary() {
+    ADDetokenizer detokenizer = new ADDetokenizer(new DictionaryDetokenizer(
+        new DetokenizationDictionary(new String[] {"-"}, new Operation[] {Operation.MOVE_LEFT})));
+    assertEquals("ofereceu- me", detokenizer.detokenize(new String[] {"ofereceu-", "me"}, null));
   }
 
   private String[] tokenArguments(String input, String option) throws IOException {
