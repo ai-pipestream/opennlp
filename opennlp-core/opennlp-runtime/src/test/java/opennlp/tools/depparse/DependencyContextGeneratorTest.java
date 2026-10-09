@@ -229,6 +229,23 @@ public class DependencyContextGeneratorTest {
     assertNotEquals("s0lct=*ROOT*", attached[24]);
   }
 
+  /**
+   * Pins the escaped features: a value equal to a marker and a backslash are escaped
+   * everywhere, separators only inside a combined feature.
+   */
+  @Test
+  void testFeaturesOfValuesThatNeedEscaping() {
+    final String[] features = new DependencyContextGenerator().getContext(stackOfTwo(),
+        new String[] {"and/or", "a\\b"}, new String[] {"*NULL*", "X|Y"});
+    assertEquals("s0w=a\\\\b", features[0]);
+    assertEquals("s0t=X|Y", features[1]);
+    assertEquals("s1w=and/or", features[2]);
+    assertEquals("s1t=\\*NULL*", features[3]);
+    assertEquals("s0wt=a\\\\b/X\\|Y", features[10]);
+    assertEquals("s1wt=and\\/or/\\*NULL*", features[11]);
+    assertEquals("s1t,s0t=\\*NULL*|X\\|Y", features[18]);
+  }
+
   @Test
   void testRejectsInvalidArguments() {
     final DependencyContextGenerator generator = new DependencyContextGenerator();

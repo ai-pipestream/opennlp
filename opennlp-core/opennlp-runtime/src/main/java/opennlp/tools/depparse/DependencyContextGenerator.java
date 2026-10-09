@@ -26,6 +26,12 @@ import opennlp.tools.util.ParamChecks;
  * structure built so far (tags and relations of the leftmost and rightmost dependents,
  * valency counts), and a bucketed distance between stack top and buffer front.
  *
+ * <p>Words, tags, and relations are escaped with a backslash so that distinct
+ * configurations yield distinct features: a value equal to a marker value gets a
+ * backslash in front, a backslash in a value is doubled, and inside a feature combining
+ * several values each {@code /} and {@code |} gets a backslash in front. A value with
+ * no backslash and no separator that is not a marker appears unchanged.</p>
+ *
  * <p>Instances hold no state and are safe to share between threads.</p>
  *
  * @since 3.0.0
@@ -44,6 +50,9 @@ class DependencyContextGenerator {
 
   /** Separates the parts of a feature combining several positions. */
   private static final char POSITION_SEPARATOR = '|';
+
+  /** Marks the following character of a value as part of the value. */
+  private static final char ESCAPE = '\\';
 
   /** The number of features {@link #getContext(ArcStandardState, String[], String[])} emits. */
   private static final int FEATURE_COUNT = 37;
@@ -214,6 +223,16 @@ class DependencyContextGenerator {
     final String s1rcl = dependentRelation(state, s1, false);
 
     final String distance = distance(s0, b0);
+    final String s0wPart = part(s0w);
+    final String s0tPart = part(s0t);
+    final String s1wPart = part(s1w);
+    final String s1tPart = part(s1t);
+    final String s2tPart = part(s2t);
+    final String b0wPart = part(b0w);
+    final String b0tPart = part(b0t);
+    final String b1tPart = part(b1t);
+    final String s0lctPart = part(s0lct);
+    final String s1rctPart = part(s1rct);
     final String[] features = new String[FEATURE_COUNT];
     int f = 0;
     features[f++] = S0_WORD + s0w;
@@ -226,23 +245,24 @@ class DependencyContextGenerator {
     features[f++] = B1_WORD + b1w;
     features[f++] = B1_TAG + b1t;
     features[f++] = B2_TAG + b2t;
-    features[f++] = S0_WORD_TAG + s0w + WORD_TAG_SEPARATOR + s0t;
-    features[f++] = S1_WORD_TAG + s1w + WORD_TAG_SEPARATOR + s1t;
-    features[f++] = B0_WORD_TAG + b0w + WORD_TAG_SEPARATOR + b0t;
-    features[f++] = S0_WORD_B0_WORD + s0w + POSITION_SEPARATOR + b0w;
-    features[f++] = S0_TAG_B0_TAG + s0t + POSITION_SEPARATOR + b0t;
-    features[f++] = S0_WORD_B0_TAG + s0w + POSITION_SEPARATOR + b0t;
-    features[f++] = S0_TAG_B0_WORD + s0t + POSITION_SEPARATOR + b0w;
-    features[f++] = S0_WORD_TAG_B0_TAG + s0w + WORD_TAG_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
-    features[f++] = S1_TAG_S0_TAG + s1t + POSITION_SEPARATOR + s0t;
-    features[f++] = S1_TAG_S0_WORD + s1t + POSITION_SEPARATOR + s0w;
-    features[f++] = S1_WORD_S0_TAG + s1w + POSITION_SEPARATOR + s0t;
+    features[f++] = S0_WORD_TAG + s0wPart + WORD_TAG_SEPARATOR + s0tPart;
+    features[f++] = S1_WORD_TAG + s1wPart + WORD_TAG_SEPARATOR + s1tPart;
+    features[f++] = B0_WORD_TAG + b0wPart + WORD_TAG_SEPARATOR + b0tPart;
+    features[f++] = S0_WORD_B0_WORD + s0wPart + POSITION_SEPARATOR + b0wPart;
+    features[f++] = S0_TAG_B0_TAG + s0tPart + POSITION_SEPARATOR + b0tPart;
+    features[f++] = S0_WORD_B0_TAG + s0wPart + POSITION_SEPARATOR + b0tPart;
+    features[f++] = S0_TAG_B0_WORD + s0tPart + POSITION_SEPARATOR + b0wPart;
+    features[f++] = S0_WORD_TAG_B0_TAG
+        + s0wPart + WORD_TAG_SEPARATOR + s0tPart + POSITION_SEPARATOR + b0tPart;
+    features[f++] = S1_TAG_S0_TAG + s1tPart + POSITION_SEPARATOR + s0tPart;
+    features[f++] = S1_TAG_S0_WORD + s1tPart + POSITION_SEPARATOR + s0wPart;
+    features[f++] = S1_WORD_S0_TAG + s1wPart + POSITION_SEPARATOR + s0tPart;
     features[f++] = S1_TAG_S0_TAG_B0_TAG
-        + s1t + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
+        + s1tPart + POSITION_SEPARATOR + s0tPart + POSITION_SEPARATOR + b0tPart;
     features[f++] = S0_TAG_B0_TAG_B1_TAG
-        + s0t + POSITION_SEPARATOR + b0t + POSITION_SEPARATOR + b1t;
+        + s0tPart + POSITION_SEPARATOR + b0tPart + POSITION_SEPARATOR + b1tPart;
     features[f++] = S2_TAG_S1_TAG_S0_TAG
-        + s2t + POSITION_SEPARATOR + s1t + POSITION_SEPARATOR + s0t;
+        + s2tPart + POSITION_SEPARATOR + s1tPart + POSITION_SEPARATOR + s0tPart;
     features[f++] = S0_LEFT_DEPENDENT_TAG + s0lct;
     features[f++] = S0_RIGHT_DEPENDENT_TAG + s0rct;
     features[f++] = S1_LEFT_DEPENDENT_TAG + s1lct;
@@ -251,14 +271,14 @@ class DependencyContextGenerator {
     features[f++] = S0_RIGHT_DEPENDENT_RELATION + s0rcl;
     features[f++] = S1_RIGHT_DEPENDENT_RELATION + s1rcl;
     features[f++] = S1_TAG_S1_RIGHT_DEPENDENT_TAG_S0_TAG
-        + s1t + POSITION_SEPARATOR + s1rct + POSITION_SEPARATOR + s0t;
+        + s1tPart + POSITION_SEPARATOR + s1rctPart + POSITION_SEPARATOR + s0tPart;
     features[f++] = S0_TAG_S0_LEFT_DEPENDENT_TAG_B0_TAG
-        + s0t + POSITION_SEPARATOR + s0lct + POSITION_SEPARATOR + b0t;
+        + s0tPart + POSITION_SEPARATOR + s0lctPart + POSITION_SEPARATOR + b0tPart;
     features[f++] = S0_DEPENDENTS + dependents(state, s0);
     features[f++] = S1_DEPENDENTS + dependents(state, s1);
     features[f++] = DISTANCE + distance;
     features[f++] = DISTANCE_S0_TAG_B0_TAG
-        + distance + POSITION_SEPARATOR + s0t + POSITION_SEPARATOR + b0t;
+        + distance + POSITION_SEPARATOR + s0tPart + POSITION_SEPARATOR + b0tPart;
     return features;
   }
 
@@ -273,7 +293,62 @@ class DependencyContextGenerator {
     if (index == ArcStandardState.ROOT) {
       return ROOT_VALUE;
     }
-    return index == ArcStandardState.NONE ? NONE_VALUE : values[index];
+    return index == ArcStandardState.NONE ? NONE_VALUE : literal(values[index]);
+  }
+
+  /**
+   * Encodes a word, tag, or relation so that it never reads like a marker value: the
+   * escape character is doubled, and a value equal to a marker gets the escape character
+   * in front. Values without the escape character that are not markers stay unchanged.
+   *
+   * @param value The value from the sentence or the configuration.
+   * @return The encoded value.
+   */
+  private String literal(String value) {
+    if (ROOT_VALUE.equals(value) || NONE_VALUE.equals(value)) {
+      return ESCAPE + value;
+    }
+    return escape(value, ESCAPE, ESCAPE);
+  }
+
+  /**
+   * Encodes a value returned by {@link #valueAt(String[], int)} or the dependent lookups
+   * for use inside a feature combining several values: the escape character goes in front
+   * of each separator. Since {@link #literal(String)} already doubled the escape
+   * character, every escape character in the result escapes the character after it, and
+   * every unescaped separator separates two values.
+   *
+   * @param value The encoded value.
+   * @return The value with its separators escaped.
+   */
+  private String part(String value) {
+    return escape(value, WORD_TAG_SEPARATOR, POSITION_SEPARATOR);
+  }
+
+  /**
+   * Puts the escape character in front of each occurrence of the given characters.
+   *
+   * @param value The value to escape.
+   * @param first A character to escape.
+   * @param second Another character to escape, or {@code first} again.
+   * @return The escaped value, or {@code value} itself if it holds neither of them.
+   */
+  private String escape(String value, char first, char second) {
+    StringBuilder escaped = null;
+    for (int i = 0; i < value.length(); i++) {
+      final char c = value.charAt(i);
+      final boolean needsEscape = c == first || c == second;
+      if (needsEscape && escaped == null) {
+        escaped = new StringBuilder(value.length() + 4).append(value, 0, i);
+      }
+      if (escaped != null) {
+        if (needsEscape) {
+          escaped.append(ESCAPE);
+        }
+        escaped.append(c);
+      }
+    }
+    return escaped == null ? value : escaped.toString();
   }
 
   /**
@@ -314,7 +389,7 @@ class DependencyContextGenerator {
       return NONE_VALUE;
     }
     final String relation = state.assignedRelation(dependent);
-    return relation == null ? NONE_VALUE : relation;
+    return relation == null ? NONE_VALUE : literal(relation);
   }
 
   /**
