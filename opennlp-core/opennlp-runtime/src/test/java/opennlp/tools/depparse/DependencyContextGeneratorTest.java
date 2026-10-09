@@ -17,7 +17,6 @@
 
 package opennlp.tools.depparse;
 
-import java.util.Arrays;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -27,7 +26,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -183,19 +182,17 @@ public class DependencyContextGeneratorTest {
   }
 
   /**
-   * Pins that separators are not escaped: a value containing {@code |} or {@code /} makes
-   * one combined feature of two different sentences read the same, while the single-position
-   * features still tell them apart.
+   * A value containing {@code |} or {@code /} must not make one combined feature of two
+   * different sentences read the same.
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("collidingSentences")
-  void testUnescapedSeparatorsCollideInCombinedFeatures(String description, String[] tokensA,
+  void testSeparatorsInValuesDoNotCollide(String description, String[] tokensA,
       String[] tagsA, String[] tokensB, String[] tagsB, int feature) {
     final DependencyContextGenerator generator = new DependencyContextGenerator();
     final String[] a = generator.getContext(stackOfTwo(), tokensA, tagsA);
     final String[] b = generator.getContext(stackOfTwo(), tokensB, tagsB);
-    assertEquals(a[feature], b[feature]);
-    assertFalse(Arrays.equals(a, b), "the single-position features differ");
+    assertNotEquals(a[feature], b[feature]);
   }
 
   /**
@@ -210,15 +207,26 @@ public class DependencyContextGeneratorTest {
     return state;
   }
 
-  /** A value equal to a marker or holding {@code =} is used as is, so a marker word is not told apart. */
+  /**
+   * A word, tag, or relation equal to a marker must not read like the root or an absent
+   * position. A value holding {@code =} needs no escaping, since the feature prefix ends
+   * at the first {@code =}.
+   */
   @Test
-  void testMarkerAndEqualsSignValuesAreUsedAsIs() {
-    final ArcStandardState state = new ArcStandardState(2);
-    final String[] features = new DependencyContextGenerator().getContext(state,
-        new String[] {"*NULL*", "b0w=x"}, new String[] {"*ROOT*", "T"});
-    assertEquals("b0w=*NULL*", features[5]);
-    assertEquals("b0t=*ROOT*", features[6]);
-    assertEquals("b1w=b0w=x", features[7]);
+  void testMarkerValuesAreToldApartFromMarkers() {
+    final DependencyContextGenerator generator = new DependencyContextGenerator();
+    final String[] tokens = {"*NULL*", "b0w=x"};
+    final String[] tags = {"*ROOT*", "T"};
+    final String[] start = generator.getContext(new ArcStandardState(2), tokens, tags);
+    assertNotEquals("b0w=*NULL*", start[5]);
+    assertNotEquals("b0t=*ROOT*", start[6]);
+    assertEquals("b1w=b0w=x", start[7]);
+
+    final ArcStandardState state = stackOfTwo();
+    state.apply(Transition.leftArc("*NULL*"));
+    final String[] attached = generator.getContext(state, tokens, tags);
+    assertNotEquals("s0lcl=*NULL*", attached[28]);
+    assertNotEquals("s0lct=*ROOT*", attached[24]);
   }
 
   @Test
