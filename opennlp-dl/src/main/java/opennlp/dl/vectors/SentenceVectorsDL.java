@@ -30,6 +30,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 import opennlp.dl.AbstractDL;
+import opennlp.dl.InferenceOptions;
 import opennlp.dl.Tokens;
 import opennlp.tools.tokenize.Tokenizer;
 
@@ -63,10 +64,36 @@ public class SentenceVectorsDL extends AbstractDL {
   public SentenceVectorsDL(final File model, final File vocabulary)
       throws OrtException, IOException {
 
-    env = OrtEnvironment.getEnvironment();
-    session = env.createSession(model.getPath(), new OrtSession.SessionOptions());
-    vocab = loadVocab(vocabulary);
-    tokenizer = createTokenizer(vocab);
+    this(model, vocabulary, new InferenceOptions());
+
+  }
+
+  /**
+   * Instantiates a {@link SentenceVectorsDL sentence vector generator} using ONNX models and the
+   * given {@link InferenceOptions}, so the session can run on a GPU through
+   * {@code opennlp-dl-gpu}.
+   *
+   * @param model The file name of a sentence vectors ONNX model.
+   * @param vocabulary The file name of the vocabulary file for the model.
+   * @param inferenceOptions The {@link InferenceOptions}, of which the GPU settings are used.
+   *
+   * @throws OrtException Thrown if the {@code model} cannot be loaded, or if a GPU was requested
+   *     and ONNX Runtime cannot provide it. ONNX Runtime does not fall back to the CPU.
+   * @throws IOException Thrown if errors occurred loading the {@code model} or {@code vocabulary}.
+   */
+  public SentenceVectorsDL(final File model, final File vocabulary,
+      final InferenceOptions inferenceOptions) throws OrtException, IOException {
+
+    this.env = OrtEnvironment.getEnvironment();
+
+    final OrtSession.SessionOptions sessionOptions = new OrtSession.SessionOptions();
+    if (inferenceOptions.isGpu()) {
+      sessionOptions.addCUDA(inferenceOptions.getGpuDeviceId());
+    }
+
+    this.session = env.createSession(model.getPath(), sessionOptions);
+    this.vocab = loadVocab(vocabulary);
+    this.tokenizer = createTokenizer(vocab);
 
   }
 
