@@ -74,20 +74,20 @@ under the License.
         Make sure you replace the placeholders with the appropriate version values.
         Next, you can search for such a model and load it from the classpath:
 
-        <programlisting language="java">
-<![CDATA[final ClassgraphModelFinder finder = new ClassgraphModelFinder(); // or use: new SimpleClassPathModelFinder()
+        <programlisting language="java" xml:id="example.modelloading.load">
+<![CDATA[final ClassgraphModelFinder finder = new ClassgraphModelFinder();
+// or use: new SimpleClassPathModelFinder()
 final ClassPathModelLoader loader = new ClassPathModelLoader();
 final Set<ClassPathModelEntry> models = finder.findModels(false);
-for(ClassPathModelEntry entry : models) {
-
-     final ClassPathModel model = loader.load(entry);
-     if(model != null) {
-          System.out.println(model.getModelName());
-          System.out.println(model.getModelSHA256());
-          System.out.println(model.getModelVersion());
-          System.out.println(model.getModelLanguage());
-          // do something with the model by consuming the byte array
-     }
+for (ClassPathModelEntry entry : models) {
+  final ClassPathModel model = loader.load(entry);
+  if (model != null) {
+    System.out.println(model.getModelName());
+    System.out.println(model.getModelSHA256());
+    System.out.println(model.getModelVersion());
+    System.out.println(model.getModelLanguage());
+    // do something with the model by consuming the byte array
+  }
 }]]>
         </programlisting>
     </para>
@@ -98,12 +98,13 @@ for(ClassPathModelEntry entry : models) {
       It allows direct use of models available under a certain locale, given
       that those are present in the classpath and can be loaded.
 
-      <programlisting language="java">
+      <programlisting language="java" xml:id="example.modelloading.load.provider">
 <![CDATA[final ClassPathModelProvider provider = new DefaultClassPathModelProvider(finder, loader);
 // Here: SentenceModel, other model types accordingly
-final SentenceModel sm = provider.load("en", opennlp.tools.models.ModelType.SENTENCE_DETECTOR, SentenceModel.class);
-if(sm != null) {
-    // do something with the (sentence) model
+final SentenceModel sm = provider.load("en",
+    opennlp.tools.models.ModelType.SENTENCE_DETECTOR, SentenceModel.class);
+if (sm != null) {
+  // do something with the (sentence) model
 }]]>
       </programlisting>
 
@@ -133,7 +134,7 @@ if(sm != null) {
 
       Make sure you add a <emphasis>model.properties</emphasis> file with the following content:
 
-      <programlisting language="java">
+      <programlisting language="none">
 <![CDATA[model.name=${model.name}
 model.version=${model.version}
 model.sha256=${model.sha256}
@@ -146,19 +147,20 @@ model.language=${model.language}]]>
       To load such a custom model, you may need to adjust the pattern for classpath scanning. For example, if you name the model "custom-opennlp-model",
       you need the following code to successfully find and load it:
 
-      <programlisting language="java">
-<![CDATA[final ClassgraphModelFinder finder = new ClassgraphModelFinder("custom-opennlp-model.jar"); // or use: new SimpleClassPathModelFinder("custom-opennlp-model.jar")
+      <programlisting language="java" xml:id="example.modelloading.bundle">
+<![CDATA[final ClassgraphModelFinder finder = new ClassgraphModelFinder("custom-opennlp-model.jar");
+// or use: new SimpleClassPathModelFinder("custom-opennlp-model.jar")
 final ClassPathModelLoader loader = new ClassPathModelLoader();
 final Set<ClassPathModelEntry> models = finder.findModels(false);
-for(ClassPathModelEntry entry : models) {
-    final ClassPathModel model = loader.load(entry);
-    if(model != null) {
-      System.out.println(model.getModelName());
-      System.out.println(model.getModelSHA256());
-      System.out.println(model.getModelVersion());
-      System.out.println(model.getModelLanguage());
-      // do something with the model by consuming the byte array
-    }
+for (ClassPathModelEntry entry : models) {
+  final ClassPathModel model = loader.load(entry);
+  if (model != null) {
+    System.out.println(model.getModelName());
+    System.out.println(model.getModelSHA256());
+    System.out.println(model.getModelVersion());
+    System.out.println(model.getModelLanguage());
+    // do something with the model by consuming the byte array
+  }
 }]]>
       </programlisting>
 
@@ -192,7 +194,7 @@ for(ClassPathModelEntry entry : models) {
       and other content is stored under its source name. OpenNLP <code>*.bin</code> model
       files remain packed.
     </para>
-    <programlisting language="java">
+    <programlisting language="java" xml:id="example.modelloading.resourceinstaller">
 <![CDATA[Path result = ResourceInstaller.install(
     corpusTarGz.toUri(), targetDirectory, expectedSha256);
 // result is targetDirectory; the archived files appear under their archive paths]]>
@@ -223,7 +225,7 @@ for(ClassPathModelEntry entry : models) {
       compresses better than 100 to 1, such as a corpus of highly repetitive text, needs
       <code>opennlp.install.max.expansion.ratio</code> raised as well.
     </para>
-    <programlisting language="java">
+    <programlisting language="java" xml:id="example.modelloading.resourceinstaller.limits">
 <![CDATA[ResourceInstaller.Limits limits = ResourceInstaller.Limits.builder()
     .readTimeout(Duration.ofSeconds(10))
     .maxDownloadBytes(1024L * 1024)   // download limit in bytes
