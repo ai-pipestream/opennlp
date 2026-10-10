@@ -114,7 +114,7 @@ String category = myCategorizer.getBestCategory(outcomes);]]>
 			</para>
 			<para>
 				Training an SVM model from <code>DocumentSample</code> data:
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.doccat.api.svm.train">
 <![CDATA[// Configure the SVM categorizer
 SvmDoccatConfiguration config = new SvmDoccatConfiguration.Builder()
     .setSvmConfiguration(new SvmConfigurationImpl.Builder()
@@ -134,22 +134,23 @@ SvmDoccatModel model = DocumentCategorizerSVM.train("eng", sampleStream, config,
 
 // Serialize the model
 try (OutputStream out = new FileOutputStream("doccat-svm.bin")) {
-    model.serialize(out);
+  model.serialize(out);
 }]]>
 				</programlisting>
 			</para>
 			<para>
 				Classifying text with the trained model:
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.doccat.api.svm.classify">
 <![CDATA[// Load the model
 SvmDoccatModel model;
 try (InputStream in = new FileInputStream("doccat-svm.bin")) {
-    model = SvmDoccatModel.deserialize(in);
+  model = SvmDoccatModel.deserialize(in);
 }
 
 // Classify
 DocumentCategorizer categorizer = new DocumentCategorizerSVM(model, new BagOfWordsFeatureGenerator());
-double[] outcomes = categorizer.categorize(new String[]{"tokens", "of", "text"});
+double[] outcomes = categorizer.categorize(
+    new String[]{"The", "gross", "margin", "rose", "because", "of", "higher", "prices", "."});
 String bestCategory = categorizer.getBestCategory(outcomes);]]>
 				</programlisting>
 			</para>
@@ -225,7 +226,7 @@ DocumentCategorizerDL categorizer = new DocumentCategorizerDL(
 			The following sample shows the sample from above in the required format. Here GMDecrease and GMIncrease
 			are the categories.
 			<screen>
-<![CDATA[MDecrease Major acquisitions that have a lower gross margin than the existing network also \
+<![CDATA[GMDecrease Major acquisitions that have a lower gross margin than the existing network also \
 	 had a negative impact on the overall gross margin, but it should improve following \
 	 the implementation of its integration strategies .
 GMIncrease The upward movement of gross margin resulted from amounts pursuant to adjustments \
@@ -257,11 +258,11 @@ GMIncrease The upward movement of gross margin resulted from amounts pursuant to
 		text, or an array of tokens. By default, the raw text will be split into tokens by whitespace. So, let's say
 		your training data was contained in a text file, where the format is as described above.
 		Then you might want to write something like this to create a collection of DocumentSamples:
-		<programlisting language="java">
+		<programlisting language="java" xml:id="example.doccat.training.api">
 <![CDATA[DoccatModel model = null;
 try {
-  ObjectStream<String> lineStream =
-		new PlainTextByLineStream(new MarkableFileInputStreamFactory(new File("en-sentiment.train")), StandardCharsets.UTF_8);
+  ObjectStream<String> lineStream = new PlainTextByLineStream(
+      new MarkableFileInputStreamFactory(new File("en-doccat.train")), StandardCharsets.UTF_8);
 
   ObjectStream<DocumentSample> sampleStream = new DocumentSampleStream(lineStream);
 
@@ -276,7 +277,7 @@ try {
 		but first we'll cover serialization. Feel free to skim.
 		</para>
 		<para>
-		<programlisting language="java">
+		<programlisting language="java" xml:id="example.doccat.training.api.serialize">
 <![CDATA[try (OutputStream modelOut = new BufferedOutputStream(new FileOutputStream(modelFile))) {
   model.serialize(modelOut);
 }]]>
@@ -296,7 +297,7 @@ try {
 			A typical SVM text classification pipeline uses a LINEAR kernel with
 			binary or TF-IDF term weighting and information gain or chi-square feature
 			selection:
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.doccat.training.svm">
 <![CDATA[SvmDoccatConfiguration config = new SvmDoccatConfiguration.Builder()
     .setSvmConfiguration(new SvmConfigurationImpl.Builder()
         .setKernelType(KernelType.LINEAR)
@@ -315,12 +316,17 @@ SvmDoccatModel model = DocumentCategorizerSVM.train("eng", sampleStream, config,
 		<para>
 			The resulting <code>SvmDoccatModel</code> can be serialized and deserialized
 			using Java serialization:
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.doccat.training.svm.serialize">
 <![CDATA[// Save
-model.serialize(new FileOutputStream("svm-doccat.bin"));
+try (OutputStream out = new FileOutputStream("svm-doccat.bin")) {
+  model.serialize(out);
+}
 
 // Load
-SvmDoccatModel loaded = SvmDoccatModel.deserialize(new FileInputStream("svm-doccat.bin"));]]>
+SvmDoccatModel loaded;
+try (InputStream in = new FileInputStream("svm-doccat.bin")) {
+  loaded = SvmDoccatModel.deserialize(in);
+}]]>
 			</programlisting>
 		</para>
 	</section>
