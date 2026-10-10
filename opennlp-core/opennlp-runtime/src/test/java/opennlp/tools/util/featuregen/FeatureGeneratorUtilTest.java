@@ -156,4 +156,35 @@ public class FeatureGeneratorUtilTest {
     Assertions.assertEquals("jak", FeatureGeneratorUtil.tokenFeature("オープン・ソ〜ス・ソフトウェア"));
     Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature("アパッチ・ソフトウェア財団"));
   }
+
+  /**
+   * Classes follow code points: a supplementary capital is a capital letter, a combining
+   * accent keeps a lowercase word lowercase, a caseless word is lowercase, and words in other
+   * scripts are not Japanese.
+   */
+  @Test
+  void testTokenFeatureByCodePoint() {
+    final String deseretCapital = new String(Character.toChars(0x10400));
+    Assertions.assertEquals("ac", FeatureGeneratorUtil.tokenFeature(deseretCapital + "A"));
+    Assertions.assertEquals("lc", FeatureGeneratorUtil.tokenFeature("cafe\u0301"));
+    Assertions.assertEquals("lc", FeatureGeneratorUtil.tokenFeature("αλφα"));
+    Assertions.assertEquals("lc", FeatureGeneratorUtil.tokenFeature("слово"));
+    Assertions.assertEquals("lc", FeatureGeneratorUtil.tokenFeature("لغة"));
+    Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature(""));
+  }
+
+  /**
+   * Under the legacy mode classes follow UTF-16 chars, and a letter of a script other than
+   * Latin, Han, Hiragana and Katakana does not end a Japanese class.
+   */
+  @Test
+  void testTokenFeatureByCharInLegacyMode() {
+    CompatibilityMode.setActive(CompatibilityMode.LEGACY);
+    final String deseretCapital = new String(Character.toChars(0x10400));
+    Assertions.assertEquals("jah", FeatureGeneratorUtil.tokenFeature(deseretCapital));
+    Assertions.assertEquals("other", FeatureGeneratorUtil.tokenFeature("cafe\u0301"));
+    Assertions.assertEquals("jah", FeatureGeneratorUtil.tokenFeature("αλφα"));
+    Assertions.assertEquals("jah", FeatureGeneratorUtil.tokenFeature("слово"));
+    Assertions.assertEquals("jah", FeatureGeneratorUtil.tokenFeature(""));
+  }
 }
