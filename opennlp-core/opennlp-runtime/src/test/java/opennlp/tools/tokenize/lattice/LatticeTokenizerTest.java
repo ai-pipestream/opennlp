@@ -714,6 +714,39 @@ public class LatticeTokenizerTest {
   }
 
   /**
+   * Verifies that characters with a meaning in glob patterns are plain characters in a
+   * lexicon file name.
+   */
+  @Test
+  void testLexiconDiscoveryAcceptsUnicodeAndGlobCharactersInFileNames(
+      @TempDir Path dictionary) throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "\u8A9E[1]*?.csv", "\u6771,0,0,3000,unicode-name\n");
+
+    List<Morpheme> morphemes = new LatticeTokenizer(MecabDictionary.load(dictionary))
+        .analyze("\u6771");
+
+    Assertions.assertEquals(List.of("unicode-name"), morphemes.get(0).features());
+  }
+
+  /**
+   * Verifies that lexicon files are read in file name order, so the first malformed file
+   * reported is the first by name.
+   */
+  @Test
+  void testLexiconFilesAreReadInFileNameOrder(@TempDir Path dictionary) throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "z.csv", "broken-z\n");
+    write(dictionary, "a.csv", "broken-a\n");
+
+    InvalidFormatException error = Assertions.assertThrows(InvalidFormatException.class,
+        () -> MecabDictionary.load(dictionary));
+
+    Assertions.assertTrue(error.getMessage().contains(dictionary.resolve("a.csv").toString()),
+        error.getMessage());
+  }
+
+  /**
    * Verifies that a lexicon row whose right context id is outside the
    * {@code matrix.def} dimensions is rejected at load time, naming the file, the line,
    * and the offending id, rather than reaching the cost matrix with an out of range
