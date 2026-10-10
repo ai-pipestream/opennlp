@@ -75,11 +75,10 @@ Mr . <START:person> Vinken <END> is chairman of Elsevier N.V. , the Dutch publis
 			directly into the application instead of using the command line interface.
 			First the name finder model must be loaded into memory from disk or another source.
 			In the sample below it is loaded from disk.
-			<programlisting language="java">
-<![CDATA[try (InputStream modelIn = new FileInputStream("en-ner-person.bin")){
+			<programlisting language="java" xml:id="example.namefinder.api.model">
+<![CDATA[try (InputStream modelIn = new FileInputStream("en-ner-person.bin")) {
   TokenNameFinderModel model = new TokenNameFinderModel(modelIn);
-}
-]]>
+}]]>
 			 </programlisting>
 			 There is a number of reasons why the model loading can fail:
 			 <itemizedlist>
@@ -98,7 +97,7 @@ Mr . <START:person> Vinken <END> is chairman of Elsevier N.V. , the Dutch publis
 				</listitem>
 			</itemizedlist>
 			After the model is loaded the NameFinderME can be instantiated.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.namefinder.api.namefinder">
 <![CDATA[NameFinderME nameFinder = new NameFinderME(model);]]>
 			</programlisting>
 			The initialization is now finished and the Name Finder can be used. As of OpenNLP
@@ -115,23 +114,23 @@ Mr . <START:person> Vinken <END> is chairman of Elsevier N.V. , the Dutch publis
 			the feature generators. Not calling clearAdaptiveData can lead to a sharp drop in the detection
 			rate after a few documents.
 			The following code illustrates that:
-			<programlisting language="java">
-<![CDATA[for (String document[][] : documents) {
+			<programlisting language="java" xml:id="example.namefinder.api.documents">
+<![CDATA[for (String[][] document : documents) {
   for (String[] sentence : document) {
-    Span nameSpans[] = nameFinder.find(sentence);
+    Span[] nameSpans = nameFinder.find(sentence);
     // do something with the names
   }
-  nameFinder.clearAdaptiveData()
+  nameFinder.clearAdaptiveData();
 }]]>
 			 </programlisting>
 			 the following snippet shows a call to find
-			 <programlisting language="java">
+			 <programlisting language="java" xml:id="example.namefinder.api.find">
 <![CDATA[String[] sentence = new String[]{
     "Pierre",
     "Vinken",
     "is",
     "61",
-    "years"
+    "years",
     "old",
     "."
     };
@@ -349,20 +348,22 @@ The example above will train models with a pre-defined feature set. It is also p
 				</listitem>
 			</itemizedlist>
 			The three steps are illustrated by the following sample code:
-			<programlisting language="java">
-<![CDATA[TokenNameFinderFactory factory = TokenNameFinderFactory.create(null, null, Collections.emptyMap(), new BioCodec());
+			<programlisting language="java" xml:id="example.namefinder.training.api">
+<![CDATA[TokenNameFinderFactory factory = TokenNameFinderFactory.create(null, null,
+    Collections.emptyMap(), new BioCodec());
 File trainingFile = new File("en-ner-person.train");
-ObjectStream<String> lineStream =
-				new PlainTextByLineStream(new MarkableFileInputStreamFactory(trainingFile), StandardCharsets.UTF_8);
+ObjectStream<String> lineStream = new PlainTextByLineStream(
+    new MarkableFileInputStreamFactory(trainingFile), StandardCharsets.UTF_8);
 
 TokenNameFinderModel trainedModel;
 try (ObjectStream<NameSample> sampleStream = new NameSampleDataStream(lineStream)) {
-	trainedModel = NameFinderME.train("eng", "person", sampleStream, TrainingParameters.defaultParams(), factory);
+  trainedModel = NameFinderME.train("eng", "person", sampleStream,
+      TrainingParameters.defaultParams(), factory);
 }
 
-File modelFile = new File("en-ner-person.bin");
+File modelFile = new File("en-ner-person-custom.bin");
 try (OutputStream modelOut = new BufferedOutputStream(new FileOutputStream(modelFile))) {
-	trainedModel.serialize(modelOut);
+  trainedModel.serialize(modelOut);
 }]]>
 			 </programlisting>
 		</para>
@@ -382,19 +383,19 @@ try (OutputStream modelOut = new BufferedOutputStream(new FileOutputStream(model
 				and for detecting the names. If the feature generation during training time and detection
 				time is different the name finder might not be able to detect names.
 				The following lines show how to construct a custom feature generator
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.namefinder.featuregen.api">
 <![CDATA[AdaptiveFeatureGenerator featureGenerator = new CachedFeatureGenerator(
-		 new AdaptiveFeatureGenerator[]{
-			 new WindowFeatureGenerator(new TokenFeatureGenerator(), 2, 2),
-			 new WindowFeatureGenerator(new TokenClassFeatureGenerator(true), 2, 2),
-			 new OutcomePriorFeatureGenerator(),
-			 new PreviousMapFeatureGenerator(),
-			 new BigramNameFeatureGenerator(),
-			 new SentenceFeatureGenerator(true, false),
-			 new BrownTokenFeatureGenerator(BrownCluster dictResource)
-		 });]]>
+    new AggregatedFeatureGenerator(
+        new WindowFeatureGenerator(new TokenFeatureGenerator(), 2, 2),
+        new WindowFeatureGenerator(new TokenClassFeatureGenerator(true), 2, 2),
+        new OutcomePriorFeatureGenerator(),
+        new PreviousMapFeatureGenerator(),
+        new BigramNameFeatureGenerator(),
+        new SentenceFeatureGenerator(true, false),
+        new BrownTokenFeatureGenerator(dictResource)));]]>
 				</programlisting>
-				which is similar to the default feature generator but with a BrownTokenFeature added.
+				which is similar to the default feature generator but with a BrownTokenFeature added,
+				where dictResource is a BrownCluster.
 				The javadoc of the feature generator classes explain what the individual feature generators do.
 				To write a custom feature generator please implement the AdaptiveFeatureGenerator interface or
 				if it must not be adaptive extend the FeatureGeneratorAdapter.
@@ -406,7 +407,7 @@ try (OutputStream modelOut = new BufferedOutputStream(new FileOutputStream(model
 				</programlisting>
 				where the TokenNameFinderFactory allows to specify a custom feature generator.
 				To detect names the model which was returned from the train method must be passed to the NameFinderME constructor.
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.namefinder.featuregen.detector">
 <![CDATA[new NameFinderME(model);]]>
 				 </programlisting>
 			</para>
@@ -575,7 +576,7 @@ F-Measure: 0.7717879983140168]]>
 		The evaluation can be performed on a pre-trained model and a test dataset or via cross validation.
 		In the first case the model must be loaded and a NameSample ObjectStream must be created (see code samples above),
 		assuming these two objects exist the following code shows how to perform the evaluation:
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.namefinder.eval.api">
 <![CDATA[TokenNameFinderEvaluator evaluator = new TokenNameFinderEvaluator(new NameFinderME(model));
 evaluator.evaluate(sampleStream);
 
@@ -585,12 +586,12 @@ System.out.println(result.toString());]]>
 			In the cross validation case all the training arguments must be
 			provided (see the Training API section above).
 			To perform cross validation the ObjectStream must be resettable.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.namefinder.eval.crossval">
 <![CDATA[InputStreamFactory dataIn = new MarkableFileInputStreamFactory(new File("en-ner-person.train"));
 ObjectStream<NameSample> sampleStream = new NameSampleDataStream(
     new PlainTextByLineStream(dataIn, StandardCharsets.UTF_8));
 TokenNameFinderCrossValidator evaluator = new TokenNameFinderCrossValidator("eng",
-    null, TrainingParameters.defaultParams(), null, (TokenNameFinderEvaluationMonitor) null);
+    null, TrainingParameters.defaultParams(), new TokenNameFinderFactory());
 evaluator.evaluate(sampleStream, 10);
 
 FMeasure result = evaluator.getFMeasure();
