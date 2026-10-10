@@ -78,14 +78,14 @@ signed	VERB	sign
 				The statistical lemmatizer requires that a trained model is loaded
 				into memory from disk or from another source.
 				In the example below it is loaded from disk:
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.lemmatizer.api.model">
 <![CDATA[LemmatizerModel model = null;
-try (InputStream modelIn = new FileInputStream("opennlp-en-ud-ewt-lemmas-1.3-2.5.4.bin"))) {
+try (InputStream modelIn = new FileInputStream("opennlp-en-ud-ewt-lemmas-1.3-2.5.4.bin")) {
   model = new LemmatizerModel(modelIn);
 }]]>
 			</programlisting>
 				Once the model is loaded, a LemmatizerME can be instantiated.
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.lemmatizer.api.lemmatizer">
 <![CDATA[LemmatizerME lemmatizer = new LemmatizerME(model);]]>
 			</programlisting>
 				The Lemmatizer instance is now ready to lemmatize data. It expects a
@@ -100,7 +100,7 @@ try (InputStream modelIn = new FileInputStream("opennlp-en-ud-ewt-lemmas-1.3-2.5
 			<para>
 				The following code shows how to determine the most likely lemma for
 				a sentence.
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.lemmatizer.api.lemmatize">
 <![CDATA[String[] tokens = new String[] { "Rockwell", "International", "Corp.", "'s",
     "Tulsa", "unit", "said", "it", "signed", "a", "tentative", "agreement",
     "extending", "its", "contract", "with", "Boeing", "Co.", "to",
@@ -126,19 +126,19 @@ String[] lemmas = lemmatizer.lemmatize(tokens, postags);]]>
 				consists of a text file containing, for each row, a word, its postag and the
 				corresponding lemma, each column separated by a tab character.
 				<screen>
-<![CDATA[show		NOUN	show
+<![CDATA[show	NOUN	show
 showcase	NOUN	showcase
 showcases	NOUN	showcase
 showdown	NOUN	showdown
 showdowns	NOUN	showdown
-shower		NOUN	shower
-showers		NOUN	shower
-showman		NOUN	showman
+shower	NOUN	shower
+showers	NOUN	shower
+showman	NOUN	showman
 showmanship	NOUN	showmanship
-showmen		NOUN	showman
+showmen	NOUN	showman
 showroom	NOUN	showroom
 showrooms	NOUN	showroom
-shows		NOUN	show
+shows	NOUN	show
 shrapnel	NOUN	shrapnel]]>
 		</screen>
 				Alternatively, if a (word,postag) pair can output multiple lemmas, the
@@ -146,32 +146,28 @@ shrapnel	NOUN	shrapnel]]>
 				each row, a word, its postag and the corresponding lemmas separated by "#":
 				<screen>
 <![CDATA[muestras	NOUN	muestra
-cantaba		VERB	cantar
-fue		VERB	ir#ser
+cantaba	VERB	cantar
+fue	VERB	ir#ser
 entramos	VERB	entrar]]>
 					</screen>
 				First the dictionary must be loaded into memory from disk or another
 				source.
-				In the sample below it is loaded from disk.
-				<programlisting language="java">
-<![CDATA[InputStream dictLemmatizer = null;
-try (dictLemmatizer = new FileInputStream("english-dict-lemmatizer.txt")) {
-
+				In the sample below it is loaded from disk, and the DictionaryLemmatizer
+				is instantiated from it.
+				<programlisting language="java" xml:id="example.lemmatizer.dictionary.load">
+<![CDATA[DictionaryLemmatizer lemmatizer;
+try (InputStream dictLemmatizer = new FileInputStream("english-dict-lemmatizer.txt")) {
+  lemmatizer = new DictionaryLemmatizer(dictLemmatizer);
 }]]>
-			</programlisting>
-				After the dictionary is loaded the DictionaryLemmatizer can be
-				instantiated.
-				<programlisting language="java">
-<![CDATA[DictionaryLemmatizer lemmatizer = new DictionaryLemmatizer(dictLemmatizer);]]>
 			</programlisting>
 				The DictionaryLemmatizer instance is now ready. It expects two
 				String arrays as input, containing the tokens and their respective postags.
 				The following code shows how to find a lemma using a DictionaryLemmatizer.
 				
-				<programlisting language="java">
+				<programlisting language="java" xml:id="example.lemmatizer.dictionary.lemmatize">
 <![CDATA[String[] tokens = new String[]{"Most", "large", "cities", "in", "the", "US", "had",
-                             "morning", "and", "afternoon", "newspapers", "."};
-String[] tags = tagger.tag(sent);
+                               "morning", "and", "afternoon", "newspapers", "."};
+String[] tags = tagger.tag(tokens);
 String[] lemmas = lemmatizer.lemmatize(tokens, tags);]]>
 			</programlisting>
 				The tags array contains one part-of-speech tag for each token in the
@@ -250,44 +246,23 @@ Arguments description:
 				<title>Training API</title>
 				<para>
 					The Lemmatizer offers an API to train a new lemmatizer model. First
-					a training parameters
-					file needs to be instantiated:
-					<programlisting language="java">
-<![CDATA[TrainingParameters mlParams = CmdLineUtil.loadTrainingParameters(params.getParams(), false);
-if (mlParams == null) {
-		mlParams = ModelUtil.createDefaultTrainingParameters();
-}]]>
+					the training parameters need to be instantiated:
+					<programlisting language="java" xml:id="example.lemmatizer.training.api.params">
+<![CDATA[TrainingParameters mlParams = TrainingParameters.defaultParams();]]>
                 </programlisting>
 					Then we read the training data:
-					<programlisting language="java">
-<![CDATA[InputStreamFactory inputStreamFactory = null;
-try {
-		inputStreamFactory = new MarkableFileInputStreamFactory(new File(en-custom-lemmatizer.train));
-} catch (FileNotFoundException e) {
-		e.printStackTrace();
-}
-ObjectStream<String> lineStream = null;
-LemmaSampleStream lemmaStream = null;
-try {
-		lineStream = new PlainTextByLineStream((inputStreamFactory), StandardCharsets.UTF_8);
-		lemmaStream = new LemmaSampleStream(lineStream);
-} catch (IOException e) {
-		CmdLineUtil.handleCreateObjectStreamError(e);
-}]]>
+					<programlisting language="java" xml:id="example.lemmatizer.training.api.data">
+<![CDATA[InputStreamFactory inputStreamFactory =
+    new MarkableFileInputStreamFactory(new File("en-custom-lemmatizer.train"));
+ObjectStream<String> lineStream =
+    new PlainTextByLineStream(inputStreamFactory, StandardCharsets.UTF_8);
+LemmaSampleStream lemmaStream = new LemmaSampleStream(lineStream);]]>
                 </programlisting>
 					The following step proceeds to train the model:
-					<programlisting language="java">
+					<programlisting language="java" xml:id="example.lemmatizer.training.api.train">
 <![CDATA[LemmatizerModel model;
-try {
-		LemmatizerFactory lemmatizerFactory = LemmatizerFactory.create(params.getFactory());
-		model = LemmatizerME.train(params.getLang(), lemmaStream, mlParams, lemmatizerFactory);
-} catch (IOException e) {
-		throw new TerminateToolException(-1, "IO error while reading training data or indexing data: " + e.getMessage(), e);
-} finally {
-		try {
-				sampleStream.close();
-		} catch (IOException e) {
-		}
+try (lemmaStream) {
+  model = LemmatizerME.train("eng", lemmaStream, mlParams, new LemmatizerFactory());
 }]]>
 		</programlisting>
 				</para>
