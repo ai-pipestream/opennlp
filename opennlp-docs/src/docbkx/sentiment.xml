@@ -68,7 +68,7 @@ SentimentModel model = new SentimentModel(is);]]>
                 </programlisting>
                 With the <code>SentimentModel</code> in hand, create a
                 <code>SentimentME</code> instance and predict sentiments:
-                <programlisting language="java">
+                <programlisting language="java" xml:id="example.sentiment.api.predict">
 <![CDATA[SentimentME sentiment = new SentimentME(model);
 
 // Predict from a raw sentence string (tokenized internally)
@@ -117,7 +117,7 @@ negative Terrible experience the worst customer service I have ever had]]>
                 To train a sentiment model programmatically, prepare an
                 <code>ObjectStream</code> of <code>SentimentSample</code> objects and
                 call the <code>SentimentME.train()</code> method:
-                <programlisting language="java">
+                <programlisting language="java" xml:id="example.sentiment.training.api">
 <![CDATA[SentimentModel model;
 
 InputStreamFactory dataIn = new MarkableFileInputStreamFactory(
@@ -132,7 +132,7 @@ model = SentimentME.train("eng", sampleStream,
     TrainingParameters.defaultParams(), new SentimentFactory());]]>
                 </programlisting>
                 Once trained, the model can be serialized for later use:
-                <programlisting language="java">
+                <programlisting language="java" xml:id="example.sentiment.training.api.serialize">
 <![CDATA[try (OutputStream modelOut = new BufferedOutputStream(
     new FileOutputStream("en-sentiment.bin"))) {
   model.serialize(modelOut);
@@ -172,7 +172,7 @@ model = SentimentME.train("eng", sampleStream,
             <para>
                 The evaluation API allows programmatic evaluation against a set of
                 <code>SentimentSample</code> references:
-                <programlisting language="java">
+                <programlisting language="java" xml:id="example.sentiment.evaluation.api">
 <![CDATA[SentimentME sentiment = new SentimentME(model);
 SentimentEvaluator evaluator = new SentimentEvaluator(sentiment);
 evaluator.evaluate(testSampleStream);
