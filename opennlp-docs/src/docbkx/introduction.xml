@@ -332,6 +332,26 @@ Arguments description:
 			from accumulating during repeated reads and training passes.
 		</para>
 	</section>
+    <section xml:id="intro.unicode-string-patterns">
+        <title>Unicode String Patterns</title>
+        <para>
+            Feature generators classify a token with <code>StringPattern</code>, for example
+            as all lowercase, all digits or Hiragana. It scans Unicode code points, so a
+            supplementary letter or digit counts as one character. A combining mark right
+            after a letter keeps that letter's case and Japanese script, so a decomposed
+            <code>cafe&#x301;</code> is all lowercase like <code>caf&#xE9;</code>. The strict
+            <code>isAllLetter()</code> result stays false for the decomposed form, because the
+            mark is not a letter. A letter without case, as in Arabic or Hangul, counts as
+            lowercase; Han and kana letters do not. Only Hiragana or Katakana letters make a
+            token Hiragana or Katakana, an empty token has no positive class, and malformed
+            UTF-16 clears the whole-token classes.
+        </para>
+        <para>
+            These classes are model features. Under <code>-Dopennlp.compat.mode=LEGACY</code>
+            a token is classified one UTF-16 char at a time instead, which gives models trained
+            with an earlier release the features they were trained with.
+        </para>
+    </section>
     <section xml:id="intro.sysprops">
         <title>System Properties</title>
         <section xml:id="intro.sysprops.interner">
