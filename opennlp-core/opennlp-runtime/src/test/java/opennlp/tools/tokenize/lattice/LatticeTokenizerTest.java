@@ -694,6 +694,26 @@ public class LatticeTokenizerTest {
   }
 
   /**
+   * Verifies that only regular files whose names end in lowercase {@code .csv} are read as
+   * lexicon files: a directory named with that suffix, an uppercase suffix, and a longer
+   * suffix are skipped.
+   */
+  @Test
+  void testLexiconDiscoveryReadsLowercaseCsvRegularFilesOnly(@TempDir Path dictionary)
+      throws IOException {
+    writeUnitMatrixDictionary(dictionary);
+    write(dictionary, "valid.csv", "\u6771,0,0,3000,valid\n");
+    Files.createDirectory(dictionary.resolve("directory.csv"));
+    write(dictionary, "uppercase.CSV", "broken\n");
+    write(dictionary, "near.csv.bak", "broken\n");
+
+    List<Morpheme> morphemes = new LatticeTokenizer(MecabDictionary.load(dictionary))
+        .analyze("\u6771");
+
+    Assertions.assertEquals(List.of("valid"), morphemes.get(0).features());
+  }
+
+  /**
    * Verifies that a lexicon row whose right context id is outside the
    * {@code matrix.def} dimensions is rejected at load time, naming the file, the line,
    * and the offending id, rather than reaching the cost matrix with an out of range
