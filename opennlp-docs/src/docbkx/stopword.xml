@@ -56,7 +56,7 @@
 			language code. The returned filter is a
 			<code>DictionaryStopwordFilter</code> that is case-insensitive by
 			default.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.bundled">
 <![CDATA[StopwordFilter filter = StopwordLists.forLanguage("en");
 
 boolean isStop = filter.isStopword("the");        // true
@@ -66,7 +66,7 @@ String[] kept  = filter.filter(new String[] {
 // kept => { "quick", "brown", "fox" }]]>
 			</programlisting>
 			The set of supported languages can be queried at runtime:
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.bundled.languages">
 <![CDATA[Set<String> supported = StopwordLists.supportedLanguages();]]>
 			</programlisting>
 		</para>
@@ -79,7 +79,7 @@ String[] kept  = filter.filter(new String[] {
 			via <code>StopwordLists.load</code>. The method takes the input stream,
 			a character set and a flag indicating whether matching should be
 			case-sensitive.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.custom">
 <![CDATA[try (InputStream in = new FileInputStream("my-stopwords.txt")) {
   StopwordFilter filter = StopwordLists.load(
       in, StandardCharsets.UTF_8, false /* case-insensitive */);
@@ -129,15 +129,16 @@ in spite of]]>
 			bundled resource, layers user-supplied <code>add</code> /
 			<code>remove</code> operations on top, and produces a fresh immutable
 			filter from <code>build()</code>.
-			<programlisting language="java">
-<![CDATA[InputStream bundled =
-    StopwordLists.class.getResourceAsStream("/opennlp/tools/stopword/en.txt");
-
-StopwordFilter filter = DictionaryStopwordFilter.builder()
-    .load(bundled, StandardCharsets.UTF_8)
-    .add("foo")            // mark a new word as a stopword
-    .remove("the")         // keep "the" in the output
-    .build();]]>
+			<programlisting language="java" xml:id="example.stopword.extending">
+<![CDATA[StopwordFilter filter;
+try (InputStream bundled =
+    StopwordLists.class.getResourceAsStream("/opennlp/tools/stopword/en.txt")) {
+  filter = DictionaryStopwordFilter.builder()
+      .load(bundled, StandardCharsets.UTF_8)
+      .add("foo")            // mark a new word as a stopword
+      .remove("the")         // keep "the" in the output
+      .build();
+}]]>
 			</programlisting>
 			Bulk operations are also available via
 			<code>addAll(Collection&lt;String[]&gt;)</code> and
@@ -154,7 +155,7 @@ StopwordFilter filter = DictionaryStopwordFilter.builder()
 			The overloaded <code>isStopword(String...)</code> method accepts a
 			sequence of tokens and returns <code>true</code> if the entire sequence
 			is registered as a multi-word stopword entry.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.multiword">
 <![CDATA[StopwordFilter filter = DictionaryStopwordFilter.builder()
     .add("of", "the")
     .add("in", "spite", "of")
@@ -176,7 +177,7 @@ filter.isStopword("of");                // false]]>
 			the head token is kept and scanning advances by one. Tokens that are
 			<code>null</code> are kept in place and never participate in a window
 			match.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.multiword.filter">
 <![CDATA[StopwordFilter filter = DictionaryStopwordFilter.builder()
     .add("the")               // 1-gram
     .add("of", "the")         // 2-gram
@@ -203,7 +204,7 @@ String[] kept = filter.filter(new String[] {
 			stopwords from its output. The decorator delegates tokenization to the
 			wrapped instance and then runs the resulting token array through the
 			provided <code>StopwordFilter</code>.
-			<programlisting language="java">
+			<programlisting language="java" xml:id="example.stopword.tokenizer">
 <![CDATA[StopwordFilter filter = StopwordLists.forLanguage("en");
 Tokenizer tokenizer = new StopwordFilteringTokenizer(
     SimpleTokenizer.INSTANCE, filter);
