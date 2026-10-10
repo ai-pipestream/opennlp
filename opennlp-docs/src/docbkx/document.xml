@@ -48,8 +48,8 @@ text:      The dog barks. It naps.
            01234567890123456789012
 
 sentences: [0..14) "The dog barks."   [15..23) "It naps."
-tokens:    [0..3) "The" [4..7) "dog" [8..14) "barks." [15..17) "It" [18..23) "naps."
-pos-tags:  [0..3) "DT"  [4..7) "NN"  [8..14) "VBZ"    [15..17) "PRP" [18..23) "VBZ"</literallayout>
+tokens:    [0..3) "The" [4..7) "dog"  [8..14) "barks." [15..17) "It"   [18..23) "naps."
+pos-tags:  [0..3) "DET" [4..7) "NOUN" [8..14) "PUNCT"  [15..17) "PRON" [18..23) "PUNCT"</literallayout>
 		</example>
 		<para>
 			Each layer in the figure above is identified by a <code>LayerKey</code> that
@@ -87,7 +87,7 @@ pos-tags:  [0..3) "DT"  [4..7) "NN"  [8..14) "VBZ"    [15..17) "PRP" [18..23) "V
 			carries whole-document values without spans, which is where a language id,
 			a category distribution, or provenance belongs:
 		</para>
-		<programlisting language="java"><![CDATA[
+		<programlisting language="java" xml:id="example.document.introduction.scope"><![CDATA[
 LayerKey<String> LANGUAGE = LayerKey.document("app:language", String.class);
 
 Document tagged = document.with(LANGUAGE, List.of(Annotation.of("eng")));
@@ -213,9 +213,11 @@ String language = tagged.get(LANGUAGE).get(0).value(); // "eng", span is null]]>
 			three adapters with one custom annotator and analyzes the text from the
 			introduction's figure; the components behind the adapters are any
 			<code>SentenceDetector</code>, <code>Tokenizer</code>, and
-			<code>POSTagger</code>, for example the ME implementations loaded from models:
+			<code>POSTagger</code>, for example <code>SentenceDetectorME</code> and
+			<code>POSTaggerME</code> loaded from the published English models together with
+			<code>WhitespaceTokenizer.INSTANCE</code>:
 		</para>
-		<programlisting language="java"><![CDATA[
+		<programlisting language="java" xml:id="example.document.pipeline"><![CDATA[
 DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
     .add(new SentenceDetectorAnnotator(sentenceDetector))
     .add(new TokenizerAnnotator(tokenizer))
@@ -233,14 +235,16 @@ Document document = analyzer.analyze("The dog barks. It naps.");]]>
 			<code>It naps.</code>. The token layer holds five tokens whose spans refer to
 			the document text even inside the second sentence, so
 			<code>It</code> is <code>[15..17)</code> and <code>naps.</code> is
-			<code>[18..23)</code>. Layers produced per token stay aligned with the token
+			<code>[18..23)</code>. Because those tokens keep their final periods, the
+			tagger labels <code>barks.</code> and <code>naps.</code> as
+			<code>PUNCT</code>. Layers produced per token stay aligned with the token
 			layer by position:
 		</para>
-		<programlisting language="java"><![CDATA[
+		<programlisting language="java" xml:id="example.document.pipeline.layers"><![CDATA[
 List<Annotation<String>> tokens = document.get(Layers.TOKENS);
 List<Annotation<String>> tags = document.get(Layers.POS_TAGS);
 for (int i = 0; i < tags.size(); i++) {
-  // each tag sits on its token's span, e.g. "DT" on [0..3) for "The"
+  // each tag sits on its token's span, e.g. "DET" on [0..3) for "The"
   Span span = tags.get(i).span();
 }
 
@@ -269,7 +273,7 @@ for (Annotation<String> token : tokens) {
 			layer, and provides one integer annotation per token; the analyzer's
 			build-time validation guarantees a tokenizer ran earlier:
 		</para>
-		<programlisting language="java"><![CDATA[
+		<programlisting language="java" xml:id="example.document.custom"><![CDATA[
 static final LayerKey<Integer> TOKEN_LENGTHS =
     LayerKey.of("token-lengths", Integer.class);
 
@@ -302,7 +306,7 @@ class TokenLengthAnnotator implements DocumentAnnotator {
 			without a cast; for the text above the five values are
 			<code>3, 3, 6, 2, 5</code>, each on its token's span:
 		</para>
-		<programlisting language="java"><![CDATA[
+		<programlisting language="java" xml:id="example.document.custom.lengths"><![CDATA[
 List<Annotation<Integer>> lengths = document.get(TOKEN_LENGTHS);
 int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 		</programlisting>
@@ -333,7 +337,7 @@ int firstTokenLength = lengths.get(0).value(); // 3, for "The" at [0..3)]]>
 			only by a normalization fold group together while their spans keep pointing into
 			the original text. A token whose normalized form is empty is omitted from the
 			layer. The layer preserves first-occurrence order.
-			<programlisting language="java"><![CDATA[
+			<programlisting language="java" xml:id="example.document.termvectors"><![CDATA[
 DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
     .add(new TokenizerAnnotator(tokenizer))
     .add(new TermVectorAnnotator())
@@ -350,7 +354,7 @@ List<Annotation<TermVector>> vectors = document.get(TermVectorAnnotator.TERM_VEC
 			normalizer is applied to each token's covered text to produce the term, so the
 			case, NFC, and accent folds that <code>buildAligned()</code> rejects all work
 			here, and every occurrence span stays the token's own span in the original text.
-			<programlisting language="java"><![CDATA[
+			<programlisting language="java" xml:id="example.document.termvectors.normalized"><![CDATA[
 CharSequenceNormalizer folder = TextNormalizer.builder().caseFold().build();
 DocumentAnalyzer analyzer = DocumentAnalyzer.builder()
     .add(new TokenizerAnnotator(WhitespaceTokenizer.INSTANCE))
