@@ -226,7 +226,7 @@ public class ConlluDependencyParserUsageTest {
   void testFeedforwardTrainSaveReloadAndParse(@TempDir Path dir) throws IOException {
     // The manual's feedforward example: train from the CoNLL-U reader with the default
     // settings, save the model, load it back, and parse with a beam of four. The parse
-    // of the reloaded model must equal the parse of the model in memory.
+    // of the reloaded model must equal the gold tree and the parse of the model in memory.
     final Path treebank = dir.resolve("train.conllu");
     Files.writeString(treebank, repeat(CONLLU, REPETITIONS), StandardCharsets.UTF_8);
     final Path modelFile = dir.resolve("en-depparse-ff.bin");
@@ -247,9 +247,8 @@ public class ConlluDependencyParserUsageTest {
     final DependencyTree expected =
         new FeedforwardDependencyParser(model, BEAM_SIZE).parse(ALICE_TOKENS, ALICE_TAGS);
     final DependencyTree parse = reloaded.parse(ALICE_TOKENS, ALICE_TAGS);
-    assertEquals(expected, parse);
-    assertEquals(ALICE_TOKENS.length, parse.size());
-    assertEquals(ALICE_TREE.root(), parse.root());
+    assertEquals(ALICE_TREE, expected);
+    assertEquals(ALICE_TREE, parse);
   }
 
   /**
