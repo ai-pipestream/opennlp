@@ -17,6 +17,8 @@
 
 package opennlp.tools.depparse;
 
+import opennlp.tools.commons.ThreadSafe;
+
 /**
  * The feature template of the feedforward parser: a fixed set of configuration
  * positions whose words, tags, and arc labels are embedded and concatenated into the
@@ -28,7 +30,12 @@ package opennlp.tools.depparse;
  * dependent and rightmost dependent of the rightmost dependent of the top two stack
  * items, capturing second-order structure. Words and tags are read for all positions,
  * labels only for the dependent positions, whose relations are already assigned.</p>
+ *
+ * <p>This class holds no state and its methods are safe to call from several threads.</p>
+ *
+ * @since 3.0.0
  */
+@ThreadSafe
 final class FeedforwardContext {
 
   /** The number of positions whose word and tag are embedded. */
@@ -82,17 +89,41 @@ final class FeedforwardContext {
     return features;
   }
 
-  /** The leftmost dependent of a position, or the absence marker for absent positions. */
+  /**
+   * Finds the leftmost dependent of a position.
+   *
+   * @param state The configuration whose arcs are inspected. Must not be {@code null}.
+   * @param index A token index, {@link ArcStandardState#ROOT}, or
+   *              {@link ArcStandardState#NONE}.
+   * @return The index of the leftmost dependent, or {@link ArcStandardState#NONE} if
+   *         {@code index} is the root or absent, or the token has no dependent yet.
+   */
   private static int leftmost(ArcStandardState state, int index) {
     return index >= 0 ? state.leftmostDependent(index) : ArcStandardState.NONE;
   }
 
-  /** The rightmost dependent of a position, or the absence marker for absent positions. */
+  /**
+   * Finds the rightmost dependent of a position.
+   *
+   * @param state The configuration whose arcs are inspected. Must not be {@code null}.
+   * @param index A token index, {@link ArcStandardState#ROOT}, or
+   *              {@link ArcStandardState#NONE}.
+   * @return The index of the rightmost dependent, or {@link ArcStandardState#NONE} if
+   *         {@code index} is the root or absent, or the token has no dependent yet.
+   */
   private static int rightmost(ArcStandardState state, int index) {
     return index >= 0 ? state.rightmostDependent(index) : ArcStandardState.NONE;
   }
 
-  /** The value at a position: the root symbol for the root, {@code null} when absent. */
+  /**
+   * Reads the word or tag at a position.
+   *
+   * @param values The words or tags of the sentence. Must not be {@code null}.
+   * @param index A token index, {@link ArcStandardState#ROOT}, or
+   *              {@link ArcStandardState#NONE}.
+   * @return The value at {@code index}, {@link DependencyContextGenerator#ROOT_VALUE} for
+   *         the root, or {@code null} if the position is absent.
+   */
   private static String symbol(String[] values, int index) {
     if (index == ArcStandardState.ROOT) {
       return DependencyContextGenerator.ROOT_VALUE;

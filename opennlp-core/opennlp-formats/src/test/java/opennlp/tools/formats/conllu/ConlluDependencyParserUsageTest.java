@@ -228,41 +228,26 @@ public class ConlluDependencyParserUsageTest {
     // settings, save the model, load it back, and parse with a beam of four. The parse
     // of the reloaded model must equal the gold tree and the parse of the model in memory.
     final Path treebank = dir.resolve("train.conllu");
-    Files.writeString(treebank, repeat(CONLLU, REPETITIONS), StandardCharsets.UTF_8);
+    Files.writeString(treebank, (CONLLU + "\n\n").repeat(REPETITIONS), StandardCharsets.UTF_8);
     final Path modelFile = dir.resolve("en-depparse-ff.bin");
     final InputStreamFactory trainingData = () -> Files.newInputStream(treebank);
 
-    FeedforwardDependencyModel model;
+    FeedforwardDependencyModel feedforwardModel;
     try (ObjectStream<DependencySample> samples =
         new ConlluDependencySampleStream(trainingData, ConlluTagset.U)) {
-      model = FeedforwardDependencyTrainer.train(
+      feedforwardModel = FeedforwardDependencyTrainer.train(
           samples, FeedforwardDependencyTrainer.Settings.defaults());
     }
     try (OutputStream out = Files.newOutputStream(modelFile)) {
-      model.serialize(out);
+      feedforwardModel.serialize(out);
     }
 
     DependencyParser reloaded = new FeedforwardDependencyParser(
         FeedforwardDependencyModel.load(modelFile), BEAM_SIZE);
-    final DependencyTree expected =
-        new FeedforwardDependencyParser(model, BEAM_SIZE).parse(ALICE_TOKENS, ALICE_TAGS);
+    final DependencyTree expected = new FeedforwardDependencyParser(feedforwardModel, BEAM_SIZE)
+        .parse(ALICE_TOKENS, ALICE_TAGS);
     final DependencyTree parse = reloaded.parse(ALICE_TOKENS, ALICE_TAGS);
     assertEquals(ALICE_TREE, expected);
     assertEquals(ALICE_TREE, parse);
-  }
-
-  /**
-   * Repeats CoNLL-U content so a small fixture gives the trainers enough evidence.
-   *
-   * @param conllu The content to repeat; sentences are separated by a blank line.
-   * @param times How often to repeat it.
-   * @return The repeated content. Never {@code null}.
-   */
-  private static String repeat(String conllu, int times) {
-    final StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < times; i++) {
-      sb.append(conllu).append("\n\n");
-    }
-    return sb.toString();
   }
 }
