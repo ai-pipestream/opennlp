@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import opennlp.tools.ml.BeamSearch;
 import opennlp.tools.ml.maxent.quasinewton.QNTrainer;
@@ -269,6 +270,82 @@ public class FeedforwardDependencyParserTest {
     assertArrayEquals(before, score(local.network(), features, null));
     assertFalse(Arrays.equals(before, score(refined.network(), features, null)));
     assertEquals(LANGUAGE, refined.getLanguage());
+  }
+
+  /** Checks that a model that was not refined records no beam size and parses greedily. */
+  @Test
+  void testUnrefinedModelParsesGreedilyByDefault() {
+    assertNull(model.getManifestProperty(BeamSearch.BEAM_SIZE_PARAMETER));
+    assertEquals(1, model.getBeamSize());
+    assertEquals(1, parser.beamSize());
+  }
+
+  /**
+   * Checks that a parser created without a beam size uses the beam size the model was
+   * refined with, also after the model is serialized and loaded again.
+   */
+  @Test
+  void testRefinedModelParsesWithItsBeamSizeByDefault() throws IOException {
+    final TrainingParameters parameters = feedforwardParameters(1, 0.01);
+    parameters.put(BeamSearch.BEAM_SIZE_PARAMETER, 3);
+    final FeedforwardDependencyModel refined = FeedforwardDependencyTrainer.refine(
+        localFeedforward(), ObjectStreamUtils.createObjectStream(corpus()), parameters);
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    refined.serialize(out);
+    final FeedforwardDependencyModel reloaded =
+        new FeedforwardDependencyModel(new ByteArrayInputStream(out.toByteArray()));
+
+    assertEquals(3, refined.getBeamSize());
+    assertEquals(3, reloaded.getBeamSize());
+    assertEquals(3, new FeedforwardDependencyParser(reloaded).beamSize());
+    assertEquals(BEAM_SIZE, new FeedforwardDependencyParser(reloaded, BEAM_SIZE).beamSize());
+  }
+
+  /**
+   * Checks that a model whose manifest records a beam size that is not a positive
+   * integer is rejected when it is loaded.
+   *
+   * @param beamSize The recorded beam size.
+   * @throws IOException Thrown if writing the model package fails.
+   */
+  @ParameterizedTest(name = "recorded beam size {0}")
+  @ValueSource(strings = {"abc", "0", "-2", "2147483648"})
+  void testInvalidRecordedBeamSizeIsRejected(String beamSize) throws IOException {
+    final byte[] tampered = withManifestLine(BeamSearch.BEAM_SIZE_PARAMETER + "=" + beamSize);
+    final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new FeedforwardDependencyModel(new ByteArrayInputStream(tampered)));
+    final InvalidFormatException cause = assertInstanceOf(InvalidFormatException.class,
+        e.getCause());
+    assertEquals("The manifest " + BeamSearch.BEAM_SIZE_PARAMETER
+        + " must be a positive integer: " + beamSize, cause.getMessage());
+  }
+
+  /**
+   * Serializes the shared model with one more line in its manifest.
+   *
+   * @param line The manifest line to add.
+   * @return The changed model package. Never {@code null}.
+   * @throws IOException Thrown if writing the model package fails.
+   */
+  private static byte[] withManifestLine(String line) throws IOException {
+    final ByteArrayOutputStream valid = new ByteArrayOutputStream();
+    model.serialize(valid);
+    final ByteArrayOutputStream changed = new ByteArrayOutputStream();
+    try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(valid.toByteArray()));
+         ZipOutputStream out = new ZipOutputStream(changed)) {
+      ZipEntry entry;
+      while ((entry = in.getNextEntry()) != null) {
+        byte[] content = in.readAllBytes();
+        if ("manifest.properties".equals(entry.getName())) {
+          content = (new String(content, StandardCharsets.UTF_8) + line + "\n")
+              .getBytes(StandardCharsets.UTF_8);
+        }
+        out.putNextEntry(new ZipEntry(entry.getName()));
+        out.write(content);
+        out.closeEntry();
+      }
+    }
+    return changed.toByteArray();
   }
 
   /**

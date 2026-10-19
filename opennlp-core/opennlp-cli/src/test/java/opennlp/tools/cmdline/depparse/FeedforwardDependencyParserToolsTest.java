@@ -354,16 +354,11 @@ public class FeedforwardDependencyParserToolsTest {
     assertEquals("beamSize must be positive", exception.getMessage());
   }
 
-  /** Without {@code -beamSize} the tools parse with the beam a refined model records. */
+  /** Without {@code -beamSize} the parser tool parses a refined model with the beam it records. */
   @Test
-  void testDefaultBeamSizeComesFromTheModel() throws IOException {
-    train();
-    assertEquals(1, FeedforwardDependencyParserTool.beamSize(
-        new FeedforwardDependencyModel(model), null));
+  void testParserToolParsesARefinedModel() {
     train("-refineParams", refineParameters.toString());
-    final FeedforwardDependencyModel refined = new FeedforwardDependencyModel(model);
-    assertEquals(3, FeedforwardDependencyParserTool.beamSize(refined, null));
-    assertEquals(5, FeedforwardDependencyParserTool.beamSize(refined, 5));
+    assertEquals(PARSED_SENTENCE, parse("dogs_NOUN run_VERB\n", model.toString()));
   }
 
   /** The evaluator logs perfect greedy scores on the training data. */
@@ -555,7 +550,7 @@ public class FeedforwardDependencyParserToolsTest {
         "Tokens excluding punctuation: 0; UAS: 0.0; LAS: 0.0"), log);
   }
 
-  /** A model whose manifest records a beam size that is not an integer ends the parser tool. */
+  /** A model whose manifest records a beam size that is not an integer fails to load. */
   @Test
   void testParserToolRejectsInvalidRecordedBeamSize() throws IOException {
     train("-refineParams", refineParameters.toString());
@@ -564,7 +559,7 @@ public class FeedforwardDependencyParserToolsTest {
     final TerminateToolException exception = assertThrows(TerminateToolException.class,
         () -> parse("dogs_NOUN run_VERB\n", tampered.toString()));
     assertEquals(-1, exception.getCode());
-    assertEquals("The model records an invalid BeamSize: abc", exception.getMessage());
+    assertEquals("Model has invalid format", exception.getMessage());
   }
 
   /**
