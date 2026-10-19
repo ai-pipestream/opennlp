@@ -24,7 +24,6 @@ import opennlp.tools.cmdline.CLI;
 import opennlp.tools.cmdline.TerminateToolException;
 import opennlp.tools.depparse.FeedforwardDependencyModel;
 import opennlp.tools.depparse.FeedforwardDependencyParser;
-import opennlp.tools.ml.BeamSearch;
 
 /**
  * Parses POS-tagged sentences from standard input with a {@link FeedforwardDependencyParser}
@@ -34,9 +33,6 @@ public class FeedforwardDependencyParserTool extends BasicCmdLineTool {
 
   /** The option that sets the beam size. */
   static final String BEAM_SIZE_OPTION = "-beamSize";
-
-  /** The beam size at which decoding is greedy. */
-  private static final int GREEDY_BEAM_SIZE = 1;
 
   /** {@inheritDoc} */
   @Override
@@ -89,45 +85,17 @@ public class FeedforwardDependencyParserTool extends BasicCmdLineTool {
    * none is requested.
    *
    * @param model The model to parse with. Must not be {@code null}.
-   * @param requested The beam size given on the command line, or {@code null}.
+   * @param beamSize The beam size given on the command line, or {@code null}.
    * @return The parser. Never {@code null}.
-   * @throws TerminateToolException Thrown if the beam size is not positive or the model
-   *         records an invalid beam size.
+   * @throws TerminateToolException Thrown if the beam size is not positive.
    */
   static FeedforwardDependencyParser createParser(FeedforwardDependencyModel model,
-      Integer requested) {
+      Integer beamSize) {
     try {
-      return new FeedforwardDependencyParser(model, beamSize(model, requested));
+      return beamSize == null
+          ? new FeedforwardDependencyParser(model) : new FeedforwardDependencyParser(model, beamSize);
     } catch (IllegalArgumentException e) {
       throw new TerminateToolException(-1, e.getMessage(), e);
-    }
-  }
-
-  /**
-   * Resolves the beam size to parse with. A model refined with beam search records its
-   * beam size in the manifest under {@value BeamSearch#BEAM_SIZE_PARAMETER}; a locally
-   * trained model records none and is parsed greedily.
-   *
-   * @param model The model to parse with. Must not be {@code null}.
-   * @param requested The beam size given on the command line, or {@code null}.
-   * @return {@code requested} if not {@code null}, else the beam size of the model, else
-   *         {@code 1}. Not checked for range.
-   * @throws TerminateToolException Thrown if the model records a beam size that is not
-   *         a decimal integer.
-   */
-  static int beamSize(FeedforwardDependencyModel model, Integer requested) {
-    if (requested != null) {
-      return requested;
-    }
-    final String recorded = model.getManifestProperty(BeamSearch.BEAM_SIZE_PARAMETER);
-    if (recorded == null) {
-      return GREEDY_BEAM_SIZE;
-    }
-    try {
-      return Integer.parseInt(recorded);
-    } catch (NumberFormatException e) {
-      throw new TerminateToolException(-1, "The model records an invalid "
-          + BeamSearch.BEAM_SIZE_PARAMETER + ": " + recorded, e);
     }
   }
 }
