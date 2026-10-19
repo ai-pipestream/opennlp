@@ -117,8 +117,8 @@ DependencyParser parser = new FeedforwardDependencyParser(
 		<para>
 			A beam size of one decodes greedily; a larger beam keeps that many transition
 			sequences per step and scores each of them. Without a beam size the parser uses
-			the one the model was refined with, and decodes a model that was not refined
-			greedily. One parser instance can be shared between threads.
+			the beam size the model was refined with, or decodes greedily if the model was
+			not refined. One parser instance can be shared between threads.
 		</para>
 
 		<section xml:id="tools.dependency.feedforward.cli">

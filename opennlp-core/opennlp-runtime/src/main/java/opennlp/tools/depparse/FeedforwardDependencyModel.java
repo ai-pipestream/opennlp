@@ -46,7 +46,7 @@ import opennlp.tools.util.model.BaseModel;
 public class FeedforwardDependencyModel extends BaseModel {
 
   @Serial
-  private static final long serialVersionUID = 2746091883120417596L;
+  private static final long serialVersionUID = -5262211380538922987L;
 
   /** The component name recorded in the model manifest. */
   private static final String COMPONENT_NAME = "FeedforwardDependencyParser";
