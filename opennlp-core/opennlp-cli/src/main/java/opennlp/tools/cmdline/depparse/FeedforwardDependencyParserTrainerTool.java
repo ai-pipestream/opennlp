@@ -102,7 +102,7 @@ public class FeedforwardDependencyParserTrainerTool
         }
       } else {
         // Empty parameters give every key the default of FeedforwardDependencyTrainer.
-        mlParams = DependencyParserTrainerTool.loadTrainingParameters(params.getParams(),
+        mlParams = DependencyParserToolSupport.loadTrainingParameters(params.getParams(),
             new TrainingParameters());
         model = FeedforwardDependencyTrainer.train(params.getLang(), samples, mlParams);
         if (refineParams != null) {

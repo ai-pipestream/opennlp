@@ -22,7 +22,6 @@ import java.io.File;
 import opennlp.tools.cmdline.BasicCmdLineTool;
 import opennlp.tools.cmdline.CLI;
 import opennlp.tools.cmdline.TerminateToolException;
-import opennlp.tools.depparse.FeedforwardDependencyModel;
 import opennlp.tools.depparse.FeedforwardDependencyParser;
 
 /**
@@ -63,8 +62,9 @@ public class FeedforwardDependencyParserTool extends BasicCmdLineTool {
     } else {
       throw new TerminateToolException(1, getHelp());
     }
-    DependencyParserMETool.parseTaggedSentences(
-        createParser(new FeedforwardDependencyModelLoader().load(new File(modelFile)), beamSize));
+    DependencyParserToolSupport.parseTaggedSentences(
+        DependencyParserToolSupport.createFeedforwardParser(
+            new FeedforwardDependencyModelLoader().load(new File(modelFile)), beamSize));
   }
 
   /**
@@ -77,25 +77,6 @@ public class FeedforwardDependencyParserTool extends BasicCmdLineTool {
       return Integer.parseInt(value);
     } catch (NumberFormatException e) {
       throw new TerminateToolException(1, BEAM_SIZE_OPTION + " must be an integer: " + value, e);
-    }
-  }
-
-  /**
-   * Creates a parser with the requested beam size, or the beam size of the model when
-   * none is requested.
-   *
-   * @param model The model to parse with. Must not be {@code null}.
-   * @param beamSize The beam size given on the command line, or {@code null}.
-   * @return The parser. Never {@code null}.
-   * @throws TerminateToolException Thrown if the beam size is not positive.
-   */
-  static FeedforwardDependencyParser createParser(FeedforwardDependencyModel model,
-      Integer beamSize) {
-    try {
-      return beamSize == null
-          ? new FeedforwardDependencyParser(model) : new FeedforwardDependencyParser(model, beamSize);
-    } catch (IllegalArgumentException e) {
-      throw new TerminateToolException(-1, e.getMessage(), e);
     }
   }
 }
