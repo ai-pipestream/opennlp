@@ -68,6 +68,8 @@ public class FeedforwardDependencyParserTool extends BasicCmdLineTool {
   }
 
   /**
+   * Parses the {@value #BEAM_SIZE_OPTION} argument.
+   *
    * @param value The {@value #BEAM_SIZE_OPTION} argument.
    * @return The beam size. Not checked for range.
    * @throws TerminateToolException Thrown if {@code value} is not a decimal integer.

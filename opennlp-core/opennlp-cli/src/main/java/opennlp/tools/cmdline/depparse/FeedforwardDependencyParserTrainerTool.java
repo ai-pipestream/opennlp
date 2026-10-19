@@ -57,6 +57,9 @@ public class FeedforwardDependencyParserTrainerTool
     File getBaseModel();
   }
 
+  /** The option that names the training parameters file. */
+  private static final String PARAMS_OPTION = "-params";
+
   /** The option that names the refinement parameters file. */
   private static final String REFINE_PARAMS_OPTION = "-refineParams";
 
@@ -85,7 +88,7 @@ public class FeedforwardDependencyParserTrainerTool
               BASE_MODEL_OPTION + " requires " + REFINE_PARAMS_OPTION);
         }
         if (params.getParams() != null) {
-          throw new TerminateToolException(1, "-params does not apply with " + BASE_MODEL_OPTION
+          throw new TerminateToolException(1, PARAMS_OPTION + " does not apply with " + BASE_MODEL_OPTION
               + "; refinement reads " + REFINE_PARAMS_OPTION);
         }
       }
