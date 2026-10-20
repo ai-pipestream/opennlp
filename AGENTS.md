@@ -35,31 +35,34 @@ the same rules.
 
 ## Policy
 
-- AI tools may help write code. The committer reviews every line, can explain
-  it, and is responsible for it.
-- When AI contributed to a commit that a human authored and edited, disclose it
-  with a `Co-authored-by:` trailer naming the tool and its version and the model
-  and its version, following the
-  [ASF generative tooling guidance](https://www.apache.org/legal/generative-tooling.html).
-  Use the form `Co-authored-by: <tool> <version> (<model> <version>) <email>`,
-  for example
+OpenNLP follows the
+[ASF generative tooling guidance](https://www.apache.org/legal/generative-tooling.html).
+In short:
+
+- AI tools may help write code. The contributor reviews every line, can
+  explain it, and is responsible for it, including that the tool's terms allow
+  the output to be contributed under the Apache License.
+- Never include third-party code or data without a compatible license.
+- Disclose AI help in the commit message. The ASF recommends naming the tool;
+  OpenNLP requires this form of it: a `Co-authored-by:` trailer naming the tool
+  and its version and the model and its version, for example
   `Co-authored-by: ExampleCoder 2.1.0 (example-model 4.5) <coder@example.com>`.
   GitHub only recognizes the trailer with an e-mail address.
   The human is the author and signs off the commit (`git commit -s`).
-- Agents do not open pull requests, post comments, file issues or reply to
-  reviewers on their own. A human writes each message. Quoted AI output is
-  marked as such and accompanied by the human's comment.
-- Contributors who need AI translation, because English is not their first
-  language or for accessibility, quote and attribute the AI text and include
-  the original wording when possible.
-- Never include third-party code or data without a compatible license.
+- An agent may edit, build and commit locally. It should not push, open pull
+  requests, file issues, post comments or reply to reviewers on its own, only
+  with the explicit approval of the person using it.
+- What is posted is that person's own words. AI-generated text is quoted and
+  marked as such.
 - When in doubt, ask on GitHub Discussions or dev@opennlp.apache.org.
 
 ## Build
 
 - JDK 21 and `./mvnw`. With `-pl`, add `-am`.
 - Run `./mvnw verify` on the touched modules before proposing a change;
-  checkstyle and forbiddenapis run there.
+  checkstyle and forbiddenapis run there. Say which commands ran, which
+  failed and which were skipped. Never report a check as passed that did
+  not run.
 - Do not introduce new dependencies without a discussion and approval.
 
 ## Code
@@ -71,7 +74,8 @@ the same rules.
 - Unicode character sets by default, not ASCII unless a standard feature requires it.
 - Use existing helpers before writing new ones. Check the JDK, then
   `ParamChecks`, `StringUtil`, `UnicodeWhitespace` and the helpers of the
-  package you work in. A second copy of a helper is a bug.
+  package you work in. Do not duplicate existing functionality without a clear
+  technical reason.
 - Case mapping and trimming go through `StringUtil`
   (`toLowerCase`, `toUpperCase`, `trimUnicodeWhitespace`), never the
   locale-sensitive `String` methods.
@@ -82,18 +86,20 @@ the same rules.
 - Reject bad arguments at the public API with `IllegalArgumentException` via
   `ParamChecks`; never NPE from `Objects.requireNonNull`.
 - Malformed input data throws `InvalidFormatException`.
-- Name repeated literals as constants. Do not allocate in hot loops.
+- Name repeated literals as constants. Avoid unnecessary allocations in
+  performance-critical loops.
 - Serializable singletons need `readResolve()`; changed Serializable classes
   need a new `serialVersionUID`.
 
 ## Javadoc and comments
 
-- Every new or changed method gets short, accurate Javadoc. Overrides use
-  `{@inheritDoc}`. Write `@throws X Thrown if ...`. New public types get
-  `@since`.
+- New public and protected APIs, and changes to a documented contract, get
+  short, accurate Javadoc. Overrides use `{@inheritDoc}`. Write
+  `@throws X Thrown if ...`. New public types get `@since`.
 - Describe the contract, not the history. No "replaces the old regex",
   issue numbers, or design narrative in source; that goes in the issue.
-- No em dashes.
+- Avoid em dashes in new or changed Javadoc, comments and documentation. Do
+  not edit unrelated text only to remove them.
 - Use the terms the code and the manual already use; do not invent new ones.
 
 ## Tests
@@ -107,7 +113,9 @@ the same rules.
 - Changes to models, training or default behavior need an eval build: the
   `eval-tests` profile of `opennlp-eval-tests`, run on the ASF Jenkins job
   `OpenNLP/eval-tests-configurable`. Ask a committer to trigger it and link the
-  run in the pull request.
+  run in the pull request. To run it locally, unpack
+  [opennlp-data.zip](https://nightlies.apache.org/opennlp/opennlp-data.zip) and
+  pass `-DOPENNLP_DATA_DIR=<dir>`.
 
 ## Commits
 
