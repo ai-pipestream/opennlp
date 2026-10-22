@@ -82,7 +82,7 @@ public class NativeMemoryProfiler implements InternalProfiler {
    * {@return the resident set size of this process in bytes, or {@code -1} where
    * {@code /proc/self/status} does not report it}
    */
-  private static long residentSetSize() {
+  private long residentSetSize() {
     if (!Files.isReadable(STATUS)) {
       return -1;
     }

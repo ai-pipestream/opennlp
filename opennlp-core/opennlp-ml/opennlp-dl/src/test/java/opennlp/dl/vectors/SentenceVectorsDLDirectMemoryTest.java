@@ -96,6 +96,10 @@ class SentenceVectorsDLDirectMemoryTest {
     }
   }
 
+  /**
+   * Checks that calls no larger than an earlier one allocate no direct buffer, for token and
+   * pooled outputs and for a hidden dimension of 3 and of 1024.
+   */
   @ParameterizedTest
   @ValueSource(strings = {TINY_VECTORS, TINY_POOLED, TINY_WIDE})
   void repeatedCallsAllocateNoDirectBuffers(final String name, @TempDir final Path dir)
@@ -111,6 +115,7 @@ class SentenceVectorsDLDirectMemoryTest {
     }
   }
 
+  /** A model that does not declare its hidden dimension gets it measured, and pools with it. */
   @Test
   void measuresAnUndeclaredDimension(@TempDir final Path dir) throws Exception {
     try (SentenceVectorsDL vectors = new SentenceVectorsDL(model(dir, TINY_WIDE), vocab(dir),
@@ -124,6 +129,10 @@ class SentenceVectorsDLDirectMemoryTest {
     }
   }
 
+  /**
+   * Checks that threads sharing one instance, and so its spare buffer, each get the vectors of
+   * their own texts, with calls of different sizes.
+   */
   @ParameterizedTest
   @ValueSource(strings = {TINY_VECTORS, TINY_WIDE})
   void concurrentCallsGetTheirOwnVectors(final String name, @TempDir final Path dir)

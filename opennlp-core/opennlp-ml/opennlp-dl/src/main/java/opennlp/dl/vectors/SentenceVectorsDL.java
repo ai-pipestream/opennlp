@@ -523,7 +523,7 @@ public class SentenceVectorsDL extends AbstractDL implements TextEmbedder {
    * @param offset The index of the first byte.
    * @param bytes The number of bytes.
    */
-  private static ByteBuffer slice(final ByteBuffer buffer, final int offset, final int bytes) {
+  private ByteBuffer slice(final ByteBuffer buffer, final int offset, final int bytes) {
     return buffer.slice(offset, bytes).order(ByteOrder.nativeOrder());
   }
 
