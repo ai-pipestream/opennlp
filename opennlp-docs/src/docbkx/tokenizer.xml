@@ -260,6 +260,9 @@ TokenizerFactory factory = new TokenizerFactory("en", null, true, policy);]]>
 			<code>PARAGRAPH SEPARATOR</code> <code>U+2029</code>) as tokens. Under
 			<code>LEGACY</code> mode, only <code>LF</code> (<code>\n</code>) and
 			<code>CR</code> (<code>\r</code>) are kept as line break tokens.
+			Each retained line-break character has its own token, and
+			<code>tokenizePos</code> reports its original position in the input.
+			A <code>CRLF</code> pair therefore produces two line-break tokens.
 		</para>
 	</section>
 	<section xml:id="tools.tokenizer.training">
